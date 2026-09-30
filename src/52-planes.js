@@ -137,11 +137,12 @@ try {
       } else {
         const lift = AF.clamp((pl.v - vs * 0.75) / (vs * 0.25), 0, 1), auth = 0.25 + 0.75 * AF.clamp((pl.v - vs) / vs, 0, 1);
         // pitch: rate scales with airspeed and eases in, softly limited toward +-PMAX; hands off slowly relaxes toward level
-        let pr = pitchIn * T.pitch * auth;
+        let pr = pitchIn * T.pitch * (pitchIn < 0 ? Math.max(auth, 0.7) * 1.35 : auth);
         pr *= pr > 0 ? AF.clamp((PMAX - pl.pitch) / 0.7, 0, 1) : AF.clamp((PMAX + pl.pitch) / 0.7, 0, 1);
         pl.pr += (pr - pl.pr) * Math.min(1, dt * T.presp);
         pl.pitch += pl.pr * dt;
-        if (!pitchIn) pl.pitch *= Math.exp(-dt * 0.5);
+        // hands off: settle level under power, into a gentle glide attitude with the engine off
+        if (!pitchIn) pl.pitch += ((pl.engine ? 0 : -0.12) - pl.pitch) * (1 - Math.exp(-dt * 0.5));
         // bank toward rollIn * BANK; releasing A/D rolls the wings level
         const rr = AF.clamp((rollIn * BANK - pl.roll) * 4, -T.roll, T.roll);
         pl.rr += (rr - pl.rr) * Math.min(1, dt * T.resp);
@@ -158,7 +159,9 @@ try {
         pl.pitch = AF.clamp(pl.pitch, -PMAX - 0.05, PMAX + 0.05);
         // coordinated turn g*tan(bank)/v, floored so a full bank always turns >= ~27 deg/s, capped near stall
         pl.yaw -= (Math.tan(pl.roll) * AF.clamp(G0 / Math.max(pl.v, 1), 0.17, 0.3) + yawIn * 0.3) * dt;
-        pl.v += (pl.throttle * T.thrust - drag * pl.v * pl.v - G0 * Math.sin(pl.gam) * 0.9 - 1.2 * Math.sin(pl.roll) ** 2 * pl.v / T.vmax) * dt;
+        // engine off: the windmilling prop adds drag, so a dead-stick plane bleeds speed unless the nose goes down
+        const deadK = pl.engine ? 1 : 2.2, deadC = pl.engine ? 0 : 0.8;
+        pl.v += (pl.throttle * T.thrust - drag * deadK * pl.v * pl.v - deadC - G0 * Math.sin(pl.gam) * 0.9 - 1.2 * Math.sin(pl.roll) ** 2 * pl.v / T.vmax) * dt;
         pl.v = AF.clamp(pl.v, 3, T.vmax * 1.25);
       }
       const cg = Math.cos(pl.gam); dir.set(Math.sin(pl.yaw) * cg, Math.sin(pl.gam), Math.cos(pl.yaw) * cg);

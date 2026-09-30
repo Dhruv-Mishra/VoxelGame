@@ -1083,8 +1083,8 @@ function physics(car, dt, inp) {
   car.pitch += (pT + dive - car.pitch) * Math.min(1, dt * 9);
   if (!car.type.solo) car.roll += (rT + lean - car.roll) * Math.min(1, dt * 9);
   // a faint, position-keyed road texture (was per-frame random noise, which made flat asphalt feel bumpy)
-  car.bobV += (-car.bob * 90 - car.bobV * 9) * dt + (AF.noise2(car.x * 0.8, car.z * 0.8) - 0.5) * Math.min(sp, 20) * 0.02 * dt;
-  car.bob += car.bobV * dt; car.bob = AF.clamp(car.bob, -0.06, 0.06);
+  car.bobV += (-car.bob * 90 - car.bobV * 9) * dt + (AF.noise2(car.x * 0.8, car.z * 0.8) - 0.5) * Math.min(sp, 20) * 0.006 * dt;
+  car.bob += car.bobV * dt; car.bob = AF.clamp(car.bob, -0.025, 0.025);
 }
 VV.physics = physics;
 function exitSpot(car) {
@@ -1146,17 +1146,24 @@ AF.modes.drive = {
     if ((document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { DR.orbit = (DR.orbit - m.dx * 0.006) % (Math.PI * 2); DR.orbitP = AF.clamp(DR.orbitP + m.dy * 0.004, -0.25, 0.9); DR.dragT = 1.5; }
     else if ((DR.dragT = (DR.dragT || 0) - dt) < 0) { DR.orbit *= Math.exp(-dt * 1.8); DR.orbitP *= Math.exp(-dt * 1.8); }
     if (m.wheel) DR.dist = AF.clamp(DR.dist * Math.exp(m.wheel * 0.001), 4, 28);
-    const a = car.yaw + DR.orbit, pitch = 0.2 + DR.orbitP + DR.dist * 0.004;
-    const tx = car.x + Math.sin(car.yaw) * 1.5, ty = car.y + (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), tz = car.z + Math.cos(car.yaw) * 1.5;
+    // chase camera rigidly follows the car's position; only its heading and boom length are smoothed (a world-space lerp lagged
+    // metres behind at speed and stuttered whenever the frame time varied)
+    const k0 = !DR.init;
+    if (k0) { DR.cyaw = car.yaw; DR.cy = car.y; DR.cd = DR.dist; }
+    DR.cyaw += AF.angDiff(DR.cyaw, car.yaw) * (1 - Math.exp(-dt * 4.5));
+    DR.cy += (car.y - DR.cy) * (1 - Math.exp(-dt * 6));
+    const a = DR.cyaw + DR.orbit, pitch = 0.2 + DR.orbitP + DR.dist * 0.004;
+    const tx = car.x + Math.sin(car.yaw) * 1.5, ty = DR.cy + (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), tz = car.z + Math.cos(car.yaw) * 1.5;
     let d = DR.dist;
-    const want = DR.want.set(tx - Math.sin(a) * Math.cos(pitch) * d, ty + Math.sin(pitch) * d, tz - Math.cos(a) * Math.cos(pitch) * d);
-    // keep the camera out of walls
+    // keep the camera out of walls: pull in fast, ease back out
     for (let t = 0.25; t <= 1.0001; t += 0.125) {
-      const px = tx + (want.x - tx) * t, py = ty + (want.y - ty) * t, pz = tz + (want.z - tz) * t;
-      if (AF.solidAt(px, py, pz)) { const tt = Math.max(0.12, t - 0.15); want.set(tx + (want.x - tx) * tt, ty + (want.y - ty) * tt, tz + (want.z - tz) * tt); break; }
+      const dd = d * t, px = tx - Math.sin(a) * Math.cos(pitch) * dd, py = ty + Math.sin(pitch) * dd, pz = tz - Math.cos(a) * Math.cos(pitch) * dd;
+      if (AF.solidAt(px, py, pz)) { d = Math.max(1.2, d * Math.max(0.12, t - 0.15)); break; }
     }
-    const k = DR.init ? 1 - Math.exp(-dt * 7) : 1; DR.init = true;
-    DR.camPos.lerp(want, k); DR.camLook.lerp(tmpV.set(tx, ty, tz), DR.init ? Math.min(1, k * 2) : 1);
+    DR.cd = k0 ? d : DR.cd + (d - DR.cd) * (1 - Math.exp(-dt * (d < DR.cd ? 14 : 2.5)));
+    const want = DR.want.set(tx - Math.sin(a) * Math.cos(pitch) * DR.cd, ty + Math.sin(pitch) * DR.cd, tz - Math.cos(a) * Math.cos(pitch) * DR.cd);
+    DR.init = true;
+    DR.camPos.copy(want); DR.camLook.set(tx, ty, tz);
     const cam = AF.camera;
     cam.position.copy(DR.camPos);
     const gy = AF.W.groundY(cam.position.x, cam.position.z) + 0.4; if (cam.position.y < gy) cam.position.y = gy;

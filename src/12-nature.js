@@ -654,9 +654,16 @@ try {
     return K;
   };
   const greenAt = (i) => { const hx = AF.PAL.hex[W.C[i]]; if (hx == null) return false; const r = (hx >> 16) & 255, g = (hx >> 8) & 255, b = hx & 255; return g > r + 6 && g > b + 24; };
+  // 2x coarser copy of a plant (any voxel in a 2x2x2 block keeps it) for everything beyond GC_NEAR: ~1/4 of the triangles
+  const coarsen = (m) => {
+    const o = new AF.Model(Math.ceil(m.w / 2), Math.ceil(m.h / 2), Math.ceil(m.d / 2));
+    for (let x = 0; x < m.w; x++) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) { const v = m.get(x, y, z); if (v && !o.get(x >> 1, y >> 1, z >> 1)) o.set(x >> 1, y >> 1, z >> 1, v); }
+    return o;
+  };
+  const GC_NEAR = 18;
   AF.onBuild('land-ground-cover', 520, () => {
     const t0 = performance.now();
-    const K = GC.kinds = coverModels().map((k) => ({ ...k, geo: AF.meshModel(k.m, { vs: k.vs, anchor: [0.5, 0, 0.5], flat: true }), m: null }));
+    const K = GC.kinds = coverModels().map((k) => ({ ...k, geo: AF.meshModel(k.m, { vs: k.vs, anchor: [0.5, 0, 0.5], flat: true }), geoF: AF.meshModel(coarsen(k.m), { vs: k.vs * 2, anchor: [0.5, 0, 0.5], flat: true }), m: null }));
     const wSum = K.reduce((s, k) => s + k.w, 0), R = AF.rng(4711), cells = GC.cells;
     const B = P.bounds || { x0: -660, z0: -300, x1: 300, z1: 300 };
     for (let x = B.x0 + 1; x < B.x1 - 1; x += 1.1) for (let z = B.z0 + 1; z < B.z1 - 1; z += 1.1) {
@@ -672,7 +679,7 @@ try {
       a.push(jx, gy, jz, R() * 6.2832, 0.75 + R() * 0.55, k); GC.n++;
     }
     for (const [key, a] of cells) cells.set(key, new Float32Array(a));
-    const tier = (AF.GFX && AF.GFX.tier) || 'high', cap = AF.MOBILE ? 1400 : tier === 'low' ? 3800 : tier === 'high' ? 8500 : 13000;
+    const tier = (AF.GFX && AF.GFX.tier) || 'high', cap = AF.MOBILE ? 1200 : tier === 'low' ? 3000 : tier === 'high' ? 6500 : 10000;
     // plants grow in / out in the vertex shader from the live viewer position every frame (uCoverC = x, z, fade start, radius),
     // so the 6 m instance refreshes never show as a stepped ring of popping tufts
     const mat = GC.mat = AF.mat.patchVoxel(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'cover');
@@ -682,14 +689,18 @@ try {
       sh.vertexShader = 'uniform vec4 uCoverC;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n#ifdef USE_INSTANCING\n{ vec2 ip = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz; float ff = 1.0 - smoothstep(uCoverC.z, uCoverC.w, distance(ip, uCoverC.xy)); transformed *= ff * ff * (3.0 - 2.0 * ff); }\n#endif');
     };
     for (const k of K) {
-      const im = new THREE.InstancedMesh(k.geo, mat, Math.ceil(cap * (k.id === 'tuft' ? 0.45 : 0.25)));
-      im.count = 0; im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; im.name = 'cover-' + k.id; im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      AF.scene.add(im); k.im = im;
+      const share = k.id === 'tuft' ? 0.45 : 0.25;
+      const mk = (geo, n, tag) => {
+        const im = new THREE.InstancedMesh(geo, mat, Math.max(16, Math.ceil(n)));
+        im.count = 0; im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; im.name = 'cover-' + k.id + tag; im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        AF.scene.add(im); return im;
+      };
+      k.im = mk(k.geo, cap * share * 0.3, ''); k.imF = mk(k.geoF, cap * share, '-far');
     }
     GC.ms = Math.round(performance.now() - t0);
     console.log('[af] ground cover', GC.n, 'plants in', cells.size, 'cells,', GC.ms, 'ms');
   });
-  const coverRadius = () => { const t = (AF.GFX && AF.GFX.tier) || 'high'; return AF.MOBILE ? 24 : t === 'low' ? 40 : t === 'high' ? 62 : 88; };
+  const coverRadius = () => { const G = AF.GFX || {}, t = G.tier || 'high'; return AF.MOBILE ? 22 : t === 'low' ? 32 : t === 'high' ? (G.lite ? 40 : 50) : 72; };
   // 16 m cell offsets sorted nearest-first, so the instance cap always drops the farthest plants, never the ones at your feet
   let ring = null, ringR = 0;
   const cellRing = (Rr) => {
@@ -699,8 +710,8 @@ try {
     o.sort((p, q) => p[2] - q[2]); ringR = Rr; return (ring = o.filter((p) => p[2] <= Rr));
   };
   const refreshCover = (cx, cz, cy) => {
-    const K = GC.kinds, Rr = coverRadius() + 8, R2 = Rr * Rr;
-    for (const k of K) k.n = 0;
+    const K = GC.kinds, Rr = coverRadius() + 8, R2 = Rr * Rr, N2 = GC_NEAR * GC_NEAR;
+    for (const k of K) k.n = k.nF = 0;
     const high = cy - Math.max(0, W.groundY(cx, cz)) > 45;
     if (!high) {
       const gcx = Math.floor(cx / 16), gcz = Math.floor(cz / 16);
@@ -708,17 +719,22 @@ try {
         const a = GC.cells.get((gcx + ox) * 1000 + gcz + oz); if (!a) continue;
         for (let i = 0; i < a.length; i += 6) {
           const dx = a[i] - cx, dz = a[i + 2] - cz, d2 = dx * dx + dz * dz; if (d2 > R2) continue;
-          const k = K[a[i + 5]], im = k.im; if (k.n >= im.instanceMatrix.count) continue;
+          const k = K[a[i + 5]], near = d2 < N2, im = near ? k.im : k.imF, n = near ? k.n : k.nF; if (n >= im.instanceMatrix.count) continue;
           const s = a[i + 4];
-          const c = Math.cos(a[i + 3]) * s, sn = Math.sin(a[i + 3]) * s, arr = im.instanceMatrix.array, o = k.n * 16;
+          const c = Math.cos(a[i + 3]) * s, sn = Math.sin(a[i + 3]) * s, arr = im.instanceMatrix.array, o = n * 16;
           arr[o] = c; arr[o + 1] = 0; arr[o + 2] = -sn; arr[o + 3] = 0; arr[o + 4] = 0; arr[o + 5] = s; arr[o + 6] = 0; arr[o + 7] = 0;
           arr[o + 8] = sn; arr[o + 9] = 0; arr[o + 10] = c; arr[o + 11] = 0; arr[o + 12] = a[i]; arr[o + 13] = a[i + 1]; arr[o + 14] = a[i + 2]; arr[o + 15] = 1;
-          k.n++;
+          if (near) k.n++; else k.nF++;
         }
       }
     }
     let shown = 0;
-    for (const k of K) { k.im.count = k.n; k.im.visible = k.n > 0; if (k.n) k.im.instanceMatrix.needsUpdate = true; shown += k.n; }
+    for (const k of K) {
+      for (const [im, n] of [[k.im, k.n], [k.imF, k.nF]]) {
+        if (n) { im.instanceMatrix.clearUpdateRanges(); im.instanceMatrix.addUpdateRange(0, n * 16); im.instanceMatrix.needsUpdate = true; }
+        im.count = n; im.visible = n > 0; shown += n;
+      }
+    }
     GC.shown = shown; GC.at = { x: cx, z: cz, y: cy };
   };
   AF.onTick('ground-cover', 445, (dt) => {

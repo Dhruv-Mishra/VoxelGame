@@ -29,7 +29,7 @@
 </script>
 <script type="module">
 // Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.
-// Parts: 00-prologue, 01-core, 02-voxel, 03-render, 05-plan, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 45-west, 46-zoo, 47-airfield, 48-sea, 50-vehicles, 52-planes, 55-people, 56-animals, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 98-tests, 99-boot
+// Parts: 00-prologue, 01-core, 02-voxel, 03-render, 05-plan, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 45-west, 46-zoo, 47-airfield, 48-sea, 50-vehicles, 52-planes, 55-people, 56-animals, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 98-tests, 99-boot
 // ===== prologue: module scope shared by every part (only THREE + ADDONS live here) =====
 window.AF = window.AF || {};
 {
@@ -1820,12 +1820,12 @@ AF.onTick('prop-lod', 880, () => {
     }
   }
   let budget = AF.SHOT || AF.TEST ? 1e9 : 10, best = null, bestD = 1e9;
-  const t0 = performance.now();
+  const t0 = performance.now(), SN = AF.shadowNear;
   for (const [k, r] of AF.world.lod) {
     const rl = RL && RL.get(k);
     if (rl && rl.hid) {
       if (r.nearBuilt) freeNear(r);
-      if (r.far) r.far.visible = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7) < (AF.PROP_CULL || 900);
+      if (r.far) { r.far.visible = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7) < (AF.PROP_CULL || 900); r.far.layers.set(0); }
       continue;
     }
     const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
@@ -1836,7 +1836,10 @@ AF.onTick('prop-lod', 880, () => {
     const showNear = r.nearBuilt && d < D + 25;
     if (r.near) r.near.visible = showNear;
     if (r.nearGlass) r.nearGlass.visible = showNear;
-    if (r.far) r.far.visible = !showNear && d < (AF.PROP_CULL || 900);
+    // full-detail props cast only right around the shadow focus; further out their LOD copy casts instead (shadow pass only, layer 1)
+    const proxy = showNear && !!r.far && Math.hypot(r.cx - SN.cx, r.cz - SN.cz) > 26;
+    if (r.near && r.near.castShadow === proxy) r.near.castShadow = !proxy;
+    if (r.far) { r.far.visible = showNear ? proxy : d < (AF.PROP_CULL || 900); r.far.layers.set(showNear ? 1 : 0); }
   }
   if (best && performance.now() - t0 < budget) buildNear(best);
 });
@@ -2487,9 +2490,9 @@ try {
     try { const gl = R.getContext(); const ext = gl.getExtension('WEBGL_debug_renderer_info'); gpu = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)); } catch (e) {}
     AF.gfx.gpu = gpu;
     if (!G.forced) {
-      // Balanced ('high') on discrete GPUs; integrated laptop GPUs (Intel UHD/Iris/Xe, AMD Radeon Graphics/Vega APUs, Safari's masked
-      // 'Apple GPU') start on Laptop ('lite'); phones, tablets and software renderers on Low. High ('ultra') is opt-in.
-      let t = 'high';
+      // Laptop ('lite') by default on desktop GPUs; phones, tablets and software renderers on Low. Balanced ('high') and High
+      // ('ultra') are opt-in from the menu.
+      let t = 'lite';
       const saved = (() => { try { return localStorage.getItem('portSolace.gfx'); } catch (e) { return null; } })();
       AF.gfx.integrated = (/intel/i.test(gpu) && !/\barc\b/i.test(gpu)) || /radeon(\(tm\))? (vega \d+ )?graphics|radeon(\(tm\))? \d{3}m\b|apple gpu/i.test(gpu);
       if (AF.gfx.integrated) t = 'lite';
@@ -2502,10 +2505,10 @@ try {
   // per-tier settings (read by R1 code every frame). near/far = shadow map sizes, lights = physical point lights, ao = SAO samples,
   // regLod/farLod = metres to the 0.5 m coarse / 1 m far region copies, lod = near props, propCull = far props hidden beyond
   const TIER = {
-    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 110, propCull: 900 },
-    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 80, propCull: 380 },
-    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 3, pools: 12, regLod: 80, farLod: 240, lod: 70, propCull: 300 },
-    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 60, propCull: 240 },
+    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 70, propCull: 700 },
+    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 45, propCull: 300 },
+    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 3, pools: 12, regLod: 80, farLod: 240, lod: 35, propCull: 240 },
+    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 32, propCull: 200 },
     cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
@@ -2544,12 +2547,11 @@ try {
   };
   G.onChange(applyTier);
   // ---------------------------------------------------------------- auto tier (only while G.auto: no saved/forced choice; never in ?shot / ?test)
-  // Down one step after 3 s of > 22 ms frames; up one step (never to High, never back to a tier that was too slow) after 20 s at the
-  // display rate. rAF intervals can't show headroom beyond vsync, so an upgrade is a trial that the downgrade rule reverts.
+  // Down one step after 3 s of > 22 ms frames; never up (higher tiers are opt-in from the menu).
   {
-    const base = AF.basePR, LADDER = ['low', 'lite', 'high', 'ultra'], tooSlow = new Set();
-    let ema = 16.7, slowT = 0, adjT = 0, goodT = 0, grace = 2, vsync = 16.7;
-    G.onChange(() => { ema = vsync; slowT = goodT = 0; grace = 2; });
+    const base = AF.basePR, LADDER = ['low', 'lite', 'high', 'ultra'];
+    let ema = 16.7, slowT = 0, adjT = 0, grace = 2, vsync = 16.7;
+    G.onChange(() => { ema = vsync; slowT = 0; grace = 2; });
     AF.onTick('gfx-adapt', 960, (dt) => {
       if (AF.SHOT || AF.TEST || !AF.ready || AF.paused || document.hidden || G.cinema) return;   // cinema: fixed full resolution, never downgrade
       const ms = dt * 1000; if (ms <= 0 || ms > 250) return;
@@ -2564,10 +2566,7 @@ try {
       if (!G.auto) return;
       const i = LADDER.indexOf(G.name);
       if (ema > 22) slowT += dt; else slowT = Math.max(0, slowT - dt);
-      if (slowT > 3 && i > 0) { tooSlow.add(G.name); G.set(LADDER[i - 1], 'slow frames'); return; }
-      if (ema < vsync * 1.04 + 0.3) goodT += dt; else goodT = 0;
-      const up = LADDER[i + 1];
-      if (goodT > 20 && up && up !== 'ultra' && !tooSlow.has(up)) G.set(up, 'headroom');
+      if (slowT > 3 && i > 0) { G.set(LADDER[i - 1], 'slow frames'); return; }
     });
   }
 
@@ -5470,9 +5469,16 @@ try {
     return K;
   };
   const greenAt = (i) => { const hx = AF.PAL.hex[W.C[i]]; if (hx == null) return false; const r = (hx >> 16) & 255, g = (hx >> 8) & 255, b = hx & 255; return g > r + 6 && g > b + 24; };
+  // 2x coarser copy of a plant (any voxel in a 2x2x2 block keeps it) for everything beyond GC_NEAR: ~1/4 of the triangles
+  const coarsen = (m) => {
+    const o = new AF.Model(Math.ceil(m.w / 2), Math.ceil(m.h / 2), Math.ceil(m.d / 2));
+    for (let x = 0; x < m.w; x++) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) { const v = m.get(x, y, z); if (v && !o.get(x >> 1, y >> 1, z >> 1)) o.set(x >> 1, y >> 1, z >> 1, v); }
+    return o;
+  };
+  const GC_NEAR = 18;
   AF.onBuild('land-ground-cover', 520, () => {
     const t0 = performance.now();
-    const K = GC.kinds = coverModels().map((k) => ({ ...k, geo: AF.meshModel(k.m, { vs: k.vs, anchor: [0.5, 0, 0.5], flat: true }), m: null }));
+    const K = GC.kinds = coverModels().map((k) => ({ ...k, geo: AF.meshModel(k.m, { vs: k.vs, anchor: [0.5, 0, 0.5], flat: true }), geoF: AF.meshModel(coarsen(k.m), { vs: k.vs * 2, anchor: [0.5, 0, 0.5], flat: true }), m: null }));
     const wSum = K.reduce((s, k) => s + k.w, 0), R = AF.rng(4711), cells = GC.cells;
     const B = P.bounds || { x0: -660, z0: -300, x1: 300, z1: 300 };
     for (let x = B.x0 + 1; x < B.x1 - 1; x += 1.1) for (let z = B.z0 + 1; z < B.z1 - 1; z += 1.1) {
@@ -5488,7 +5494,7 @@ try {
       a.push(jx, gy, jz, R() * 6.2832, 0.75 + R() * 0.55, k); GC.n++;
     }
     for (const [key, a] of cells) cells.set(key, new Float32Array(a));
-    const tier = (AF.GFX && AF.GFX.tier) || 'high', cap = AF.MOBILE ? 1400 : tier === 'low' ? 3800 : tier === 'high' ? 8500 : 13000;
+    const tier = (AF.GFX && AF.GFX.tier) || 'high', cap = AF.MOBILE ? 1200 : tier === 'low' ? 3000 : tier === 'high' ? 6500 : 10000;
     // plants grow in / out in the vertex shader from the live viewer position every frame (uCoverC = x, z, fade start, radius),
     // so the 6 m instance refreshes never show as a stepped ring of popping tufts
     const mat = GC.mat = AF.mat.patchVoxel(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'cover');
@@ -5498,14 +5504,18 @@ try {
       sh.vertexShader = 'uniform vec4 uCoverC;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n#ifdef USE_INSTANCING\n{ vec2 ip = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz; float ff = 1.0 - smoothstep(uCoverC.z, uCoverC.w, distance(ip, uCoverC.xy)); transformed *= ff * ff * (3.0 - 2.0 * ff); }\n#endif');
     };
     for (const k of K) {
-      const im = new THREE.InstancedMesh(k.geo, mat, Math.ceil(cap * (k.id === 'tuft' ? 0.45 : 0.25)));
-      im.count = 0; im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; im.name = 'cover-' + k.id; im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      AF.scene.add(im); k.im = im;
+      const share = k.id === 'tuft' ? 0.45 : 0.25;
+      const mk = (geo, n, tag) => {
+        const im = new THREE.InstancedMesh(geo, mat, Math.max(16, Math.ceil(n)));
+        im.count = 0; im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; im.name = 'cover-' + k.id + tag; im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        AF.scene.add(im); return im;
+      };
+      k.im = mk(k.geo, cap * share * 0.3, ''); k.imF = mk(k.geoF, cap * share, '-far');
     }
     GC.ms = Math.round(performance.now() - t0);
     console.log('[af] ground cover', GC.n, 'plants in', cells.size, 'cells,', GC.ms, 'ms');
   });
-  const coverRadius = () => { const t = (AF.GFX && AF.GFX.tier) || 'high'; return AF.MOBILE ? 24 : t === 'low' ? 40 : t === 'high' ? 62 : 88; };
+  const coverRadius = () => { const G = AF.GFX || {}, t = G.tier || 'high'; return AF.MOBILE ? 22 : t === 'low' ? 32 : t === 'high' ? (G.lite ? 40 : 50) : 72; };
   // 16 m cell offsets sorted nearest-first, so the instance cap always drops the farthest plants, never the ones at your feet
   let ring = null, ringR = 0;
   const cellRing = (Rr) => {
@@ -5515,8 +5525,8 @@ try {
     o.sort((p, q) => p[2] - q[2]); ringR = Rr; return (ring = o.filter((p) => p[2] <= Rr));
   };
   const refreshCover = (cx, cz, cy) => {
-    const K = GC.kinds, Rr = coverRadius() + 8, R2 = Rr * Rr;
-    for (const k of K) k.n = 0;
+    const K = GC.kinds, Rr = coverRadius() + 8, R2 = Rr * Rr, N2 = GC_NEAR * GC_NEAR;
+    for (const k of K) k.n = k.nF = 0;
     const high = cy - Math.max(0, W.groundY(cx, cz)) > 45;
     if (!high) {
       const gcx = Math.floor(cx / 16), gcz = Math.floor(cz / 16);
@@ -5524,17 +5534,22 @@ try {
         const a = GC.cells.get((gcx + ox) * 1000 + gcz + oz); if (!a) continue;
         for (let i = 0; i < a.length; i += 6) {
           const dx = a[i] - cx, dz = a[i + 2] - cz, d2 = dx * dx + dz * dz; if (d2 > R2) continue;
-          const k = K[a[i + 5]], im = k.im; if (k.n >= im.instanceMatrix.count) continue;
+          const k = K[a[i + 5]], near = d2 < N2, im = near ? k.im : k.imF, n = near ? k.n : k.nF; if (n >= im.instanceMatrix.count) continue;
           const s = a[i + 4];
-          const c = Math.cos(a[i + 3]) * s, sn = Math.sin(a[i + 3]) * s, arr = im.instanceMatrix.array, o = k.n * 16;
+          const c = Math.cos(a[i + 3]) * s, sn = Math.sin(a[i + 3]) * s, arr = im.instanceMatrix.array, o = n * 16;
           arr[o] = c; arr[o + 1] = 0; arr[o + 2] = -sn; arr[o + 3] = 0; arr[o + 4] = 0; arr[o + 5] = s; arr[o + 6] = 0; arr[o + 7] = 0;
           arr[o + 8] = sn; arr[o + 9] = 0; arr[o + 10] = c; arr[o + 11] = 0; arr[o + 12] = a[i]; arr[o + 13] = a[i + 1]; arr[o + 14] = a[i + 2]; arr[o + 15] = 1;
-          k.n++;
+          if (near) k.n++; else k.nF++;
         }
       }
     }
     let shown = 0;
-    for (const k of K) { k.im.count = k.n; k.im.visible = k.n > 0; if (k.n) k.im.instanceMatrix.needsUpdate = true; shown += k.n; }
+    for (const k of K) {
+      for (const [im, n] of [[k.im, k.n], [k.imF, k.nF]]) {
+        if (n) { im.instanceMatrix.clearUpdateRanges(); im.instanceMatrix.addUpdateRange(0, n * 16); im.instanceMatrix.needsUpdate = true; }
+        im.count = n; im.visible = n > 0; shown += n;
+      }
+    }
     GC.shown = shown; GC.at = { x: cx, z: cz, y: cy };
   };
   AF.onTick('ground-cover', 445, (dt) => {
@@ -7174,7 +7189,7 @@ try {
       for (let i = 0; i < NS; i++) { const gm = AF.modelMesh(GG[i % 6]); gm.castShadow = false; gm.rotation.y = Math.PI / 2; AF.scene.add(gm); gonds.push(gm); }
       L.ferris = { wheel, gonds, WX, WY, WZ, WR };
       dyn.push({ x: WX, z: WZ, r: 400, update(dt, t) {
-        wheel.rotation.x += dt * 0.07;
+        wheel.rotation.x += dt * 0.07 * (L.ferris.k || 1);
         for (let i = 0; i < NS; i++) { const a = wheel.rotation.x + i / NS * TAU; gonds[i].position.set(WX - Math.cos(a) * (WR - 0.4), WY + Math.sin(a) * (WR - 0.4) + 0.1, WZ); gonds[i].rotation.x = Math.sin(t * 0.8 + i) * 0.05; }
       } });
       AF.addLight({ x: WX, y: WY, z: WZ - 3, color: 0xffe0a0, intensity: 2.2, range: 26, kind: 'sign' });
@@ -8742,6 +8757,139 @@ try {
 }
 
 } catch (e) { AF.partError('15-harbour-2.js', e); }
+
+// ================================================================ 16-rides.js
+try {
+// ===== 16-rides: ride the Big Wheel and the Sea Serpent coaster ('funride' mode). A ticket kiosk beside each ride; one full turn of the
+//       wheel / one lap of the coaster from your own seat (first-person, mouse or drag to look around), E gets you off early.
+{
+  const L = AF.land, PI = Math.PI, TAU = PI * 2;
+  const RD = AF.rides = { cur: null, yaw: 0, pitch: 0 };
+  const eye = new THREE.Vector3(), q = new THREE.Quaternion(), qe = new THREE.Quaternion(), e = new THREE.Euler();
+  const col = (h, o) => AF.col(h, Object.assign({ jitter: 0.3, edge: 0.4 }, o || {}));
+
+  // a striped-roof kiosk with a window facing -z (toward the boardwalk)
+  const kiosk = (x, z, title) => {
+    const W = AF.W, red = col(0xc0342e), cream = col(0xf2ead0), gold = col(0xd8b84a, { metal: 0.6, rough: 0.35 }), glass = col(0xa9c9d6, { glass: true });
+    const bulb = AF.col(0xfff2c0, { emit: 0xffd070, emitK: 2.6, mode: 'night' });
+    W.fill(x - 1.25, 0.25, z - 1, x + 1.25, 2.5, z + 1, cream);
+    W.fill(x - 0.75, 1.1, z - 1.05, x + 0.75, 2.1, z - 1, glass);
+    W.fill(x - 1.0, 1.0, z - 1.35, x + 1.0, 1.1, z - 1, col(0x8a5a36));
+    for (let i = 0; i < 12; i++) W.fill(x - 1.5 + i * 0.25, 2.5, z - 1.4, x - 1.25 + i * 0.25, 2.75, z + 1.25, i % 2 ? red : cream);
+    W.fill(x - 1.5, 2.75, z - 1.4, x + 1.5, 3.0, z + 1.25, gold);
+    for (let i = 0; i < 6; i++) W.setM(x - 1.25 + i * 0.5, 2.4, z - 1.4, bulb);
+    const w = AF.textModel(title, 1, { font: 'deco', depth: 1, pad: 0 }).w || 1;
+    const g = AF.meshModel(AF.textModel(title, red, { font: 'deco', depth: 1, pad: 0 }), { vs: Math.min(1 / 16, 2.3 / w), anchor: [0.5, 0, 0.5] });
+    AF.placeStatic(g, x, 2.08, z - 1.06, 2, { collide: false });
+    AF.addLight({ x, y: 2.3, z: z - 1.6, color: 0xffd890, intensity: 0.8, range: 7, kind: 'sign' });
+  };
+
+  AF.onBuild('ride-kiosks', 310, () => {
+    const FW = L.ferris, CO = L.coaster; if (!FW || !CO) return;
+    const st = new THREE.Vector3(); CO.curve.getPointAt(0.015, st);
+    RD.wheelK = { x: FW.WX - 6.5, z: FW.WZ - 8 };
+    RD.coastK = { x: st.x + 6.5, z: 206.5 };
+    kiosk(RD.wheelK.x, RD.wheelK.z, 'BIG WHEEL 10\u00a2');
+    kiosk(RD.coastK.x, RD.coastK.z, 'SEA SERPENT 10\u00a2');
+    RD.coastExit = { x: st.x + 3, z: 207.5 };
+    AF.addInteract({ x: RD.wheelK.x, y: 1.3, z: RD.wheelK.z - 1.7, r: 2.6, label: 'Ride the Big Wheel \u00b7 10\u00a2', prio: 2, can: () => AF.mode === 'walk', act: () => AF.setMode('funride', { ride: 'wheel' }) });
+    AF.addInteract({ x: RD.coastK.x, y: 1.3, z: RD.coastK.z - 1.7, r: 2.6, label: 'Ride the Sea Serpent \u00b7 10\u00a2', prio: 2, can: () => AF.mode === 'walk', act: () => AF.setMode('funride', { ride: 'coaster' }) });
+  });
+
+  const wheelSeat = (R, out) => {
+    const FW = L.ferris, a = FW.wheel.rotation.x + R.gi / FW.gonds.length * TAU;
+    return out.set(FW.WX - Math.cos(a) * (FW.WR - 0.4), FW.WY + Math.sin(a) * (FW.WR - 0.4) + 0.1 - 0.62, FW.WZ);
+  };
+  const getOff = (R, msg) => {
+    const ex = R.kind === 'wheel' ? { x: RD.wheelK.x + 2.5, z: RD.wheelK.z - 2.2 } : { x: RD.coastExit.x, z: RD.coastExit.z };
+    AF.setMode('walk', { x: ex.x, y: AF.surfaceBelow(ex.x, ex.z, 3, 6), z: ex.z, yaw: PI });
+    if (msg) AF.emit('toast', msg);
+  };
+
+  AF.modes.funride = {
+    enter(o = {}) {
+      const FW = L.ferris, CO = L.coaster;
+      if (!FW || !CO) { AF.setMode('walk'); return; }
+      const R = RD.cur = { kind: o.ride === 'coaster' ? 'coaster' : 'wheel', t: 0, done: 0, last: 0 };
+      RD.yaw = 0; RD.pitch = 0;
+      if (R.kind === 'wheel') {
+        // an empty gondola (odd patterns carry no riders) brought round to the bottom, then the wheel speeds up for one turn
+        const n = FW.gonds.length; let best = 1, bd = 1e9;
+        for (let i = 1; i < n; i += 2) { const a = FW.wheel.rotation.x + i / n * TAU, d = Math.abs(AF.angDiff(a, -PI / 2)); if (d < bd) { bd = d; best = i; } }
+        R.gi = best; FW.wheel.rotation.x = -PI / 2 - best / n * TAU; R.last = FW.wheel.rotation.x;
+        FW.k = 2.4; RD.yaw = PI;
+        AF.emit('toast', 'All aboard the Big Wheel! ' + (AF.touch ? 'Drag to look around, EXIT to get off.' : 'Move the mouse to look around, E to get off.'));
+      } else {
+        CO.st.s = CO.LEN * 0.0151; CO.st.dwell = 2.5; R.last = CO.st.s;
+        AF.emit('toast', 'Front seat on the Sea Serpent \u2014 hold on! ' + (AF.touch ? 'EXIT' : 'E') + ' to get off at the station.');
+      }
+      if (AF.player) AF.player.setVisible(false);
+      AF.emit('hint', AF.touch ? '' : 'Mouse look \u00b7 E get off');
+    },
+    exit() {
+      if (L.ferris) L.ferris.k = 1;
+      RD.cur = null;
+      if (AF.player) AF.player.setVisible(true);
+      AF.emit('hud', { speed: null }); AF.emit('hint', '');
+    },
+    update(dt) {
+      const R = RD.cur; if (!R) return;
+      const I = AF.input, m = I.mouse;
+      if ((document.pointerLockElement || (AF.touch && (m.buttons & 1))) && (m.dx || m.dy)) {
+        RD.yaw -= m.dx * 0.004; RD.pitch = AF.clamp(RD.pitch - m.dy * 0.004, -1.1, 1.1);
+      }
+      if (R.kind === 'wheel') {
+        const FW = L.ferris; R.done += Math.max(0, FW.wheel.rotation.x - R.last); R.last = FW.wheel.rotation.x;
+        if (R.done >= TAU) { getOff(R, 'Round we go \u2014 thanks for riding the Big Wheel!'); return; }
+      } else {
+        const CO = L.coaster; let ds = CO.st.s - R.last; if (ds < -CO.LEN * 0.5) ds += CO.LEN; R.done += Math.max(0, ds); R.last = CO.st.s;
+        if (R.done > CO.LEN * 0.9 && CO.st.dwell > 0) { getOff(R, 'What a ride! The Sea Serpent pulls back into the station.'); return; }
+      }
+      if (I.hit('KeyE') || I.hit('KeyF')) {
+        if (R.kind === 'wheel') getOff(R, 'The operator stops the wheel and lets you off.');
+        else if (L.coaster.st.dwell > 0 || R.done < 1) getOff(R, 'You climb out at the station.');
+        else AF.emit('toast', 'Keep your arms inside the car until the station!');
+      }
+    },
+  };
+  // camera after harbour-life (330) has moved the wheel and the train this frame
+  const fwd = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  AF.onTick('ride-cam', 336, () => {
+    const R = RD.cur; if (!R || AF.mode !== 'funride') return;
+    const cam = AF.camera;
+    if (R.kind === 'wheel') {
+      wheelSeat(R, eye);
+      cam.position.copy(eye); cam.up.copy(up);
+      e.set(RD.pitch, RD.yaw + PI, 0, 'YXZ'); cam.quaternion.setFromEuler(e);
+      const FW = L.ferris;
+      AF.emit('hud', { mode: 'fly', speed: FW.WR * 0.07 * (FW.k || 1) * 2.237, alt: Math.max(0, eye.y), car: 'The Big Wheel \u00b7 ' + Math.round(Math.min(1, R.done / TAU) * 100) + '% \u00b7 ' + (AF.touch ? 'EXIT' : 'E') + ' get off' });
+    } else {
+      const car = L.coaster.cars[0]; car.updateMatrixWorld();
+      eye.set(0, 1.75, -0.1).applyMatrix4(car.matrixWorld);
+      cam.position.copy(eye); cam.up.copy(up);
+      q.copy(car.quaternion); e.set(RD.pitch, RD.yaw + PI, 0, 'YXZ'); qe.setFromEuler(e); cam.quaternion.copy(q).multiply(qe);
+      AF.emit('hud', { mode: 'fly', speed: L.coaster.st.v * 2.237, alt: Math.max(0, eye.y), car: 'Sea Serpent \u00b7 ' + (L.coaster.st.dwell > 0 ? 'in the station' : 'hold on!') });
+    }
+    cam.getWorldDirection(fwd);
+    AF.camTarget.copy(eye).addScaledVector(fwd, 8); AF.shadowFocus.set(eye.x, 0, eye.z); AF.shadowRadius = 60;
+  });
+  AF.test('rides: Big Wheel + Sea Serpent are rideable from their kiosks', () => {
+    if (!L.ferris || !L.coaster || !RD.wheelK) return { ok: false, info: 'missing rides' };
+    const was = AF.mode, P = AF.player, save = P ? { x: P.x, y: P.y, z: P.z } : null;
+    let wheel = false, coaster = false;
+    try {
+      AF.setMode('funride', { ride: 'wheel' }); const y0 = wheelSeat(RD.cur, new THREE.Vector3()).y;
+      for (let i = 0; i < 60; i++) { L.hbUpdate(1 / 30, i / 30); AF.modes.funride.update(1 / 30); }
+      wheel = AF.mode === 'funride' && RD.cur.done > 0 && wheelSeat(RD.cur, new THREE.Vector3()).y > y0;
+      AF.setMode('walk');
+      AF.setMode('funride', { ride: 'coaster' }); const s0 = L.coaster.st.s;
+      for (let i = 0; i < 150; i++) { L.hbUpdate(1 / 30, i / 30); AF.modes.funride.update(1 / 30); }
+      coaster = AF.mode === 'funride' && RD.cur.done > 0 && L.coaster.st.s !== s0;
+    } finally { AF.setMode(was || 'walk'); if (save && P.teleport) P.teleport(save.x, save.y, save.z); }
+    return { ok: wheel && coaster, info: `wheel ${wheel}, coaster ${coaster}` };
+  });
+}
+} catch (e) { AF.partError('16-rides.js', e); }
 
 // ================================================================ 20-downtown.js
 try {
@@ -18534,13 +18682,15 @@ try {
     W.fill(-555, 6.5, z1 - 2, -537, 7.5, z1 - 1, col(0x2f6a4a));
     const g = K().text('SOLACE ZOO', 0xffe9b0, { font: 'deco', vs: 1 / 9, k: 2.2 });
     AF.placeStatic(g, -546, 6.55, z1 - 0.95, 0, { collide: false }); AF.placeStatic(g, -546, 6.55, z1 - 2.05, 2, { collide: false });
-    W.fill(-535, 0.25, z1 - 6, -531, 3, z1 - 2, col(0xe8dcc0, { pat: 'stucco' })); W.fill(-535.25, 3, z1 - 6.25, -530.75, 3.5, z1 - 1.75, col(0xc0392b)); W.fill(-535.1, 1.25, z1 - 5, -535, 2.25, z1 - 3, col(0xa9c9d6, { glass: true }));
+    // ticket booth on the forecourt OUTSIDE the wall, window facing the gate
+    W.fill(-535, 0.25, z1 + 0.5, -531, 3, z1 + 4, col(0xe8dcc0, { pat: 'stucco' })); W.fill(-535.25, 3, z1 + 0.25, -530.75, 3.5, z1 + 4.25, col(0xc0392b)); W.fill(-535.1, 1.25, z1 + 1.25, -535, 2.25, z1 + 3.25, col(0xa9c9d6, { glass: true }));
+    W.fill(-535.35, 1.0, z1 + 1.0, -535, 1.25, z1 + 3.5, col(0x8a5a36));
     for (const gx of [-556, -536]) AF.addLight({ x: gx, y: 9, z: z1, color: 0xffe0a0, intensity: 1, range: 12, kind: 'street' });
     // turnstile posts across the gate (the arms are a live mesh that swings open with a ticket, see zoo-gate below)
     for (const tx of [-555, -551, -547, -543, -539]) { W.fill(tx, 0.25, z1 - 2.25, tx + 0.5, 1.25, z1 - 1.75, col(0x2f6a4a)); W.fill(tx - 0.125, 1.25, z1 - 2.375, tx + 0.625, 1.5, z1 - 1.625, col(0xd8b84a, { metal: 0.8, rough: 0.3 })); }
-    W.fill(-534.75, 2.25, z1 - 5.5, -534.5, 2.75, z1 - 2.5, col(0xf2ead0));
+    W.fill(-535.25, 2.3, z1 + 0.75, -535, 2.95, z1 + 3.75, col(0xf2ead0));
     const fitTextG = (str, hex, maxW) => { const w = AF.textModel(str, 1, { font: 'deco', depth: 1, pad: 0 }).w || 1; return K().text(str, hex, { lit: false, font: 'deco', pad: 0, vs: Math.min(1 / 16, maxW / w) }); };
-    AF.placeStatic(fitTextG('TICKETS 25\u00a2', 0xc0392b, 2.8), -534.45, 2.3, z1 - 4, 3, { collide: false });
+    AF.placeStatic(fitTextG('TICKETS 25\u00a2', 0xc0392b, 2.8), -535.3, 2.38, z1 + 2.25, 3, { collide: false });
     AF.addBuilding({ id: 'zoo', name: 'Solace Zoo', kind: 'zoo', box: [x0, 0, z0, x1, 3, z1], doors: [{ x: -546, y: 0.25, z: z1 - 2, yaw: PI }], interior: false, owner: 'west', label: true });
     // lamp posts along the promenade
     for (let z = -40; z > -280; z -= 24) for (const x of [-554, -538]) { W.fill(x, 0.25, z, x + 0.25, 4, z + 0.25, iron); W.fill(x - 0.25, 4, z - 0.25, x + 0.5, 4.5, z + 0.5, glow(0xfff0c8, 2.6, 'night')); AF.addLight({ x: x + 0.1, y: 4.3, z: z + 0.1, color: 0xffe0b0, intensity: 0.8, range: 10, kind: 'street' }); }
@@ -18829,7 +18979,7 @@ try {
         const arm = new THREE.Mesh(geo, mat); arm.position.set(px, 1.0, zg); arm.castShadow = true; arm.name = 'zoo-turnstile'; AF.scene.add(arm); G.arms.push(arm);
       }
       G.coll = AF.addCollider(-555, 0, zg - 0.3, -537, 2.5, zg + 0.3, 'zoo-gate');
-      AF.addInteract({ x: -533.5, y: 1.3, z: z1 - 4, r: 2.6, label: 'Buy a zoo ticket \u00b7 25\u00a2', prio: 2, can: () => AF.mode === 'walk' && !G.ticket,
+      AF.addInteract({ x: -536, y: 1.3, z: z1 + 2.25, r: 3, label: 'Buy a zoo ticket \u00b7 25\u00a2', prio: 2, can: () => AF.mode === 'walk' && !G.ticket,
         act: () => { G.ticket = true; AF.emit('toast', 'Admit one \u2014 Solace Zoo. Enjoy your visit!'); AF.emit('dialogue', { name: 'Ticket booth', role: 'Solace Zoo', line: 'Here you go, one adult. The turnstile\u2019s all yours \u2014 and the brook bridge is lovely at sunset.' }); } });
       AF.addInteract({ x: -546, y: 1.2, z: z1 - 0.5, r: 3.2, label: 'Tickets at the booth \u2192', prio: 0.5, can: () => AF.mode === 'walk' && !G.ticket && AF.player && AF.player.z > zg,
         act: () => AF.emit('toast', 'You need a ticket \u2014 the booth is just to the right of the gate.') });
@@ -20840,8 +20990,8 @@ function physics(car, dt, inp) {
   car.pitch += (pT + dive - car.pitch) * Math.min(1, dt * 9);
   if (!car.type.solo) car.roll += (rT + lean - car.roll) * Math.min(1, dt * 9);
   // a faint, position-keyed road texture (was per-frame random noise, which made flat asphalt feel bumpy)
-  car.bobV += (-car.bob * 90 - car.bobV * 9) * dt + (AF.noise2(car.x * 0.8, car.z * 0.8) - 0.5) * Math.min(sp, 20) * 0.02 * dt;
-  car.bob += car.bobV * dt; car.bob = AF.clamp(car.bob, -0.06, 0.06);
+  car.bobV += (-car.bob * 90 - car.bobV * 9) * dt + (AF.noise2(car.x * 0.8, car.z * 0.8) - 0.5) * Math.min(sp, 20) * 0.006 * dt;
+  car.bob += car.bobV * dt; car.bob = AF.clamp(car.bob, -0.025, 0.025);
 }
 VV.physics = physics;
 function exitSpot(car) {
@@ -20903,17 +21053,24 @@ AF.modes.drive = {
     if ((document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { DR.orbit = (DR.orbit - m.dx * 0.006) % (Math.PI * 2); DR.orbitP = AF.clamp(DR.orbitP + m.dy * 0.004, -0.25, 0.9); DR.dragT = 1.5; }
     else if ((DR.dragT = (DR.dragT || 0) - dt) < 0) { DR.orbit *= Math.exp(-dt * 1.8); DR.orbitP *= Math.exp(-dt * 1.8); }
     if (m.wheel) DR.dist = AF.clamp(DR.dist * Math.exp(m.wheel * 0.001), 4, 28);
-    const a = car.yaw + DR.orbit, pitch = 0.2 + DR.orbitP + DR.dist * 0.004;
-    const tx = car.x + Math.sin(car.yaw) * 1.5, ty = car.y + (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), tz = car.z + Math.cos(car.yaw) * 1.5;
+    // chase camera rigidly follows the car's position; only its heading and boom length are smoothed (a world-space lerp lagged
+    // metres behind at speed and stuttered whenever the frame time varied)
+    const k0 = !DR.init;
+    if (k0) { DR.cyaw = car.yaw; DR.cy = car.y; DR.cd = DR.dist; }
+    DR.cyaw += AF.angDiff(DR.cyaw, car.yaw) * (1 - Math.exp(-dt * 4.5));
+    DR.cy += (car.y - DR.cy) * (1 - Math.exp(-dt * 6));
+    const a = DR.cyaw + DR.orbit, pitch = 0.2 + DR.orbitP + DR.dist * 0.004;
+    const tx = car.x + Math.sin(car.yaw) * 1.5, ty = DR.cy + (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), tz = car.z + Math.cos(car.yaw) * 1.5;
     let d = DR.dist;
-    const want = DR.want.set(tx - Math.sin(a) * Math.cos(pitch) * d, ty + Math.sin(pitch) * d, tz - Math.cos(a) * Math.cos(pitch) * d);
-    // keep the camera out of walls
+    // keep the camera out of walls: pull in fast, ease back out
     for (let t = 0.25; t <= 1.0001; t += 0.125) {
-      const px = tx + (want.x - tx) * t, py = ty + (want.y - ty) * t, pz = tz + (want.z - tz) * t;
-      if (AF.solidAt(px, py, pz)) { const tt = Math.max(0.12, t - 0.15); want.set(tx + (want.x - tx) * tt, ty + (want.y - ty) * tt, tz + (want.z - tz) * tt); break; }
+      const dd = d * t, px = tx - Math.sin(a) * Math.cos(pitch) * dd, py = ty + Math.sin(pitch) * dd, pz = tz - Math.cos(a) * Math.cos(pitch) * dd;
+      if (AF.solidAt(px, py, pz)) { d = Math.max(1.2, d * Math.max(0.12, t - 0.15)); break; }
     }
-    const k = DR.init ? 1 - Math.exp(-dt * 7) : 1; DR.init = true;
-    DR.camPos.lerp(want, k); DR.camLook.lerp(tmpV.set(tx, ty, tz), DR.init ? Math.min(1, k * 2) : 1);
+    DR.cd = k0 ? d : DR.cd + (d - DR.cd) * (1 - Math.exp(-dt * (d < DR.cd ? 14 : 2.5)));
+    const want = DR.want.set(tx - Math.sin(a) * Math.cos(pitch) * DR.cd, ty + Math.sin(pitch) * DR.cd, tz - Math.cos(a) * Math.cos(pitch) * DR.cd);
+    DR.init = true;
+    DR.camPos.copy(want); DR.camLook.set(tx, ty, tz);
     const cam = AF.camera;
     cam.position.copy(DR.camPos);
     const gy = AF.W.groundY(cam.position.x, cam.position.z) + 0.4; if (cam.position.y < gy) cam.position.y = gy;
@@ -21529,11 +21686,12 @@ try {
       } else {
         const lift = AF.clamp((pl.v - vs * 0.75) / (vs * 0.25), 0, 1), auth = 0.25 + 0.75 * AF.clamp((pl.v - vs) / vs, 0, 1);
         // pitch: rate scales with airspeed and eases in, softly limited toward +-PMAX; hands off slowly relaxes toward level
-        let pr = pitchIn * T.pitch * auth;
+        let pr = pitchIn * T.pitch * (pitchIn < 0 ? Math.max(auth, 0.7) * 1.35 : auth);
         pr *= pr > 0 ? AF.clamp((PMAX - pl.pitch) / 0.7, 0, 1) : AF.clamp((PMAX + pl.pitch) / 0.7, 0, 1);
         pl.pr += (pr - pl.pr) * Math.min(1, dt * T.presp);
         pl.pitch += pl.pr * dt;
-        if (!pitchIn) pl.pitch *= Math.exp(-dt * 0.5);
+        // hands off: settle level under power, into a gentle glide attitude with the engine off
+        if (!pitchIn) pl.pitch += ((pl.engine ? 0 : -0.12) - pl.pitch) * (1 - Math.exp(-dt * 0.5));
         // bank toward rollIn * BANK; releasing A/D rolls the wings level
         const rr = AF.clamp((rollIn * BANK - pl.roll) * 4, -T.roll, T.roll);
         pl.rr += (rr - pl.rr) * Math.min(1, dt * T.resp);
@@ -21550,7 +21708,9 @@ try {
         pl.pitch = AF.clamp(pl.pitch, -PMAX - 0.05, PMAX + 0.05);
         // coordinated turn g*tan(bank)/v, floored so a full bank always turns >= ~27 deg/s, capped near stall
         pl.yaw -= (Math.tan(pl.roll) * AF.clamp(G0 / Math.max(pl.v, 1), 0.17, 0.3) + yawIn * 0.3) * dt;
-        pl.v += (pl.throttle * T.thrust - drag * pl.v * pl.v - G0 * Math.sin(pl.gam) * 0.9 - 1.2 * Math.sin(pl.roll) ** 2 * pl.v / T.vmax) * dt;
+        // engine off: the windmilling prop adds drag, so a dead-stick plane bleeds speed unless the nose goes down
+        const deadK = pl.engine ? 1 : 2.2, deadC = pl.engine ? 0 : 0.8;
+        pl.v += (pl.throttle * T.thrust - drag * deadK * pl.v * pl.v - deadC - G0 * Math.sin(pl.gam) * 0.9 - 1.2 * Math.sin(pl.roll) ** 2 * pl.v / T.vmax) * dt;
         pl.v = AF.clamp(pl.v, 3, T.vmax * 1.25);
       }
       const cg = Math.cos(pl.gam); dir.set(Math.sin(pl.yaw) * cg, Math.sin(pl.gam), Math.cos(pl.yaw) * cg);
@@ -27697,7 +27857,7 @@ try {
   });
   // outside walk/aerial (driving, flying, riding): the vehicle owner may seat the avatar via PL.seat = {x,y,z,yaw,roll,pitch,bike}
   AF.onTick('player-idle', 160, (dt) => {
-    if (!player.mesh || AF.mode === 'walk' || AF.mode === 'aerial') return;
+    if (!player.mesh || AF.mode === 'walk' || AF.mode === 'aerial' || AF.mode === 'skydive' || AF.mode === 'row') return;
     const S = PL.seat;
     if (S && player.parts) {
       AV.sit(player.parts, true, S.seatH ?? 0.62);
@@ -27749,7 +27909,7 @@ try {
   #ui #t-title .logo{position:absolute;z-index:1;top:max(4vh,18px);left:max(28px,5vw);text-align:left}
   #ui #t-title h1{margin:0;font:400 clamp(26px,4.4vw,52px)/1 Limelight,Georgia,serif;letter-spacing:.24em;color:#ffe6a8;text-shadow:0 2px 0 rgba(60,36,8,.7),0 0 24px rgba(240,190,90,.35)}
   #ui #t-title .sub{margin-top:8px;color:#e9dcc0;font-style:italic;text-shadow:0 1px 3px #000}
-  #ui #t-title .modal{pointer-events:auto;width:min(420px,92vw);max-height:100%;padding:16px 18px 18px;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;z-index:0;overflow:hidden;background:rgba(10,18,28,.52);backdrop-filter:blur(16px) saturate(1.1);-webkit-backdrop-filter:blur(16px) saturate(1.1);box-shadow:0 24px 70px rgba(0,0,0,.5);animation:uiIn .35s ease}
+  #ui #t-title .modal{pointer-events:auto;width:min(420px,92vw);max-height:100%;padding:16px 18px 18px;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;z-index:0;overflow:hidden;background:linear-gradient(180deg,rgba(10,18,28,.14),rgba(10,18,28,.14) 58%,rgba(10,18,28,.8) 74%);backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 24px 70px rgba(0,0,0,.45);animation:uiIn .35s ease}
   #ui #t-title .q{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);text-align:center}
   #ui #t-title .stage{position:relative;z-index:-1;width:100%;height:min(42vh,340px);min-height:190px;margin:6px 0 4px;border-radius:14px;overflow:hidden;background:none;cursor:grab;touch-action:none}
   #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;background:rgba(10,20,30,.6);border:1px solid var(--line);font-size:28px;line-height:1;display:flex;align-items:center;justify-content:center;color:#ffe6a8;transition:background .15s,transform .1s}
@@ -27881,7 +28041,7 @@ try {
   const dlg = h('div', 'panel pe', `<div class="face"></div><div><span class="nm"></span><span class="rl"></span></div><div class="ln"></div><div class="more">${TOUCH ? 'tap' : 'E / click'} to continue</div>`); dlg.id = 'h-dlg';
   const bubbleEl = h('div', 'bubble', ''); bubbleEl.style.display = 'none';
   const menu = h('div', 'sheet pe', `<div class="panel"><h2>PAUSED</h2>
-    <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="lite" title="Balanced without AO, god rays and MSAA (laptop GPUs)">Laptop</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
+    <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="lite" title="Default: Balanced without AO, god rays and MSAA">Standard</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
     <div class="row"><label>Resolution</label><div class="seg" data-k="res"><button data-v="0">Auto</button><button data-v="0.75">75%</button><button data-v="0.9">90%</button><button data-v="1">100%</button></div></div>
     <div class="row"><label></label><small class="rr" style="opacity:.75"></small></div>
     <div class="row"><label>Time of day</label><input data-k="hour" type="range" min="0" max="23.95" step="0.05"></div>
@@ -28027,7 +28187,7 @@ try {
     R.getViewport(PV.vp); R.getScissor(PV.sc);
     const rt = R.getRenderTarget(), sct = R.getScissorTest(), ac = R.autoClear, tm = R.toneMapping, ex = R.toneMappingExposure;
     try {
-      R.setRenderTarget(null); R.autoClear = false; R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 1.05;
+      R.setRenderTarget(null); R.autoClear = false; R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 1.2;
       R.setViewport(x, y, w, hh); R.setScissor(x, y, w, hh); R.setScissorTest(true);
       R.clearDepth(); R.render(PV.scene, PV.cam);
     } finally {
@@ -28340,7 +28500,7 @@ try {
       [IC.run, 'run', 'toggle', ['walk']], [IC.jump, 'Space', 'tap', ['walk'], 'big'],
       [IC.exit, 'KeyE', 'tap', ['drive']], [IC.brake, 'Space', 'hold', ['drive'], 'big'],
       [IC.down, 'thr-', 'hold', ['fly']], [IC.up, 'thr+', 'hold', ['fly'], 'big'], [IC.exit, 'KeyF', 'tap', ['fly']], [IC.brake, 'KeyB', 'hold', ['fly']],
-      [IC.walk, 'Tab', 'tap', ['aerial']], [IC.chute, 'Space', 'tap', ['skydive'], 'big'], [IC.exit, 'KeyE', 'tap', ['row'], 'big'],
+      [IC.walk, 'Tab', 'tap', ['aerial']], [IC.chute, 'Space', 'tap', ['skydive'], 'big'], [IC.exit, 'KeyE', 'tap', ['row', 'ride', 'funride'], 'big'],
     ];
     const rows = [document.createElement('div'), document.createElement('div')]; rows.forEach((r) => { r.className = 'tc-row'; pad.appendChild(r); });
     const btns = DEF.map(([label, key, kind, modes, cls], i) => {

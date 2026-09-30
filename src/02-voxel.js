@@ -1422,12 +1422,12 @@ AF.onTick('prop-lod', 880, () => {
     }
   }
   let budget = AF.SHOT || AF.TEST ? 1e9 : 10, best = null, bestD = 1e9;
-  const t0 = performance.now();
+  const t0 = performance.now(), SN = AF.shadowNear;
   for (const [k, r] of AF.world.lod) {
     const rl = RL && RL.get(k);
     if (rl && rl.hid) {
       if (r.nearBuilt) freeNear(r);
-      if (r.far) r.far.visible = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7) < (AF.PROP_CULL || 900);
+      if (r.far) { r.far.visible = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7) < (AF.PROP_CULL || 900); r.far.layers.set(0); }
       continue;
     }
     const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
@@ -1438,7 +1438,10 @@ AF.onTick('prop-lod', 880, () => {
     const showNear = r.nearBuilt && d < D + 25;
     if (r.near) r.near.visible = showNear;
     if (r.nearGlass) r.nearGlass.visible = showNear;
-    if (r.far) r.far.visible = !showNear && d < (AF.PROP_CULL || 900);
+    // full-detail props cast only right around the shadow focus; further out their LOD copy casts instead (shadow pass only, layer 1)
+    const proxy = showNear && !!r.far && Math.hypot(r.cx - SN.cx, r.cz - SN.cz) > 26;
+    if (r.near && r.near.castShadow === proxy) r.near.castShadow = !proxy;
+    if (r.far) { r.far.visible = showNear ? proxy : d < (AF.PROP_CULL || 900); r.far.layers.set(showNear ? 1 : 0); }
   }
   if (best && performance.now() - t0 < budget) buildNear(best);
 });

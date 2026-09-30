@@ -488,7 +488,7 @@ try {
       for (let i = 0; i < NS; i++) { const gm = AF.modelMesh(GG[i % 6]); gm.castShadow = false; gm.rotation.y = Math.PI / 2; AF.scene.add(gm); gonds.push(gm); }
       L.ferris = { wheel, gonds, WX, WY, WZ, WR };
       dyn.push({ x: WX, z: WZ, r: 400, update(dt, t) {
-        wheel.rotation.x += dt * 0.07;
+        wheel.rotation.x += dt * 0.07 * (L.ferris.k || 1);
         for (let i = 0; i < NS; i++) { const a = wheel.rotation.x + i / NS * TAU; gonds[i].position.set(WX - Math.cos(a) * (WR - 0.4), WY + Math.sin(a) * (WR - 0.4) + 0.1, WZ); gonds[i].rotation.x = Math.sin(t * 0.8 + i) * 0.05; }
       } });
       AF.addLight({ x: WX, y: WY, z: WZ - 3, color: 0xffe0a0, intensity: 2.2, range: 26, kind: 'sign' });

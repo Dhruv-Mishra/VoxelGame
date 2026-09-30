@@ -93,13 +93,15 @@ try {
     W.fill(-555, 6.5, z1 - 2, -537, 7.5, z1 - 1, col(0x2f6a4a));
     const g = K().text('SOLACE ZOO', 0xffe9b0, { font: 'deco', vs: 1 / 9, k: 2.2 });
     AF.placeStatic(g, -546, 6.55, z1 - 0.95, 0, { collide: false }); AF.placeStatic(g, -546, 6.55, z1 - 2.05, 2, { collide: false });
-    W.fill(-535, 0.25, z1 - 6, -531, 3, z1 - 2, col(0xe8dcc0, { pat: 'stucco' })); W.fill(-535.25, 3, z1 - 6.25, -530.75, 3.5, z1 - 1.75, col(0xc0392b)); W.fill(-535.1, 1.25, z1 - 5, -535, 2.25, z1 - 3, col(0xa9c9d6, { glass: true }));
+    // ticket booth on the forecourt OUTSIDE the wall, window facing the gate
+    W.fill(-535, 0.25, z1 + 0.5, -531, 3, z1 + 4, col(0xe8dcc0, { pat: 'stucco' })); W.fill(-535.25, 3, z1 + 0.25, -530.75, 3.5, z1 + 4.25, col(0xc0392b)); W.fill(-535.1, 1.25, z1 + 1.25, -535, 2.25, z1 + 3.25, col(0xa9c9d6, { glass: true }));
+    W.fill(-535.35, 1.0, z1 + 1.0, -535, 1.25, z1 + 3.5, col(0x8a5a36));
     for (const gx of [-556, -536]) AF.addLight({ x: gx, y: 9, z: z1, color: 0xffe0a0, intensity: 1, range: 12, kind: 'street' });
     // turnstile posts across the gate (the arms are a live mesh that swings open with a ticket, see zoo-gate below)
     for (const tx of [-555, -551, -547, -543, -539]) { W.fill(tx, 0.25, z1 - 2.25, tx + 0.5, 1.25, z1 - 1.75, col(0x2f6a4a)); W.fill(tx - 0.125, 1.25, z1 - 2.375, tx + 0.625, 1.5, z1 - 1.625, col(0xd8b84a, { metal: 0.8, rough: 0.3 })); }
-    W.fill(-534.75, 2.25, z1 - 5.5, -534.5, 2.75, z1 - 2.5, col(0xf2ead0));
+    W.fill(-535.25, 2.3, z1 + 0.75, -535, 2.95, z1 + 3.75, col(0xf2ead0));
     const fitTextG = (str, hex, maxW) => { const w = AF.textModel(str, 1, { font: 'deco', depth: 1, pad: 0 }).w || 1; return K().text(str, hex, { lit: false, font: 'deco', pad: 0, vs: Math.min(1 / 16, maxW / w) }); };
-    AF.placeStatic(fitTextG('TICKETS 25\u00a2', 0xc0392b, 2.8), -534.45, 2.3, z1 - 4, 3, { collide: false });
+    AF.placeStatic(fitTextG('TICKETS 25\u00a2', 0xc0392b, 2.8), -535.3, 2.38, z1 + 2.25, 3, { collide: false });
     AF.addBuilding({ id: 'zoo', name: 'Solace Zoo', kind: 'zoo', box: [x0, 0, z0, x1, 3, z1], doors: [{ x: -546, y: 0.25, z: z1 - 2, yaw: PI }], interior: false, owner: 'west', label: true });
     // lamp posts along the promenade
     for (let z = -40; z > -280; z -= 24) for (const x of [-554, -538]) { W.fill(x, 0.25, z, x + 0.25, 4, z + 0.25, iron); W.fill(x - 0.25, 4, z - 0.25, x + 0.5, 4.5, z + 0.5, glow(0xfff0c8, 2.6, 'night')); AF.addLight({ x: x + 0.1, y: 4.3, z: z + 0.1, color: 0xffe0b0, intensity: 0.8, range: 10, kind: 'street' }); }
@@ -388,7 +390,7 @@ try {
         const arm = new THREE.Mesh(geo, mat); arm.position.set(px, 1.0, zg); arm.castShadow = true; arm.name = 'zoo-turnstile'; AF.scene.add(arm); G.arms.push(arm);
       }
       G.coll = AF.addCollider(-555, 0, zg - 0.3, -537, 2.5, zg + 0.3, 'zoo-gate');
-      AF.addInteract({ x: -533.5, y: 1.3, z: z1 - 4, r: 2.6, label: 'Buy a zoo ticket \u00b7 25\u00a2', prio: 2, can: () => AF.mode === 'walk' && !G.ticket,
+      AF.addInteract({ x: -536, y: 1.3, z: z1 + 2.25, r: 3, label: 'Buy a zoo ticket \u00b7 25\u00a2', prio: 2, can: () => AF.mode === 'walk' && !G.ticket,
         act: () => { G.ticket = true; AF.emit('toast', 'Admit one \u2014 Solace Zoo. Enjoy your visit!'); AF.emit('dialogue', { name: 'Ticket booth', role: 'Solace Zoo', line: 'Here you go, one adult. The turnstile\u2019s all yours \u2014 and the brook bridge is lovely at sunset.' }); } });
       AF.addInteract({ x: -546, y: 1.2, z: z1 - 0.5, r: 3.2, label: 'Tickets at the booth \u2192', prio: 0.5, can: () => AF.mode === 'walk' && !G.ticket && AF.player && AF.player.z > zg,
         act: () => AF.emit('toast', 'You need a ticket \u2014 the booth is just to the right of the gate.') });

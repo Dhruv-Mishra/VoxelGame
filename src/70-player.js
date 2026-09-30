@@ -621,7 +621,7 @@ try {
   });
   // outside walk/aerial (driving, flying, riding): the vehicle owner may seat the avatar via PL.seat = {x,y,z,yaw,roll,pitch,bike}
   AF.onTick('player-idle', 160, (dt) => {
-    if (!player.mesh || AF.mode === 'walk' || AF.mode === 'aerial') return;
+    if (!player.mesh || AF.mode === 'walk' || AF.mode === 'aerial' || AF.mode === 'skydive' || AF.mode === 'row') return;
     const S = PL.seat;
     if (S && player.parts) {
       AV.sit(player.parts, true, S.seatH ?? 0.62);

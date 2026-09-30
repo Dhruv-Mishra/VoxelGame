@@ -273,9 +273,9 @@ try {
     try { const gl = R.getContext(); const ext = gl.getExtension('WEBGL_debug_renderer_info'); gpu = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)); } catch (e) {}
     AF.gfx.gpu = gpu;
     if (!G.forced) {
-      // Balanced ('high') on discrete GPUs; integrated laptop GPUs (Intel UHD/Iris/Xe, AMD Radeon Graphics/Vega APUs, Safari's masked
-      // 'Apple GPU') start on Laptop ('lite'); phones, tablets and software renderers on Low. High ('ultra') is opt-in.
-      let t = 'high';
+      // Laptop ('lite') by default on desktop GPUs; phones, tablets and software renderers on Low. Balanced ('high') and High
+      // ('ultra') are opt-in from the menu.
+      let t = 'lite';
       const saved = (() => { try { return localStorage.getItem('portSolace.gfx'); } catch (e) { return null; } })();
       AF.gfx.integrated = (/intel/i.test(gpu) && !/\barc\b/i.test(gpu)) || /radeon(\(tm\))? (vega \d+ )?graphics|radeon(\(tm\))? \d{3}m\b|apple gpu/i.test(gpu);
       if (AF.gfx.integrated) t = 'lite';
@@ -288,10 +288,10 @@ try {
   // per-tier settings (read by R1 code every frame). near/far = shadow map sizes, lights = physical point lights, ao = SAO samples,
   // regLod/farLod = metres to the 0.5 m coarse / 1 m far region copies, lod = near props, propCull = far props hidden beyond
   const TIER = {
-    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 110, propCull: 900 },
-    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 80, propCull: 380 },
-    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 3, pools: 12, regLod: 80, farLod: 240, lod: 70, propCull: 300 },
-    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 60, propCull: 240 },
+    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 70, propCull: 700 },
+    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 45, propCull: 300 },
+    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 3, pools: 12, regLod: 80, farLod: 240, lod: 35, propCull: 240 },
+    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 32, propCull: 200 },
     cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
@@ -330,12 +330,11 @@ try {
   };
   G.onChange(applyTier);
   // ---------------------------------------------------------------- auto tier (only while G.auto: no saved/forced choice; never in ?shot / ?test)
-  // Down one step after 3 s of > 22 ms frames; up one step (never to High, never back to a tier that was too slow) after 20 s at the
-  // display rate. rAF intervals can't show headroom beyond vsync, so an upgrade is a trial that the downgrade rule reverts.
+  // Down one step after 3 s of > 22 ms frames; never up (higher tiers are opt-in from the menu).
   {
-    const base = AF.basePR, LADDER = ['low', 'lite', 'high', 'ultra'], tooSlow = new Set();
-    let ema = 16.7, slowT = 0, adjT = 0, goodT = 0, grace = 2, vsync = 16.7;
-    G.onChange(() => { ema = vsync; slowT = goodT = 0; grace = 2; });
+    const base = AF.basePR, LADDER = ['low', 'lite', 'high', 'ultra'];
+    let ema = 16.7, slowT = 0, adjT = 0, grace = 2, vsync = 16.7;
+    G.onChange(() => { ema = vsync; slowT = 0; grace = 2; });
     AF.onTick('gfx-adapt', 960, (dt) => {
       if (AF.SHOT || AF.TEST || !AF.ready || AF.paused || document.hidden || G.cinema) return;   // cinema: fixed full resolution, never downgrade
       const ms = dt * 1000; if (ms <= 0 || ms > 250) return;
@@ -350,10 +349,7 @@ try {
       if (!G.auto) return;
       const i = LADDER.indexOf(G.name);
       if (ema > 22) slowT += dt; else slowT = Math.max(0, slowT - dt);
-      if (slowT > 3 && i > 0) { tooSlow.add(G.name); G.set(LADDER[i - 1], 'slow frames'); return; }
-      if (ema < vsync * 1.04 + 0.3) goodT += dt; else goodT = 0;
-      const up = LADDER[i + 1];
-      if (goodT > 20 && up && up !== 'ultra' && !tooSlow.has(up)) G.set(up, 'headroom');
+      if (slowT > 3 && i > 0) { G.set(LADDER[i - 1], 'slow frames'); return; }
     });
   }
 

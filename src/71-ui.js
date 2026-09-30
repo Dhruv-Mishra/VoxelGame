@@ -28,7 +28,7 @@ try {
   #ui #t-title .logo{position:absolute;z-index:1;top:max(4vh,18px);left:max(28px,5vw);text-align:left}
   #ui #t-title h1{margin:0;font:400 clamp(26px,4.4vw,52px)/1 Limelight,Georgia,serif;letter-spacing:.24em;color:#ffe6a8;text-shadow:0 2px 0 rgba(60,36,8,.7),0 0 24px rgba(240,190,90,.35)}
   #ui #t-title .sub{margin-top:8px;color:#e9dcc0;font-style:italic;text-shadow:0 1px 3px #000}
-  #ui #t-title .modal{pointer-events:auto;width:min(420px,92vw);max-height:100%;padding:16px 18px 18px;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;z-index:0;overflow:hidden;background:rgba(10,18,28,.52);backdrop-filter:blur(16px) saturate(1.1);-webkit-backdrop-filter:blur(16px) saturate(1.1);box-shadow:0 24px 70px rgba(0,0,0,.5);animation:uiIn .35s ease}
+  #ui #t-title .modal{pointer-events:auto;width:min(420px,92vw);max-height:100%;padding:16px 18px 18px;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;z-index:0;overflow:hidden;background:linear-gradient(180deg,rgba(10,18,28,.14),rgba(10,18,28,.14) 58%,rgba(10,18,28,.8) 74%);backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 24px 70px rgba(0,0,0,.45);animation:uiIn .35s ease}
   #ui #t-title .q{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);text-align:center}
   #ui #t-title .stage{position:relative;z-index:-1;width:100%;height:min(42vh,340px);min-height:190px;margin:6px 0 4px;border-radius:14px;overflow:hidden;background:none;cursor:grab;touch-action:none}
   #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;background:rgba(10,20,30,.6);border:1px solid var(--line);font-size:28px;line-height:1;display:flex;align-items:center;justify-content:center;color:#ffe6a8;transition:background .15s,transform .1s}
@@ -160,7 +160,7 @@ try {
   const dlg = h('div', 'panel pe', `<div class="face"></div><div><span class="nm"></span><span class="rl"></span></div><div class="ln"></div><div class="more">${TOUCH ? 'tap' : 'E / click'} to continue</div>`); dlg.id = 'h-dlg';
   const bubbleEl = h('div', 'bubble', ''); bubbleEl.style.display = 'none';
   const menu = h('div', 'sheet pe', `<div class="panel"><h2>PAUSED</h2>
-    <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="lite" title="Balanced without AO, god rays and MSAA (laptop GPUs)">Laptop</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
+    <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="lite" title="Default: Balanced without AO, god rays and MSAA">Standard</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
     <div class="row"><label>Resolution</label><div class="seg" data-k="res"><button data-v="0">Auto</button><button data-v="0.75">75%</button><button data-v="0.9">90%</button><button data-v="1">100%</button></div></div>
     <div class="row"><label></label><small class="rr" style="opacity:.75"></small></div>
     <div class="row"><label>Time of day</label><input data-k="hour" type="range" min="0" max="23.95" step="0.05"></div>
@@ -306,7 +306,7 @@ try {
     R.getViewport(PV.vp); R.getScissor(PV.sc);
     const rt = R.getRenderTarget(), sct = R.getScissorTest(), ac = R.autoClear, tm = R.toneMapping, ex = R.toneMappingExposure;
     try {
-      R.setRenderTarget(null); R.autoClear = false; R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 1.05;
+      R.setRenderTarget(null); R.autoClear = false; R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 1.2;
       R.setViewport(x, y, w, hh); R.setScissor(x, y, w, hh); R.setScissorTest(true);
       R.clearDepth(); R.render(PV.scene, PV.cam);
     } finally {
