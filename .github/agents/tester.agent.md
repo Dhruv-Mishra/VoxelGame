@@ -2,6 +2,7 @@
 name: tester
 description: "Use when: running Port Solace self-tests, checking a build in the browser, verifying a change visually (screenshots of a place or mode), or simulating gameplay (planes, driving, crowd). Runs Playwright in isolation and returns a short pass/fail report."
 model: GPT-6 Luna (copilot)
+reasoning-effort: max
 ---
 You test the Port Solace build and report back briefly. You do not edit `src/` unless the caller asks you to.
 

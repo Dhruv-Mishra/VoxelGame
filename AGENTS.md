@@ -7,6 +7,7 @@ Single-page three.js (r160, CDN importmap) voxel city game. **Edit `src/`, never
 - `node tools/serve.mjs 8765` → http://127.0.0.1:8765/output.html (`?test` runs the `AF.test` self-tests; page title shows `passed/total`, currently 110/110; add `&v=<n>` to dodge browser cache). `file://` also works.
 - Parts are plain scripts inside one module; each is wrapped in `try{}catch(e){AF.partError(...)}`. Numeric prefix = load order.
 - Browser testing: delegate to the `tester` subagent (`.github/agents/tester.agent.md`) so Playwright output stays out of the main context.
+- Scoped implementation: delegate well-specified, single-area changes to the `implementer` subagent (GPT-6.1 Sol, xhigh); keep planning and cross-cutting work in the main agent.
 
 ## Architecture (global `AF`)
 - Lifecycle: `AF.onBuild(name, order, fn)` at boot, `AF.onTick(name, order, fn)` per frame. Modes: `AF.modes[name]={enter,exit,update}`, `AF.setMode(name, opts)` (walk, aerial, drive, fly).
