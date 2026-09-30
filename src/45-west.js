@@ -278,6 +278,226 @@ try {
     },
   };
 
+  // ------------------------------------------------------------ friend homes v2: a distinct silhouette per friend, a bathroom annex, a kitchen
+  //   upgrade, a patio door and a themed back garden (pool / swings / beds / trees). Fine props are 1/16 m models placed as statics.
+  const PM = {};
+  const pm = (k, fn) => PM[k] || (PM[k] = fn());
+  const M16 = (w, h, d, fn) => K.model(w, h, d, fn, 1 / 16);
+  const PROPS = {
+    toilet: () => pm('toilet', () => M16(8, 15, 12, (m) => { const wt = smoothC(0xf6f6f2), ch = col(0xc8ccd2, { metal: 0.9, rough: 0.2 }); m.box(2, 0, 4, 6, 6, 10, wt); m.box(1, 6, 3, 7, 7, 11, wt); m.box(2, 6, 5, 6, 7, 10, smoothC(0xdfe6ea)); m.box(1, 6, 0, 7, 13, 3, wt); m.box(0, 13, 0, 8, 14, 3, wt); m.set(4, 14, 1, ch); })),
+    sink: () => pm('sink', () => M16(10, 18, 8, (m) => { const wt = smoothC(0xf6f6f2), ch = col(0xc8ccd2, { metal: 0.9, rough: 0.2 }); m.box(4, 0, 2, 6, 12, 5, wt); m.box(0, 12, 0, 10, 15, 8, wt); m.box(1, 14, 1, 9, 15, 7, 0); m.box(4, 15, 0, 6, 17, 2, ch); m.set(5, 16, 2, ch); m.set(5, 16, 3, ch); })),
+    tub: () => pm('tub', () => M16(14, 9, 28, (m) => { const wt = smoothC(0xf6f6f2); m.box(0, 0, 0, 14, 9, 28, wt); m.box(1, 2, 1, 13, 9, 27, 0); m.box(1, 2, 1, 13, 6, 27, col(0x8fd0ea, { glass: true, jitter: 0.02, edge: 0 })); m.box(6, 9, 0, 8, 11, 2, col(0xc8ccd2, { metal: 0.9 })); })),
+    mirror: () => pm('mirror', () => M16(12, 14, 1, (m) => { m.box(0, 0, 0, 12, 14, 1, col(0xd8b04a, { metal: 0.9, rough: 0.3 })); m.box(1, 1, 0, 11, 13, 1, col(0xe8f0f6, { metal: 1, rough: 0.05, jitter: 0, edge: 0 })); })),
+    fridge: () => pm('fridge', () => M16(14, 32, 13, (m) => { const b = col(0xe6eaee, { metal: 0.35, rough: 0.3, jitter: 0.03 }), ch = col(0xc8ccd2, { metal: 0.9, rough: 0.2 }); m.box(0, 0, 0, 14, 32, 12, b); m.box(0, 21, 11, 14, 22, 12, smoothC(0x5a5e64)); m.box(11, 6, 12, 12, 19, 13, ch); m.box(11, 23, 12, 12, 30, 13, ch); })),
+    lounger: (hex) => pm('lounger' + hex, () => M16(11, 9, 30, (m) => { const fr = smoothC(0xf2f2ee), cu = smoothC(hex); for (const x of [0, 10]) for (const z of [2, 27]) m.box(x, 0, z, x + 1, 3, z + 1, fr); m.box(0, 3, 0, 11, 4, 30, fr); m.box(1, 4, 9, 10, 5, 29, cu); for (let z = 0; z < 9; z++) { const t = 4 + Math.round((9 - z) * 0.55); m.box(1, 4, z, 10, t, z + 1, cu); } })),
+    umbrella: (a, b) => pm('umb' + a + b, () => M16(33, 40, 33, (m) => { const ca = smoothC(a), cb = smoothC(b); m.box(16, 0, 16, 17, 36, 17, col(0xd8d4c8, { metal: 0.6 })); m.box(13, 0, 13, 20, 1, 20, smoothC(0x3a3a3e)); for (let y = 30; y < 36; y++) { const r = 16 - (y - 30) * 2.6; for (let x = 0; x < 33; x++) for (let z = 0; z < 33; z++) { const dx = x - 16, dz = z - 16, d = Math.hypot(dx, dz); if (d <= r && d > r - 3.2) m.set(x, y, z, (Math.floor((Math.atan2(dz, dx) + PI) / (PI / 4)) & 1) ? ca : cb); } } m.set(16, 36, 16, cb); })),
+    bbq: () => pm('bbq', () => M16(11, 17, 11, (m) => { const k = smoothC(0x1d1d20), ch = col(0xc8ccd2, { metal: 0.9 }); for (const [x, z] of [[1, 1], [9, 1], [5, 9]]) m.box(x, 0, z, x + 1, 9, z + 1, ch); m.sphere(5.5, 11, 5.5, 5, k, (x, y) => (y <= 11 ? k : 0)); m.sphere(5.5, 11.5, 5.5, 4.8, k, (x, y) => (y > 11 ? k : 0)); m.box(5, 16, 5, 6, 17, 6, ch); m.box(0, 11, 0, 11, 12, 11, 0); m.box(1, 11, 1, 10, 12, 10, col(0x8a8e94, { metal: 0.9 })); })),
+    swing: (hex) => pm('swing' + hex, () => M16(64, 42, 26, (m) => { const fr = col(hex, { metal: 0.5, rough: 0.4 }), ch = col(0xb8bcc2, { metal: 0.9 }), seat = smoothC(0x2a2a2e);
+      for (const x of [0, 1, 62, 63]) for (let y = 0; y < 40; y++) { const k = Math.round(y * 11 / 39); m.set(x, y, k, fr); m.set(x, y, 25 - k, fr); }
+      m.box(0, 39, 11, 64, 41, 15, fr);
+      for (const s of [14, 38]) { for (let y = 10; y < 39; y++) { m.set(s, y, 13, ch); m.set(s + 10, y, 13, ch); } m.box(s - 1, 9, 10, s + 12, 10, 16, seat); } })),
+    trampoline: () => pm('tramp', () => M16(48, 12, 48, (m) => { const pad = smoothC(0x2f7a4a), mat = smoothC(0x1a1a1c), leg = col(0x8a8e94, { metal: 0.8 }); for (let x = 0; x < 48; x++) for (let z = 0; z < 48; z++) { const d = Math.hypot(x - 23.5, z - 23.5); if (d < 20) m.set(x, 9, z, mat); else if (d < 24) m.box(x, 9, z, x + 1, 11, z + 1, pad); } for (const a of [0, 1, 2, 3, 4, 5]) { const x = Math.round(23.5 + Math.cos(a * PI / 3) * 21), z = Math.round(23.5 + Math.sin(a * PI / 3) * 21); m.box(x, 0, z, x + 1, 9, z + 1, leg); } })),
+    lamp: () => pm('glamp', () => M16(3, 14, 3, (m) => { m.box(1, 0, 1, 2, 11, 2, smoothC(0x2a2a2e)); m.box(0, 11, 0, 3, 13, 3, glow(0xffe6b0, 2.2, 'night')); m.box(0, 13, 0, 3, 14, 3, smoothC(0x2a2a2e)); })),
+    table: (hex) => pm('ptable' + hex, () => M16(16, 12, 16, (m) => { const t = smoothC(hex), lg = smoothC(shade(hex, 0.6)); m.sphere(7.5, 11.5, 7.5, 8, t, (x, y) => (y === 11 ? t : 0)); m.box(7, 0, 7, 9, 11, 9, lg); m.box(4, 0, 4, 12, 1, 12, lg); })),
+    chair: (hex) => pm('pchair' + hex, () => M16(8, 14, 8, (m) => { const c = smoothC(hex); for (const [x, z] of [[0, 0], [7, 0], [0, 7], [7, 7]]) m.box(x, 0, z, x + 1, 7, z + 1, c); m.box(0, 7, 0, 8, 8, 8, c); m.box(0, 8, 0, 8, 14, 1, c); })),
+    float: () => pm('float', () => M16(14, 8, 14, (m) => { const p = smoothC(0xff7fbf); for (let x = 0; x < 14; x++) for (let z = 0; z < 14; z++) { const d = Math.hypot(x - 6.5, z - 6.5); if (d < 7 && d > 3.5) m.box(x, 0, z, x + 1, 2, z + 1, p); } m.box(9, 2, 5, 11, 7, 7, p); m.box(9, 7, 5, 13, 8, 7, p); m.set(12, 6, 6, smoothC(0x1a1a1a)); })),
+    hottub: () => pm('hottub', () => M16(36, 12, 36, (m) => { const w = smoothC(0x2a2a2e), g = col(0xd4a84a, { metal: 1, rough: 0.25 }); m.box(0, 0, 0, 36, 12, 36, w); m.box(0, 11, 0, 36, 12, 36, g); m.box(2, 3, 2, 34, 12, 34, 0); m.box(2, 3, 2, 34, 9, 34, col(0x6ad8e8, { glass: true, jitter: 0.02, edge: 0 })); })),
+  };
+  // sunken pool (heightmap basin + stepped entry + a water plane), in plot coordinates
+  const yardPool = (F, u0, v0, u1, v1, tileHex, copingHex) => {
+    const b = F.box(u0, v0, u1, v1), cx = (b[0] + b[2]) / 2, cz = (b[1] + b[3]) / 2, g = Math.round(W.groundY(cx, cz) * 4), wy = g * 0.25 - 0.3;
+    const tile = col(tileHex, { pat: 'none', patTop: 'slab', jitter: 0.12 }), cop = col(copingHex, { pat: 'none', patTop: 'slab', jitter: 0.1 });
+    F.paint(u0 - 0.75, v0 - 0.75, u1 + 0.75, v1 + 0.75, cop);
+    W.ground(b[0], b[1], b[2], b[3], g - 6, tile, tile);
+    for (let k = 1; k <= 4; k++) { const e = F.box(u0, v0, u0 + (5 - k) * 0.5, v1); W.ground(e[0], e[1], e[2], e[3], g - 6 + k, tile, tile); }
+    const pos = [], idx = []; let n = 0;
+    for (let x = b[0]; x < b[2] - 0.01; x += 0.5) for (let z = b[1]; z < b[3] - 0.01; z += 0.5) { pos.push(x, wy, z, x, wy, z + 0.5, x + 0.5, wy, z + 0.5, x + 0.5, wy, z); idx.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4; }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((v, i) => (i % 3 === 1 ? 1 : 0)), 3));
+    geo.setIndex(idx); geo.computeBoundingSphere(); geo.userData.kind = 'basin'; geo.userData.waterY = wy;
+    AF.addWater(geo); P.pools.push({ x0: b[0], z0: b[1], x1: b[2], z1: b[3], y: wy });
+    W.tDirty = true;
+    return { cx, cz, wy };
+  };
+  const leafC = [col(0x4f8a3a, { jitter: 0.7, solid: false }), col(0x3f7430, { jitter: 0.7, solid: false }), col(0x6aa84a, { jitter: 0.7, solid: false })];
+  const bush = (F, u, v, r, seed) => { for (let a = -r; a <= r; a += 0.25) for (let b2 = -r; b2 <= r; b2 += 0.25) { const d = Math.hypot(a, b2) / r, hsh = AF.hash2((u + a) * 4 | 0, (v + b2) * 4 + seed | 0); if (d > 1 - hsh * 0.25) continue; const h = 0.25 + Math.round((1 - d * d) * r * 1.4 * 4) / 4; F.fill(u + a, 0.25, v + b2, u + a + 0.25, 0.25 + h, v + b2 + 0.25, leafC[(hsh * 3) | 0]); } };
+  const flowerBed = (F, u0, v0, u1, v1, cols) => {
+    F.paint(u0, v0, u1, v1, col(0x5a4030, { jitter: 0.5 }));
+    const fc = cols.map((h) => col(h, { jitter: 0.3, solid: false }));
+    for (let u = u0; u < u1; u += 0.25) for (let v = v0; v < v1; v += 0.25) { const q = AF.hash2(u * 4 | 0, v * 4 | 0); if (q < 0.45) F.fill(u, 0.25, v, u + 0.25, 0.5, v + 0.25, leafC[q < 0.15 ? 1 : 0]); else if (q < 0.7) F.fill(u, 0.25, v, u + 0.25, 0.5 + (q < 0.55 ? 0.25 : 0), v + 0.25, fc[(q * 97 | 0) % fc.length]); }
+  };
+  const stones = (F, u0, v, u1) => { const c = col(0xcfc6b4, { pat: 'none', patTop: 'slab', jitter: 0.2 }); for (let u = u0; u < u1; u += 1.25) F.paint(u, v, u + 0.75, v + 0.75, c); };
+  const tree = (F, u, v, species, size, seed) => { if (!AF.TREEKIT) return; const [x, z] = F.w(u, v); AF.TREEKIT.place(x, z, species, size ? 0.65 : 0.5, seed); };   // garden-sized trees
+  const BATH_V = { kaybee: 18.25 };   // bathroom door (v) off the back wall; everyone else at 5 (tanishk 6.75)
+  const upgradeHome = (owner, F, th, rec) => {
+    const wall = col(th.wall, { pat: 'stucco', rough: 0.9, jitter: 0.12 }), trim = col(th.trim, { rough: 0.5 }), roof = col(th.roof, { pat: 'none', patTop: 'tar' });
+    const glass = col(0xa9c9d6, { glass: true, jitter: 0.05, edge: 0 }), win = AF.MAT.winApartment;
+    // ---- kitchen: fridge, a cooktop, a sink with a tap
+    F.place(PROPS.fridge(), 8.75, FLOOR, 7.5, F.rotBack);
+    F.fill(11, 1.5, 3.5, 11.25, 1.75, 3.75, smoothC(0x1d1d20)); F.fill(11.75, 1.5, 3.5, 12, 1.75, 3.75, smoothC(0x1d1d20));
+    F.fill(8.25, 1.25, 5, 9.25, 1.5, 6, col(0xc8ccd2, { metal: 0.9, rough: 0.2 })); F.fill(8.25, 1.5, 5.25, 8.5, 2.0, 5.5, col(0xc8ccd2, { metal: 0.9, rough: 0.2 }));
+    // ---- the bathroom annex behind the house
+    const dv = BATH_V[owner] ?? (owner === 'tanishk' ? 6.75 : 5), a = dv - 1.25, b = a + 5.5;
+    F.fill(24, 0.25, a, 29.5, CEIL, b, wall); F.fill(23.75, CEIL - 0.25, a - 0.25, 29.75, CEIL, b + 0.25, trim);
+    F.clear(24, FLOOR, a + 0.25, 29.25, CEIL - 0.25, b - 0.25);
+    F.fill(24, 0.25, a + 0.25, 29.25, FLOOR, b - 0.25, col(0xe8eef2, { pat: 'none', patTop: 'slab', rough: 0.3 }));
+    F.fill(24, CEIL - 0.5, a + 0.25, 29.25, CEIL - 0.25, b - 0.25, smoothC(0xf6f2ea));
+    F.clear(23.7, FLOOR, dv, 24.3, 3.0, dv + 1.25);
+    F.fill(29.25, 1.75, a + 2, 29.5, 2.75, a + 3.5, glass);
+    F.place(PROPS.toilet(), 28.75, FLOOR, a + 1, F.rotLane);
+    F.place(PROPS.sink(), 28.9, FLOOR, a + 2.75, F.rotLane); F.place(PROPS.mirror(), 29.2, 1.75, a + 2.75, F.rotLane);
+    F.place(PROPS.tub(), 25.4, FLOOR, a + 4.1, (F.rotLane + 1) % 4);
+    F.fill(26.5, CEIL - 0.75, a + 2.25, 27.25, CEIL - 0.5, a + 3, glow(0xfff4dc, 1.8, 'night'));
+    F.fill(24.25, 1.75, b - 0.5, 25.5, 2.0, b - 0.25, smoothC(th.accent));   // towel rail
+    { const [x, z] = F.w(26.75, a + 2.75); AF.addLight({ x, y: CEIL - 0.9, z, color: 0xfff0dc, intensity: 0.6, range: 6, kind: 'interior' }); }
+    // ---- patio door onto the garden + a patio
+    F.clear(23.7, FLOOR, 12, 24.3, 3.0, 13.25);
+    F.paint(24, 11, 30.5, 17, col(0xd8cfbe, { pat: 'none', patTop: 'slab', jitter: 0.25 }));
+    stones(F, 31, 13, 38);
+    F.place(PROPS.lamp(), 30.75, 0.25, 11.25, 0); F.place(PROPS.lamp(), 30.75, 0.25, 16.5, 0);
+    // ---- the silhouette
+    SHAPE[owner](F, th, { wall, trim, roof, glass, win });
+    // ---- the garden
+    GARDEN[owner](F, th);
+    rec.box[4] = TOP + 6;
+  };
+  const SHAPE = {
+    dhruv(F, th, c) {           // modern: a set-back upper floor with a glass balcony, cantilevered out over the garden, solar panels
+      F.clear(7.75, CEIL + 0.25, 2.75, 12, TOP + 0.5, 24.25);
+      F.fill(7.75, CEIL + 0.25, 2.75, 8, CEIL + 1.25, 24.25, c.glass); F.fill(8, CEIL + 0.25, 2.75, 12, CEIL + 1.25, 3, c.glass); F.fill(8, CEIL + 0.25, 24, 12, CEIL + 1.25, 24.25, c.glass);
+      F.fill(12, CEIL + 0.25, 3, 12.25, TOP, 24, c.wall);
+      for (const [v0, v1] of [[4, 11], [13, 22.5]]) F.fill(12, CEIL + 0.75, v0, 12.25, TOP - 0.75, v1, c.glass);
+      F.fill(24, CEIL, 3, 30, TOP, 12, c.wall); F.fill(29.75, CEIL + 0.75, 4, 30, TOP - 0.75, 11, c.glass);
+      F.fill(24.25, CEIL, 3, 30, CEIL + 0.25, 12, glow(th.accent, 1.6));
+      F.fill(11.75, TOP - 0.25, 2.75, 24.25, TOP + 0.5, 24.25, c.trim); F.fill(23.75, TOP - 0.25, 2.75, 30.25, TOP + 0.5, 12.25, c.trim);
+      F.clear(12.25, TOP, 3.25, 23.75, TOP + 0.5, 23.75); F.clear(23.75, TOP, 3.25, 29.75, TOP + 0.5, 11.75);
+      F.fill(12.25, TOP - 0.25, 3.25, 23.75, TOP, 23.75, c.roof); F.fill(23.75, TOP - 0.25, 3.25, 29.75, TOP, 11.75, c.roof);
+      const pv = col(0x1d2c4a, { metal: 0.6, rough: 0.2 });
+      for (let v = 5; v < 22; v += 2.5) F.fill(14, TOP, v, 22, TOP + 0.25, v + 1.75, pv);
+    },
+    hunar(F, th, c) {           // dreamhouse: a pink gable roof, a round turret with a cone cap, pink shutters
+      F.clear(7.75, TOP, 2.75, 24.25, TOP + 0.5, 24.25);
+      for (let s = 0; s < 17; s++) F.fill(7.75 + s * 0.5, TOP - 0.25 + s * 0.25, 2.5, 24.25 - s * 0.5, TOP + s * 0.25, 24.5, c.roof);
+      for (let s = 0; s < 15; s++) { F.fill(8 + s * 0.5, TOP + s * 0.25, 2.75, 24 - s * 0.5, TOP + 0.25 + s * 0.25, 3, c.wall); F.fill(8 + s * 0.5, TOP + s * 0.25, 24, 24 - s * 0.5, TOP + 0.25 + s * 0.25, 24.25, c.wall); }
+      F.fill(15, TOP + 1, 2.5, 17, TOP + 2.5, 2.75, glow(th.accent, 1.8, 'night'));
+      const [tx, tz] = F.w(6, 2.5), tw = col(0xffffff, { pat: 'stucco' }), cone = col(th.roof, { pat: 'none' });
+      for (let y = 0.25; y < TOP + 1; y += 0.25) W.eachCol(tx - 2.5, tz - 2.5, tx + 2.5, tz + 2.5, (bx, bz, i, x, z) => { const d = Math.hypot(x - tx, z - tz); if (d < 2.3 && d > 1.8) W.setM(x, y + 0.01, z, (y > 4.5 && y < 6 && ((bx + bz) & 3) === 0) ? glow(0xffd0e8, 1.5, 'night') : tw); });
+      for (let k = 0; k < 14; k++) { const r = 2.6 - k * 0.2, y = TOP + 1 + k * 0.25; W.eachCol(tx - r, tz - r, tx + r, tz + r, (bx, bz, i, x, z) => { if (Math.hypot(x - tx, z - tz) < r) W.setM(x, y + 0.01, z, cone); }); }
+      for (const [v0, v1] of [[4.5, 9], [12, 16], [18.5, 22.5]]) { F.fill(7.75, CEIL + 1, v0 - 0.5, 8, CEIL + 2.75, v0, smoothC(th.accent)); F.fill(7.75, CEIL + 1, v1, 8, CEIL + 2.75, v1 + 0.5, smoothC(th.accent)); }
+    },
+    tanishk(F, th, c) {         // penthouse: a gold-railed roof terrace over the back half, gold crown line
+      F.clear(18, CEIL + 0.25, 2.75, 24.25, TOP + 0.5, 24.25);
+      F.fill(17.75, CEIL + 0.25, 3, 18, TOP, 24, c.wall);
+      for (const [v0, v1] of [[4.5, 10.5], [16.5, 22.5]]) F.fill(17.75, CEIL + 0.5, v0, 18, TOP - 0.75, v1, c.glass);
+      F.fill(17.75, CEIL + 0.5, 11.5, 18, CEIL + 3, 15.5, c.glass);
+      const gold = col(0xd4a84a, { metal: 1, rough: 0.25 });
+      F.fill(23.75, CEIL + 0.25, 2.75, 24.25, CEIL + 1.25, 24.25, c.glass); F.fill(23.75, CEIL + 1.25, 2.75, 24.25, CEIL + 1.5, 24.25, gold);
+      F.fill(18, CEIL + 0.25, 2.75, 24.25, CEIL + 1.25, 3, c.glass); F.fill(18, CEIL + 0.25, 24, 24.25, CEIL + 1.25, 24.25, c.glass);
+      F.fill(18, CEIL + 1.25, 2.75, 24.25, CEIL + 1.5, 3, gold); F.fill(18, CEIL + 1.25, 24, 24.25, CEIL + 1.5, 24.25, gold);
+      F.fill(7.75, TOP - 0.25, 2.75, 18.25, TOP + 0.5, 24.25, c.trim); F.clear(8.25, TOP, 3.25, 17.75, TOP + 0.5, 23.75); F.fill(8.25, TOP - 0.25, 3.25, 17.75, TOP, 23.75, c.roof);
+      F.fill(7.75, TOP + 0.5, 2.75, 18.25, TOP + 0.75, 3, glow(0xf7931a, 1.4, 'night'));
+      F.place(PROPS.hottub(), 21, CEIL + 0.25, 7, 0); F.place(PROPS.lounger(0xd4a84a), 21, CEIL + 0.25, 15, F.rotLane); F.place(PROPS.lounger(0xd4a84a), 21, CEIL + 0.25, 18, F.rotLane);      F.place(PROPS.umbrella(0x1d1d20, 0xd4a84a), 21.5, CEIL + 0.25, 21.5, 0);
+    },
+    diksha(F, th, c) {          // cottage: a steep lavender gable across the house, a brick chimney, window boxes
+      F.clear(7.75, TOP, 2.75, 24.25, TOP + 0.5, 24.25);
+      for (let s = 0; s < 15; s++) F.fill(7.5, TOP - 0.25 + s * 0.25, 2.5 + s * 0.75, 24.5, TOP + s * 0.25, 24.5 - s * 0.75, c.roof);
+      for (let s = 0; s < 14; s++) { F.fill(7.75, TOP + s * 0.25, 3 + s * 0.75, 8, TOP + 0.25 + s * 0.25, 24 - s * 0.75, c.wall); F.fill(24, TOP + s * 0.25, 3 + s * 0.75, 24.25, TOP + 0.25 + s * 0.25, 24 - s * 0.75, c.wall); }
+      F.fill(7.5, TOP + 0.75, 12.5, 7.75, TOP + 2, 14.5, glow(0xffe6c0, 1.6, 'night'));
+      const brick = col(0x9a4a3a, { pat: 'brick' });
+      F.fill(20, TOP, 18, 21.25, TOP + 4.75, 19.25, brick); F.fill(19.75, TOP + 4.75, 17.75, 21.5, TOP + 5, 19.5, col(0x5a5a5a));
+      const box = smoothC(0xfaf6ff), fl = [col(0xff8fc8, { solid: false }), col(0xc27ad6, { solid: false }), col(0xfff0a0, { solid: false })];
+      for (const [v0, v1] of [[4, 8.75], [13.25, 22.75]]) { F.fill(7.5, 1.0, v0, 8, 1.25, v1, box); for (let v = v0; v < v1; v += 0.25) F.fill(7.5, 1.25, v, 7.75, 1.5, v + 0.25, fl[((v * 4) | 0) % 3]); }
+    },
+    kush(F, th, c) {            // L-shape: a second storey over the garage and a green roof garden
+      F.fill(8, 3.75, 24, 22, TOP, 33, c.wall);
+      for (const [v0, v1] of [[25.5, 31.5]]) F.fill(8, CEIL + 1, v0, 8.25, CEIL + 2.75, v1, c.win);
+      F.fill(12, CEIL + 1, 32.75, 18, CEIL + 2.75, 33, c.win); F.fill(21.75, CEIL + 1, 26, 22, CEIL + 2.75, 31, c.win);
+      F.clear(8.25, TOP, 23.75, 21.75, TOP + 0.5, 24.25);
+      F.fill(7.75, TOP - 0.25, 23.75, 22.25, TOP + 0.5, 33.25, c.trim); F.clear(8.25, TOP, 24, 21.75, TOP + 0.5, 32.75);
+      const turf = col(0x5f9a3a, { jitter: 0.9 });
+      F.fill(8.25, TOP - 0.25, 3.25, 23.75, TOP, 23.75, turf); F.fill(8.25, TOP - 0.25, 24, 21.75, TOP, 32.75, turf);
+      for (const [u, v] of [[10, 6], [20, 6], [10, 20], [16, 29], [20, 20]]) { F.fill(u, TOP, v, u + 1.5, TOP + 0.5, v + 1.5, smoothC(0x6a4a2a)); F.fill(u + 0.25, TOP + 0.5, v + 0.25, u + 1.25, TOP + 1.25, v + 1.25, leafC[1]); }
+      F.fill(12, TOP, 12, 18, TOP + 0.25, 15, smoothC(0x8a6a4a)); F.fill(12.5, TOP + 0.25, 12.5, 17.5, TOP + 0.5, 14.5, smoothC(th.accent));
+    },
+    kaybee(F, th, c) {          // ship: a narrow upper 'cabin' with portholes, wooden deck rails, a crow's nest by the flag
+      F.clear(7.75, CEIL + 0.25, 2.75, 11, TOP + 0.5, 24.25); F.clear(21, CEIL + 0.25, 2.75, 24.25, TOP + 0.5, 24.25);
+      F.fill(11, CEIL + 0.25, 3, 11.25, TOP, 24, c.wall); F.fill(20.75, CEIL + 0.25, 3, 21, TOP, 24, c.wall);
+      const port = glow(0xffe6a0, 1.4, 'night'), brass = col(0xd8b04a, { metal: 1 });
+      for (let v = 5; v < 23; v += 3) { F.fill(11, CEIL + 1.5, v, 11.25, CEIL + 2.25, v + 0.75, port); F.fill(10.75, CEIL + 1.25, v - 0.25, 11, CEIL + 1.5, v + 1, brass); F.fill(20.75, CEIL + 1.5, v, 21, CEIL + 2.25, v + 0.75, port); }
+      const wood = col(0x8a5a34, { pat: 'none' });
+      for (const u of [7.75, 23.75]) { F.fill(u, CEIL + 1, 2.75, u + 0.25, CEIL + 1.25, 24.25, wood); for (let v = 3; v < 24.25; v += 1.5) F.fill(u, CEIL + 0.25, v, u + 0.25, CEIL + 1, v + 0.25, wood); }
+      F.fill(10.75, TOP - 0.25, 2.75, 21.25, TOP + 0.5, 24.25, c.trim); F.clear(11.25, TOP, 3.25, 20.75, TOP + 0.5, 23.75); F.fill(11.25, TOP - 0.25, 3.25, 20.75, TOP, 23.75, wood);
+      F.fill(19.75, TOP, 19.75, 20.25, TOP + 5.5, 20.25, wood);
+      F.fill(18.75, TOP + 3.5, 18.75, 21.25, TOP + 3.75, 21.25, wood); F.fill(18.75, TOP + 3.75, 18.75, 21.25, TOP + 4.25, 19, wood); F.fill(18.75, TOP + 3.75, 21, 21.25, TOP + 4.25, 21.25, wood); F.fill(18.75, TOP + 3.75, 18.75, 19, TOP + 4.25, 21.25, wood);
+      F.fill(7.5, 1.5, 12, 7.75, 2.25, 12.75, col(0xf2f2f2)); F.fill(7.5, 1.75, 12.25, 7.75, 2.0, 12.5, col(0xc8322a));   // lifebuoy
+    },
+  };
+  const GARDEN = {
+    dhruv(F) {
+      yardPool(F, 34, 4, 47, 10, 0x3a8ac8, 0xe8e8e4);
+      for (const v of [11.5, 13.25]) F.place(PROPS.lounger(0x2d4a7a), 41 + (v - 11.5) * 2, 0.25, v + 0.5, (F.rotLane + 1) % 4);
+      F.place(PROPS.umbrella(0xffffff, 0x3aa0ff), 45.5, 0.25, 13, 0);
+      F.place(PROPS.table(0xe8e8e4), 26.5, 0.25, 14.5, 0); for (const [u, v, r] of [[25.25, 14.5, 3], [27.75, 14.5, 1]]) F.place(PROPS.chair(0x2d3e57), u, 0.25, v, (F.rotLane + r) % 4);
+      F.place(PROPS.bbq(), 29, 0.25, 12, 0);
+      flowerBed(F, 32, 20, 47, 21.5, [0x3aa0ff, 0xffffff, 0x9ad0ff]);
+      for (const [u, v] of [[33, 30], [46.5, 30], [40, 25]]) bush(F, u, v, 1.1, u);
+      tree(F, 47, 17, 'maple', 0, 11); tree(F, 34, 28, 'birch', 0, 12); tree(F, 46, 32, 'pine', 0, 13);
+    },
+    hunar(F) {
+      const pl = yardPool(F, 35, 13, 45, 21, 0xff9fcf, 0xffffff);
+      F.place(PROPS.float(), 40, pl.wy + 0.05, 17, 0);
+      for (const v of [9.5, 11.25]) F.place(PROPS.lounger(0xff5fae), 38 + (v - 9.5) * 2.5, 0.25, v, (F.rotLane + 1) % 4);
+      F.place(PROPS.umbrella(0xffffff, 0xff4fa3), 45.5, 0.25, 10, 0);
+      F.place(PROPS.table(0xffffff), 26.5, 0.25, 14.5, 0); for (const [u, v, r] of [[25.25, 14.5, 3], [27.75, 14.5, 1]]) F.place(PROPS.chair(0xff7fbf), u, 0.25, v, (F.rotLane + r) % 4);
+      flowerBed(F, 33, 24, 47, 25.5, [0xff4fa3, 0xffc4e1, 0xffffff, 0xc02a7a]); flowerBed(F, 33, 3, 47, 4.5, [0xff4fa3, 0xffc4e1, 0xff8fc8]);
+      for (const [u, v] of [[34, 30], [40, 30], [46, 30]]) bush(F, u, v, 0.9, u + 3);
+      tree(F, 47.5, 7, 'maple-red', 0, 21); tree(F, 32.5, 8, 'sweetgum', 0, 22);
+    },
+    tanishk(F) {
+      yardPool(F, 33, 6, 47, 13, 0x1d2c3a, 0xd4a84a);
+      for (const u of [35, 38, 41, 44]) F.place(PROPS.lounger(0x202024), u, 0.25, 15.5, (F.rotLane + 1) % 4);
+      F.place(PROPS.umbrella(0x1d1d20, 0xd4a84a), 46.5, 0.25, 17.5, 0);
+      F.place(PROPS.bbq(), 29, 0.25, 12, 0);
+      const gold = col(0xd4a84a, { metal: 1, rough: 0.25 });
+      F.fill(38, 0.25, 22, 41, 0.75, 25, smoothC(0x2e2e33)); F.fill(39, 0.75, 23, 40, 2.75, 24, gold); F.fill(38.75, 2.75, 22.75, 40.25, 3.25, 24.25, glow(0xf7931a, 1.6, 'night'));   // a gold BTC plinth
+      for (const [u, v] of [[33, 29], [46.5, 29], [33, 20], [46.5, 21]]) bush(F, u, v, 1.0, u * 2);
+      tree(F, 48, 3, 'pine', 0, 31); tree(F, 32, 3, 'pine', 0, 32);
+    },
+    diksha(F) {
+      F.place(PROPS.swing(0x8e5ad6), 40, 0.25, 9, F.rotLane);
+      flowerBed(F, 32, 16, 47, 18, [0xc27ad6, 0xd6b1e8, 0xff8fc8, 0xfff0a0]); flowerBed(F, 32, 20, 47, 22, [0x8e5ad6, 0xffffff, 0xf2c6e6]);
+      F.place(PROPS.table(0xfaf6ff), 26.5, 0.25, 14.5, 0); for (const [u, v, r] of [[25.25, 14.5, 3], [27.75, 14.5, 1]]) F.place(PROPS.chair(0xc27ad6), u, 0.25, v, (F.rotLane + r) % 4);
+      const wood = col(0xfaf6ff); for (const [u, v] of [[36, 26], [42, 26], [36, 31], [42, 31]]) F.fill(u, 0.25, v, u + 0.25, 2.75, v + 0.25, wood);   // a little pergola
+      F.fill(35.75, 2.75, 25.75, 42.5, 3.0, 31.5, wood); for (let u = 36; u < 42.5; u += 0.75) F.fill(u, 3.0, 25.75, u + 0.25, 3.25, 31.5, wood);
+      for (let v = 26; v < 31.5; v += 0.5) F.fill(35.75, 1.5 + ((v * 4) & 3) * 0.25, v, 36, 3.0, v + 0.25, leafC[2]);
+      for (const [u, v] of [[46, 5], [33, 5]]) bush(F, u, v, 1.1, v * 7);
+      tree(F, 47, 30, 'maple-orange', 0, 41); tree(F, 32, 11, 'birch', 0, 42);
+    },
+    kush(F, th) {
+      F.place(PROPS.swing(0x2f7a4a), 36, 0.25, 7, F.rotLane);
+      F.place(PROPS.trampoline(), 44, 0.25, 8, 0);
+      // a vegetable patch + a small koi-free splash pool for Div
+      const soil = col(0x5a4030, { jitter: 0.5 }), veg = [col(0x3f8a3a, { solid: false }), col(0xd8502a, { solid: false }), col(0x6ab83a, { solid: false })];
+      for (let r = 0; r < 4; r++) { F.paint(33, 20 + r * 1.5, 45, 20.75 + r * 1.5, soil); for (let u = 33; u < 45; u += 0.5) F.fill(u, 0.25, 20 + r * 1.5, u + 0.25, 0.5 + (r & 1) * 0.25, 20.25 + r * 1.5, veg[(r + ((u * 2) | 0)) % 3]); }
+      F.place(PROPS.bbq(), 29, 0.25, 12, 0);
+      F.place(PROPS.table(0x8a6a4a), 26.5, 0.25, 14.5, 0); for (const [u, v, r] of [[25.25, 14.5, 3], [27.75, 14.5, 1]]) F.place(PROPS.chair(0x2f7a4a), u, 0.25, v, (F.rotLane + r) % 4);
+      for (const [u, v] of [[33, 30], [47, 30], [47, 16]]) bush(F, u, v, 1.0, u + v);
+      tree(F, 34, 15, 'oak', 1, 51); tree(F, 47, 3, 'maple-gold', 0, 52);
+    },
+    kaybee(F) {
+      // a ship-shaped sandbox with a mast, a swing, and a little lagoon
+      const sand = col(0xe8d8a8, { jitter: 0.5 }), wood = col(0x8a5a34, { pat: 'none' });
+      F.paint(34, 6, 44, 12, sand);
+      for (let u = 34; u < 44; u += 0.25) { const w = u > 41 ? (44 - u) * 1.0 : 3; F.fill(u, 0.25, 9 - w, u + 0.25, 0.75, 9 - w + 0.25, wood); F.fill(u, 0.25, 9 + w - 0.25, u + 0.25, 0.75, 9 + w, wood); }
+      F.fill(34, 0.25, 6, 34.25, 0.75, 12, wood); F.fill(38.5, 0.25, 8.75, 38.75, 5, 9, wood); F.fill(37, 3, 8.9, 40.5, 4.75, 9, smoothC(0xf2ece0));
+      yardPool(F, 36, 20, 44, 26, 0x2a7a8a, 0x8a5a34);
+      F.place(PROPS.swing(0xb8322a), 45, 0.25, 30, F.rotLane);
+      F.place(PROPS.table(0x6a4a2a), 26.5, 0.25, 14.5, 0); for (const [u, v, r] of [[25.25, 14.5, 3], [27.75, 14.5, 1]]) F.place(PROPS.chair(0xb8322a), u, 0.25, v, (F.rotLane + r) % 4);
+      for (const [u, v] of [[33, 30], [47, 17], [33, 16]]) bush(F, u, v, 1.0, u * 3 + v);
+      tree(F, 47.5, 4, 'autumn', 1, 61); tree(F, 31.5, 25, 'maple-red', 0, 62);
+    },
+  };
+
   // ------------------------------------------------------------ BUILD
   AF.onBuild('west-colony', 310, () => {
     const t0 = performance.now();
@@ -291,6 +511,7 @@ try {
       AF.addBuilding({ id: owner ? 'friend-' + owner : 'colony-' + pl.i, name: name || 'a neighbour\u2019s house', label: !!owner, kind: 'house', box: rec.box, doors: [rec.door], interior: !!owner, owner: 'west' });
       if (!owner) continue;
       const S = INTERIOR[owner](F, th);
+      try { upgradeHome(owner, F, th, rec); } catch (e) { console.warn('[af] home upgrade failed', owner, e); }
       // the name plate over the door + an indoor neon sign on the back wall
       F.place(K.text(owner === 'kush' ? 'KUSH & DIV' : owner.toUpperCase(), th.trim === 0xffffff ? 0x2a2a2e : th.trim, { lit: false, font: 'deco', vs: 1 / 12 }), 7.9, 3.55, 10.9, F.rotLane);
       F.place(K.text(S.sign[0], S.sign[1], S.sign[2] || {}), 23.6, 2.35, 13, F.rotLane);

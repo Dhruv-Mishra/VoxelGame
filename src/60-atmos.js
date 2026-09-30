@@ -133,7 +133,7 @@ try {
   const HA = ramp([[-0.4, 0x0c1428], [-0.2, 0x151e3c], [-0.1, 0x2c2e58], [-0.04, 0x55497a], [0.0, 0x9a7690], [0.04, 0xc8988a], [0.1, 0xe0b890], [0.2, 0xe2c6a2], [0.4, 0xdccbb2], [0.6, 0xc8d2d6], [0.8, 0xb4cae0]]);
   const HS = ramp([[-0.4, 0x0e1630, 1.5], [-0.2, 0x1e2244, 1.5], [-0.1, 0x5a3e66, 1.6], [-0.04, 0xa8586a, 2.0], [0.0, 0xf07a4a, 2.6], [0.04, 0xffa050, 2.8], [0.1, 0xffbe78, 2.6], [0.2, 0xf8d6a8, 2.2], [0.4, 0xeadcc6, 1.8], [0.8, 0xd6e0e6, 1.4]]);
   const GL2 = ramp([[-0.1, 0x401830, 0], [-0.03, 0xc04a30, 0.5], [0.0, 0xff6a28, 1.1], [0.05, 0xff8c3a, 1.25], [0.12, 0xffa850, 1.05], [0.25, 0xffc890, 0.75], [0.5, 0xffe6c8, 0.5], [0.8, 0xfff2e0, 0.4]]);
-  const FOGD = [[-0.4, 0.00034], [-0.1, 0.00034], [0.0, 0.0004], [0.08, 0.00034], [0.2, 0.00025], [0.5, 0.0002], [0.8, 0.00019]];   // v2 sharpen pass: ~0.56x the R2 haze
+  const FOGD = [[-0.4, 0.00038], [-0.1, 0.00038], [0.0, 0.00045], [0.08, 0.00039], [0.2, 0.0003], [0.5, 0.00024], [0.8, 0.00023]];   // a touch more distance haze so far LOD melts into the air
   const sampleNum = (R, s) => { if (s <= R[0][0]) return R[0][1]; for (let i = 1; i < R.length; i++) if (s <= R[i][0]) { const a = R[i - 1], b = R[i]; return lerp(a[1], b[1], (s - a[0]) / (b[0] - a[0])); } return R[R.length - 1][1]; };
   const setV = (u, c, w) => { const v = u.value; v.x = c.r; v.y = c.g; v.z = c.b; if (w !== undefined) v.w = w; };
 
@@ -1018,126 +1018,31 @@ try {
         PX.beams.push({ g, m, mat, ph: i * 1.7, sp: 0.18 + i * 0.05 });
       });
     }
-    // ---- ROUND 2: the CREATE WITH MARK blimp — 58.8 m ivory envelope (smooth lathe, gore seams, nose battens), orange-trimmed
-    //      cruciform fins with spinning-prop engine pods, a lit gondola, and a floodlit 1930s billboard panel on BOTH flanks
-    //      carrying the Create With Mark logo mark + wordmark (canvas texture, mipmapped + anisotropic, emissive at night).
+    // ---- a plain silver blimp: one smooth lathe envelope, four fins, a small gondola; no branding
     {
       const HL = 29.4, RMAX = 7.7, AXY = 13.3;   // half length, max radius, envelope axis height above the mesh origin (mooring frame of v1)
       const rAt = (z) => { const u = Math.max(-1, Math.min(1, z / HL)); return RMAX * (u > 0 ? Math.sqrt(Math.max(0, 1 - Math.pow(u, 2.2))) : Math.sqrt(Math.max(0, 1 - u * u)) * (1 - 0.18 * u * u)); };
-      const aniso = Math.min(8, AF.maxAniso || 1);
-      const mkTex = (cv) => { const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = aniso; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.needsUpdate = true; return t; };
       const g = new THREE.Group(); g.name = 'blimp';
-      // envelope texture: u = around (0 = belly), v = tail -> nose
-      const ecv = document.createElement('canvas'); ecv.width = 1024; ecv.height = 1024;
-      {
-        const c = ecv.getContext('2d');
-        const gr = c.createLinearGradient(0, 0, 1024, 0);   // around: slightly warmer on the flanks, cooler at the belly
-        gr.addColorStop(0, '#d9d2c2'); gr.addColorStop(0.25, '#f1eadb'); gr.addColorStop(0.5, '#f7f1e3'); gr.addColorStop(0.75, '#f1eadb'); gr.addColorStop(1, '#d9d2c2');
-        c.fillStyle = gr; c.fillRect(0, 0, 1024, 1024);
-        // fabric panels: faint per-gore tone steps + seams
-        for (let i = 0; i < 32; i++) { c.fillStyle = `rgba(${i % 2 ? '120,100,70' : '255,250,240'},${0.035 + (i % 3) * 0.012})`; c.fillRect(i * 32, 0, 32, 1024); }
-        c.fillStyle = 'rgba(110,96,74,0.55)'; for (let i = 0; i < 32; i++) c.fillRect(i * 32, 0, 2, 1024);
-        c.fillStyle = 'rgba(110,96,74,0.28)'; for (let j = 0; j < 1024; j += 64) c.fillRect(0, j, 1024, 2);
-        // nose cone battens + cap (v -> 1 = nose; canvas y is flipped: v = 1 - y/1024)
-        c.fillStyle = '#3a3a3e'; for (let i = 0; i < 16; i++) c.fillRect(i * 64 - 5, 0, 10, 115);
-        c.fillStyle = '#2e2e32'; c.fillRect(0, 0, 1024, 26);
-        // tail: brand-orange band with a thin ink pinstripe (reads from the air)
-        c.fillStyle = '#FF5A36'; c.fillRect(0, 1024 - 250, 1024, 34);
-        c.fillStyle = '#121212'; c.fillRect(0, 1024 - 206, 1024, 7); c.fillRect(0, 1024 - 262, 1024, 5);
-        // soft weathering: sun-bleached top, a little grime at the belly
-        const w = c.createLinearGradient(0, 0, 1024, 0); w.addColorStop(0, 'rgba(60,50,40,0.10)'); w.addColorStop(0.12, 'rgba(60,50,40,0)'); w.addColorStop(0.88, 'rgba(60,50,40,0)'); w.addColorStop(1, 'rgba(60,50,40,0.10)');
-        c.fillStyle = w; c.fillRect(0, 0, 1024, 1024);
-      }
-      const prof = []; for (let i = 0; i <= 64; i++) { const z = -HL + (i / 64) * 2 * HL; prof.push(new THREE.Vector2(Math.max(0.001, rAt(z)), z)); }
-      const eg = new THREE.LatheGeometry(prof, 72); eg.rotateX(Math.PI / 2); eg.translate(0, AXY, 0);
-      const envTex = mkTex(ecv), envMat = new THREE.MeshStandardMaterial({ map: envTex, emissiveMap: envTex, emissive: new THREE.Color(0xffffff), emissiveIntensity: 0, roughness: 0.58, metalness: 0.0 });   // emissive = the envelope floodlit from below at night
-      const env = new THREE.Mesh(eg, envMat); env.castShadow = true; env.receiveShadow = false; g.add(env);
-      // ---- the logo billboard: a curved panel hugging each flank (constant height so the lettering never tapers)
-      const LCV = document.createElement('canvas'); LCV.width = 2048; LCV.height = 640;
-      const ECV = document.createElement('canvas'); ECV.width = 1024; ECV.height = 320;
-      const drawSign = (c, W, H, night, phase = -1) => {
-        const s = W / 2048; c.save(); c.scale(s, s);
-        c.fillStyle = night ? '#b9b3a6' : '#f8f4ea'; c.fillRect(0, 0, 2048, 640);
-        // deco frame: ink rule, gold inner line, stepped corners
-        c.fillStyle = night ? '#000' : '#121212'; c.fillRect(0, 0, 2048, 22); c.fillRect(0, 618, 2048, 22); c.fillRect(0, 0, 22, 640); c.fillRect(2026, 0, 22, 640);
-        c.strokeStyle = night ? '#6a5320' : '#b8923a'; c.lineWidth = 6; c.strokeRect(40, 40, 1968, 560);
-        // marquee bulbs round the frame (they bloom at night)
-        let bi = 0;   // marquee bulbs: at night two alternating sets (the emissive map swaps between them = a chase)
-        const bulb = (x, y) => { const on = phase < 0 || (bi++ % 2) === phase; c.beginPath(); c.arc(x, y, 7, 0, Math.PI * 2); c.fillStyle = night ? (on ? '#fff6d8' : '#4a4030') : '#e9dcb4'; c.fill(); };
-        for (let x = 60; x <= 1990; x += 48) for (const y of [11, 629]) bulb(x, y);
-        for (let y = 59; y <= 590; y += 48) for (const x of [11, 2037]) bulb(x, y);
-        // logo mark (800x800 viewBox) at the left: black bracket corners + the tilted orange square
-        c.save(); c.translate(92, 80); c.scale(480 / 800, 480 / 800);
-        c.fillStyle = night ? '#000' : '#121212';
-        c.fill(new Path2D('M0 0h337v121H129v207H0z M464 0h336v328H671V121H464z M0 472h129v208h208v120H0z'));
-        c.fillStyle = night ? '#ff4a22' : '#FF5A36'; c.fill(new Path2D('M508 548l245-48 47 245-245 47z'));
-        c.restore();
-        // wordmark: CREATE / WITH MARK (MARK in orange), bold geometric sans fitted to the panel
-        const fam = '"Futura", "Avenir Next", "Century Gothic", "Helvetica Neue", Arial, sans-serif';
-        const x0 = 680, maxW = 2048 - x0 - 90;
-        let fs = 250; c.font = `bold ${fs}px ${fam}`;
-        const w2 = c.measureText('WITH MARK').width; if (w2 > maxW) fs = Math.floor(fs * maxW / w2);
-        c.font = `bold ${fs}px ${fam}`; c.textBaseline = 'alphabetic';
-        c.fillStyle = night ? '#000' : '#121212'; c.fillText('CREATE', x0, 90 + fs * 0.86);
-        const wy = 90 + fs * 0.86 + fs * 1.02;
-        c.fillText('WITH ', x0, wy); const ww = c.measureText('WITH ').width;
-        c.fillStyle = night ? '#ff4a22' : '#FF5A36'; c.fillText('MARK', x0 + ww, wy);
-        c.restore();
-      };
-      drawSign(LCV.getContext('2d'), 2048, 640, false);
-      drawSign(ECV.getContext('2d'), 1024, 320, true, 0);
-      const ECV2 = document.createElement('canvas'); ECV2.width = 1024; ECV2.height = 320; drawSign(ECV2.getContext('2d'), 1024, 320, true, 1);
-      const chase = [mkTex(ECV), mkTex(ECV2)];
-      const signMat = new THREE.MeshStandardMaterial({ map: mkTex(LCV), emissiveMap: chase[0], emissive: new THREE.Color(0xfff1d6), emissiveIntensity: 0, roughness: 0.62, metalness: 0.0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-      const PL = 30.4, PH = 9.5, PZ = 1.2;   // panel length, height (m), centre offset toward the nose
-      const mkPanel = (side) => {
-        const NI = 48, NJ = 16, pos = [], uv = [], idx = [];
-        for (let i = 0; i <= NI; i++) for (let j = 0; j <= NJ; j++) {
-          const u = i / NI, v = j / NJ, z = PZ + (side > 0 ? PL / 2 - u * PL : -PL / 2 + u * PL), y = (v - 0.5) * PH, r = rAt(z) + 0.07;
-          pos.push(side * Math.sqrt(Math.max(0.01, r * r - y * y)), AXY + y, z); uv.push(u, v);
-        }
-        for (let i = 0; i < NI; i++) for (let j = 0; j < NJ; j++) { const a = i * (NJ + 1) + j, b = a + NJ + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
-        const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); pg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); pg.setIndex(idx); pg.computeVertexNormals();
-        const m = new THREE.Mesh(pg, signMat); m.name = 'blimp-logo-' + (side > 0 ? 'starboard' : 'port'); return m;
-      };
-      const panels = [mkPanel(1), mkPanel(-1)]; for (const p of panels) g.add(p);
-      // ---- fins: ivory with brand-orange rudders/elevators and an ink tip stripe
-      const ivory = new THREE.MeshStandardMaterial({ color: 0xefe8d8, roughness: 0.6 }), orange = new THREE.MeshStandardMaterial({ color: 0xff5a36, roughness: 0.5 }), ink = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.5 });
-      const finShape = new THREE.Shape([new THREE.Vector2(-26.2, 1), new THREE.Vector2(-26.2, 8.6), new THREE.Vector2(-23.6, 8.6), new THREE.Vector2(-15, 5.6), new THREE.Vector2(-15, 1)]);
-      const rudShape = new THREE.Shape([new THREE.Vector2(-28.9, 1), new THREE.Vector2(-28.9, 8.3), new THREE.Vector2(-26.2, 8.6), new THREE.Vector2(-26.2, 1)]);
-      const tipShape = new THREE.Shape([new THREE.Vector2(-28.9, 8.3), new THREE.Vector2(-28.9, 8.9), new THREE.Vector2(-23.6, 9.2), new THREE.Vector2(-23.6, 8.6), new THREE.Vector2(-26.2, 8.6)]);
-      const exG = (sh, d) => { const q = new THREE.ExtrudeGeometry(sh, { depth: d, bevelEnabled: false }); q.translate(0, 0, -d / 2); return q; };
-      const finG = exG(finShape, 0.36), rudG = exG(rudShape, 0.3), tipG = exG(tipShape, 0.4);
+      const prof = []; for (let i = 0; i <= 28; i++) { const z = -HL + (i / 28) * 2 * HL; prof.push(new THREE.Vector2(Math.max(0.001, rAt(z)), z)); }
+      const eg = new THREE.LatheGeometry(prof, 28); eg.rotateX(Math.PI / 2); eg.translate(0, AXY, 0);
+      const envMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd0, emissive: new THREE.Color(0xffffff), emissiveIntensity: 0, roughness: 0.5, metalness: 0.25 });
+      const env = new THREE.Mesh(eg, envMat); env.castShadow = true; g.add(env);
+      const finMat = new THREE.MeshStandardMaterial({ color: 0xa8acb2, roughness: 0.55, metalness: 0.2 });
+      const finShape = new THREE.Shape([new THREE.Vector2(-28.6, 1), new THREE.Vector2(-28.6, 8.4), new THREE.Vector2(-24, 8.6), new THREE.Vector2(-15, 5.6), new THREE.Vector2(-15, 1)]);
+      const finG = new THREE.ExtrudeGeometry(finShape, { depth: 0.36, bevelEnabled: false }); finG.translate(0, 0, -0.18);
       const mb = new THREE.Matrix4();
       for (let k = 0; k < 4; k++) {
         const a = k * Math.PI / 2, d = new THREE.Vector3(Math.sin(a), Math.cos(a), 0), t = new THREE.Vector3(Math.cos(a), -Math.sin(a), 0);
         mb.makeBasis(new THREE.Vector3(0, 0, 1), d, t).setPosition(0, AXY, 0);
-        for (const [geo, mat] of [[finG, ivory], [rudG, orange], [tipG, ink]]) { const m = new THREE.Mesh(geo, mat); m.applyMatrix4(mb); m.castShadow = true; g.add(m); }
+        const m = new THREE.Mesh(finG, finMat); m.applyMatrix4(mb); m.castShadow = true; g.add(m);
       }
-      // ---- gondola (navy, lit window band) + two engine pods with spinning props
-      const navy = new THREE.MeshStandardMaterial({ color: 0x1d2740, roughness: 0.45, metalness: 0.3 });
-      const winMat = new THREE.MeshStandardMaterial({ color: 0x3a3226, emissive: new THREE.Color(0xffd08a), emissiveIntensity: 0.3, roughness: 0.2 });
       const gy = AXY - RMAX + 0.55;
-      const gond = new THREE.Mesh(new THREE.CapsuleGeometry(1.25, 8.6, 6, 14), navy); gond.rotation.x = Math.PI / 2; gond.scale.set(1, 1, 0.95); gond.position.set(0, gy - 1.05, 2.5); gond.castShadow = true; g.add(gond);
-      const wins = new THREE.Mesh(new THREE.BoxGeometry(2.62, 0.62, 7.2), winMat); wins.position.set(0, gy - 0.85, 2.7); g.add(wins);
-      const fairing = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 9.6), ivory); fairing.position.set(0, gy + 0.25, 2.5); g.add(fairing);
-      const props = [];
-      const bladeG = new THREE.BoxGeometry(0.16, 3.0, 0.08);
-      for (const sx of [-1, 1]) {
-        const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.42, 3.2, 12), navy); pod.rotation.x = Math.PI / 2; pod.position.set(sx * 3.6, gy - 0.3, -1.2); pod.castShadow = true; g.add(pod);
-        const strut = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.16, 0.7), navy); strut.position.set(sx * 2.3, gy - 0.3, -1.2); g.add(strut);
-        const hub = new THREE.Group(); hub.position.set(sx * 3.6, gy - 0.3, -2.9);
-        for (let b = 0; b < 3; b++) { const bl = new THREE.Mesh(bladeG, ink); bl.position.y = 0; bl.rotation.z = b * Math.PI * 2 / 3; bl.geometry = bladeG; const arm = new THREE.Group(); arm.rotation.z = b * Math.PI * 2 / 3; bl.rotation.z = 0; bl.position.y = 0.75; arm.add(bl); hub.add(arm); }
-        const cap = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.6, 10), orange); cap.rotation.x = -Math.PI / 2; cap.position.z = -0.25; hub.add(cap);
-        g.add(hub); props.push(hub);
-      }
-      const nav = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a18, fog: false }));
-      nav.position.set(0, gy - 2.4, 2.5); g.add(nav);
-      const nav2 = nav.clone(); nav2.position.set(0, AXY + RMAX + 0.3, 4); g.add(nav2);
-      g.traverse((o) => { o.frustumCulled = false; });
+      const gond = new THREE.Mesh(new THREE.CapsuleGeometry(1.2, 7, 3, 8), new THREE.MeshStandardMaterial({ color: 0x3a3f48, roughness: 0.5 })); gond.rotation.x = Math.PI / 2; gond.position.set(0, gy - 0.9, 2.5); g.add(gond);
+      const nav = new THREE.Mesh(new THREE.SphereGeometry(0.45, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff2a18, fog: false }));
+      nav.position.set(0, gy - 2.2, 2.5); g.add(nav);
       S.add(g);
-      PX.blimp = { mode: 'loop', cool: 90, mesh: g, nav: [nav, nav2], props, signMat, winMat, envMat, chase, panels, logoCanvas: LCV, s: 0.15, cx: 10, cz: -30, rx: 230, rz: 170, y: 168, speed: 4.2, x: 0, z: 0, k: 1.4 };
-      AF.blimp = { mesh: g, panels, pos: () => g.position };
+      PX.blimp = { mode: 'loop', cool: 90, mesh: g, nav: [nav], envMat, s: 0.15, cx: 10, cz: -30, rx: 230, rz: 170, y: 168, speed: 4.2, x: 0, z: 0, k: 1.4 };
+      AF.blimp = { mesh: g, pos: () => g.position };
     }
     // ---- R2: sea spray where the chop slaps the quay wall (soft additive puffs near the camera)
     {
@@ -1242,21 +1147,13 @@ try {
     const B = PX.blimp;
     if (B) {
       stepBlimp(B, dt); const blink = (t % 1.6) < 0.25; for (const n of B.nav) n.visible = blink || night < 0.3 ? blink : true;
-      if (B.props) for (let i = 0; i < B.props.length; i++) B.props[i].rotation.z += dt * (B.mode === 'hold' ? 2.5 : 14) * (i ? 1 : -1);
-      // the logo billboard is floodlit from dusk (a 1930s lit sign); the gondola windows glow
-      const lit = Math.max(night, smooth(0.16, 0.02, sunVec.y));
-      if (B.signMat) { B.signMat.emissiveIntensity = 1.35 * lit; if (B.chase) B.signMat.emissiveMap = B.chase[(t * 2.2 | 0) & 1]; }
-      if (B.winMat) B.winMat.emissiveIntensity = 0.3 + 2.4 * lit;
-      if (B.envMat) B.envMat.emissiveIntensity = 0.12 * night;
+      if (B.envMat) B.envMat.emissiveIntensity = 0.08 * night;
     }
   });
-  AF.test('blimp carries the Create With Mark logo', () => {
-    const B = PX.blimp; if (!B || !B.panels) return { ok: false, info: 'no logo blimp' };
-    const c = B.logoCanvas.getContext('2d'), d = c.getImageData(0, 0, B.logoCanvas.width, B.logoCanvas.height).data;
-    let orange = 0, ink = 0;
-    for (let i = 0; i < d.length; i += 64) { const r = d[i], g = d[i + 1], b = d[i + 2]; if (r > 220 && g > 60 && g < 120 && b < 80) orange++; else if (r < 40 && g < 40 && b < 40) ink++; }
+  AF.test('blimp is plain (no branding panels)', () => {
+    const B = PX.blimp; if (!B) return { ok: false, info: 'no blimp' };
     const eg = B.mesh.children[0].geometry; eg.computeBoundingBox(); const L2 = eg.boundingBox.max.z - eg.boundingBox.min.z;
-    return { ok: B.panels.length === 2 && orange > 300 && ink > 1500 && !!AF.blimp && L2 > 54 && L2 < 62, info: `panels ${B.panels.length}, orange px ${orange}, ink px ${ink}, length ${L2.toFixed(1)} m` };
+    return { ok: !B.panels && B.mesh.children.length <= 8 && L2 > 54 && L2 < 62, info: `children ${B.mesh.children.length}, length ${L2.toFixed(1)} m` };
   });
   AF.test('atmos: blimp drifts, steam + searchlights exist', () => {
     const B = PX.blimp; if (!B) return { ok: false, info: 'no blimp' };

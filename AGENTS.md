@@ -4,8 +4,9 @@ Single-page three.js (r160, CDN importmap) voxel city game. **Edit `src/`, never
 
 ## Build / run
 - `node tools/build.mjs --check` — syntax-checks each part, concatenates `shell.html` + `src/*.js` (sorted) into `output.html`.
-- `node tools/serve.mjs 8765` → http://127.0.0.1:8765/output.html (`?test` runs the `AF.test` self-tests; page title shows `passed/total`, currently 108/108; add `&v=<n>` to dodge browser cache). `file://` also works.
+- `node tools/serve.mjs 8765` → http://127.0.0.1:8765/output.html (`?test` runs the `AF.test` self-tests; page title shows `passed/total`, currently 110/110; add `&v=<n>` to dodge browser cache). `file://` also works.
 - Parts are plain scripts inside one module; each is wrapped in `try{}catch(e){AF.partError(...)}`. Numeric prefix = load order.
+- Browser testing: delegate to the `tester` subagent (`.github/agents/tester.agent.md`) so Playwright output stays out of the main context.
 
 ## Architecture (global `AF`)
 - Lifecycle: `AF.onBuild(name, order, fn)` at boot, `AF.onTick(name, order, fn)` per frame. Modes: `AF.modes[name]={enter,exit,update}`, `AF.setMode(name, opts)` (walk, aerial, drive, fly).
@@ -18,6 +19,12 @@ Single-page three.js (r160, CDN importmap) voxel city game. **Edit `src/`, never
 - World: 10 terrain/horizon, 11 streets, 12–42 districts, 45 friends colony, 46 zoo, 47 airfield.
 - Actors: 50 cars/bikes (+ kerb-car proxy), 52 planes, 55 pedestrians, 56 ambient animals, 57 friends (cast, dialogue lines, NPCs, garages).
 - Player/UI: 70 avatar + walk/aerial, 71 UI (title select, HUD, menu, map, dialogue), 72 touch controls, 98 tests, 99 boot.
+- Avatar parts are authored at 1/16 m then doubled to 1/32 m with a `FINE` detail pass (70). Zoo animals are refined 1/8 → 1/16 (46 `refine`).
+- Title = modal with a second small WebGLRenderer turntable (71 `PV`), roster sorted by name.
+- Ground cover (12, `AF.groundCover`): instanced tufts/flowers/ferns/shrubs scattered on green ground cells, drawn only within a tier radius of the camera and shrunk to zero at the edge.
+- Crowd (55): per-9 m-cell density cap, groups (`w.lead` + `fl`/`fb` offsets: couples holding hands, parent + child, friends, wheelchair users), far walkers step at half rate.
+- Friend homes (45 `upgradeHome`): per-friend `SHAPE`, bathroom annex, patio door, `GARDEN` (sunken `yardPool`, 1/16 `PROPS`).
+- Planes (52): Space power + climb, Shift power off + descend, W/S taxi/brake, A/D bank-turn; keyboard pitch is soft-limited and auto-flares near the ground.
 
 ## Performance rules
 - Tiers in `03-render.js` (`low`/`high`=Balanced default/`ultra`) gate pixel ratio, AO, shadow cadence, point lights, region/prop LOD distances. Auto-downgrade to low when frame EMA > 26 ms; choice saved in `localStorage['portSolace.gfx']`.

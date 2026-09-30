@@ -3851,6 +3851,7 @@ try {
     {
       const strips = [[-253, -232, -248, 147], [248, -232, 253, -10]];
       for (const [x0, z0, x1, z1] of strips) W.eachCol(x0, z0, x1, z1, (bx, bz, i, x, z) => {
+        if (ST.mask[i] === 1) return;   // never raise a kerb across a road (Westgate Road runs through the west strip)
         if (W.getM(x, 0.375, z) || W.getM(x, 0.625, z) || W.getM(x, 0.875, z)) return;
         W.H[i] = 1; ST.mask[i] = 2; W.S[i] = k.kerb;
         W.C[i] = ST.paveCol(x, z, bx, bz);
@@ -5138,6 +5139,91 @@ try {
   AF.test('land: trees planted (autumn designs) + AF.nature.tree exposed', () => {
     const s = L.natureStats || {}; const ids = new Set((L.trees || []).map((t) => t.id));
     return { ok: (s.hero + s.forest + (s.far || 0)) > 150 && ids.size >= 8 && typeof AF.nature.tree === 'function', info: `hero ${s.hero} forest ${s.forest} far ${s.far} designs ${ids.size} placedQuads ${Math.round(s.placedQuads)} ms ${s.ms}` };
+  });
+
+  // ============================================================ GROUND COVER: instanced grass tufts, low plants, wildflowers, ferns + small shrubs
+  // Scattered once over every green ground cell (lawns, park, colony yards, the heights), bucketed in 16 m cells. Only a
+  // radius around the camera is drawn (one InstancedMesh per kind, refreshed as the camera moves); instances shrink to
+  // nothing toward the edge of that radius so there is no pop-in line. Hidden from high above (you could not see it anyway).
+  const GC = AF.groundCover = { kinds: [], cells: new Map(), n: 0, at: { x: 1e9, z: 1e9 }, t: 0, shown: 0 };
+  const coverModels = () => {
+    const R = AF.rng(8080), K = [];
+    const plant = (S, H, fn) => { const m = new AF.Model(S, H, S); fn(m); return m; };
+    const blade = (m, x, z, h, c, lean) => { for (let y = 0; y < h; y++) m.set(x + (y > h * 0.6 ? lean : 0), y, z, c); };
+    const greens = [0x5f8f36, 0x6f9e3e, 0x80ac48, 0x4f7f30].map((h) => AF.col(h, { jitter: 0.5, edge: 0.1, solid: false }));
+    const dry = [0x9aa04a, 0xb0a458, 0x8a9a40].map((h) => AF.col(h, { jitter: 0.5, edge: 0.1, solid: false }));
+    for (const pal of [greens, greens, dry]) K.push({ id: 'tuft', vs: 1 / 16, w: 1, m: plant(10, 12, (m) => { for (let i = 0; i < 6; i++) blade(m, 2 + ((R() * 6) | 0), 2 + ((R() * 6) | 0), 4 + ((R() * 7) | 0), pal[(R() * pal.length) | 0], R() < 0.5 ? 1 : -1); }) });
+    K.push({ id: 'clover', vs: 1 / 16, w: 0.5, m: plant(10, 4, (m) => { const a = greens[0], b = greens[2]; for (let i = 0; i < 5; i++) { const x = 1 + ((R() * 7) | 0), z = 1 + ((R() * 7) | 0), y = (R() * 2) | 0; m.set(x, y, z, a); m.set(x + 1, y, z, b); m.set(x, y, z + 1, b); m.set(x, y + 1, z, a); } }) });
+    const bloom = (hexes) => plant(12, 10, (m) => { const fc = hexes.map((h) => AF.col(h, { jitter: 0.3, edge: 0.1, solid: false })); for (let i = 0; i < 5; i++) { const x = 2 + ((R() * 8) | 0), z = 2 + ((R() * 8) | 0), h = 4 + ((R() * 5) | 0), c = fc[(R() * fc.length) | 0]; blade(m, x, z, h, greens[1], 0); m.set(x, h, z, c); m.set(x + 1, h, z, c); m.set(x - 1, h, z, c); m.set(x, h, z + 1, c); m.set(x, h, z - 1, c); m.set(x, h + 1, z, fc[0]); } });
+    K.push({ id: 'daisy', vs: 1 / 16, w: 0.35, m: bloom([0xf6f2e6, 0xf6f2e6, 0xf0c840]) });
+    K.push({ id: 'poppy', vs: 1 / 16, w: 0.25, m: bloom([0xd8402a, 0xe8602e, 0x2a1a14]) });
+    K.push({ id: 'bell', vs: 1 / 16, w: 0.25, m: bloom([0x7a6ad8, 0x9a7ae0, 0xc8a8f0]) });
+    K.push({ id: 'fern', vs: 1 / 16, w: 0.25, m: plant(16, 9, (m) => { const c = greens[3], c2 = greens[1]; for (let a = 0; a < 6; a++) { const dx = Math.cos(a * 1.05), dz = Math.sin(a * 1.05); for (let t = 0; t < 7; t++) m.set(Math.round(7.5 + dx * t), Math.round(Math.sin(t / 7 * 2.4) * 6), Math.round(7.5 + dz * t), t & 1 ? c : c2); } }) });
+    K.push({ id: 'shrub', vs: 1 / 8, w: 0.12, m: plant(9, 7, (m) => { for (let x = 0; x < 9; x++) for (let y = 0; y < 7; y++) for (let z = 0; z < 9; z++) { const d = Math.hypot((x - 4) / 4.5, (y - 2) / 4, (z - 4) / 4.5); if (d < 1 - hash(x * 3 + y, z * 7) * 0.2) m.set(x, y, z, greens[(x + y * 2 + z) % 4]); } }) });
+    return K;
+  };
+  const greenAt = (i) => { const hx = AF.PAL.hex[W.C[i]]; if (hx == null) return false; const r = (hx >> 16) & 255, g = (hx >> 8) & 255, b = hx & 255; return g > r + 6 && g > b + 24; };
+  AF.onBuild('land-ground-cover', 520, () => {
+    const t0 = performance.now();
+    const K = GC.kinds = coverModels().map((k) => ({ ...k, geo: AF.meshModel(k.m, { vs: k.vs, anchor: [0.5, 0, 0.5], flat: true }), m: null }));
+    const wSum = K.reduce((s, k) => s + k.w, 0), R = AF.rng(4711), cells = GC.cells;
+    const B = P.bounds || { x0: -660, z0: -300, x1: 300, z1: 300 };
+    for (let x = B.x0 + 1; x < B.x1 - 1; x += 1.1) for (let z = B.z0 + 1; z < B.z1 - 1; z += 1.1) {
+      const jx = x + (R() - 0.5) * 0.9, jz = z + (R() - 0.5) * 0.9, i = W.col(jx, jz); if (i < 0 || !greenAt(i)) continue;
+      const n = N2(jx * 0.06, jz * 0.06); if (R() > 0.2 + n * 0.75) continue;
+      const gy = W.H[i] * 0.25; if (gy < -0.2) continue;
+      if (W.getM(jx, gy + 0.1, jz) || W.getM(jx, gy + 0.6, jz)) continue;
+      // kind: mostly tufts; wildflowers in drifts; ferns + shrubs along the shady edges
+      const fl = N2(jx * 0.035 + 17, jz * 0.035 - 5);
+      let v = R() * wSum, k = 0; for (; k < K.length - 1; k++) { v -= K[k].w * (K[k].id === 'daisy' || K[k].id === 'poppy' || K[k].id === 'bell' ? (fl > 0.6 ? 4 : 0.3) : 1); if (v <= 0) break; }
+      const key = Math.floor(jx / 16) * 1000 + Math.floor(jz / 16); let a = cells.get(key); if (!a) cells.set(key, a = []);
+      a.push(jx, gy, jz, R() * 6.2832, 0.75 + R() * 0.55, k); GC.n++;
+    }
+    for (const [key, a] of cells) cells.set(key, new Float32Array(a));
+    const tier = (AF.GFX && AF.GFX.tier) || 'high', cap = tier === 'low' ? 2200 : tier === 'high' ? 5000 : 9000;
+    for (const k of K) {
+      const im = new THREE.InstancedMesh(k.geo, AF.mat.voxel, Math.ceil(cap * (k.id === 'tuft' ? 0.45 : 0.25)));
+      im.count = 0; im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; im.name = 'cover-' + k.id; im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      AF.scene.add(im); k.im = im;
+    }
+    GC.ms = Math.round(performance.now() - t0);
+    console.log('[af] ground cover', GC.n, 'plants in', cells.size, 'cells,', GC.ms, 'ms');
+  });
+  const coverRadius = () => { const t = (AF.GFX && AF.GFX.tier) || 'high'; return t === 'low' ? 30 : t === 'high' ? 48 : 72; };
+  const refreshCover = (cx, cz, cy) => {
+    const K = GC.kinds, Rr = coverRadius(), R2 = Rr * Rr, fade0 = Rr * 0.62;
+    for (const k of K) k.n = 0;
+    const high = cy - Math.max(0, W.groundY(cx, cz)) > 45;
+    if (!high) {
+      const g0x = Math.floor((cx - Rr) / 16), g1x = Math.floor((cx + Rr) / 16), g0z = Math.floor((cz - Rr) / 16), g1z = Math.floor((cz + Rr) / 16);
+      for (let gx = g0x; gx <= g1x; gx++) for (let gz = g0z; gz <= g1z; gz++) {
+        const a = GC.cells.get(gx * 1000 + gz); if (!a) continue;
+        for (let i = 0; i < a.length; i += 6) {
+          const dx = a[i] - cx, dz = a[i + 2] - cz, d2 = dx * dx + dz * dz; if (d2 > R2) continue;
+          const k = K[a[i + 5]], im = k.im; if (k.n >= im.instanceMatrix.count) continue;
+          const d = Math.sqrt(d2), f = d < fade0 ? 1 : 1 - (d - fade0) / (Rr - fade0), s = a[i + 4] * f * f * (3 - 2 * f);
+          const c = Math.cos(a[i + 3]) * s, sn = Math.sin(a[i + 3]) * s, arr = im.instanceMatrix.array, o = k.n * 16;
+          arr[o] = c; arr[o + 1] = 0; arr[o + 2] = -sn; arr[o + 3] = 0; arr[o + 4] = 0; arr[o + 5] = s; arr[o + 6] = 0; arr[o + 7] = 0;
+          arr[o + 8] = sn; arr[o + 9] = 0; arr[o + 10] = c; arr[o + 11] = 0; arr[o + 12] = a[i]; arr[o + 13] = a[i + 1]; arr[o + 14] = a[i + 2]; arr[o + 15] = 1;
+          k.n++;
+        }
+      }
+    }
+    let shown = 0;
+    for (const k of K) { k.im.count = k.n; k.im.visible = k.n > 0; if (k.n) k.im.instanceMatrix.needsUpdate = true; shown += k.n; }
+    GC.shown = shown; GC.at = { x: cx, z: cz, y: cy };
+  };
+  AF.onTick('ground-cover', 445, (dt) => {
+    if (!GC.kinds.length || !GC.kinds[0].im) return;
+    const c = AF.camera.position, f = AF.player && AF.mode === 'walk' ? AF.player : c;
+    GC.t -= dt;
+    const moved = Math.abs(f.x - GC.at.x) + Math.abs(f.z - GC.at.z) > 5 || Math.abs(c.y - GC.at.y) > 12;
+    if (moved || GC.t <= 0) { GC.t = 1.5; refreshCover(f.x, f.z, c.y); }
+  });
+  AF.test('land: ground cover scattered + drawn near the camera', () => {
+    if (!GC.kinds.length) return { ok: false, info: 'no ground cover' };
+    refreshCover(-40, -200, 2); const n = GC.shown; GC.at = { x: 1e9, z: 1e9, y: 0 };
+    return { ok: GC.n > 5000 && n > 100 && GC.kinds.every((k) => k.im.count <= k.im.instanceMatrix.count), info: `plants ${GC.n}, drawn at the park ${n}, ${GC.ms} ms` };
   });
 }
 
@@ -17217,6 +17303,226 @@ try {
     },
   };
 
+  // ------------------------------------------------------------ friend homes v2: a distinct silhouette per friend, a bathroom annex, a kitchen
+  //   upgrade, a patio door and a themed back garden (pool / swings / beds / trees). Fine props are 1/16 m models placed as statics.
+  const PM = {};
+  const pm = (k, fn) => PM[k] || (PM[k] = fn());
+  const M16 = (w, h, d, fn) => K.model(w, h, d, fn, 1 / 16);
+  const PROPS = {
+    toilet: () => pm('toilet', () => M16(8, 15, 12, (m) => { const wt = smoothC(0xf6f6f2), ch = col(0xc8ccd2, { metal: 0.9, rough: 0.2 }); m.box(2, 0, 4, 6, 6, 10, wt); m.box(1, 6, 3, 7, 7, 11, wt); m.box(2, 6, 5, 6, 7, 10, smoothC(0xdfe6ea)); m.box(1, 6, 0, 7, 13, 3, wt); m.box(0, 13, 0, 8, 14, 3, wt); m.set(4, 14, 1, ch); })),
+    sink: () => pm('sink', () => M16(10, 18, 8, (m) => { const wt = smoothC(0xf6f6f2), ch = col(0xc8ccd2, { metal: 0.9, rough: 0.2 }); m.box(4, 0, 2, 6, 12, 5, wt); m.box(0, 12, 0, 10, 15, 8, wt); m.box(1, 14, 1, 9, 15, 7, 0); m.box(4, 15, 0, 6, 17, 2, ch); m.set(5, 16, 2, ch); m.set(5, 16, 3, ch); })),
+    tub: () => pm('tub', () => M16(14, 9, 28, (m) => { const wt = smoothC(0xf6f6f2); m.box(0, 0, 0, 14, 9, 28, wt); m.box(1, 2, 1, 13, 9, 27, 0); m.box(1, 2, 1, 13, 6, 27, col(0x8fd0ea, { glass: true, jitter: 0.02, edge: 0 })); m.box(6, 9, 0, 8, 11, 2, col(0xc8ccd2, { metal: 0.9 })); })),
+    mirror: () => pm('mirror', () => M16(12, 14, 1, (m) => { m.box(0, 0, 0, 12, 14, 1, col(0xd8b04a, { metal: 0.9, rough: 0.3 })); m.box(1, 1, 0, 11, 13, 1, col(0xe8f0f6, { metal: 1, rough: 0.05, jitter: 0, edge: 0 })); })),
+    fridge: () => pm('fridge', () => M16(14, 32, 13, (m) => { const b = col(0xe6eaee, { metal: 0.35, rough: 0.3, jitter: 0.03 }), ch = col(0xc8ccd2, { metal: 0.9, rough: 0.2 }); m.box(0, 0, 0, 14, 32, 12, b); m.box(0, 21, 11, 14, 22, 12, smoothC(0x5a5e64)); m.box(11, 6, 12, 12, 19, 13, ch); m.box(11, 23, 12, 12, 30, 13, ch); })),
+    lounger: (hex) => pm('lounger' + hex, () => M16(11, 9, 30, (m) => { const fr = smoothC(0xf2f2ee), cu = smoothC(hex); for (const x of [0, 10]) for (const z of [2, 27]) m.box(x, 0, z, x + 1, 3, z + 1, fr); m.box(0, 3, 0, 11, 4, 30, fr); m.box(1, 4, 9, 10, 5, 29, cu); for (let z = 0; z < 9; z++) { const t = 4 + Math.round((9 - z) * 0.55); m.box(1, 4, z, 10, t, z + 1, cu); } })),
+    umbrella: (a, b) => pm('umb' + a + b, () => M16(33, 40, 33, (m) => { const ca = smoothC(a), cb = smoothC(b); m.box(16, 0, 16, 17, 36, 17, col(0xd8d4c8, { metal: 0.6 })); m.box(13, 0, 13, 20, 1, 20, smoothC(0x3a3a3e)); for (let y = 30; y < 36; y++) { const r = 16 - (y - 30) * 2.6; for (let x = 0; x < 33; x++) for (let z = 0; z < 33; z++) { const dx = x - 16, dz = z - 16, d = Math.hypot(dx, dz); if (d <= r && d > r - 3.2) m.set(x, y, z, (Math.floor((Math.atan2(dz, dx) + PI) / (PI / 4)) & 1) ? ca : cb); } } m.set(16, 36, 16, cb); })),
+    bbq: () => pm('bbq', () => M16(11, 17, 11, (m) => { const k = smoothC(0x1d1d20), ch = col(0xc8ccd2, { metal: 0.9 }); for (const [x, z] of [[1, 1], [9, 1], [5, 9]]) m.box(x, 0, z, x + 1, 9, z + 1, ch); m.sphere(5.5, 11, 5.5, 5, k, (x, y) => (y <= 11 ? k : 0)); m.sphere(5.5, 11.5, 5.5, 4.8, k, (x, y) => (y > 11 ? k : 0)); m.box(5, 16, 5, 6, 17, 6, ch); m.box(0, 11, 0, 11, 12, 11, 0); m.box(1, 11, 1, 10, 12, 10, col(0x8a8e94, { metal: 0.9 })); })),
+    swing: (hex) => pm('swing' + hex, () => M16(64, 42, 26, (m) => { const fr = col(hex, { metal: 0.5, rough: 0.4 }), ch = col(0xb8bcc2, { metal: 0.9 }), seat = smoothC(0x2a2a2e);
+      for (const x of [0, 1, 62, 63]) for (let y = 0; y < 40; y++) { const k = Math.round(y * 11 / 39); m.set(x, y, k, fr); m.set(x, y, 25 - k, fr); }
+      m.box(0, 39, 11, 64, 41, 15, fr);
+      for (const s of [14, 38]) { for (let y = 10; y < 39; y++) { m.set(s, y, 13, ch); m.set(s + 10, y, 13, ch); } m.box(s - 1, 9, 10, s + 12, 10, 16, seat); } })),
+    trampoline: () => pm('tramp', () => M16(48, 12, 48, (m) => { const pad = smoothC(0x2f7a4a), mat = smoothC(0x1a1a1c), leg = col(0x8a8e94, { metal: 0.8 }); for (let x = 0; x < 48; x++) for (let z = 0; z < 48; z++) { const d = Math.hypot(x - 23.5, z - 23.5); if (d < 20) m.set(x, 9, z, mat); else if (d < 24) m.box(x, 9, z, x + 1, 11, z + 1, pad); } for (const a of [0, 1, 2, 3, 4, 5]) { const x = Math.round(23.5 + Math.cos(a * PI / 3) * 21), z = Math.round(23.5 + Math.sin(a * PI / 3) * 21); m.box(x, 0, z, x + 1, 9, z + 1, leg); } })),
+    lamp: () => pm('glamp', () => M16(3, 14, 3, (m) => { m.box(1, 0, 1, 2, 11, 2, smoothC(0x2a2a2e)); m.box(0, 11, 0, 3, 13, 3, glow(0xffe6b0, 2.2, 'night')); m.box(0, 13, 0, 3, 14, 3, smoothC(0x2a2a2e)); })),
+    table: (hex) => pm('ptable' + hex, () => M16(16, 12, 16, (m) => { const t = smoothC(hex), lg = smoothC(shade(hex, 0.6)); m.sphere(7.5, 11.5, 7.5, 8, t, (x, y) => (y === 11 ? t : 0)); m.box(7, 0, 7, 9, 11, 9, lg); m.box(4, 0, 4, 12, 1, 12, lg); })),
+    chair: (hex) => pm('pchair' + hex, () => M16(8, 14, 8, (m) => { const c = smoothC(hex); for (const [x, z] of [[0, 0], [7, 0], [0, 7], [7, 7]]) m.box(x, 0, z, x + 1, 7, z + 1, c); m.box(0, 7, 0, 8, 8, 8, c); m.box(0, 8, 0, 8, 14, 1, c); })),
+    float: () => pm('float', () => M16(14, 8, 14, (m) => { const p = smoothC(0xff7fbf); for (let x = 0; x < 14; x++) for (let z = 0; z < 14; z++) { const d = Math.hypot(x - 6.5, z - 6.5); if (d < 7 && d > 3.5) m.box(x, 0, z, x + 1, 2, z + 1, p); } m.box(9, 2, 5, 11, 7, 7, p); m.box(9, 7, 5, 13, 8, 7, p); m.set(12, 6, 6, smoothC(0x1a1a1a)); })),
+    hottub: () => pm('hottub', () => M16(36, 12, 36, (m) => { const w = smoothC(0x2a2a2e), g = col(0xd4a84a, { metal: 1, rough: 0.25 }); m.box(0, 0, 0, 36, 12, 36, w); m.box(0, 11, 0, 36, 12, 36, g); m.box(2, 3, 2, 34, 12, 34, 0); m.box(2, 3, 2, 34, 9, 34, col(0x6ad8e8, { glass: true, jitter: 0.02, edge: 0 })); })),
+  };
+  // sunken pool (heightmap basin + stepped entry + a water plane), in plot coordinates
+  const yardPool = (F, u0, v0, u1, v1, tileHex, copingHex) => {
+    const b = F.box(u0, v0, u1, v1), cx = (b[0] + b[2]) / 2, cz = (b[1] + b[3]) / 2, g = Math.round(W.groundY(cx, cz) * 4), wy = g * 0.25 - 0.3;
+    const tile = col(tileHex, { pat: 'none', patTop: 'slab', jitter: 0.12 }), cop = col(copingHex, { pat: 'none', patTop: 'slab', jitter: 0.1 });
+    F.paint(u0 - 0.75, v0 - 0.75, u1 + 0.75, v1 + 0.75, cop);
+    W.ground(b[0], b[1], b[2], b[3], g - 6, tile, tile);
+    for (let k = 1; k <= 4; k++) { const e = F.box(u0, v0, u0 + (5 - k) * 0.5, v1); W.ground(e[0], e[1], e[2], e[3], g - 6 + k, tile, tile); }
+    const pos = [], idx = []; let n = 0;
+    for (let x = b[0]; x < b[2] - 0.01; x += 0.5) for (let z = b[1]; z < b[3] - 0.01; z += 0.5) { pos.push(x, wy, z, x, wy, z + 0.5, x + 0.5, wy, z + 0.5, x + 0.5, wy, z); idx.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4; }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((v, i) => (i % 3 === 1 ? 1 : 0)), 3));
+    geo.setIndex(idx); geo.computeBoundingSphere(); geo.userData.kind = 'basin'; geo.userData.waterY = wy;
+    AF.addWater(geo); P.pools.push({ x0: b[0], z0: b[1], x1: b[2], z1: b[3], y: wy });
+    W.tDirty = true;
+    return { cx, cz, wy };
+  };
+  const leafC = [col(0x4f8a3a, { jitter: 0.7, solid: false }), col(0x3f7430, { jitter: 0.7, solid: false }), col(0x6aa84a, { jitter: 0.7, solid: false })];
+  const bush = (F, u, v, r, seed) => { for (let a = -r; a <= r; a += 0.25) for (let b2 = -r; b2 <= r; b2 += 0.25) { const d = Math.hypot(a, b2) / r, hsh = AF.hash2((u + a) * 4 | 0, (v + b2) * 4 + seed | 0); if (d > 1 - hsh * 0.25) continue; const h = 0.25 + Math.round((1 - d * d) * r * 1.4 * 4) / 4; F.fill(u + a, 0.25, v + b2, u + a + 0.25, 0.25 + h, v + b2 + 0.25, leafC[(hsh * 3) | 0]); } };
+  const flowerBed = (F, u0, v0, u1, v1, cols) => {
+    F.paint(u0, v0, u1, v1, col(0x5a4030, { jitter: 0.5 }));
+    const fc = cols.map((h) => col(h, { jitter: 0.3, solid: false }));
+    for (let u = u0; u < u1; u += 0.25) for (let v = v0; v < v1; v += 0.25) { const q = AF.hash2(u * 4 | 0, v * 4 | 0); if (q < 0.45) F.fill(u, 0.25, v, u + 0.25, 0.5, v + 0.25, leafC[q < 0.15 ? 1 : 0]); else if (q < 0.7) F.fill(u, 0.25, v, u + 0.25, 0.5 + (q < 0.55 ? 0.25 : 0), v + 0.25, fc[(q * 97 | 0) % fc.length]); }
+  };
+  const stones = (F, u0, v, u1) => { const c = col(0xcfc6b4, { pat: 'none', patTop: 'slab', jitter: 0.2 }); for (let u = u0; u < u1; u += 1.25) F.paint(u, v, u + 0.75, v + 0.75, c); };
+  const tree = (F, u, v, species, size, seed) => { if (!AF.TREEKIT) return; const [x, z] = F.w(u, v); AF.TREEKIT.place(x, z, species, size ? 0.65 : 0.5, seed); };   // garden-sized trees
+  const BATH_V = { kaybee: 18.25 };   // bathroom door (v) off the back wall; everyone else at 5 (tanishk 6.75)
+  const upgradeHome = (owner, F, th, rec) => {
+    const wall = col(th.wall, { pat: 'stucco', rough: 0.9, jitter: 0.12 }), trim = col(th.trim, { rough: 0.5 }), roof = col(th.roof, { pat: 'none', patTop: 'tar' });
+    const glass = col(0xa9c9d6, { glass: true, jitter: 0.05, edge: 0 }), win = AF.MAT.winApartment;
+    // ---- kitchen: fridge, a cooktop, a sink with a tap
+    F.place(PROPS.fridge(), 8.75, FLOOR, 7.5, F.rotBack);
+    F.fill(11, 1.5, 3.5, 11.25, 1.75, 3.75, smoothC(0x1d1d20)); F.fill(11.75, 1.5, 3.5, 12, 1.75, 3.75, smoothC(0x1d1d20));
+    F.fill(8.25, 1.25, 5, 9.25, 1.5, 6, col(0xc8ccd2, { metal: 0.9, rough: 0.2 })); F.fill(8.25, 1.5, 5.25, 8.5, 2.0, 5.5, col(0xc8ccd2, { metal: 0.9, rough: 0.2 }));
+    // ---- the bathroom annex behind the house
+    const dv = BATH_V[owner] ?? (owner === 'tanishk' ? 6.75 : 5), a = dv - 1.25, b = a + 5.5;
+    F.fill(24, 0.25, a, 29.5, CEIL, b, wall); F.fill(23.75, CEIL - 0.25, a - 0.25, 29.75, CEIL, b + 0.25, trim);
+    F.clear(24, FLOOR, a + 0.25, 29.25, CEIL - 0.25, b - 0.25);
+    F.fill(24, 0.25, a + 0.25, 29.25, FLOOR, b - 0.25, col(0xe8eef2, { pat: 'none', patTop: 'slab', rough: 0.3 }));
+    F.fill(24, CEIL - 0.5, a + 0.25, 29.25, CEIL - 0.25, b - 0.25, smoothC(0xf6f2ea));
+    F.clear(23.7, FLOOR, dv, 24.3, 3.0, dv + 1.25);
+    F.fill(29.25, 1.75, a + 2, 29.5, 2.75, a + 3.5, glass);
+    F.place(PROPS.toilet(), 28.75, FLOOR, a + 1, F.rotLane);
+    F.place(PROPS.sink(), 28.9, FLOOR, a + 2.75, F.rotLane); F.place(PROPS.mirror(), 29.2, 1.75, a + 2.75, F.rotLane);
+    F.place(PROPS.tub(), 25.4, FLOOR, a + 4.1, (F.rotLane + 1) % 4);
+    F.fill(26.5, CEIL - 0.75, a + 2.25, 27.25, CEIL - 0.5, a + 3, glow(0xfff4dc, 1.8, 'night'));
+    F.fill(24.25, 1.75, b - 0.5, 25.5, 2.0, b - 0.25, smoothC(th.accent));   // towel rail
+    { const [x, z] = F.w(26.75, a + 2.75); AF.addLight({ x, y: CEIL - 0.9, z, color: 0xfff0dc, intensity: 0.6, range: 6, kind: 'interior' }); }
+    // ---- patio door onto the garden + a patio
+    F.clear(23.7, FLOOR, 12, 24.3, 3.0, 13.25);
+    F.paint(24, 11, 30.5, 17, col(0xd8cfbe, { pat: 'none', patTop: 'slab', jitter: 0.25 }));
+    stones(F, 31, 13, 38);
+    F.place(PROPS.lamp(), 30.75, 0.25, 11.25, 0); F.place(PROPS.lamp(), 30.75, 0.25, 16.5, 0);
+    // ---- the silhouette
+    SHAPE[owner](F, th, { wall, trim, roof, glass, win });
+    // ---- the garden
+    GARDEN[owner](F, th);
+    rec.box[4] = TOP + 6;
+  };
+  const SHAPE = {
+    dhruv(F, th, c) {           // modern: a set-back upper floor with a glass balcony, cantilevered out over the garden, solar panels
+      F.clear(7.75, CEIL + 0.25, 2.75, 12, TOP + 0.5, 24.25);
+      F.fill(7.75, CEIL + 0.25, 2.75, 8, CEIL + 1.25, 24.25, c.glass); F.fill(8, CEIL + 0.25, 2.75, 12, CEIL + 1.25, 3, c.glass); F.fill(8, CEIL + 0.25, 24, 12, CEIL + 1.25, 24.25, c.glass);
+      F.fill(12, CEIL + 0.25, 3, 12.25, TOP, 24, c.wall);
+      for (const [v0, v1] of [[4, 11], [13, 22.5]]) F.fill(12, CEIL + 0.75, v0, 12.25, TOP - 0.75, v1, c.glass);
+      F.fill(24, CEIL, 3, 30, TOP, 12, c.wall); F.fill(29.75, CEIL + 0.75, 4, 30, TOP - 0.75, 11, c.glass);
+      F.fill(24.25, CEIL, 3, 30, CEIL + 0.25, 12, glow(th.accent, 1.6));
+      F.fill(11.75, TOP - 0.25, 2.75, 24.25, TOP + 0.5, 24.25, c.trim); F.fill(23.75, TOP - 0.25, 2.75, 30.25, TOP + 0.5, 12.25, c.trim);
+      F.clear(12.25, TOP, 3.25, 23.75, TOP + 0.5, 23.75); F.clear(23.75, TOP, 3.25, 29.75, TOP + 0.5, 11.75);
+      F.fill(12.25, TOP - 0.25, 3.25, 23.75, TOP, 23.75, c.roof); F.fill(23.75, TOP - 0.25, 3.25, 29.75, TOP, 11.75, c.roof);
+      const pv = col(0x1d2c4a, { metal: 0.6, rough: 0.2 });
+      for (let v = 5; v < 22; v += 2.5) F.fill(14, TOP, v, 22, TOP + 0.25, v + 1.75, pv);
+    },
+    hunar(F, th, c) {           // dreamhouse: a pink gable roof, a round turret with a cone cap, pink shutters
+      F.clear(7.75, TOP, 2.75, 24.25, TOP + 0.5, 24.25);
+      for (let s = 0; s < 17; s++) F.fill(7.75 + s * 0.5, TOP - 0.25 + s * 0.25, 2.5, 24.25 - s * 0.5, TOP + s * 0.25, 24.5, c.roof);
+      for (let s = 0; s < 15; s++) { F.fill(8 + s * 0.5, TOP + s * 0.25, 2.75, 24 - s * 0.5, TOP + 0.25 + s * 0.25, 3, c.wall); F.fill(8 + s * 0.5, TOP + s * 0.25, 24, 24 - s * 0.5, TOP + 0.25 + s * 0.25, 24.25, c.wall); }
+      F.fill(15, TOP + 1, 2.5, 17, TOP + 2.5, 2.75, glow(th.accent, 1.8, 'night'));
+      const [tx, tz] = F.w(6, 2.5), tw = col(0xffffff, { pat: 'stucco' }), cone = col(th.roof, { pat: 'none' });
+      for (let y = 0.25; y < TOP + 1; y += 0.25) W.eachCol(tx - 2.5, tz - 2.5, tx + 2.5, tz + 2.5, (bx, bz, i, x, z) => { const d = Math.hypot(x - tx, z - tz); if (d < 2.3 && d > 1.8) W.setM(x, y + 0.01, z, (y > 4.5 && y < 6 && ((bx + bz) & 3) === 0) ? glow(0xffd0e8, 1.5, 'night') : tw); });
+      for (let k = 0; k < 14; k++) { const r = 2.6 - k * 0.2, y = TOP + 1 + k * 0.25; W.eachCol(tx - r, tz - r, tx + r, tz + r, (bx, bz, i, x, z) => { if (Math.hypot(x - tx, z - tz) < r) W.setM(x, y + 0.01, z, cone); }); }
+      for (const [v0, v1] of [[4.5, 9], [12, 16], [18.5, 22.5]]) { F.fill(7.75, CEIL + 1, v0 - 0.5, 8, CEIL + 2.75, v0, smoothC(th.accent)); F.fill(7.75, CEIL + 1, v1, 8, CEIL + 2.75, v1 + 0.5, smoothC(th.accent)); }
+    },
+    tanishk(F, th, c) {         // penthouse: a gold-railed roof terrace over the back half, gold crown line
+      F.clear(18, CEIL + 0.25, 2.75, 24.25, TOP + 0.5, 24.25);
+      F.fill(17.75, CEIL + 0.25, 3, 18, TOP, 24, c.wall);
+      for (const [v0, v1] of [[4.5, 10.5], [16.5, 22.5]]) F.fill(17.75, CEIL + 0.5, v0, 18, TOP - 0.75, v1, c.glass);
+      F.fill(17.75, CEIL + 0.5, 11.5, 18, CEIL + 3, 15.5, c.glass);
+      const gold = col(0xd4a84a, { metal: 1, rough: 0.25 });
+      F.fill(23.75, CEIL + 0.25, 2.75, 24.25, CEIL + 1.25, 24.25, c.glass); F.fill(23.75, CEIL + 1.25, 2.75, 24.25, CEIL + 1.5, 24.25, gold);
+      F.fill(18, CEIL + 0.25, 2.75, 24.25, CEIL + 1.25, 3, c.glass); F.fill(18, CEIL + 0.25, 24, 24.25, CEIL + 1.25, 24.25, c.glass);
+      F.fill(18, CEIL + 1.25, 2.75, 24.25, CEIL + 1.5, 3, gold); F.fill(18, CEIL + 1.25, 24, 24.25, CEIL + 1.5, 24.25, gold);
+      F.fill(7.75, TOP - 0.25, 2.75, 18.25, TOP + 0.5, 24.25, c.trim); F.clear(8.25, TOP, 3.25, 17.75, TOP + 0.5, 23.75); F.fill(8.25, TOP - 0.25, 3.25, 17.75, TOP, 23.75, c.roof);
+      F.fill(7.75, TOP + 0.5, 2.75, 18.25, TOP + 0.75, 3, glow(0xf7931a, 1.4, 'night'));
+      F.place(PROPS.hottub(), 21, CEIL + 0.25, 7, 0); F.place(PROPS.lounger(0xd4a84a), 21, CEIL + 0.25, 15, F.rotLane); F.place(PROPS.lounger(0xd4a84a), 21, CEIL + 0.25, 18, F.rotLane);      F.place(PROPS.umbrella(0x1d1d20, 0xd4a84a), 21.5, CEIL + 0.25, 21.5, 0);
+    },
+    diksha(F, th, c) {          // cottage: a steep lavender gable across the house, a brick chimney, window boxes
+      F.clear(7.75, TOP, 2.75, 24.25, TOP + 0.5, 24.25);
+      for (let s = 0; s < 15; s++) F.fill(7.5, TOP - 0.25 + s * 0.25, 2.5 + s * 0.75, 24.5, TOP + s * 0.25, 24.5 - s * 0.75, c.roof);
+      for (let s = 0; s < 14; s++) { F.fill(7.75, TOP + s * 0.25, 3 + s * 0.75, 8, TOP + 0.25 + s * 0.25, 24 - s * 0.75, c.wall); F.fill(24, TOP + s * 0.25, 3 + s * 0.75, 24.25, TOP + 0.25 + s * 0.25, 24 - s * 0.75, c.wall); }
+      F.fill(7.5, TOP + 0.75, 12.5, 7.75, TOP + 2, 14.5, glow(0xffe6c0, 1.6, 'night'));
+      const brick = col(0x9a4a3a, { pat: 'brick' });
+      F.fill(20, TOP, 18, 21.25, TOP + 4.75, 19.25, brick); F.fill(19.75, TOP + 4.75, 17.75, 21.5, TOP + 5, 19.5, col(0x5a5a5a));
+      const box = smoothC(0xfaf6ff), fl = [col(0xff8fc8, { solid: false }), col(0xc27ad6, { solid: false }), col(0xfff0a0, { solid: false })];
+      for (const [v0, v1] of [[4, 8.75], [13.25, 22.75]]) { F.fill(7.5, 1.0, v0, 8, 1.25, v1, box); for (let v = v0; v < v1; v += 0.25) F.fill(7.5, 1.25, v, 7.75, 1.5, v + 0.25, fl[((v * 4) | 0) % 3]); }
+    },
+    kush(F, th, c) {            // L-shape: a second storey over the garage and a green roof garden
+      F.fill(8, 3.75, 24, 22, TOP, 33, c.wall);
+      for (const [v0, v1] of [[25.5, 31.5]]) F.fill(8, CEIL + 1, v0, 8.25, CEIL + 2.75, v1, c.win);
+      F.fill(12, CEIL + 1, 32.75, 18, CEIL + 2.75, 33, c.win); F.fill(21.75, CEIL + 1, 26, 22, CEIL + 2.75, 31, c.win);
+      F.clear(8.25, TOP, 23.75, 21.75, TOP + 0.5, 24.25);
+      F.fill(7.75, TOP - 0.25, 23.75, 22.25, TOP + 0.5, 33.25, c.trim); F.clear(8.25, TOP, 24, 21.75, TOP + 0.5, 32.75);
+      const turf = col(0x5f9a3a, { jitter: 0.9 });
+      F.fill(8.25, TOP - 0.25, 3.25, 23.75, TOP, 23.75, turf); F.fill(8.25, TOP - 0.25, 24, 21.75, TOP, 32.75, turf);
+      for (const [u, v] of [[10, 6], [20, 6], [10, 20], [16, 29], [20, 20]]) { F.fill(u, TOP, v, u + 1.5, TOP + 0.5, v + 1.5, smoothC(0x6a4a2a)); F.fill(u + 0.25, TOP + 0.5, v + 0.25, u + 1.25, TOP + 1.25, v + 1.25, leafC[1]); }
+      F.fill(12, TOP, 12, 18, TOP + 0.25, 15, smoothC(0x8a6a4a)); F.fill(12.5, TOP + 0.25, 12.5, 17.5, TOP + 0.5, 14.5, smoothC(th.accent));
+    },
+    kaybee(F, th, c) {          // ship: a narrow upper 'cabin' with portholes, wooden deck rails, a crow's nest by the flag
+      F.clear(7.75, CEIL + 0.25, 2.75, 11, TOP + 0.5, 24.25); F.clear(21, CEIL + 0.25, 2.75, 24.25, TOP + 0.5, 24.25);
+      F.fill(11, CEIL + 0.25, 3, 11.25, TOP, 24, c.wall); F.fill(20.75, CEIL + 0.25, 3, 21, TOP, 24, c.wall);
+      const port = glow(0xffe6a0, 1.4, 'night'), brass = col(0xd8b04a, { metal: 1 });
+      for (let v = 5; v < 23; v += 3) { F.fill(11, CEIL + 1.5, v, 11.25, CEIL + 2.25, v + 0.75, port); F.fill(10.75, CEIL + 1.25, v - 0.25, 11, CEIL + 1.5, v + 1, brass); F.fill(20.75, CEIL + 1.5, v, 21, CEIL + 2.25, v + 0.75, port); }
+      const wood = col(0x8a5a34, { pat: 'none' });
+      for (const u of [7.75, 23.75]) { F.fill(u, CEIL + 1, 2.75, u + 0.25, CEIL + 1.25, 24.25, wood); for (let v = 3; v < 24.25; v += 1.5) F.fill(u, CEIL + 0.25, v, u + 0.25, CEIL + 1, v + 0.25, wood); }
+      F.fill(10.75, TOP - 0.25, 2.75, 21.25, TOP + 0.5, 24.25, c.trim); F.clear(11.25, TOP, 3.25, 20.75, TOP + 0.5, 23.75); F.fill(11.25, TOP - 0.25, 3.25, 20.75, TOP, 23.75, wood);
+      F.fill(19.75, TOP, 19.75, 20.25, TOP + 5.5, 20.25, wood);
+      F.fill(18.75, TOP + 3.5, 18.75, 21.25, TOP + 3.75, 21.25, wood); F.fill(18.75, TOP + 3.75, 18.75, 21.25, TOP + 4.25, 19, wood); F.fill(18.75, TOP + 3.75, 21, 21.25, TOP + 4.25, 21.25, wood); F.fill(18.75, TOP + 3.75, 18.75, 19, TOP + 4.25, 21.25, wood);
+      F.fill(7.5, 1.5, 12, 7.75, 2.25, 12.75, col(0xf2f2f2)); F.fill(7.5, 1.75, 12.25, 7.75, 2.0, 12.5, col(0xc8322a));   // lifebuoy
+    },
+  };
+  const GARDEN = {
+    dhruv(F) {
+      yardPool(F, 34, 4, 47, 10, 0x3a8ac8, 0xe8e8e4);
+      for (const v of [11.5, 13.25]) F.place(PROPS.lounger(0x2d4a7a), 41 + (v - 11.5) * 2, 0.25, v + 0.5, (F.rotLane + 1) % 4);
+      F.place(PROPS.umbrella(0xffffff, 0x3aa0ff), 45.5, 0.25, 13, 0);
+      F.place(PROPS.table(0xe8e8e4), 26.5, 0.25, 14.5, 0); for (const [u, v, r] of [[25.25, 14.5, 3], [27.75, 14.5, 1]]) F.place(PROPS.chair(0x2d3e57), u, 0.25, v, (F.rotLane + r) % 4);
+      F.place(PROPS.bbq(), 29, 0.25, 12, 0);
+      flowerBed(F, 32, 20, 47, 21.5, [0x3aa0ff, 0xffffff, 0x9ad0ff]);
+      for (const [u, v] of [[33, 30], [46.5, 30], [40, 25]]) bush(F, u, v, 1.1, u);
+      tree(F, 47, 17, 'maple', 0, 11); tree(F, 34, 28, 'birch', 0, 12); tree(F, 46, 32, 'pine', 0, 13);
+    },
+    hunar(F) {
+      const pl = yardPool(F, 35, 13, 45, 21, 0xff9fcf, 0xffffff);
+      F.place(PROPS.float(), 40, pl.wy + 0.05, 17, 0);
+      for (const v of [9.5, 11.25]) F.place(PROPS.lounger(0xff5fae), 38 + (v - 9.5) * 2.5, 0.25, v, (F.rotLane + 1) % 4);
+      F.place(PROPS.umbrella(0xffffff, 0xff4fa3), 45.5, 0.25, 10, 0);
+      F.place(PROPS.table(0xffffff), 26.5, 0.25, 14.5, 0); for (const [u, v, r] of [[25.25, 14.5, 3], [27.75, 14.5, 1]]) F.place(PROPS.chair(0xff7fbf), u, 0.25, v, (F.rotLane + r) % 4);
+      flowerBed(F, 33, 24, 47, 25.5, [0xff4fa3, 0xffc4e1, 0xffffff, 0xc02a7a]); flowerBed(F, 33, 3, 47, 4.5, [0xff4fa3, 0xffc4e1, 0xff8fc8]);
+      for (const [u, v] of [[34, 30], [40, 30], [46, 30]]) bush(F, u, v, 0.9, u + 3);
+      tree(F, 47.5, 7, 'maple-red', 0, 21); tree(F, 32.5, 8, 'sweetgum', 0, 22);
+    },
+    tanishk(F) {
+      yardPool(F, 33, 6, 47, 13, 0x1d2c3a, 0xd4a84a);
+      for (const u of [35, 38, 41, 44]) F.place(PROPS.lounger(0x202024), u, 0.25, 15.5, (F.rotLane + 1) % 4);
+      F.place(PROPS.umbrella(0x1d1d20, 0xd4a84a), 46.5, 0.25, 17.5, 0);
+      F.place(PROPS.bbq(), 29, 0.25, 12, 0);
+      const gold = col(0xd4a84a, { metal: 1, rough: 0.25 });
+      F.fill(38, 0.25, 22, 41, 0.75, 25, smoothC(0x2e2e33)); F.fill(39, 0.75, 23, 40, 2.75, 24, gold); F.fill(38.75, 2.75, 22.75, 40.25, 3.25, 24.25, glow(0xf7931a, 1.6, 'night'));   // a gold BTC plinth
+      for (const [u, v] of [[33, 29], [46.5, 29], [33, 20], [46.5, 21]]) bush(F, u, v, 1.0, u * 2);
+      tree(F, 48, 3, 'pine', 0, 31); tree(F, 32, 3, 'pine', 0, 32);
+    },
+    diksha(F) {
+      F.place(PROPS.swing(0x8e5ad6), 40, 0.25, 9, F.rotLane);
+      flowerBed(F, 32, 16, 47, 18, [0xc27ad6, 0xd6b1e8, 0xff8fc8, 0xfff0a0]); flowerBed(F, 32, 20, 47, 22, [0x8e5ad6, 0xffffff, 0xf2c6e6]);
+      F.place(PROPS.table(0xfaf6ff), 26.5, 0.25, 14.5, 0); for (const [u, v, r] of [[25.25, 14.5, 3], [27.75, 14.5, 1]]) F.place(PROPS.chair(0xc27ad6), u, 0.25, v, (F.rotLane + r) % 4);
+      const wood = col(0xfaf6ff); for (const [u, v] of [[36, 26], [42, 26], [36, 31], [42, 31]]) F.fill(u, 0.25, v, u + 0.25, 2.75, v + 0.25, wood);   // a little pergola
+      F.fill(35.75, 2.75, 25.75, 42.5, 3.0, 31.5, wood); for (let u = 36; u < 42.5; u += 0.75) F.fill(u, 3.0, 25.75, u + 0.25, 3.25, 31.5, wood);
+      for (let v = 26; v < 31.5; v += 0.5) F.fill(35.75, 1.5 + ((v * 4) & 3) * 0.25, v, 36, 3.0, v + 0.25, leafC[2]);
+      for (const [u, v] of [[46, 5], [33, 5]]) bush(F, u, v, 1.1, v * 7);
+      tree(F, 47, 30, 'maple-orange', 0, 41); tree(F, 32, 11, 'birch', 0, 42);
+    },
+    kush(F, th) {
+      F.place(PROPS.swing(0x2f7a4a), 36, 0.25, 7, F.rotLane);
+      F.place(PROPS.trampoline(), 44, 0.25, 8, 0);
+      // a vegetable patch + a small koi-free splash pool for Div
+      const soil = col(0x5a4030, { jitter: 0.5 }), veg = [col(0x3f8a3a, { solid: false }), col(0xd8502a, { solid: false }), col(0x6ab83a, { solid: false })];
+      for (let r = 0; r < 4; r++) { F.paint(33, 20 + r * 1.5, 45, 20.75 + r * 1.5, soil); for (let u = 33; u < 45; u += 0.5) F.fill(u, 0.25, 20 + r * 1.5, u + 0.25, 0.5 + (r & 1) * 0.25, 20.25 + r * 1.5, veg[(r + ((u * 2) | 0)) % 3]); }
+      F.place(PROPS.bbq(), 29, 0.25, 12, 0);
+      F.place(PROPS.table(0x8a6a4a), 26.5, 0.25, 14.5, 0); for (const [u, v, r] of [[25.25, 14.5, 3], [27.75, 14.5, 1]]) F.place(PROPS.chair(0x2f7a4a), u, 0.25, v, (F.rotLane + r) % 4);
+      for (const [u, v] of [[33, 30], [47, 30], [47, 16]]) bush(F, u, v, 1.0, u + v);
+      tree(F, 34, 15, 'oak', 1, 51); tree(F, 47, 3, 'maple-gold', 0, 52);
+    },
+    kaybee(F) {
+      // a ship-shaped sandbox with a mast, a swing, and a little lagoon
+      const sand = col(0xe8d8a8, { jitter: 0.5 }), wood = col(0x8a5a34, { pat: 'none' });
+      F.paint(34, 6, 44, 12, sand);
+      for (let u = 34; u < 44; u += 0.25) { const w = u > 41 ? (44 - u) * 1.0 : 3; F.fill(u, 0.25, 9 - w, u + 0.25, 0.75, 9 - w + 0.25, wood); F.fill(u, 0.25, 9 + w - 0.25, u + 0.25, 0.75, 9 + w, wood); }
+      F.fill(34, 0.25, 6, 34.25, 0.75, 12, wood); F.fill(38.5, 0.25, 8.75, 38.75, 5, 9, wood); F.fill(37, 3, 8.9, 40.5, 4.75, 9, smoothC(0xf2ece0));
+      yardPool(F, 36, 20, 44, 26, 0x2a7a8a, 0x8a5a34);
+      F.place(PROPS.swing(0xb8322a), 45, 0.25, 30, F.rotLane);
+      F.place(PROPS.table(0x6a4a2a), 26.5, 0.25, 14.5, 0); for (const [u, v, r] of [[25.25, 14.5, 3], [27.75, 14.5, 1]]) F.place(PROPS.chair(0xb8322a), u, 0.25, v, (F.rotLane + r) % 4);
+      for (const [u, v] of [[33, 30], [47, 17], [33, 16]]) bush(F, u, v, 1.0, u * 3 + v);
+      tree(F, 47.5, 4, 'autumn', 1, 61); tree(F, 31.5, 25, 'maple-red', 0, 62);
+    },
+  };
+
   // ------------------------------------------------------------ BUILD
   AF.onBuild('west-colony', 310, () => {
     const t0 = performance.now();
@@ -17230,6 +17536,7 @@ try {
       AF.addBuilding({ id: owner ? 'friend-' + owner : 'colony-' + pl.i, name: name || 'a neighbour\u2019s house', label: !!owner, kind: 'house', box: rec.box, doors: [rec.door], interior: !!owner, owner: 'west' });
       if (!owner) continue;
       const S = INTERIOR[owner](F, th);
+      try { upgradeHome(owner, F, th, rec); } catch (e) { console.warn('[af] home upgrade failed', owner, e); }
       // the name plate over the door + an indoor neon sign on the back wall
       F.place(K.text(owner === 'kush' ? 'KUSH & DIV' : owner.toUpperCase(), th.trim === 0xffffff ? 0x2a2a2e : th.trim, { lit: false, font: 'deco', vs: 1 / 12 }), 7.9, 3.55, 10.9, F.rotLane);
       F.place(K.text(S.sign[0], S.sign[1], S.sign[2] || {}), 23.6, 2.35, 13, F.rotLane);
@@ -17272,21 +17579,27 @@ try {
   const P = AF.PLAN, W = AF.W, ZOO = P.west.zoo, PI = Math.PI;
   const K = () => AF.westKit;
   const HAB = ZOO.habitats = [
-    { id: 'savannah', name: 'The Savannah', rect: [-640, -140, -562, -30], ground: [0xc8b060, 0xb8a050, 0xd8c078], animals: [['elephant', 3], ['giraffe', 3], ['zebra', 5], ['antelope', 4]],
-      sign: ['Elephants, giraffes, zebras and impala share the open plain.', 'An elephant eats around 150 kg of food a day. The giraffes mostly eat the acacia leaves you can see.'] },
-    { id: 'lions', name: 'Pride Rock', rect: [-536, -140, -496, -90], ground: [0xc0a860, 0xa89a58, 0xd0b878], animals: [['lion', 1], ['lioness', 2]],
-      sign: ['The pride lounges on the warm rock for most of the day.', 'Lions sleep up to twenty hours a day. Relatable.'] },
-    { id: 'tigers', name: 'Tiger Forest', rect: [-536, -82, -496, -30], ground: [0x4f7a34, 0x3f6a2e, 0x5a8a3a], animals: [['tiger', 3]],
-      sign: ['Tigers love water \u2014 watch for them near the stream.', 'No two tigers have the same stripes.'] },
-    { id: 'flamingos', name: 'Flamingo Lagoon', rect: [-486, -140, -456, -30], ground: [0xd8c8a0, 0xc8b890, 0xe0d0a8], animals: [['flamingo', 9]],
+    { id: 'elephants', name: 'Elephant Plains', rect: [-640, -140, -604, -89], side: 'e', ground: [0xc8b060, 0xb8a050, 0xd8c078], animals: [['elephant', 3]],
+      sign: ['African elephants: the largest land animals on Earth.', 'An elephant eats around 150 kg of food a day and drinks up to 200 litres of water.', 'Their ears flap to cool them down \u2014 like big grey fans.'] },
+    { id: 'giraffes', name: 'Giraffe Heights', rect: [-594, -140, -562, -89], side: 'w', ground: [0xc8b060, 0xbfa858, 0xd8c078], animals: [['giraffe', 3]],
+      sign: ['Giraffes: the tallest animals alive, up to 5.5 metres.', 'Their tongues are almost half a metre long and dark blue-black.', 'A giraffe sleeps only about 30 minutes a day, in short naps.'] },
+    { id: 'zebras', name: 'Zebra Grassland', rect: [-640, -81, -604, -30], side: 'e', ground: [0xb8b060, 0xa8a050, 0xc8c078], animals: [['zebra', 5]],
+      sign: ['Plains zebras live in family groups called harems.', 'Every zebra\u2019s stripe pattern is unique, like a fingerprint.'] },
+    { id: 'antelope', name: 'Impala Meadow', rect: [-594, -81, -562, -30], side: 'w', ground: [0xc0a860, 0xb09850, 0xd0b870], animals: [['antelope', 5]],
+      sign: ['Impala can leap three metres high and ten metres long.', 'Only the males grow the curved, ridged horns.'] },
+    { id: 'lions', name: 'Pride Rock', rect: [-536, -140, -496, -90], side: 'w', ground: [0xc0a860, 0xa89a58, 0xd0b878], animals: [['lion', 1], ['lioness', 2]],
+      sign: ['The pride lounges on the warm rock for most of the day.', 'Lions sleep up to twenty hours a day. Relatable.', 'A lion\u2019s roar carries eight kilometres.'] },
+    { id: 'tigers', name: 'Tiger Forest', rect: [-536, -82, -496, -30], side: 'w', ground: [0x4f7a34, 0x3f6a2e, 0x5a8a3a], animals: [['tiger', 3]],
+      sign: ['Tigers love water \u2014 watch for them near the stream.', 'No two tigers have the same stripes.', 'Tigers are the largest of all the big cats.'] },
+    { id: 'flamingos', name: 'Flamingo Lagoon', rect: [-486, -140, -456, -30], side: 'w', ground: [0xd8c8a0, 0xc8b890, 0xe0d0a8], animals: [['flamingo', 9]],
       sign: ['Flamingos are pink because of the shrimp and algae they eat.', 'They sleep standing on one leg. Try it.'] },
-    { id: 'hippos', name: 'Hippo Swamp', rect: [-640, -280, -602, -166], ground: [0x6a5a3a, 0x5a4a30, 0x7a6a44], animals: [['hippo', 3]],
-      sign: ['Hippos spend their days in the water and graze at night.', 'A hippo can hold its breath for five minutes.'] },
-    { id: 'crocs', name: 'Crocodile Marsh', rect: [-594, -280, -560, -166], ground: [0x5a6a3a, 0x4a5a30, 0x6a7a44], animals: [['croc', 4]],
-      sign: ['Crocodiles can lie perfectly still for hours.', 'Please do not tap on the glass. There is no glass.'] },
-    { id: 'deer', name: 'Deer Woodland', rect: [-536, -280, -496, -166], ground: [0x6f9a3e, 0x7da646, 0x88a049], animals: [['deer', 5], ['stag', 2]],
+    { id: 'hippos', name: 'Hippo Swamp', rect: [-640, -280, -602, -166], side: 'e', ground: [0x6a5a3a, 0x5a4a30, 0x7a6a44], animals: [['hippo', 3]],
+      sign: ['Hippos spend their days in the water and graze at night.', 'A hippo can hold its breath for five minutes.', 'Despite their size, hippos can outrun a person on land.'] },
+    { id: 'crocs', name: 'Crocodile Marsh', rect: [-594, -280, -560, -166], side: 'w', ground: [0x5a6a3a, 0x4a5a30, 0x6a7a44], animals: [['croc', 4]],
+      sign: ['Crocodiles can lie perfectly still for hours.', 'Please do not tap on the glass. There is no glass.', 'Crocodiles have been around for more than 200 million years.'] },
+    { id: 'deer', name: 'Deer Woodland', rect: [-536, -280, -496, -166], side: 'w', ground: [0x6f9a3e, 0x7da646, 0x88a049], animals: [['deer', 5], ['stag', 2]],
       sign: ['White-tailed deer from the hills north of Port Solace.', 'The stags grow a new set of antlers every year.'] },
-    { id: 'bears', name: 'Bear Forest', rect: [-486, -280, -456, -166], ground: [0x5a6a34, 0x4a5a2e, 0x6a5a3a], animals: [['bear', 2]],
+    { id: 'bears', name: 'Bear Forest', rect: [-486, -280, -456, -166], side: 'w', ground: [0x5a6a34, 0x4a5a2e, 0x6a5a3a], animals: [['bear', 2]],
       sign: ['Brown bears: excellent swimmers, excellent climbers, excellent nappers.', 'A bear\u2019s sense of smell is seven times better than a bloodhound\u2019s.'] },
   ];
   const POOLS = ZOO.pools = [];   // [{cx, cz, rx, rz, y, hab}]
@@ -17304,6 +17617,7 @@ try {
     path(-640, -160, -454, -146); // the cross walk
     path(-560, -148, -553, -26); path(-494, -150, -486, -26); path(-494, -282, -486, -160); path(-602, -282, -594, -160); path(-560, -282, -553, -160);
     path(-553, -30, -454, -22);   // along the south habitats
+    path(-603.5, -146, -594.5, -26); path(-640, -88.5, -562, -81.5); path(-640, -29, -553, -22);   // between the four plains enclosures + the south walk
     // perimeter wall with the gate on the promenade
     const wall = (a, b, c, d) => { W.fill(a, 0.25, b, c, 2.75, d, stoneW); W.fill(a - 0.25, 2.75, b - 0.25, c + 0.25, 3.0, d + 0.25, cap); };
     wall(x0, z0, x1, z0 + 0.5); wall(x0, z0, x0 + 0.5, z1); wall(x1 - 0.5, z0, x1, z1);
@@ -17318,21 +17632,33 @@ try {
     AF.addBuilding({ id: 'zoo', name: 'Solace Zoo', kind: 'zoo', box: [x0, 0, z0, x1, 3, z1], doors: [{ x: -546, y: 0.25, z: z1 - 2, yaw: PI }], interior: false, owner: 'west', label: true });
     // lamp posts along the promenade
     for (let z = -40; z > -280; z -= 24) for (const x of [-554, -538]) { W.fill(x, 0.25, z, x + 0.25, 4, z + 0.25, iron); W.fill(x - 0.25, 4, z - 0.25, x + 0.5, 4.5, z + 0.5, glow(0xfff0c8, 2.6, 'night')); AF.addLight({ x: x + 0.1, y: 4.3, z: z + 0.1, color: 0xffe0b0, intensity: 0.8, range: 10, kind: 'street' }); }
-    // ---- habitats: ground, fences, features
+    // ---- enclosures: ground, a knee-high stone wall + open railing (you look OVER it), a name board on the path side
+    const rail = col(0x2f4a3a, { metal: 0.6, rough: 0.45 }), boardC = col(0x2f6a4a), paper = col(0xf2ead0, { jitter: 0.05 });
+    const fitText = (str, hex, maxW, font) => { const o = { font, depth: 1, pad: 0 }; const w = AF.textModel(str, 1, o).w || 1; return K().text(str, hex, { lit: false, font, pad: 0, vs: Math.min(1 / 16, maxW / w) }); };
+    const spot = (x, z, yaw, kind) => AF.addSpot && AF.addSpot({ building: 'zoo', x, y: 0.25, z, yaw, kind });
     for (const H of HAB) {
       const [a, b, c, d] = H.rect, gc = H.ground.map((h) => col(h, { jitter: 0.9 }));
       W.eachCol(a, b, c, d, (bx, bz, i, x, z) => { const n = AF.noise2(x * 0.12, z * 0.12); W.C[i] = gc[n < 0.4 ? 0 : n < 0.7 ? 1 : 2]; });
-      // visitor wall 1.25 m + railing, all round
-      const fence = (p, q, r, s) => { W.fill(p, 0.25, q, r, 1.5, s, stoneW); W.fill(p, 1.5, q, r, 1.75, s, cap); };
+      const fence = (p, q, r, s) => { W.fill(p, 0.25, q, r, 0.75, s, stoneW); W.fill(p, 0.75, q, r, 1.0, s, cap); };
       fence(a - 0.5, b - 0.5, c + 0.5, b); fence(a - 0.5, d, c + 0.5, d + 0.5); fence(a - 0.5, b, a, d); fence(c, b, c + 0.5, d);
-      for (const [p, q, r, s] of [[a - 0.5, b - 0.5, c + 0.5, b], [a - 0.5, d, c + 0.5, d + 0.5]]) for (let x = p; x < r; x += 0.75) W.fill(x, 1.75, q + 0.125, x + 0.125, 2.75, s - 0.125, iron);
-      for (const [p, r] of [[a - 0.5, a], [c, c + 0.5]]) for (let z = b; z < d; z += 0.75) W.fill(p + 0.125, 1.75, z, r - 0.125, 2.75, z + 0.125, iron);
-      W.fill(a - 0.5, 2.75, b - 0.5, c + 0.5, 2.85, b, iron); W.fill(a - 0.5, 2.75, d, c + 0.5, 2.85, d + 0.5, iron);
-      // the info board on the path side facing the promenade / walk
-      const sx = (a + c) / 2, sz = d + 1.6;
-      W.fill(sx - 1.2, 0.25, sz, sx + 1.2, 2.0, sz + 0.25, col(0x2f6a4a)); W.fill(sx - 1.0, 1.0, sz + 0.25, sx + 1.0, 1.9, sz + 0.3, col(0xf2ead0));
-      AF.addInteract({ x: sx, y: 1.2, z: sz + 0.8, r: 2.2, label: 'Read: ' + H.name, act: () => AF.emit('dialogue', { name: H.name, role: 'Solace Zoo', lines: H.sign }) });
-      AF.addLabel(H.name, sx, (b + d) / 2, 'place');
+      for (const [p, q, r, s] of [[a - 0.5, b - 0.5, c + 0.5, b], [a - 0.5, d, c + 0.5, d + 0.5]]) { for (let x = p; x < r; x += 2) W.fill(x, 1.0, q + 0.125, x + 0.25, 1.75, s - 0.125, rail); W.fill(p, 1.5, q + 0.125, r, 1.75, s - 0.125, rail); }
+      for (const [p, r] of [[a - 0.5, a], [c, c + 0.5]]) { for (let z = b; z < d; z += 2) W.fill(p + 0.125, 1.0, z, r - 0.125, 1.75, z + 0.25, rail); W.fill(p + 0.125, 1.5, b, r - 0.125, 1.75, d, rail); }
+      // the board: a slanted lectern on the path side, name in raised letters, facts on interact
+      const east = H.side === 'e', bx0 = east ? c + 1.4 : a - 1.4, bz0 = (b + d) / 2, face = east ? 1 : 3, fx = east ? 1 : -1;
+      W.fill(bx0 - 0.125, 0.25, bz0 - 0.125, bx0 + 0.125, 1.25, bz0 + 0.125, boardC);
+      W.fill(Math.min(bx0, bx0 + fx * 0.25), 1.25, bz0 - 1.1, Math.max(bx0, bx0 + fx * 0.25), 2.25, bz0 + 1.1, boardC);
+      W.fill(Math.min(bx0 + fx * 0.25, bx0 + fx * 0.5), 1.35, bz0 - 1.0, Math.max(bx0 + fx * 0.25, bx0 + fx * 0.5), 2.15, bz0 + 1.0, paper);
+      AF.placeStatic(fitText(H.name.toUpperCase(), 0x2f4a3a, 2.0, 'deco'), bx0 + fx * 0.55, 1.8, bz0, face, { collide: false });
+      AF.placeStatic(fitText(H.animals.map((q) => q[0]).join(' \u00b7 '), 0x6a4a2a, 1.6), bx0 + fx * 0.55, 1.5, bz0, face, { collide: false });
+      AF.addInteract({ x: bx0 + fx * 1.2, y: 1.2, z: bz0, r: 2.2, label: 'Read: ' + H.name, act: () => AF.emit('dialogue', { name: H.name, role: 'Solace Zoo', lines: H.sign }) });
+      AF.addLabel(H.name, (a + c) / 2, (b + d) / 2, 'place');
+      // onlookers lean on the rail along the path side (the crowd's instanced extras fill these)
+      const rx = east ? c + 1.1 : a - 1.1, ryaw = east ? -PI / 2 : PI / 2;
+      for (let z = b + 4; z < d - 3; z += 7) if (Math.abs(z - bz0) > 2.5) spot(rx, z + (AF.hash2(z | 0, a | 0) - 0.5), ryaw, 'stand');
+      // planting along the outside of the wall (kept off the paths)
+      const hed = [col(0x4f8a3a, { jitter: 0.7, solid: false }), col(0x6aa84a, { jitter: 0.7, solid: false }), col(0xd8502a, { jitter: 0.4, solid: false }), col(0xf0d040, { jitter: 0.4, solid: false })];
+      const ox = east ? a - 1.25 : c + 0.75;
+      for (let z = b + 1; z < d - 1; z += 0.5) { const q = AF.hash2((z * 4) | 0, (ox * 4) | 0), ci = W.col(ox + 0.25, z + 0.25); if (ci < 0 || W.C[ci] === pave || W.C[ci] === paveD) continue; if (q < 0.55) W.fill(ox, 0.25, z, ox + 0.5, 0.5 + (q < 0.2 ? 0.25 : 0), z + 0.5, hed[q < 0.12 ? 2 : q < 0.2 ? 3 : q < 0.4 ? 0 : 1]); }
     }
     // ---- water: ponds per habitat
     const pool = (cx, cz, rx, rz, deep, wy, hab) => {
@@ -17361,7 +17687,8 @@ try {
     pool(-620, -222, 13, 30, 1.8, 0.0, 'hippos');                   // hippo wallow (big, deep)
     pool(-584, -250, 7, 16, 0.9, 0.0, 'crocs'); pool(-570, -196, 6, 12, 0.9, 0.0, 'crocs');   // marsh channels
     pool(-471, -85, 10, 36, 0.5, 0.05, 'flamingos');                // the shallow lagoon
-    pool(-610, -60, 9, 7, 0.8, 0.0, 'savannah');                    // the waterhole
+    pool(-620, -58, 8, 6, 0.8, 0.0, 'zebras');                      // the waterhole
+    pool(-622, -116, 7, 6, 1.0, 0.0, 'elephants');                  // the elephants' bathing pool
     pool(-506, -48, 4, 12, 0.6, 0.0, 'tigers');                     // tiger stream
     pool(-462, -190, 5, 6, 0.8, 0.0, 'bears');                      // bear pool
     // ---- features
@@ -17373,10 +17700,10 @@ try {
     // savannah: acacias (a thin trunk + a flat umbrella crown), termite mounds, rocks
     const bark = col(0x5a4632, { jitter: 0.5 }), leafA = col(0x6a8a2e, { jitter: 0.7 }), leafB = col(0x7a9a3a, { jitter: 0.7 });
     const acacia = (x, z, s) => { W.fill(x - 0.25, 0.25, z - 0.25, x + 0.25, 4.5 * s, z + 0.25, bark); W.fill(x - 1.5, 4 * s, z - 0.25, x + 1.5, 4.25 * s, z + 0.25, bark); for (const [r, y] of [[3.8 * s, 4.5 * s], [4.6 * s, 4.75 * s], [3.2 * s, 5 * s]]) W.eachCol(x - r, z - r, x + r, z + r, (bx, bz, i, px, pz) => { if (Math.hypot(px - x, pz - z) < r - AF.hash2(bx, bz) * 0.8) W.fill(px - 0.125, y, pz - 0.125, px + 0.125, y + 0.25, pz + 0.125, AF.hash2(bx * 3, bz) < 0.5 ? leafA : leafB); }); };
-    for (const [x, z, s] of [[-628, -120, 1.1], [-590, -100, 1.3], [-630, -48, 1], [-575, -128, 0.9], [-600, -36, 1.2], [-570, -70, 1]]) acacia(x, z, s);
+    for (const [x, z, s] of [[-630, -132, 1.1], [-590, -100, 1.3], [-630, -40, 1], [-575, -128, 0.9], [-580, -40, 1.2], [-570, -70, 1], [-612, -98, 1]]) acacia(x, z, s);
     const mound = col(0xa8784a, { jitter: 0.6 });
-    for (const [x, z] of [[-585, -130], [-620, -90], [-566, -44]]) for (let y = 0; y < 2.5; y += 0.25) { const r = 0.9 * (1 - y / 2.8); W.fill(x - r, 0.25 + y, z - r, x + r, 0.5 + y, z + r, mound); }
-    boulder(-596, -78, 2.5, 1.5); boulder(-632, -135, 2, 1.2);
+    for (const [x, z] of [[-585, -130], [-620, -98], [-566, -44]]) for (let y = 0; y < 2.5; y += 0.25) { const r = 0.9 * (1 - y / 2.8); W.fill(x - r, 0.25 + y, z - r, x + r, 0.5 + y, z + r, mound); }
+    boulder(-575, -60, 2.5, 1.5); boulder(-632, -135, 2, 1.2);
     // reeds in the swamp + marsh + lagoon edges
     const reed = [col(0x6a8a3a, { jitter: 0.6, solid: false }), col(0x8a9a4a, { jitter: 0.6, solid: false }), col(0x7a6a3a, { jitter: 0.6, solid: false })];
     const R = AF.rng(77);
@@ -17392,15 +17719,59 @@ try {
     const TK = AF.TREEKIT;
     if (TK) {
       const plant = (rect, n, sp, seed) => { const [a, b, c, d] = rect; for (let k = 0; k < n; k++) { const x = a + 3 + R() * (c - a - 6), z = b + 3 + R() * (d - b - 6); if (POOLS.some((q) => Math.hypot((x - q.cx) / (q.rx + 3), (z - q.cz) / (q.rz + 3)) < 1)) continue; TK.place(x, z, sp, (k % 3), seed + k); } };
-      plant(HAB[2].rect, 14, 'autumn', 100); plant(HAB[6].rect, 18, 'autumn', 200); plant(HAB[7].rect, 12, 'evergreen', 300); plant(HAB[1].rect, 2, 'oak', 400);
+      const byId = (id) => HAB.find((h) => h.id === id).rect;
+      plant(byId('tigers'), 14, 'autumn', 100); plant(byId('deer'), 18, 'autumn', 200); plant(byId('bears'), 12, 'evergreen', 300); plant(byId('lions'), 2, 'oak', 400);
       for (let z = -40; z > -280; z -= 30) { TK.place(-547, z, 'street', 1, z); }
+      // shade trees in the lawn strips beside the cross walk + the south walk
+      for (const [x, z] of [[-630, -163], [-575, -163], [-520, -163], [-470, -163], [-625, -143], [-505, -143], [-620, -19], [-580, -19], [-500, -19], [-460, -19]]) TK.place(x, z, 'any', 0, (x * 7 + z) | 0);
     }
+    // ---- kiosks along the cross walk: ice cream, snacks, gifts (counter faces the walk), with café tables + benches
+    const kiosk = (x, z, name, stripe, body) => {
+      const bd = col(body, { pat: 'none', jitter: 0.1 }), st = col(stripe, { jitter: 0.05 }), wt = col(0xf6f2ea, { jitter: 0.05 });
+      W.fill(x - 1.75, 0.25, z, x + 1.75, 2.5, z + 3, bd); W.clear(x - 1.5, 0.25, z + 0.25, x + 1.5, 2.25, z + 2.75);
+      W.clear(x - 1.5, 1.25, z, x + 1.5, 2.25, z + 0.25); W.fill(x - 1.5, 1.0, z - 0.25, x + 1.5, 1.25, z + 0.25, wt);
+      for (let i = 0; i < 7; i++) W.fill(x - 1.75 + i * 0.5, 2.5, z - 1.0, x - 1.25 + i * 0.5, 2.75, z + 3, i & 1 ? wt : st);
+      W.fill(x - 1.75, 2.25, z - 1.0, x + 1.75, 2.5, z - 0.75, st);
+      W.fill(x - 1.25, 0.25, z + 2.25, x + 1.25, 1.0, z + 2.75, wt); W.fill(x - 1.0, 1.25, z + 2.5, x + 1.0, 2.0, z + 2.75, col(stripe, { emit: stripe, emitK: 0.5, jitter: 0 }));
+      AF.placeStatic(fitText(name, 0xffffff, 3.0, 'deco'), x, 2.85, z - 0.4, 2, { collide: false });
+      W.fill(x - 1.75, 2.75, z + 1.25, x + 1.75, 3.25, z + 1.5, st);
+      AF.addLight({ x, y: 2.2, z: z + 0.2, color: 0xffe0b0, intensity: 0.6, range: 7, kind: 'shop' });
+      if (AF.addSpot) { AF.addSpot({ building: 'zoo-kiosk', x, y: 0.25, z: z + 1.4, yaw: PI, kind: 'counter' }); AF.addSpot({ building: 'zoo', x: x - 0.6, y: 0.25, z: z - 1.6, yaw: 0, kind: 'queue' }); AF.addSpot({ building: 'zoo', x: x + 0.7, y: 0.25, z: z - 2.4, yaw: 0.2, kind: 'queue' }); }
+    };
+    kiosk(-578, -144.5, 'ICE CREAM', 0xe86a9a, 0xf6e8d8); kiosk(-520, -144.5, 'SNACKS', 0xd8502a, 0xf2e2c0); kiosk(-470, -144.5, 'GIFTS', 0x2f6a8a, 0xe8eef2);
+    const table = col(0xf6f2ea), chairC = col(0x2f6a4a), bench = col(0x8a5a34, { pat: 'none' }), ironB = col(0x2a2a2e);
+    for (const [x, z] of [[-584, -163], [-526, -163], [-464, -163]]) {
+      for (const dx of [-2, 2]) { W.fill(x + dx - 0.5, 0.25, z - 0.5, x + dx + 0.5, 1.0, z + 0.5, table); W.clear(x + dx - 0.25, 0.25, z - 0.5, x + dx + 0.25, 0.75, z + 0.5); for (const s of [-1, 1]) { W.fill(x + dx - 0.25, 0.25, z + s * 0.9 - 0.25, x + dx + 0.25, 0.75, z + s * 0.9 + 0.25, chairC); AF.addSpot && AF.addSpot({ building: 'zoo', x: x + dx, y: 0.75, z: z + s * 0.9, yaw: s > 0 ? PI : 0, kind: 'sit' }); } }
+    }
+    for (let z = -52; z > -280; z -= 24) for (const [x, yaw] of [[-552.25, PI / 2], [-539.75, -PI / 2]]) {
+      W.fill(x - 0.25, 0.25, z - 1, x + 0.25, 0.5, z + 1, ironB); W.fill(x - 0.25, 0.5, z - 1, x + 0.25, 0.75, z + 1, bench);
+      const bk = x < -546 ? x - 0.25 : x + 0.25; W.fill(Math.min(bk, bk + (x < -546 ? -0.25 : 0.25)), 0.75, z - 1, Math.max(bk, bk + (x < -546 ? -0.25 : 0.25)), 1.25, z + 1, bench);
+      if (AF.addSpot) for (const dz of [-0.5, 0.5]) AF.addSpot({ building: 'zoo', x, y: 0.75, z: z + dz, yaw, kind: 'bench' });
+    }
+    // flower beds + planters dotted along the promenade edges
+    const flw = [0xd8502a, 0xf0d040, 0xe86a9a, 0xf6f2ea, 0x8a6ac8].map((h) => col(h, { jitter: 0.4, solid: false })), lf = col(0x4f8a3a, { jitter: 0.7, solid: false });
+    for (let z = -58; z > -280; z -= 24) for (const x of [-554, -538.5]) { W.fill(x - 0.25, 0.25, z - 1.5, x + 0.5, 0.5, z + 1.5, col(0x8a7a6a, { pat: 'stone' })); for (let k = 0; k < 12; k++) { const zz = z - 1.5 + k * 0.25; W.fill(x - 0.25, 0.5, zz, x + 0.5, 0.75 + (k % 3 === 0 ? 0.25 : 0), zz + 0.25, k % 3 ? lf : flw[(k + ((z / 24) | 0)) % flw.length]); } }
     ZOO.buildMs = Math.round(performance.now() - t0);
   });
 
   // ---------------------------------------------------------------- animals: species builders (1/8 m voxels)
   const VS = 1 / 8;
   const C = (h, o) => AF.col(h, Object.assign({ jitter: 0.25, edge: 0.3 }, o || {}));
+  const shadeH = (hex, k) => { const f = (s) => Math.max(0, Math.min(255, Math.round(((hex >> s) & 255) * k))); return (f(16) << 16) | (f(8) << 8) | f(0); };
+  // refine a 1/8 m animal model to 1/16 m: sun-lit back, mottled coat, chamfered corners, a catch-light in each eye
+  const refine = (m, c, eyes) => {
+    const o = new AF.Model(m.w * 2, m.h * 2, m.d * 2);
+    for (let x = 0; x < m.w; x++) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) { const v = m.get(x, y, z); if (v) o.box(x * 2, y * 2, z * 2, x * 2 + 2, y * 2 + 2, z * 2 + 2, v); }
+    const cut = [];
+    for (let x = 0; x < o.w; x++) for (let y = 0; y < o.h; y++) for (let z = 0; z < o.d; z++) {
+      const v = o.get(x, y, z); if (!v) continue;
+      if (v === c.body) { if (!o.get(x, y + 1, z)) o.set(x, y, z, c.bodyL); else if (AF.hash3(x, y, z) < 0.14) o.set(x, y, z, c.bodyD); }
+      if (y > 0) { const e = !o.get(x + 1, y, z) + !o.get(x - 1, y, z) + !o.get(x, y + 1, z) + !o.get(x, y - 1, z) + !o.get(x, y, z + 1) + !o.get(x, y, z - 1); if (e >= 3 && v !== c.eye) cut.push(x, y, z); }
+    }
+    for (let i = 0; i < cut.length; i += 3) o.set(cut[i], cut[i + 1], cut[i + 2], 0);
+    if (eyes) for (const [ex, ey, ez, side] of eyes) { o.set(ex * 2 + (side > 0 ? 1 : 0), ey * 2 + 1, ez * 2 + 1, c.white); o.set(ex * 2 + (side > 0 ? 1 : 0), ey * 2 + 1, ez * 2, c.eye); }
+    return o;
+  };
   // spec: body [w,h,l], legH, legW, leg offsets (x, z from body centre, in voxels), head [w,h,l], neck [w,h,l, forward], cols, pattern, extras(m, dims)
   const SPEC = {
     elephant: { body: [14, 15, 26], legH: 14, legW: 5, head: [12, 12, 9], neck: [8, 6, 4, 0], col: 0x8a8a90, belly: 0x7a7a82, speed: 0.9, legs: 4,
@@ -17422,7 +17793,8 @@ try {
   };
   const makeGeo = (id) => {
     const S = SPEC[id], [bw, bh, bl] = S.body, [nw, nh, nl, nf] = S.neck, [hw, hh, hl] = S.head, tailL = S.tailL || 0;
-    const c = { body: C(S.col), belly: C(S.belly), pat: C(S.patCol ?? S.col), dark: C(0x2a2018), ivory: C(0xf2ecdc), eye: C(0x141414, { jitter: 0 }), mane: C(S.maneCol ?? S.mane ?? S.col), snout: C(S.snout ?? S.belly) };
+    const c = { body: C(S.col), belly: C(S.belly), pat: C(S.patCol ?? S.col), dark: C(0x2a2018), ivory: C(0xf2ecdc), eye: C(0x141414, { jitter: 0 }), mane: C(S.maneCol ?? S.mane ?? S.col), snout: C(S.snout ?? S.belly),
+      bodyL: C(shadeH(S.col, 1.1), { jitter: 0.15 }), bodyD: C(shadeH(S.col, 0.88), { jitter: 0.2 }), white: C(0xffffff, { jitter: 0, edge: 0 }) };
     const Wd = Math.max(bw, hw + 6, S.maneCol ? 13 : 0) + 2, Hh = bh + nh + hh + 10, L = bl + tailL + nf + hl + 4;
     const m = new AF.Model(Wd, Hh, L), cx = Math.floor((Wd - bw) / 2), bz = tailL + 1;
     // body (rounded edges) with the belly underneath and a pattern
@@ -17441,13 +17813,14 @@ try {
     else { const tc = S.tail ? C(S.tail) : c.body; for (let y = 0; y < 5; y++) m.set(cx + (bw >> 1), bh - 2 - y, bz - 1, tc); if (S.tail) m.set(cx + (bw >> 1), bh - 7, bz - 1, c.mane); }
     // neck + head at the front
     const nx = cx + ((bw - nw) >> 1), ny = bh - (id === 'croc' || id === 'hippo' ? 4 : 2);
-    for (let i = 0; i < nh; i++) { const zz = bz + bl - 1 + Math.round(nf * i / Math.max(1, nh)); for (let x = 0; x < nw; x++) for (let z = 0; z < nl; z++) m.set(nx + x, ny + i, zz + z, S.mane && z === 0 ? c.mane : c.body); }
+    for (let i = 0; i < nh; i++) { const zz = bz + bl - 1 + Math.round(nf * i / Math.max(1, nh)); for (let x = 0; x < nw; x++) for (let z = 0; z < nl; z++) m.set(nx + x, ny + i, zz + z, S.mane && z === 0 ? c.mane : (S.pattern === 'stripes' && i % 3 === 0) || (S.pattern === 'spots' && AF.hash3(x, i >> 1, z) < 0.3) ? c.pat : c.body); }
     const hx = cx + ((bw - hw) >> 1), hy = ny + nh - (id === 'giraffe' || id === 'flamingo' ? 1 : 2), hz = bz + bl - 1 + nf + nl - 2;
     for (let x = 0; x < hw; x++) for (let y = 0; y < hh; y++) for (let z = 0; z < hl; z++) {
       const sn = z > hl * 0.55 && y < hh * 0.5;
       if (z > hl * 0.55 && y >= hh * 0.7 && id !== 'croc') continue;
-      m.set(hx + x, hy + y, hz + z, sn ? c.snout : c.body);
+      m.set(hx + x, hy + y, hz + z, sn ? c.snout : (S.pattern === 'stripes' && y >= hh * 0.5 && (z + y) % 3 === 0) ? c.pat : c.body);
     }
+    const eyes = [[hx, hy + hh - 2, hz + Math.floor(hl * 0.45), -1], [hx + hw - 1, hy + hh - 2, hz + Math.floor(hl * 0.45), 1]];
     m.set(hx, hy + hh - 2, hz + Math.floor(hl * 0.45), c.eye); m.set(hx + hw - 1, hy + hh - 2, hz + Math.floor(hl * 0.45), c.eye);
     if (S.maneCol) for (let x = -2; x < hw + 2; x++) for (let y = -3; y < hh + 1; y++) for (let z = -2; z < 2; z++) if (Math.hypot(x - hw / 2 + 0.5, y - hh / 2) < hw / 2 + 2.3) m.set(hx + x, hy + y, hz + z, c.mane);
     if (S.ears) { m.set(hx, hy + hh, hz + 1, c.body); m.set(hx + hw - 1, hy + hh, hz + 1, c.body); }
@@ -17456,12 +17829,12 @@ try {
     if (S.beak) { for (let z = 0; z < 3; z++) m.set(hx + (hw >> 1), hy, hz + hl + z - 1, z > 1 ? C(S.beak) : c.snout); m.set(hx + (hw >> 1), hy - 1, hz + hl + 1, C(S.beak)); }
     if (S.extra) S.extra(m, { hx, hy, hz }, c);
     const legY = S.legH;   // the body sits on top of the legs: shift it up by building legs separately
-    const geo = AF.meshModel(m, { vs: VS, anchor: [0.5, 0, (bz + bl / 2) / L] });
+    const geo = AF.meshModel(refine(m, c, eyes), { vs: VS / 2, anchor: [0.5, 0, (bz + bl / 2) / L] });
     // one leg (pivot at the hip)
     const lm = new AF.Model(S.legW, S.legH, S.legW);
     lm.box(0, 0, 0, S.legW, S.legH, S.legW, c.body); lm.box(0, 0, 0, S.legW, Math.max(1, S.legH >> 3), S.legW, id === 'flamingo' ? C(0xe07a8a) : c.dark);
     if (S.pattern === 'stripes') for (let y = 2; y < S.legH; y += 3) lm.box(0, y, 0, S.legW, y + 1, S.legW, c.pat);
-    const lgeo = AF.meshModel(lm, { vs: VS, anchor: [0.5, 1, 0.5] });
+    const lgeo = AF.meshModel(refine(lm, c, null), { vs: VS / 2, anchor: [0.5, 1, 0.5] });
     const lx = (bw / 2 - S.legW / 2 - 0.5) * VS, lz = (bl / 2 - S.legW / 2 - 1) * VS;
     const legPos = S.legs === 2 ? [[-S.legW * VS, 0], [S.legW * VS, 0]] : [[-lx, lz], [lx, lz], [-lx, -lz], [lx, -lz]];
     return { geo, lgeo, lift: legY * VS, legPos, S };
@@ -17495,7 +17868,7 @@ try {
     for (let k = 0; k < 8; k++) {
       let x = a + 3 + Math.random() * (c - a - 6), z = b + 3 + Math.random() * (d - b - 6);
       const wet = inPool(an.hab, x, z);
-      if (wet && !(an.sp.id === 'hippo' || an.sp.id === 'croc' || an.sp.id === 'flamingo' || an.sp.id === 'tiger' || an.sp.id === 'bear') ) continue;
+      if (wet && !(an.sp.id === 'hippo' || an.sp.id === 'croc' || an.sp.id === 'flamingo' || an.sp.id === 'tiger' || an.sp.id === 'bear' || an.sp.id === 'elephant') ) continue;
       if (an.sp.id === 'lion' && Math.random() < 0.5) { x = -512 + Math.random() * 6; z = -124 + Math.random() * 5; }
       an.tx = x; an.tz = z; return;
     }
@@ -18621,7 +18994,8 @@ function physics(car, dt, inp) {
   const dive = AF.clamp(-acc * 0.0035, -0.04, 0.05);
   car.pitch += (pT + dive - car.pitch) * Math.min(1, dt * 9);
   if (!car.type.solo) car.roll += (rT + lean - car.roll) * Math.min(1, dt * 9);
-  car.bobV += (-car.bob * 90 - car.bobV * 9) * dt + (Math.random() - 0.5) * sp * 0.01;
+  // a faint, position-keyed road texture (was per-frame random noise, which made flat asphalt feel bumpy)
+  car.bobV += (-car.bob * 90 - car.bobV * 9) * dt + (AF.noise2(car.x * 0.8, car.z * 0.8) - 0.5) * Math.min(sp, 20) * 0.02 * dt;
   car.bob += car.bobV * dt; car.bob = AF.clamp(car.bob, -0.06, 0.06);
 }
 VV.physics = physics;
@@ -19228,8 +19602,8 @@ try {
       const pl = o.plane; if (!pl) { AF.setMode('walk'); return; }
       PL.cur = pl; FL.init = false; FL.orbit = FL.orbitP = 0; FL.mouseP = FL.mouseR = 0;
       if (AF.player) AF.player.setVisible(false);
-      AF.emit('toast', 'Cleared for take-off in the ' + pl.name + '. Full throttle, then pull back gently.');
-      AF.emit('hint', AF.touch ? '' : 'W/S throttle \u00b7 A/D bank \u00b7 mouse or \u2191\u2193 pitch \u00b7 Q/E rudder \u00b7 F to get out on the ground');
+      AF.emit('toast', 'Cleared for take-off in the ' + pl.name + '. W to taxi, hold Space to power up and lift off.');
+      AF.emit('hint', AF.touch ? '' : 'Space engine up + climb \u00b7 Shift engine down + descend \u00b7 W/S taxi / brake \u00b7 A/D turn \u00b7 F to get out on the ground');
       if (!AF.touch) try { const r = AF.renderer.domElement.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) {}
     },
     exit() {
@@ -19244,15 +19618,21 @@ try {
       const I = AF.input, m = I.mouse, T = pl.T, S = I.stick, modal = AF.ui && AF.ui.modalOpen && AF.ui.modalOpen();
       dt = Math.min(dt, 0.05);
       // ---- input
-      let thr = 0, pitchIn = 0, rollIn = 0, yawIn = 0;
+      let thr = 0, pitchIn = 0, rollIn = 0, yawIn = 0, taxi = 0, brake = false, fine = false, diving = false;
       if (!modal) {
-        if (I.key('KeyW')) thr += 1; if (I.key('KeyS')) thr -= 1;
+        const up = I.key('Space'), down = I.key('ShiftLeft') || I.key('ShiftRight');
+        diving = down;
+        if (up) { thr += 1.4; if (!pl.onGround || pl.v > T.stall) pitchIn += 1; }
+        if (down) { thr -= 2; if (!pl.onGround) pitchIn -= 1; }
+        if (I.key('KeyW')) { if (pl.onGround) taxi = 1; else thr += 0.6; }
+        if (I.key('KeyS')) { if (pl.onGround) brake = true; else thr -= 0.6; }
         if (I.key('ArrowDown')) pitchIn += 1; if (I.key('ArrowUp')) pitchIn -= 1;
         if (I.key('KeyA') || I.key('ArrowLeft')) rollIn -= 1; if (I.key('KeyD') || I.key('ArrowRight')) rollIn += 1;
         if (I.key('KeyQ')) yawIn -= 1; if (I.key('KeyE')) yawIn += 1;
         const locked = !!document.pointerLockElement;
         if (locked) { FL.mouseP = AF.clamp(FL.mouseP + m.dy * 0.004, -1, 1); FL.mouseR = AF.clamp(FL.mouseR + m.dx * 0.004, -1, 1); }
         FL.mouseP *= Math.exp(-dt * 2.2); FL.mouseR *= Math.exp(-dt * 2.2);
+        fine = I.key('ArrowDown') || I.key('ArrowUp') || Math.abs(FL.mouseP) > 0.15 || !!(S && S.y);
         pitchIn = AF.clamp(pitchIn + FL.mouseP, -1, 1); rollIn = AF.clamp(rollIn + FL.mouseR, -1, 1);
         if (S && (S.x || S.y)) { pitchIn = AF.clamp(pitchIn - S.y, -1, 1); rollIn = AF.clamp(rollIn + S.x, -1, 1); }
         if (I.throttle) thr += I.throttle;
@@ -19260,11 +19640,14 @@ try {
       }
       if ((FL.dragT = (FL.dragT || 0) - dt) < 0) { FL.orbit *= Math.exp(-dt * 1.5); FL.orbitP *= Math.exp(-dt * 1.5); }
       pl.throttle = AF.clamp(pl.throttle + thr * dt * 0.6, 0, 1);
+      // taxi: W holds a gentle idle power and caps ground speed until Space is used
+      if (pl.onGround && taxi && pl.throttle < 0.3) pl.throttle += (0.3 - pl.throttle) * Math.min(1, dt * 3);
       // ---- dynamics
       const g = 9.8, vs = T.stall;
       const lift = AF.clamp((pl.v - vs * 0.6) / (vs * 0.5), 0, 1);           // 0 below ~0.6 stall, 1 above ~1.1 stall
-      pl.v += (pl.throttle * T.thrust - (T.thrust / (T.vmax * T.vmax)) * pl.v * pl.v - g * Math.sin(pl.pitch) * 0.9 - (pl.onGround ? (I.key('Space') ? 6 : 0.4) : 0)) * dt;
+      pl.v += (pl.throttle * T.thrust - (T.thrust / (T.vmax * T.vmax)) * pl.v * pl.v - g * Math.sin(pl.pitch) * 0.9 - (pl.onGround ? (brake ? 8 : 0.4) : 0)) * dt;
       pl.v = AF.clamp(pl.v, 0, T.vmax * 1.15);
+      if (pl.onGround && pl.throttle <= 0.31 && pl.v > 8) pl.v += (8 - pl.v) * Math.min(1, dt * 2);
       if (pl.onGround) {
         pl.roll += (0 - pl.roll) * Math.min(1, dt * 6);
         pl.yaw -= (rollIn * 0.6 + yawIn * 0.4) * Math.min(1, 0.3 + pl.v / 12) * dt;
@@ -19272,11 +19655,17 @@ try {
         if (pitchIn > 0.2 && pl.v > vs) { pl.onGround = false; pl.pitch = 0.05; AF.emit('toast', 'Wheels up!'); }
         else pl.pitch += (rest - pl.pitch) * Math.min(1, dt * 5);
       } else {
+        // Space / Shift alone hold a comfortable climb / descent attitude; arrows or the mouse can go steeper
+        if (!fine && ((pitchIn > 0 && pl.pitch > 0.32) || (pitchIn < 0 && pl.pitch < -0.28))) pitchIn = 0;
         pl.pitch += pitchIn * T.pitch * dt * (0.35 + 0.65 * lift);
         if (!pitchIn) pl.pitch *= Math.exp(-dt * 0.7);
-        pl.roll += rollIn * T.roll * dt;
-        if (!rollIn) pl.roll *= Math.exp(-dt * 0.8);
+        // A/D: bank toward a comfortable turn angle and self-level on release
+        if (rollIn) pl.roll += (rollIn * 0.75 - pl.roll) * Math.min(1, dt * T.roll * 1.2);
+        else pl.roll *= Math.exp(-dt * 1.8);
         pl.roll = AF.clamp(pl.roll, -1.25, 1.25); pl.pitch = AF.clamp(pl.pitch, -0.9, 0.9);
+        if (!fine) { const pc = AF.clamp(pl.pitch, -0.3, 0.34); pl.pitch += (pc - pl.pitch) * Math.min(1, dt * 3); }
+        // auto-flare: close to the ground and not diving, the nose eases up so a gentle approach becomes a touchdown
+        if (!diving && !fine && pl.y - ground(pl.x, pl.z) < 10) pl.pitch += (Math.max(pl.pitch, -0.06) - pl.pitch) * Math.min(1, dt * 2.5);
         // stall: the nose drops, the plane mushes down
         if (lift < 1) pl.pitch -= (1 - lift) * dt * 0.9;
         pl.yaw -= (Math.tan(pl.roll) * g / Math.max(12, pl.v)) * dt * 0.9 + yawIn * 0.35 * dt;
@@ -19327,6 +19716,25 @@ try {
       const x = cx + Math.cos(a) * R * 1.3, zz = cz + Math.sin(a) * R, y = 150 + Math.sin(a * 3) * 12;
       root.position.set(x, y, zz); root.rotation.set(0, Math.atan2(-Math.sin(a) * 1.3, Math.cos(a)), -0.35, 'YXZ'); prop.rotation.z = t * 40;
     });
+  });
+  AF.test('planes: W taxis, Space takes off + climbs, Shift descends', () => {
+    const pl = PL.list.find((p) => p.id === 'cub'); if (!pl) return { ok: false, info: 'no cub' };
+    // drive the flight model directly (no mode switch, title modal bypassed) and put everything back afterwards
+    const I = AF.input, keys = ['KeyW', 'Space', 'ShiftLeft'], saveCur = PL.cur, saveModal = AF.ui && AF.ui.modalOpen, cam = AF.camera, cp = cam.position.clone(), cq = cam.quaternion.clone();
+    const run = (s) => { for (let i = 0; i < s * 30; i++) AF.modes.fly.update(1 / 30); };
+    let taxi = 0, up = {}, down = {};
+    try {
+      if (AF.ui) AF.ui.modalOpen = () => false;
+      PL.cur = pl; pl.x = A.runway.x0 + 20; pl.z = A.runway.z; pl.yaw = PI / 2; pl.y = AF.W.groundY(pl.x, pl.z); pl.v = pl.throttle = pl.pitch = 0; pl.onGround = true;
+      I.down.add('KeyW'); run(3); taxi = pl.v; I.down.delete('KeyW');
+      I.down.add('Space'); run(9); up = { air: !pl.onGround, y: pl.y, pitch: pl.pitch }; I.down.delete('Space');
+      I.down.add('ShiftLeft'); run(2); down = { pitch: pl.pitch, thr: pl.throttle };
+    } finally {
+      for (const k of keys) I.down.delete(k);
+      PL.cur = saveCur; if (AF.ui) AF.ui.modalOpen = saveModal; PL.reset(pl); AF.emit('hud', { speed: null }); cam.position.copy(cp); cam.quaternion.copy(cq); FL.init = false;
+    }
+    const ok = taxi > 3 && taxi < 9 && up.air && up.y > 20 && up.pitch < 0.4 && down.pitch < 0 && down.thr < 0.2;
+    return { ok, info: `taxi ${taxi.toFixed(1)} m/s, after Space y ${up.y.toFixed(1)} pitch ${up.pitch.toFixed(2)}, Shift pitch ${down.pitch.toFixed(2)} throttle ${down.thr.toFixed(2)}` };
   });
 }
 
@@ -19628,7 +20036,7 @@ try {
   const LORE = [
     "They're showing 'Moonlight Over Solace' at the Paragon. Two bits for the matinee, and the organ plays before every show.",
     "The streetcar comes round every few minutes. Loop and Harbour, the blind says. Just listen for the bell.",
-    "Did you see the blimp this morning? SOLACE, right on the side, gliding over Solace Tower like a big silver fish.",
+    "Did you see the blimp this morning? Gliding over Solace Tower like a big silver fish.",
     "Mayor Fenwick cut the ribbon on the new harbour lights himself. Nearly fell in the drink, too.",
     "The fish market opens at four in the morning. By six the gulls have already eaten better than I will all day.",
     "WSOL plays Cab Harlow and his Harbour Serenaders after ten. Turn the dial to 880 and you'll never sleep again.",
@@ -20453,9 +20861,24 @@ try {
     if (pose === 'sit') { pr.legL.geometry = pr.legBG; pr.legR.geometry = pr.legBG; pr.armR.rotation.x = -0.55; pr.armL.rotation.x = -0.5; pr.hips.rotation.x = -0.02; }
     if (pose === 'work') { pr.armR.rotation.x = -1.0; pr.armL.rotation.x = -0.75; pr.hips.rotation.x = 0.06; }
     if (pose === 'hail') { pr.armR.rotation.x = -2.7; pr.armR.rotation.z = -0.2; }
+    // hand-holding: the inner arm reaches sideways toward the partner and does not swing
+    if (L.hold === 'L') { pr.armL.rotation.x = -0.08; pr.armL.rotation.z = L.holdZ; }
+    if (L.hold === 'R') { pr.armR.rotation.x = -0.08; pr.armR.rotation.z = -L.holdZ; }
+    const parts = [];
+    if (L.chair) { pr.root.position.y = 8 * VS - pr.hipY; parts.push([chairGeo(), new THREE.Matrix4()]); }
     pr.root.updateMatrixWorld(true);
-    const parts = []; pr.root.traverse((o) => { if (o.isMesh) parts.push([o.geometry, o.matrixWorld.clone()]); });
+    pr.root.traverse((o) => { if (o.isMesh) parts.push([o.geometry, o.matrixWorld.clone()]); });
     return mergeParts(parts);
+  }
+  let chairG = null;
+  function chairGeo() {
+    if (chairG) return chairG;
+    const m = new AF.Model(16, 15, 14), fr = ck(0x9aa0aa, 0.05, 0.1), tyre = ck(0x1c1c1e, 0.05, 0.05), seat = ck(0x2c3a5a, 0.1), cx = 7;
+    for (const x of [0, 15]) for (let y = 0; y < 11; y++) for (let z = 0; z < 11; z++) { const d = Math.hypot(y - 5, z - 5); if (d <= 5.2 && d >= 4.1) m.set(x, y, z, tyre); else if (d < 0.8 || ((y === 5 || z === 5) && d < 4.1)) m.set(x, y, z, fr); }
+    m.box(1, 7, 2, 15, 8, 11, seat); m.box(2, 8, 1, 14, 15, 2, seat);
+    for (const x of [1, 14]) { m.box(x, 0, 12, x + 1, 8, 13, fr); m.box(x, 8, 1, x + 1, 15, 2, fr); m.set(x, 0, 12, tyre); m.box(x, 11, 2, x + 1, 12, 9, fr); }
+    m.box(cx - 3, 1, 12, cx + 5, 2, 14, fr); m.box(1, 14, 0, 3, 15, 1, tyre); m.box(13, 14, 0, 15, 15, 1, tyre);
+    return (chairG = AF.meshModel(m, { vs: VS, anchor: [0.5, 0, 0.45] }));
   }
   // crowd looks: autumn 1936 street wear, >= 65% hats, a few sailors in whites (HARBOUR DAYS)
   function crowdLooks() {
@@ -20476,6 +20899,12 @@ try {
     // R2 EVENING WEAR (19:00 on): tails + top hats, gowns with fox stoles, a white dinner jacket, sailors and a naval officer on the town
     out.push(man({ set: { top: { style: 'suit', col: 0x2c3a5a, tie: 0xd1a23a, cuffs: true }, bottom: { style: 'pants', col: 0x2c3a5a, cuff: true }, hat: 'fedora', hatCol: 0x8a8a86, hatCol2: 0x2a2a30, propR: 'paper', skirt: null, apron: null, glasses: 'gold' } }));
     out.push(wom({ set: { top: { style: 'cardigan', col: 0xc19a62, col2: 0x8a6a40, col3: 0x6a4a32 }, skirt: { col: 0xc19a62, len: 8, flare: 1, hem: true }, bottom: { style: 'skirt', col: 0xc19a62 }, hat: 'cloche', hatCol: 0x6a4424, hatCol2: 0x3a2a20, propR: 'bag', lipstick: true } }));
+    out.push(wom({ set: { top: { style: 'dress', col: 0x3d6446, col2: 0x2a4a32, col3: 0xefe6cf }, skirt: coat(0x3d6446, 7), hat: 'beret', hatCol: 0x7a2630, propR: 'purse', purseCol: 0x2a2320 } }));
+    out.push(man({ set: { top: { style: 'vest', col: 0x6f7340, sleeve: 0xf3f0e6, tie: 0x7a2630, chain: true }, bottom: { style: 'pants', col: 0x6f7340, cuff: true }, hat: 'flatcap', hatCol: 0x5a5a55, skirt: null, apron: null, propR: null } }));
+    out.push(wom({ age: 'elder', set: { top: { style: 'cardigan', col: 0xb7a0cf, col2: 0xf3f0e6, col3: 0xf3f0e6 }, skirt: { col: 0x6a3b5c, len: 8, flare: 1, pleats: true }, bottom: { style: 'skirt', col: 0x6a3b5c }, hairStyle: 'bun', glasses: 'gold', hat: null, propR: 'bag' } }));
+    out.push(wom({ set: { top: { style: 'blouse', col: 0xf3f0e6, brooch: true }, skirt: { col: 0x2c3a5a, len: 7, flare: 1, pleats: true }, bottom: { style: 'skirt', col: 0x2c3a5a }, hat: 'straw', hatCol: 0xd8c08a, hatCol2: 0xb3342c, propR: null } }));
+    out.push(man({ set: { top: { style: 'plaid', col: 0xb0592c, col2: 0x2a2a2a }, bottom: { style: 'pants', col: 0x3e5f8a, cuff: true }, hat: 'flatcap', hatCol: 0x6a6258, skirt: null, apron: null, propR: 'paper', beard: true } }));
+    out.push(man({ age: 'teen', set: { top: { style: 'letterman', col: 0x3d6446, col2: 0xf3e7c8, col3: 0xf3e7c8, sleeve: 0xf3e7c8 }, bottom: { style: 'pants', col: 0x3e5f8a, cuff: true }, hat: null, skirt: null, apron: null, propR: 'book' } }));
     CR.nDay = out.length;
     const gown = (col, hat, hatCol, stole) => wom({ set: { top: { style: 'dress', col, col2: shade(col, 0.7), col3: stole || 0xc8844a }, skirt: { col, len: 10, flare: 1, hem: true }, bottom: { style: 'skirt', col }, hat, hatCol, hatCol2: 0x1c1c20, propR: 'purse', purseCol: 0xd8b84a, lipstick: true, hairStyle: 'wavy', apron: null } });
     out.push(man({ set: { top: { style: 'suit', col: 0x1c1c22, tie: 0xf6f4ee, cuffs: true }, bottom: { style: 'pants', col: 0x1c1c22 }, hat: 'tophat', hatCol: 0x141418, hatCol2: 0x2a2a30, propR: 'cane', skirt: null, apron: null, moustache: true } }));
@@ -20488,19 +20917,37 @@ try {
     out.push(man({ set: { top: { style: 'suit', col: 0x2a2a30, tie: 0x8a1c2a, cuffs: true }, skirt: coat(0x6a5a48, 7), bottom: { style: 'pants', col: 0x2a2a30 }, hat: 'fedora', hatCol: 0x2a2522, hatCol2: 0x141418, propR: null, apron: null } }));
     out.push(gown(0x3a1f4a, 'cloche', 0x3a1f4a, 0xe8e0d0));
     out.push(man({ set: { top: { style: 'suit', col: 0x1c1c22, tie: 0xf6f4ee, cuffs: true }, skirt: coat(0x141418, 7), bottom: { style: 'pants', col: 0x1c1c22 }, hat: 'tophat', hatCol: 0x141418, hatCol2: 0x6a1c24, propR: null, apron: null } }));
+    CR.nEve = out.length;
+    // group + rare looks (never swapped day/night): hand-holding couples, parent + child, wheelchair users, teen friends
+    const SP = CR.SP = {};
+    const sp = (name, L, o) => { Object.assign(L, o); SP[name] = out.length; out.push(L); };
+    const hands = (side, z) => side === 'L' ? { hold: 'L', holdZ: z, propL: null } : { hold: 'R', holdZ: z, propR: null };
+    sp('coupleM', man({ set: { top: { style: 'suit', col: 0x6a4a32, tie: 0xd1a23a, cuffs: true }, bottom: { style: 'pants', col: 0x6a4a32, cuff: true }, hat: 'fedora', hatCol: 0x3a3a40, hatCol2: 0x2a2522, skirt: null, apron: null } }), hands('L', 0.2));
+    sp('coupleF', wom({ set: { top: { style: 'dress', col: 0xe79aa8, col2: 0xd06a7c, col3: 0xf3f0e6, dots: true }, skirt: { col: 0xe79aa8, len: 7, flare: 2, hem: true }, bottom: { style: 'skirt', col: 0xe79aa8 }, hat: null, lipstick: true, hairStyle: 'wavy' } }), hands('R', 0.2));
+    sp('mom', wom({ set: { top: { style: 'cardigan', col: 0x3f7f7c, col2: 0x2a5a58, col3: 0xf3f0e6 }, skirt: { col: 0x45464b, len: 7, flare: 1 }, bottom: { style: 'skirt', col: 0x45464b }, hat: 'pillbox', hatCol: 0x3f7f7c, propR: 'bag' } }), hands('L', 0.32));
+    sp('girl', wom({ age: 'kid', set: { top: { style: 'dress', col: 0xf0dc7a, col2: 0xc8b050, col3: 0xf3f0e6, short: true }, skirt: { col: 0xf0dc7a, len: 3, flare: 1 }, bottom: { style: 'skirt', col: 0xf0dc7a, sock: 0xf6f2ea }, hairStyle: 'pigtails', ribbon: 0xd0404a, hat: null, propR: null } }), hands('R', 1.2));
+    sp('dad', man({ set: { top: { style: 'sweater', col: 0x2c3a5a, col2: 0xefe6cf, argyle: true }, bottom: { style: 'pants', col: 0xa99c6f, cuff: true }, hat: 'flatcap', hatCol: 0x6a6258, skirt: null, apron: null, propR: null } }), hands('L', 0.32));
+    sp('boy', man({ age: 'kid', set: { top: { style: 'striped', col: 0xf3f0e6, col2: 0xb3342c, short: true }, bottom: { style: 'shorts', col: 0x2c3a5a, sock: 0xf3f0e6 }, hat: 'baseball', hatCol: 0x2c3a5a, hatCol2: 0x1f1d1c, propL: null, apron: null, skirt: null } }), hands('R', 1.2));
+    sp('chairM', man({ age: 'elder', set: { top: { style: 'cardigan', col: 0x6a4a32, col2: 0x3a2a20, col3: 0xf3f0e6 }, bottom: { style: 'pants', col: 0x45464b }, hat: 'flatcap', hatCol: 0x5a5a55, skirt: null, apron: null, propR: null, propL: null } }), { chair: true });
+    sp('chairF', wom({ set: { top: { style: 'blouse', col: 0x86b3d6, brooch: true }, skirt: { col: 0x2c3a5a, len: 6, flare: 1 }, bottom: { style: 'skirt', col: 0x2c3a5a }, hat: null, propR: null, propL: null } }), { chair: true });
+    sp('teenF', wom({ age: 'teen', set: { top: { style: 'cardigan', col: 0xe79aa8, col2: 0xf3f0e6, col3: 0xf3f0e6 }, skirt: { col: 0x86b3d6, len: 5, flare: 3, poodle: true }, bottom: { style: 'skirt', col: 0x86b3d6, sock: 0xf6f2ea }, hat: null, propR: null } }));
+    sp('teenM', man({ age: 'teen', set: { top: { style: 'letterman', col: 0x7a2630, col2: 0xf3e7c8, col3: 0xf3e7c8, sleeve: 0xf3e7c8 }, bottom: { style: 'pants', col: 0x3e5f8a, cuff: true }, hat: null, skirt: null, apron: null, propR: null } }));
+    sp('teenM2', man({ age: 'teen', set: { top: { style: 'shirt', col: 0xf3f0e6, short: true }, bottom: { style: 'pants', col: 0x45464b, cuff: true }, hat: 'newsboy', hatCol: 0x6a6258, hatCol2: 0x4a4238, skirt: null, apron: null, propR: null } }));
     for (const L of out) { if (L.skirt === null) delete L.skirt; if (!L.bottom) L.bottom = { style: 'pants', col: 0x45464b }; if (L.skirt && L.bottom.style !== 'skirt' && !L.skirt.open) L.bottom = { style: 'skirt', col: L.skirt.col }; }
     return out;
   }
   const FRAMES = ['a', 'p', 'b', 'sit', 'work'];
   function buildCrowdMeshes() {
     const looks = crowdLooks(), tier = AF.GFX && AF.GFX.tier;
-    const NW = tier === 'low' ? 220 : tier === 'high' ? 420 : 520, NE = tier === 'low' ? 120 : 300;
+    const NW = tier === 'low' ? 150 : tier === 'high' ? 300 : 380, NE = tier === 'low' ? 100 : 260;
     CR.NW = NW; CR.NE = NE;
     for (let vi = 0; vi < looks.length; vi++) {
-      const L = looks[vi], kid = L.plan === 'kid', V = { L, im: {}, hipY: PLANS[L.plan].lh * VS, kid };
+      const L = looks[vi], kid = L.plan === 'kid', V = { L, im: {}, hipY: PLANS[L.plan].lh * VS, kid, chair: !!L.chair };
       for (const f of FRAMES) {
-        if (kid && (f === 'sit' || f === 'work')) continue;
-        const g = bakePose(L, f), cap = f === 'sit' || f === 'work' ? NE : (f === 'p' ? NW + NE : NW);
+        if ((kid || vi >= CR.nEve) && (f === 'sit' || f === 'work')) continue;
+        if (V.chair && f !== 'p') continue;
+        if (vi >= CR.nEve && f === 'b') continue;   // group looks walk on two frames (a / pass) to keep draw calls down
+        const g = bakePose(L, V.chair ? 'sit' : f), cap = f === 'sit' || f === 'work' ? NE : vi >= CR.nEve ? 48 : (f === 'p' ? NW + NE : NW);
         const im = new THREE.InstancedMesh(g, AF.mat.voxel, cap);
         im.count = 0; im.frustumCulled = false; im.castShadow = f !== 'sit' && f !== 'work'; im.receiveShadow = true; im.visible = false; im.name = 'crowd-' + vi + f;
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -20521,6 +20968,8 @@ try {
     const pier = (id) => piers.find((q) => q.id === id);
     const lines = [[[-288, CZ - 6], [-152, CZ - 6]], [[-286, CZ - 15], [-154, CZ - 15]], [[-148, CZ - 5], [-42, CZ - 5]], [[-38, CZ - 10], [38, CZ - 10]], [[-38, CZ - 24], [38, CZ - 24]], [[44, CZ - 6], [200, CZ - 6]]];
     for (const [id, off] of [['pleasure', 0.3], ['pleasure', 0.7], ['fish', 0.5], ['ferry', 0.3], ['ferry', 0.7]]) { const q = pier(id); if (q) { const x = q.x0 + (q.x1 - q.x0) * off; lines.push([[x, CZ + 3], [x, q.z1 - 4]]); } }
+    // zoo visitors: the promenade, the cross walk, the plains divider and the side walks
+    if (PL.west && PL.west.zoo) lines.push([[-549, -26], [-549, -278]], [[-543, -26], [-543, -278]], [[-636, -153], [-458, -153]], [[-599, -144], [-599, -30]], [[-636, -85], [-566, -85]], [[-490, -144], [-490, -30]], [[-490, -162], [-490, -278]], [[-598, -162], [-598, -278]], [[-556.5, -144], [-556.5, -30]], [[-636, -25.5], [-458, -25.5]]);
     let k = 0;
     for (const [[x0, z0], [x1, z1]] of lines) {
       const L = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(L / 6)), dx = (x1 - x0) / L, dz = (z1 - z0) / L;
@@ -20551,32 +21000,57 @@ try {
       if (d > C.R) continue;
       const main = Math.min(a.rw || 10, b.rw || 10) >= 14 || /Grand|Meridian|Park Row|Harbour Boulevard/.test(a.rn || '');
       const gww = CR.night && /Grand/.test(a.rn || '') && mz > 4 && mz < 165;   // the Great White Way after dark
-      const len = Math.hypot(b.x - a.x, b.z - a.z), wgt = Math.max(1, Math.round(len / (gww ? 3.2 : main ? 7 : 13.5)));
+      const len = Math.hypot(b.x - a.x, b.z - a.z), wgt = Math.max(1, Math.round(len / (gww ? 4.5 : main ? 8 : 13.5)));
       if (isCross(a, b)) continue;
       for (let k = 0; k < wgt; k++) candEdges.push(a.i < b.i ? [a, b] : [b, a]);
     }
   }
   const wr = AF.rng(4242);
+  // crowd density per 9 m cell (rebuilt each tick): spawns and turns avoid cells that are already busy
+  const dens = new Map(), DCAP = 4;
+  const cellK = (x, z) => (Math.floor(x / 9) + 500) * 4000 + Math.floor(z / 9) + 500;
+  const densAt = (x, z) => dens.get(cellK(x, z)) || 0;
   function spawnWalker(w, C, farOnly) {
     if (!candEdges.length) { w.act = false; return; }
-    let e = null;
-    for (let k = 0; k < 8; k++) { e = candEdges[Math.floor(wr() * candEdges.length)]; if (!farOnly) break; const d = Math.hypot((e[0].x + e[1].x) / 2 - C.x, (e[0].z + e[1].z) / 2 - C.z); if (d > C.R * 0.55) break; }
+    let e = null, best = null, bd = 1e9;
+    for (let k = 0; k < 10; k++) {
+      e = candEdges[Math.floor(wr() * candEdges.length)];
+      const mx = (e[0].x + e[1].x) / 2, mz = (e[0].z + e[1].z) / 2;
+      if (farOnly && Math.hypot(mx - C.x, mz - C.z) < C.R * 0.55) continue;
+      const n = densAt(mx, mz); if (n < bd) { bd = n; best = e; } if (n < DCAP) break;
+    }
+    e = best || e;
     const fw = wr() < 0.5; w.A = fw ? e[0] : e[1]; w.B = fw ? e[1] : e[0];
     w.len = Math.hypot(w.B.x - w.A.x, w.B.z - w.A.z) || 0.1; w.d = wr() * w.len; w.act = true; w.wait = 0;
-    const kid = CR.V[w.v].kid; w.speed = kid ? 1.5 + wr() * 0.5 : 1.05 + wr() * 0.45;
+    const V = CR.V[w.v]; w.speed = V.chair ? 0.75 + wr() * 0.15 : w.grp === 'kid' ? 0.9 + wr() * 0.15 : V.kid ? 1.5 + wr() * 0.5 : 1.05 + wr() * 0.45;
+    const k = cellK((w.A.x + w.B.x) / 2, (w.A.z + w.B.z) / 2); dens.set(k, (dens.get(k) || 0) + 1 + (w.nf || 0));
   }
   function initWalkers() {
     const C = crowdCentre(); refreshCand(C);
-    const nv = CR.V.length;
+    const nv = CR.nEve || CR.V.length;
     for (let i = 0; i < CR.NW; i++) {
       const nd = CR.nDay || nv, nn = nv - nd;
-      const w = { id: i, v: (i * 7 + (i >> 3)) % nd, lat: -0.25 + wr() * 1.2, s: 0.94 + wr() * 0.12, ph: wr() * 4, x: 0, y: 0.25, z: 0, yaw: 0, talk: 0, name: null };
+      const w = { id: i, v: (i * 7 + (i >> 3)) % nd, lat: -0.25 + wr() * 1.2, s: 0.92 + wr() * 0.16, ph: wr() * 4, x: 0, y: 0.25, z: 0, yaw: 0, talk: 0, name: null };
       if (CR.V[w.v].kid && wr() < 0.5) w.v = (w.v + 1) % nd;
       w.vd = w.v; w.vn = nn > 0 ? nd + (i * 3 + (i >> 2)) % nn : w.v;
-      spawnWalker(w, C, false); CR.walkers.push(w);
+      CR.walkers.push(w);
     }
-    // couples: every 9th walker shadows its neighbour
-    for (let i = 1; i < CR.walkers.length; i += 9) { const w = CR.walkers[i], L = CR.walkers[i - 1]; w.lead = L; w.v = w.vd = CR.V[L.v].L.female ? 0 : 2; if (CR.nDay) w.vn = CR.V[L.vn].L.female ? CR.nDay : CR.nDay + 1; }
+    // groups: every block of 12 walkers seeds one group; a rare wheelchair user every ~45
+    const SP = CR.SP || {}, W = CR.walkers;
+    const lead = (w, look, grp) => { w.v = w.vd = w.vn = SP[look]; w.grp = grp; w.lat = -0.45 + wr() * 0.2; w.s = 1; };
+    const follow = (f, L, look, lat, back) => { f.lead = L; f.v = f.vd = f.vn = SP[look]; f.fl = lat; f.fb = back || 0; f.s = CR.V[SP[look]].kid ? 1 : 0.97 + wr() * 0.06; L.nf = (L.nf || 0) + 1; };
+    if (SP.coupleM !== undefined) for (let i = 0, g = 0; i + 3 < W.length; i += 12, g++) {
+      const a = W[i], b = W[i + 1], c = W[i + 2];
+      switch (g % 6) {
+        case 0: case 4: lead(a, 'coupleM', 'couple'); follow(b, a, 'coupleF', 0.72); break;
+        case 1: lead(a, 'mom', 'kid'); follow(b, a, 'girl', 0.95); break;
+        case 2: lead(a, 'teenM', 'friends'); follow(b, a, 'teenF', 0.8, 0.15); follow(c, a, 'teenM2', 0.35, 0.95); break;
+        case 3: lead(a, 'dad', 'kid'); follow(b, a, 'boy', 0.95); break;
+        case 5: b.lead = a; b.fl = 0.55; a.grp = 'armin'; a.nf = 1; b.v = b.vd = CR.V[a.v].L.female ? 0 : 2; b.vn = CR.nDay ? (CR.V[a.vn].L.female ? CR.nDay : CR.nDay + 1) : b.v; break;
+      }
+    }
+    if (SP.chairM !== undefined) for (let i = 44, k = 0; i < W.length; i += 45, k++) { const w = W[i]; if (w.lead || w.grp) continue; w.v = w.vd = w.vn = SP[k & 1 ? 'chairF' : 'chairM']; w.grp = 'chair'; w.s = 1; }
+    for (const w of W) if (!w.lead) spawnWalker(w, C, false);
   }
   const E = new Float32Array(16);
   function putInst(im, i, x, y, z, yaw, s) {
@@ -20586,9 +21060,9 @@ try {
   }
   let lightT = 0;
   function stepWalker(w, dt, pp) {
-    if (w.lead) {   // arm-in-arm partner: stay at the leader's side
-      const L = w.lead, c = Math.cos(L.yaw), sn = Math.sin(L.yaw);
-      w.x = L.x + c * 0.55; w.z = L.z - sn * 0.55; w.yaw = L.yaw; w.moving = L.moving; w.ph = L.ph + 2; w.act = L.act; w.y = L.A && L.A.py !== undefined ? L.y : AF.W.groundY(w.x, w.z); return;
+    if (w.lead) {   // group member: keep station beside / behind the leader
+      const L = w.lead, c = Math.cos(L.yaw), sn = Math.sin(L.yaw), lat = w.fl ?? 0.55, bk = w.fb || 0;
+      w.x = L.x + c * lat - sn * bk; w.z = L.z - sn * lat - c * bk; w.yaw = L.yaw; w.moving = L.moving; w.ph = L.ph + 2; w.act = L.act; w.y = L.A && L.A.py !== undefined ? L.y : AF.W.groundY(w.x, w.z); return;
     }
     if (w.talk > 0) { w.talk -= dt; w.moving = false; w.yaw = Math.atan2(pp.x - w.x, pp.z - w.z); return; }
     const green = (A, B) => { const T = AF.trafficLight; if (!T || !T.state) return true; return T.state((A.x + B.x) / 2, (A.z + B.z) / 2, [B.x - A.x, B.z - A.z]) === 'green'; };
@@ -20607,13 +21081,14 @@ try {
         const A = w.A, B = w.B; let opts = B.adj.filter((e) => e.n !== A); if (!opts.length) opts = B.adj;
         if (!opts.length) { w.act = false; return; }
         let o = opts[Math.floor(wr() * opts.length)];
+        if (opts.length > 1) { const o2 = opts[Math.floor(wr() * opts.length)]; if (densAt(o2.n.x, o2.n.z) < densAt(o.n.x, o.n.z)) o = o2; }   // drift toward quieter blocks
         if (isCross(B, o.n) && opts.length > 1 && wr() < 0.4) o = opts.find((e) => !isCross(B, e.n)) || o;
         if (isCross(B, o.n) && !green(B, o.n)) { w.pend = o; w.wait = 0.4 + wr() * 0.6; w.d = w.len; }   // wait at the kerb for the lights
         else { w.A = B; w.B = o.n; w.d = 0; w.len = o.d || 0.1; if (wr() < 0.03) w.wait = 2 + wr() * 5; }   // or stop to look in a window
       }
     }
     const dx = (w.B.x - w.A.x) / w.len, dz = (w.B.z - w.A.z) / w.len, t = Math.min(w.d, w.len);
-    const cr = (isCross(w.A, w.B) ? 0.2 : w.lat) + (w.dodge || 0) * 0.6;
+    const cr = (isCross(w.A, w.B) ? (w.nf ? -0.3 : 0.2) : w.lat) + (w.dodge || 0) * 0.6;
     const tx = w.A.x + dx * t + dz * cr, tz = w.A.z + dz * t - dx * cr;
     if (w.moving || w.x === 0) { w.x = tx; w.z = tz; }
     const ty = Math.atan2(dx, dz); if (w.moving) w.yaw += AF.angDiff(w.yaw, ty) * Math.min(1, dt * 8);
@@ -20665,7 +21140,7 @@ try {
     }
     cand.sort((p, q) => p[0] - q[0]);
     CR.extras.length = 0;
-    const nd = CR.nDay || CR.V.length, adults = CR.V.map((V, i) => i).filter((i) => i < nd && !CR.V[i].kid), evening = CR.V.map((V, i) => i).filter((i) => i >= nd);
+    const nd = CR.nDay || CR.V.length, ne = CR.nEve || CR.V.length, adults = CR.V.map((V, i) => i).filter((i) => i < nd && !CR.V[i].kid), evening = CR.V.map((V, i) => i).filter((i) => i >= nd && i < ne);
     const nightOut = (h >= 19 || h < 3) && evening.length;
     for (let i = 0; i < Math.min(cand.length, CR.NE); i++) {
       const s = cand[i][1], k = s.kind || 'stand', fancy = nightOut && k !== 'work' && k !== 'counter' && /heron|rosewood|roseland|ballroom|club|paragon|rialto|theatre|audience|dance|hotel|queue/.test((s.building || '') + ' ' + k);
@@ -20687,15 +21162,21 @@ try {
     const cnt = CR.cnt || (CR.cnt = CR.V.map(() => ({ a: 0, p: 0, b: 0, sit: 0, work: 0 })));
     for (const c of cnt) { c.a = c.p = c.b = c.sit = c.work = 0; }
     let act = 0, mov = 0;
+    dens.clear();
+    for (const w of CR.walkers) if (w.act && !w.lead) { const k = cellK(w.x, w.z); dens.set(k, (dens.get(k) || 0) + 1 + (w.nf || 0)); }
+    const fr = AF.clock ? AF.clock.frame | 0 : 0, FAR2 = 65 * 65;
     for (const w of CR.walkers) {
-      if (!w.act) { spawnWalker(w, C, true); if (!w.act) continue; }
-      stepWalker(w, dt, pp);
+      if (!w.act && !w.lead) { spawnWalker(w, C, true); if (!w.act) continue; }
+      // far walkers step at half rate (their accumulated dt is applied next frame)
+      const ddx = w.x - C.x, ddz = w.z - C.z;
+      if (!w.lead && ddx * ddx + ddz * ddz > FAR2 && ((fr + w.id) & 1)) w.acc = (w.acc || 0) + dt;
+      else { stepWalker(w, Math.min(0.2, dt + (w.acc || 0)), pp); w.acc = 0; }
       if (!w.lead && Math.hypot(w.x - C.x, w.z - C.z) > C.R + 12) { spawnWalker(w, C, true); w.x = 0; continue; }
       if (!w.act) continue;
       act++; if (w.moving) mov++;
-      const V = CR.V[w.v], f = w.moving ? ['a', 'p', 'b', 'p'][Math.floor(w.ph) & 3] : 'p', im = V.im[f];
+      const V = CR.V[w.v]; let f = V.chair ? 'p' : w.moving ? ['a', 'p', 'b', 'p'][Math.floor(w.ph) & 3] : 'p'; if (!V.im[f]) f = 'a'; const im = V.im[f];
       const c = cnt[w.v]; if (c[f] >= im.instanceMatrix.count) continue;
-      putInst(im, c[f]++, w.x, w.y + (f === 'p' && w.moving ? 0 : -0.03), w.z, w.yaw, w.s);
+      putInst(im, c[f]++, w.x, w.y + (f === 'p' && w.moving && !V.chair ? 0 : -0.03), w.z, w.yaw, w.s);
     }
     // extras
     exT -= dt;
@@ -20727,11 +21208,22 @@ try {
     "I'm off to the Paragon. Two bits says the organist plays 'Stardust Avenue' again.", "My feet are killing me. Meridian's had a sale on everything but chairs.",
     "Gee whiz, did you see the blimp nosing up to the Solace mast?", "Evening! Mind the streetcar, they don't stop for daydreamers.",
     "I'm meeting my girl under the Terminal clock. Wish me luck.", "Buddy, can you spare a minute? No? Nobody can on Grand.", "That's the berries! The Blue Heron's got a new trumpet man.",
+    "Hats off to whoever fixed the streetlamp on my block. Slept like a baby.", "The automat's got pie for a nickel today. Rhubarb! Don't tell my wife.", "Say, is it true you can see the whole city from the Solace Tower deck?",
+    "I heard the zoo got a real giraffe. Neck like a lamppost!", "Gotta catch the ferry before the fog rolls in. Toodle-oo!", "Radio says fair skies all week. I'll believe it when my knees do.",
+    "They're laying new asphalt on Bay Street. Smells like progress, I suppose.", "My brother flies the Clipper out of Westgate. Says the clouds look like mashed potatoes.",
   ];
+  const GROUP_LINES = {
+    couple: ["We're celebrating our anniversary. Five years and she still laughs at my jokes!", "We're headed to the Paragon for the picture show. Care to recommend a candy?", "Don't mind us, we're just walking. Walking's free, and so is the view."],
+    kid: ["Hold on to my hand at the crossing, sweetheart. Oh, hello there!", "We're off to see the monkeys at the zoo. This one's been asking since breakfast.", "One scoop, I said ONE scoop. Kids, huh?", "Say hello to the nice stranger. No? Shy today."],
+    friends: ["We're cutting class. Don't tell Miss Pruitt!", "The soda fountain's got a new jukebox. Wanna come?", "We're gonna fly a plane someday. The real kind, at Westgate!"],
+    chair: ["Lovely day for a roll along the promenade. Kerbs could use some ramps, though!", "I used to sail the Solace harbour. Now I watch the boats, and that's fine too.", "Mind the cobbles on Bay Street, they rattle my teeth!"],
+    armin: ["We've been walking this street every evening for forty years.", "Arm in arm keeps us both upright, friend."],
+  };
   function nameWalker(w) {
     const V = CR.V[w.v], r = AF.rng(9001 + w.id * 31), f = V.L.female;
     w.first = V.kid ? pick(r, BOY) : f ? pick(r, FEMALE) : pick(r, MALE); w.last = pick(r, SURN);
-    w.lines = [pick(r, PASSER), LORE[Math.floor(r() * LORE.length)], pick(r, PASSER)]; w.li = 0;
+    const G = GROUP_LINES[w.grp];
+    w.lines = G ? [pick(r, G), pick(r, PASSER), pick(r, G)] : [pick(r, PASSER), LORE[Math.floor(r() * LORE.length)], pick(r, PASSER)]; w.li = 0;
   }
   AF.onBuild('people-crowd', 660, () => {
     const t0 = performance.now();
@@ -20873,7 +21365,7 @@ try {
   K.copTick = copTick;
 
   // ------------------------------------------------------------ tests
-  AF.test('people: crowd + extras populated', () => { if (!CR.V.length) return { ok: false, info: 'no crowd' }; for (let i = 0; i < 20; i++) crowdTick(0.05, AF.clock.t + i * 0.05); const s = CR.stats; return { ok: s.walkers >= 150 && s.draws <= 60, info: JSON.stringify(s) }; });
+  AF.test('people: crowd + extras populated', () => { if (!CR.V.length) return { ok: false, info: 'no crowd' }; for (let i = 0; i < 20; i++) crowdTick(0.05, AF.clock.t + i * 0.05); const s = CR.stats; return { ok: s.walkers >= Math.min(150, CR.NW * 0.8) && s.draws <= 110, info: JSON.stringify(s) }; });
   AF.test('people: names valid (no " home", no Court surnames)', () => { const bad = people.filter((p) => /\bhome\b|Court|Apartments|Building|undefined|null/i.test(p.name) || /\bhome place\b/.test(p.lines.join(' '))); return { ok: bad.length === 0, info: bad.length + ' bad ' + bad.slice(0, 5).map((p) => p.name).join(', ') }; });
   AF.test('people: nobody standing on awnings (> floor + 0.6 only on solid stoops/steps)', () => { const bad = []; for (const p of people) { if (p.pose === 'sit' || p.state === 'walk') continue; const g = AF.W.groundY(p.x, p.z), fl = p.spot ? Math.max(g, p.spot.y ?? g) : g; let hung = false; if (p.y > fl + 0.65) for (let y = g + 0.12; y < p.y - 0.3; y += 0.25) { const c = AF.W.getM(p.x, y, p.z); if (!(c && AF.PAL.solid[c])) { hung = true; break; } } if (hung) bad.push(p.name + '@' + p.x.toFixed(1) + ',' + p.y.toFixed(2) + ',' + p.z.toFixed(1)); } return { ok: bad.length === 0, info: bad.length + ' floating ' + bad.slice(0, 5).join(' | ') }; });
   AF.test('people: traffic cop signals with the lights (Grand x Meridian)', () => {
@@ -21915,7 +22407,7 @@ try {
   const HA = ramp([[-0.4, 0x0c1428], [-0.2, 0x151e3c], [-0.1, 0x2c2e58], [-0.04, 0x55497a], [0.0, 0x9a7690], [0.04, 0xc8988a], [0.1, 0xe0b890], [0.2, 0xe2c6a2], [0.4, 0xdccbb2], [0.6, 0xc8d2d6], [0.8, 0xb4cae0]]);
   const HS = ramp([[-0.4, 0x0e1630, 1.5], [-0.2, 0x1e2244, 1.5], [-0.1, 0x5a3e66, 1.6], [-0.04, 0xa8586a, 2.0], [0.0, 0xf07a4a, 2.6], [0.04, 0xffa050, 2.8], [0.1, 0xffbe78, 2.6], [0.2, 0xf8d6a8, 2.2], [0.4, 0xeadcc6, 1.8], [0.8, 0xd6e0e6, 1.4]]);
   const GL2 = ramp([[-0.1, 0x401830, 0], [-0.03, 0xc04a30, 0.5], [0.0, 0xff6a28, 1.1], [0.05, 0xff8c3a, 1.25], [0.12, 0xffa850, 1.05], [0.25, 0xffc890, 0.75], [0.5, 0xffe6c8, 0.5], [0.8, 0xfff2e0, 0.4]]);
-  const FOGD = [[-0.4, 0.00034], [-0.1, 0.00034], [0.0, 0.0004], [0.08, 0.00034], [0.2, 0.00025], [0.5, 0.0002], [0.8, 0.00019]];   // v2 sharpen pass: ~0.56x the R2 haze
+  const FOGD = [[-0.4, 0.00038], [-0.1, 0.00038], [0.0, 0.00045], [0.08, 0.00039], [0.2, 0.0003], [0.5, 0.00024], [0.8, 0.00023]];   // a touch more distance haze so far LOD melts into the air
   const sampleNum = (R, s) => { if (s <= R[0][0]) return R[0][1]; for (let i = 1; i < R.length; i++) if (s <= R[i][0]) { const a = R[i - 1], b = R[i]; return lerp(a[1], b[1], (s - a[0]) / (b[0] - a[0])); } return R[R.length - 1][1]; };
   const setV = (u, c, w) => { const v = u.value; v.x = c.r; v.y = c.g; v.z = c.b; if (w !== undefined) v.w = w; };
 
@@ -22800,126 +23292,31 @@ try {
         PX.beams.push({ g, m, mat, ph: i * 1.7, sp: 0.18 + i * 0.05 });
       });
     }
-    // ---- ROUND 2: the CREATE WITH MARK blimp — 58.8 m ivory envelope (smooth lathe, gore seams, nose battens), orange-trimmed
-    //      cruciform fins with spinning-prop engine pods, a lit gondola, and a floodlit 1930s billboard panel on BOTH flanks
-    //      carrying the Create With Mark logo mark + wordmark (canvas texture, mipmapped + anisotropic, emissive at night).
+    // ---- a plain silver blimp: one smooth lathe envelope, four fins, a small gondola; no branding
     {
       const HL = 29.4, RMAX = 7.7, AXY = 13.3;   // half length, max radius, envelope axis height above the mesh origin (mooring frame of v1)
       const rAt = (z) => { const u = Math.max(-1, Math.min(1, z / HL)); return RMAX * (u > 0 ? Math.sqrt(Math.max(0, 1 - Math.pow(u, 2.2))) : Math.sqrt(Math.max(0, 1 - u * u)) * (1 - 0.18 * u * u)); };
-      const aniso = Math.min(8, AF.maxAniso || 1);
-      const mkTex = (cv) => { const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = aniso; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.needsUpdate = true; return t; };
       const g = new THREE.Group(); g.name = 'blimp';
-      // envelope texture: u = around (0 = belly), v = tail -> nose
-      const ecv = document.createElement('canvas'); ecv.width = 1024; ecv.height = 1024;
-      {
-        const c = ecv.getContext('2d');
-        const gr = c.createLinearGradient(0, 0, 1024, 0);   // around: slightly warmer on the flanks, cooler at the belly
-        gr.addColorStop(0, '#d9d2c2'); gr.addColorStop(0.25, '#f1eadb'); gr.addColorStop(0.5, '#f7f1e3'); gr.addColorStop(0.75, '#f1eadb'); gr.addColorStop(1, '#d9d2c2');
-        c.fillStyle = gr; c.fillRect(0, 0, 1024, 1024);
-        // fabric panels: faint per-gore tone steps + seams
-        for (let i = 0; i < 32; i++) { c.fillStyle = `rgba(${i % 2 ? '120,100,70' : '255,250,240'},${0.035 + (i % 3) * 0.012})`; c.fillRect(i * 32, 0, 32, 1024); }
-        c.fillStyle = 'rgba(110,96,74,0.55)'; for (let i = 0; i < 32; i++) c.fillRect(i * 32, 0, 2, 1024);
-        c.fillStyle = 'rgba(110,96,74,0.28)'; for (let j = 0; j < 1024; j += 64) c.fillRect(0, j, 1024, 2);
-        // nose cone battens + cap (v -> 1 = nose; canvas y is flipped: v = 1 - y/1024)
-        c.fillStyle = '#3a3a3e'; for (let i = 0; i < 16; i++) c.fillRect(i * 64 - 5, 0, 10, 115);
-        c.fillStyle = '#2e2e32'; c.fillRect(0, 0, 1024, 26);
-        // tail: brand-orange band with a thin ink pinstripe (reads from the air)
-        c.fillStyle = '#FF5A36'; c.fillRect(0, 1024 - 250, 1024, 34);
-        c.fillStyle = '#121212'; c.fillRect(0, 1024 - 206, 1024, 7); c.fillRect(0, 1024 - 262, 1024, 5);
-        // soft weathering: sun-bleached top, a little grime at the belly
-        const w = c.createLinearGradient(0, 0, 1024, 0); w.addColorStop(0, 'rgba(60,50,40,0.10)'); w.addColorStop(0.12, 'rgba(60,50,40,0)'); w.addColorStop(0.88, 'rgba(60,50,40,0)'); w.addColorStop(1, 'rgba(60,50,40,0.10)');
-        c.fillStyle = w; c.fillRect(0, 0, 1024, 1024);
-      }
-      const prof = []; for (let i = 0; i <= 64; i++) { const z = -HL + (i / 64) * 2 * HL; prof.push(new THREE.Vector2(Math.max(0.001, rAt(z)), z)); }
-      const eg = new THREE.LatheGeometry(prof, 72); eg.rotateX(Math.PI / 2); eg.translate(0, AXY, 0);
-      const envTex = mkTex(ecv), envMat = new THREE.MeshStandardMaterial({ map: envTex, emissiveMap: envTex, emissive: new THREE.Color(0xffffff), emissiveIntensity: 0, roughness: 0.58, metalness: 0.0 });   // emissive = the envelope floodlit from below at night
-      const env = new THREE.Mesh(eg, envMat); env.castShadow = true; env.receiveShadow = false; g.add(env);
-      // ---- the logo billboard: a curved panel hugging each flank (constant height so the lettering never tapers)
-      const LCV = document.createElement('canvas'); LCV.width = 2048; LCV.height = 640;
-      const ECV = document.createElement('canvas'); ECV.width = 1024; ECV.height = 320;
-      const drawSign = (c, W, H, night, phase = -1) => {
-        const s = W / 2048; c.save(); c.scale(s, s);
-        c.fillStyle = night ? '#b9b3a6' : '#f8f4ea'; c.fillRect(0, 0, 2048, 640);
-        // deco frame: ink rule, gold inner line, stepped corners
-        c.fillStyle = night ? '#000' : '#121212'; c.fillRect(0, 0, 2048, 22); c.fillRect(0, 618, 2048, 22); c.fillRect(0, 0, 22, 640); c.fillRect(2026, 0, 22, 640);
-        c.strokeStyle = night ? '#6a5320' : '#b8923a'; c.lineWidth = 6; c.strokeRect(40, 40, 1968, 560);
-        // marquee bulbs round the frame (they bloom at night)
-        let bi = 0;   // marquee bulbs: at night two alternating sets (the emissive map swaps between them = a chase)
-        const bulb = (x, y) => { const on = phase < 0 || (bi++ % 2) === phase; c.beginPath(); c.arc(x, y, 7, 0, Math.PI * 2); c.fillStyle = night ? (on ? '#fff6d8' : '#4a4030') : '#e9dcb4'; c.fill(); };
-        for (let x = 60; x <= 1990; x += 48) for (const y of [11, 629]) bulb(x, y);
-        for (let y = 59; y <= 590; y += 48) for (const x of [11, 2037]) bulb(x, y);
-        // logo mark (800x800 viewBox) at the left: black bracket corners + the tilted orange square
-        c.save(); c.translate(92, 80); c.scale(480 / 800, 480 / 800);
-        c.fillStyle = night ? '#000' : '#121212';
-        c.fill(new Path2D('M0 0h337v121H129v207H0z M464 0h336v328H671V121H464z M0 472h129v208h208v120H0z'));
-        c.fillStyle = night ? '#ff4a22' : '#FF5A36'; c.fill(new Path2D('M508 548l245-48 47 245-245 47z'));
-        c.restore();
-        // wordmark: CREATE / WITH MARK (MARK in orange), bold geometric sans fitted to the panel
-        const fam = '"Futura", "Avenir Next", "Century Gothic", "Helvetica Neue", Arial, sans-serif';
-        const x0 = 680, maxW = 2048 - x0 - 90;
-        let fs = 250; c.font = `bold ${fs}px ${fam}`;
-        const w2 = c.measureText('WITH MARK').width; if (w2 > maxW) fs = Math.floor(fs * maxW / w2);
-        c.font = `bold ${fs}px ${fam}`; c.textBaseline = 'alphabetic';
-        c.fillStyle = night ? '#000' : '#121212'; c.fillText('CREATE', x0, 90 + fs * 0.86);
-        const wy = 90 + fs * 0.86 + fs * 1.02;
-        c.fillText('WITH ', x0, wy); const ww = c.measureText('WITH ').width;
-        c.fillStyle = night ? '#ff4a22' : '#FF5A36'; c.fillText('MARK', x0 + ww, wy);
-        c.restore();
-      };
-      drawSign(LCV.getContext('2d'), 2048, 640, false);
-      drawSign(ECV.getContext('2d'), 1024, 320, true, 0);
-      const ECV2 = document.createElement('canvas'); ECV2.width = 1024; ECV2.height = 320; drawSign(ECV2.getContext('2d'), 1024, 320, true, 1);
-      const chase = [mkTex(ECV), mkTex(ECV2)];
-      const signMat = new THREE.MeshStandardMaterial({ map: mkTex(LCV), emissiveMap: chase[0], emissive: new THREE.Color(0xfff1d6), emissiveIntensity: 0, roughness: 0.62, metalness: 0.0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-      const PL = 30.4, PH = 9.5, PZ = 1.2;   // panel length, height (m), centre offset toward the nose
-      const mkPanel = (side) => {
-        const NI = 48, NJ = 16, pos = [], uv = [], idx = [];
-        for (let i = 0; i <= NI; i++) for (let j = 0; j <= NJ; j++) {
-          const u = i / NI, v = j / NJ, z = PZ + (side > 0 ? PL / 2 - u * PL : -PL / 2 + u * PL), y = (v - 0.5) * PH, r = rAt(z) + 0.07;
-          pos.push(side * Math.sqrt(Math.max(0.01, r * r - y * y)), AXY + y, z); uv.push(u, v);
-        }
-        for (let i = 0; i < NI; i++) for (let j = 0; j < NJ; j++) { const a = i * (NJ + 1) + j, b = a + NJ + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
-        const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); pg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); pg.setIndex(idx); pg.computeVertexNormals();
-        const m = new THREE.Mesh(pg, signMat); m.name = 'blimp-logo-' + (side > 0 ? 'starboard' : 'port'); return m;
-      };
-      const panels = [mkPanel(1), mkPanel(-1)]; for (const p of panels) g.add(p);
-      // ---- fins: ivory with brand-orange rudders/elevators and an ink tip stripe
-      const ivory = new THREE.MeshStandardMaterial({ color: 0xefe8d8, roughness: 0.6 }), orange = new THREE.MeshStandardMaterial({ color: 0xff5a36, roughness: 0.5 }), ink = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.5 });
-      const finShape = new THREE.Shape([new THREE.Vector2(-26.2, 1), new THREE.Vector2(-26.2, 8.6), new THREE.Vector2(-23.6, 8.6), new THREE.Vector2(-15, 5.6), new THREE.Vector2(-15, 1)]);
-      const rudShape = new THREE.Shape([new THREE.Vector2(-28.9, 1), new THREE.Vector2(-28.9, 8.3), new THREE.Vector2(-26.2, 8.6), new THREE.Vector2(-26.2, 1)]);
-      const tipShape = new THREE.Shape([new THREE.Vector2(-28.9, 8.3), new THREE.Vector2(-28.9, 8.9), new THREE.Vector2(-23.6, 9.2), new THREE.Vector2(-23.6, 8.6), new THREE.Vector2(-26.2, 8.6)]);
-      const exG = (sh, d) => { const q = new THREE.ExtrudeGeometry(sh, { depth: d, bevelEnabled: false }); q.translate(0, 0, -d / 2); return q; };
-      const finG = exG(finShape, 0.36), rudG = exG(rudShape, 0.3), tipG = exG(tipShape, 0.4);
+      const prof = []; for (let i = 0; i <= 28; i++) { const z = -HL + (i / 28) * 2 * HL; prof.push(new THREE.Vector2(Math.max(0.001, rAt(z)), z)); }
+      const eg = new THREE.LatheGeometry(prof, 28); eg.rotateX(Math.PI / 2); eg.translate(0, AXY, 0);
+      const envMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd0, emissive: new THREE.Color(0xffffff), emissiveIntensity: 0, roughness: 0.5, metalness: 0.25 });
+      const env = new THREE.Mesh(eg, envMat); env.castShadow = true; g.add(env);
+      const finMat = new THREE.MeshStandardMaterial({ color: 0xa8acb2, roughness: 0.55, metalness: 0.2 });
+      const finShape = new THREE.Shape([new THREE.Vector2(-28.6, 1), new THREE.Vector2(-28.6, 8.4), new THREE.Vector2(-24, 8.6), new THREE.Vector2(-15, 5.6), new THREE.Vector2(-15, 1)]);
+      const finG = new THREE.ExtrudeGeometry(finShape, { depth: 0.36, bevelEnabled: false }); finG.translate(0, 0, -0.18);
       const mb = new THREE.Matrix4();
       for (let k = 0; k < 4; k++) {
         const a = k * Math.PI / 2, d = new THREE.Vector3(Math.sin(a), Math.cos(a), 0), t = new THREE.Vector3(Math.cos(a), -Math.sin(a), 0);
         mb.makeBasis(new THREE.Vector3(0, 0, 1), d, t).setPosition(0, AXY, 0);
-        for (const [geo, mat] of [[finG, ivory], [rudG, orange], [tipG, ink]]) { const m = new THREE.Mesh(geo, mat); m.applyMatrix4(mb); m.castShadow = true; g.add(m); }
+        const m = new THREE.Mesh(finG, finMat); m.applyMatrix4(mb); m.castShadow = true; g.add(m);
       }
-      // ---- gondola (navy, lit window band) + two engine pods with spinning props
-      const navy = new THREE.MeshStandardMaterial({ color: 0x1d2740, roughness: 0.45, metalness: 0.3 });
-      const winMat = new THREE.MeshStandardMaterial({ color: 0x3a3226, emissive: new THREE.Color(0xffd08a), emissiveIntensity: 0.3, roughness: 0.2 });
       const gy = AXY - RMAX + 0.55;
-      const gond = new THREE.Mesh(new THREE.CapsuleGeometry(1.25, 8.6, 6, 14), navy); gond.rotation.x = Math.PI / 2; gond.scale.set(1, 1, 0.95); gond.position.set(0, gy - 1.05, 2.5); gond.castShadow = true; g.add(gond);
-      const wins = new THREE.Mesh(new THREE.BoxGeometry(2.62, 0.62, 7.2), winMat); wins.position.set(0, gy - 0.85, 2.7); g.add(wins);
-      const fairing = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 9.6), ivory); fairing.position.set(0, gy + 0.25, 2.5); g.add(fairing);
-      const props = [];
-      const bladeG = new THREE.BoxGeometry(0.16, 3.0, 0.08);
-      for (const sx of [-1, 1]) {
-        const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.42, 3.2, 12), navy); pod.rotation.x = Math.PI / 2; pod.position.set(sx * 3.6, gy - 0.3, -1.2); pod.castShadow = true; g.add(pod);
-        const strut = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.16, 0.7), navy); strut.position.set(sx * 2.3, gy - 0.3, -1.2); g.add(strut);
-        const hub = new THREE.Group(); hub.position.set(sx * 3.6, gy - 0.3, -2.9);
-        for (let b = 0; b < 3; b++) { const bl = new THREE.Mesh(bladeG, ink); bl.position.y = 0; bl.rotation.z = b * Math.PI * 2 / 3; bl.geometry = bladeG; const arm = new THREE.Group(); arm.rotation.z = b * Math.PI * 2 / 3; bl.rotation.z = 0; bl.position.y = 0.75; arm.add(bl); hub.add(arm); }
-        const cap = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.6, 10), orange); cap.rotation.x = -Math.PI / 2; cap.position.z = -0.25; hub.add(cap);
-        g.add(hub); props.push(hub);
-      }
-      const nav = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a18, fog: false }));
-      nav.position.set(0, gy - 2.4, 2.5); g.add(nav);
-      const nav2 = nav.clone(); nav2.position.set(0, AXY + RMAX + 0.3, 4); g.add(nav2);
-      g.traverse((o) => { o.frustumCulled = false; });
+      const gond = new THREE.Mesh(new THREE.CapsuleGeometry(1.2, 7, 3, 8), new THREE.MeshStandardMaterial({ color: 0x3a3f48, roughness: 0.5 })); gond.rotation.x = Math.PI / 2; gond.position.set(0, gy - 0.9, 2.5); g.add(gond);
+      const nav = new THREE.Mesh(new THREE.SphereGeometry(0.45, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff2a18, fog: false }));
+      nav.position.set(0, gy - 2.2, 2.5); g.add(nav);
       S.add(g);
-      PX.blimp = { mode: 'loop', cool: 90, mesh: g, nav: [nav, nav2], props, signMat, winMat, envMat, chase, panels, logoCanvas: LCV, s: 0.15, cx: 10, cz: -30, rx: 230, rz: 170, y: 168, speed: 4.2, x: 0, z: 0, k: 1.4 };
-      AF.blimp = { mesh: g, panels, pos: () => g.position };
+      PX.blimp = { mode: 'loop', cool: 90, mesh: g, nav: [nav], envMat, s: 0.15, cx: 10, cz: -30, rx: 230, rz: 170, y: 168, speed: 4.2, x: 0, z: 0, k: 1.4 };
+      AF.blimp = { mesh: g, pos: () => g.position };
     }
     // ---- R2: sea spray where the chop slaps the quay wall (soft additive puffs near the camera)
     {
@@ -23024,21 +23421,13 @@ try {
     const B = PX.blimp;
     if (B) {
       stepBlimp(B, dt); const blink = (t % 1.6) < 0.25; for (const n of B.nav) n.visible = blink || night < 0.3 ? blink : true;
-      if (B.props) for (let i = 0; i < B.props.length; i++) B.props[i].rotation.z += dt * (B.mode === 'hold' ? 2.5 : 14) * (i ? 1 : -1);
-      // the logo billboard is floodlit from dusk (a 1930s lit sign); the gondola windows glow
-      const lit = Math.max(night, smooth(0.16, 0.02, sunVec.y));
-      if (B.signMat) { B.signMat.emissiveIntensity = 1.35 * lit; if (B.chase) B.signMat.emissiveMap = B.chase[(t * 2.2 | 0) & 1]; }
-      if (B.winMat) B.winMat.emissiveIntensity = 0.3 + 2.4 * lit;
-      if (B.envMat) B.envMat.emissiveIntensity = 0.12 * night;
+      if (B.envMat) B.envMat.emissiveIntensity = 0.08 * night;
     }
   });
-  AF.test('blimp carries the Create With Mark logo', () => {
-    const B = PX.blimp; if (!B || !B.panels) return { ok: false, info: 'no logo blimp' };
-    const c = B.logoCanvas.getContext('2d'), d = c.getImageData(0, 0, B.logoCanvas.width, B.logoCanvas.height).data;
-    let orange = 0, ink = 0;
-    for (let i = 0; i < d.length; i += 64) { const r = d[i], g = d[i + 1], b = d[i + 2]; if (r > 220 && g > 60 && g < 120 && b < 80) orange++; else if (r < 40 && g < 40 && b < 40) ink++; }
+  AF.test('blimp is plain (no branding panels)', () => {
+    const B = PX.blimp; if (!B) return { ok: false, info: 'no blimp' };
     const eg = B.mesh.children[0].geometry; eg.computeBoundingBox(); const L2 = eg.boundingBox.max.z - eg.boundingBox.min.z;
-    return { ok: B.panels.length === 2 && orange > 300 && ink > 1500 && !!AF.blimp && L2 > 54 && L2 < 62, info: `panels ${B.panels.length}, orange px ${orange}, ink px ${ink}, length ${L2.toFixed(1)} m` };
+    return { ok: !B.panels && B.mesh.children.length <= 8 && L2 > 54 && L2 < 62, info: `children ${B.mesh.children.length}, length ${L2.toFixed(1)} m` };
   });
   AF.test('atmos: blimp drifts, steam + searchlights exist', () => {
     const B = PX.blimp; if (!B) return { ok: false, info: 'no blimp' };
@@ -23262,20 +23651,24 @@ try {
       void main() {
         vec4 src = texture2D(tDiffuse, vUv);
         vec3 c = max(src.rgb, 0.0);
-        // luminance-ratio sharpen (no colour shift, no halos on bright neon)
-        if (uSharp > 0.001) {
+        float dz = texture2D(tDepth, vUv).r;
+        float onSky = step(0.99999, dz);
+        float zz = 2.0 * uNF.x * uNF.y / (uNF.y + uNF.x - (dz * 2.0 - 1.0) * (uNF.y - uNF.x));
+        // distance softening: far geometry (coarse LOD, thin voxel edges) is gently averaged with its 4 neighbours so it
+        // melts into the haze instead of shimmering; near pixels get the luminance-ratio sharpen. Same 4 taps either way.
+        float farK = (1.0 - onSky) * smoothstep(150.0, 420.0, zz) * 0.6;
+        if (uSharp > 0.001 || farK > 0.001) {
           vec2 px = 1.0 / uRes;
-          float ln = lum(texture2D(tDiffuse, vUv + vec2(px.x, 0.0)).rgb) + lum(texture2D(tDiffuse, vUv - vec2(px.x, 0.0)).rgb)
-                   + lum(texture2D(tDiffuse, vUv + vec2(0.0, px.y)).rgb) + lum(texture2D(tDiffuse, vUv - vec2(0.0, px.y)).rgb);
-          float l0 = lum(c), la = ln * 0.25;
-          c *= clamp(1.0 + uSharp * (l0 - la) / max(l0 + 0.02, 1e-4), 0.75, 1.25);
+          vec3 n0 = texture2D(tDiffuse, vUv + vec2(px.x, 0.0)).rgb, n1 = texture2D(tDiffuse, vUv - vec2(px.x, 0.0)).rgb;
+          vec3 n2 = texture2D(tDiffuse, vUv + vec2(0.0, px.y)).rgb, n3 = texture2D(tDiffuse, vUv - vec2(0.0, px.y)).rgb;
+          vec3 avg = max((n0 + n1 + n2 + n3) * 0.25, 0.0);
+          float l0 = lum(c), la = lum(avg);
+          c *= clamp(1.0 + uSharp * (1.0 - farK / 0.6) * (l0 - la) / max(l0 + 0.02, 1e-4), 0.75, 1.25);
+          c = mix(c, avg, farK);
         }
         // god rays + restrained sun glare (linear light)
         // shafts matter most in FRONT of geometry (the sky around the sun already glows)
         // scattering grows with the air between the camera and the surface: no glow smeared over things close by
-        float dz = texture2D(tDepth, vUv).r;
-        float onSky = step(0.99999, dz);
-        float zz = 2.0 * uNF.x * uNF.y / (uNF.y + uNF.x - (dz * 2.0 - 1.0) * (uNF.y - uNF.x));
         float air = onSky > 0.5 ? 0.6 : 1.0 - exp(-zz / 140.0);
         c += texture2D(tRays, vUv).rgb * uSunCol * uRaysK * air;
         vec2 dv = (vUv - uSunUV) * vec2(uAspect, 1.0); float r2 = dot(dv, dv);
@@ -24477,14 +24870,18 @@ try {
   //          shoe, hat: null|'cap'|'straw', hatCol, female, height (1 = 1.75 m), extra: 'headphones'|'chain'|'bow'|null }
   const AV = AF.avatar = {};
   const geoCache = new Map();
-  const cget = (key, fn, anchor) => { let g = geoCache.get(key); if (!g) { g = AF.meshModel(fn(), { vs: 1 / 16, anchor }); geoCache.set(key, g); } return g; };
+  // every avatar part is authored at 1/16 m, then doubled to 1/32 m and given a fine detail pass (see FINE below)
+  const cget = (key, fn, anchor, det) => { let g = geoCache.get(key); if (!g) { const m = up2(fn()); if (det) det(m); g = AF.meshModel(m, { vs: 1 / 32, anchor }); geoCache.set(key, g); } return g; };
+  const up2 = (m) => { const o = new AF.Model(m.w * 2, m.h * 2, m.d * 2); for (let x = 0; x < m.w; x++) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) { const c = m.get(x, y, z); if (c) o.box(x * 2, y * 2, z * 2, x * 2 + 2, y * 2 + 2, z * 2 + 2, c); } return o; };
+  const hsh = (x, y, z) => ((Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) >>> 0);
   const shade = (hex, k) => { const f = (s) => Math.max(0, Math.min(255, Math.round(((hex >> s) & 255) * k))); return (f(16) << 16) | (f(8) << 8) | f(0); };
   const pal = (L) => {
     const c = (h, j = 0.15, e = 0.25) => AF.col(h, { jitter: j, edge: e });
     const top = L.top || {}, bot = L.bottom || {};
     return {
       skin: c(L.skin, 0.08, 0.15), skinS: c(shade(L.skin, 0.88), 0.08, 0.15), eye: c(0x2a211c, 0, 0), white: c(0xf6f1e6, 0.05, 0.1), blush: c(shade(L.skin, 0.92) | 0x200000, 0.05, 0.1),
-      mouth: c(L.lips || shade(L.skin, 0.7), 0, 0.1), hair: c(L.hair, 0.3, 0.3), hairD: c(shade(L.hair, 0.8), 0.25, 0.3),
+      mouth: c(L.lips || shade(L.skin, 0.7), 0, 0.1), hair: c(L.hair, 0.3, 0.3), hairD: c(shade(L.hair, 0.8), 0.25, 0.3), hairL: c(shade(L.hair, 1.35) + 0x0a0806, 0.2, 0.3), brow: c(shade(L.hair, 0.7), 0.05, 0.1),
+      nose: c(shade(L.skin, 0.93), 0.05, 0.15), lace: c(0xf4f1ea, 0.05, 0.1),
       top: c(top.col, 0.2, 0.3), topD: c(shade(top.col, 0.78), 0.15, 0.3), topL: c(shade(top.col, 1.12), 0.2, 0.3), top2: c(top.col2 ?? 0xf2eee2, 0.08, 0.2), print: c(top.print ?? top.col2 ?? 0xffffff, 0.05, 0.1),
       bot: c(bot.col, 0.25, 0.3), botD: c(shade(bot.col, 0.82), 0.2, 0.3), shoe: c(L.shoe ?? 0x6a4028, 0.2, 0.35), sole: c(shade(L.shoe ?? 0x6a4028, 0.5), 0.1, 0.2),
       glass: L.glasses != null ? c(L.glasses, 0.05, 0.1) : 0, lens: AF.col(0xcfe6f0, { glass: true, jitter: 0, edge: 0 }), beard: L.beard != null ? c(L.beard, 0.3, 0.3) : 0,
@@ -24574,13 +24971,62 @@ try {
     for (let y = 2; y < 7; y++) m.box(3, y, 2, 9, y + 1, 6, 0);
     return m;
   };
+  // ---- fine detail passes (coordinates in 1/32 m cells of the doubled models)
+  const FINE = {
+    head(m, L, C) {
+      // hair: strand texture (light + dark flecks) on every hair cell
+      for (let x = 0; x < m.w; x++) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) if (m.get(x, y, z) === C.hair) { const q = hsh(x, y >> 1, z) % 9; if (q === 0) m.set(x, y, z, C.hairL); else if (q < 3) m.set(x, y, z, C.hairD); }
+      const F = 15;   // front face layer
+      // eyes: white on the outer column, iris inside, a catch-light on top
+      for (const [wx, ix] of [[6, 7], [13, 12]]) { m.set(wx, 14, F, C.white); m.set(wx, 15, F, C.white); m.set(ix, 14, F, C.eye); m.set(ix, 15, F, C.eye); m.set(ix, 16, F, C.skin); m.set(wx, 16, F, C.skin); }
+      // brows: a thin arched line
+      for (const [a, b] of [[5, 8], [12, 15]]) for (let x = a; x < b; x++) m.set(x, 17, F, C.brow);
+      if (L.female) { m.set(5, 15, F, C.eye); m.set(14, 15, F, C.eye); m.set(4, 16, F, C.skin); m.set(4, 17, F, C.skin); m.set(15, 16, F, C.skin); m.set(15, 17, F, C.skin); }
+      // nose: a narrow bridge with a shaded tip
+      for (let x = 8; x < 12; x++) for (let y = 12; y < 14; y++) { m.set(x, y, F + 1, 0); m.set(x, y, F + 2, 0); }
+      m.set(9, 13, F + 1, C.skin); m.set(10, 13, F + 1, C.skin); m.set(9, 12, F + 1, C.nose); m.set(10, 12, F + 1, C.nose);
+      // mouth: a small smile (not under a beard)
+      if (!C.beard) { for (let x = 8; x < 12; x++) { m.set(x, 11, F, C.skin); m.set(x, 10, F, C.skin); } m.set(9, 10, F, C.mouth); m.set(10, 10, F, C.mouth); m.set(8, 11, F, C.mouth); m.set(11, 11, F, C.mouth); }
+      // ears: an inner fold
+      for (const x of [2, 17]) { if (m.get(x, 13, 10)) m.set(x, 13, 10, C.nose); }
+    },
+    torso(m, L, C) {
+      const T = L.top || {}, st = T.style || 'tee', w = m.w, cx = w >> 1, F = m.d - 1;
+      // hem + side seams
+      for (let x = 0; x < w; x++) { if (m.get(x, 2, F) === C.top) m.set(x, 2, F, C.topD); }
+      for (let y = 3; y < 14; y++) { if (m.get(0, y, F) === C.top) m.set(0, y, F, C.topD); if (m.get(w - 1, y, F) === C.top) m.set(w - 1, y, F, C.topD); }
+      // belt buckle (trousers only)
+      if (!(L.bottom && L.bottom.style === 'skirt')) { m.set(cx - 1, 0, F, C.gold); m.set(cx, 0, F, C.gold); m.set(cx - 1, 1, F, C.gold); m.set(cx, 1, F, C.gold); }
+      if (st === 'shirt' || st === 'cardigan') for (let y = 4; y < 14; y += 3) m.set(cx, y, F, st === 'cardigan' ? C.gold : C.topD);
+      if (st === 'shirt') { m.set(cx - 3, 15, F, C.top2); m.set(cx + 2, 15, F, C.top2); m.set(cx - 2, 14, F, C.top2); m.set(cx + 1, 14, F, C.top2); }
+      if (st === 'hoodie') { for (let y = 9; y < 14; y++) { m.set(cx - 2, y, F, C.top2); m.set(cx + 1, y, F, C.top2); } m.set(cx - 2, 8, F, C.gold); m.set(cx + 1, 8, F, C.gold); for (let x = cx - 4; x < cx + 4; x++) m.set(x, 10, F, C.topD); }
+      if (st === 'tee' && T.print == null) for (let x = cx - 2; x < cx + 2; x++) m.set(x, 14, F, C.topD);
+    },
+    arm(m, L, C) {
+      // fingers: shaded tips + a thumb; cuff line at the sleeve end
+      for (let x = 0; x < m.w; x++) for (let z = 0; z < m.d; z++) if (m.get(x, 0, z) === C.skin) m.set(x, 0, z, C.skinS);
+      for (let z = 1; z < m.d; z += 2) if (m.get(0, 1, z) === C.skin) m.set(0, 1, z, C.skinS);
+      for (let y = 1; y < m.h; y++) { let cuff = false; for (let x = 0; x < m.w; x++) if (m.get(x, y, 0) === C.top && m.get(x, y - 1, 0) === C.skin) cuff = true; if (cuff) { for (let x = 0; x < m.w; x++) for (let z = 0; z < m.d; z++) if (m.get(x, y, z) === C.top) m.set(x, y, z, C.topD); break; } }
+    },
+    leg(m, L, C) {
+      const F = m.d - 1;
+      // laces over the instep + a toe cap
+      for (let x = 2; x < m.w - 2; x += 2) if (m.get(x, 5, F - 1) === C.shoe) { m.set(x, 5, F - 1, C.lace); m.set(x + 1, 5, F - 2, C.lace); }
+      for (let x = 0; x < m.w; x++) for (let y = 2; y < 4; y++) if (m.get(x, y, F) === C.shoe) m.set(x, y, F, C.sole);
+      // denim / jogger detail: knee crease + hem
+      const bs = L.bottom && L.bottom.style;
+      if (bs === 'jeans' || bs === 'joggers') for (let x = 0; x < m.w; x++) { for (let z = 0; z < m.d; z++) if (m.get(x, 13, z) === C.bot) m.set(x, 13, z, C.botD); }
+      if (bs === 'shorts') for (let x = 0; x < m.w; x++) for (let z = 0; z < m.d; z++) if (m.get(x, 14, z) === C.bot) m.set(x, 14, z, C.botD);
+    },
+    skirt(m, L, C) { for (let x = 0; x < m.w; x += 3) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) if (m.get(x, y, z) === C.bot) m.set(x, y, z, C.botD); },
+  };
   AV.build = (L) => {
     const C = pal(L), key = JSON.stringify(L);
-    const gLegL = cget('lL' + key, () => legModel(L, C, -1, false), [0.5, 1, 0.5]), gLegR = cget('lR' + key, () => legModel(L, C, 1, false), [0.5, 1, 0.5]);
+    const gLegL = cget('lL' + key, () => legModel(L, C, -1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C)), gLegR = cget('lR' + key, () => legModel(L, C, 1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C));
     const gBent = cget('lB' + key, () => legModel(L, C, 1, true), [0.5, 1, 2 / 11]);
-    const gTorso = cget('t' + key, () => torsoModel(L, C), [0.5, 0, 0.5]);
-    const gArm = cget('a' + key, () => armModel(L, C), [0.5, 1, 0.5]);
-    const gHead = cget('h' + key, () => headModel(L, C), [0.5, 4 / 15, 0.5]);
+    const gTorso = cget('t' + key, () => torsoModel(L, C), [0.5, 0, 0.5], (m) => FINE.torso(m, L, C));
+    const gArm = cget('a' + key, () => armModel(L, C), [0.5, 1, 0.5], (m) => FINE.arm(m, L, C));
+    const gHead = cget('h' + key, () => headModel(L, C), [0.5, 4 / 15, 0.5], (m) => FINE.head(m, L, C));
     const root = new THREE.Group(); root.name = 'avatar';
     const hips = new THREE.Group(); hips.position.y = 0.75; root.add(hips);
     const hw = L.female ? 0.11 : 0.125;
@@ -24594,7 +25040,7 @@ try {
     const head = new THREE.Group(); head.position.set(0, 0.52, 0); chest.add(head);
     const headM = AF.modelMesh(gHead); headM.position.z = -0.03; head.add(headM);
     let skirt = null;
-    if (L.bottom && L.bottom.style === 'skirt') { skirt = AF.modelMesh(cget('s' + key, () => skirtModel(L, C), [0.5, 1, 0.5])); skirt.position.y = 0.02; hips.add(skirt); }
+    if (L.bottom && L.bottom.style === 'skirt') { skirt = AF.modelMesh(cget('s' + key, () => skirtModel(L, C), [0.5, 1, 0.5], (m) => FINE.skirt(m, L, C))); skirt.position.y = 0.02; hips.add(skirt); }
     root.scale.setScalar(L.height || 1);
     const parts = { root, hips, legL, legR, chest, torso, armL, armR, head, skirt, gLeg: [gLegL, gLegR], gBent, sitting: false };
     for (const m of [legL, legR, torso, armL, armR, headM, skirt]) if (m) { m.castShadow = true; m.receiveShadow = true; }
@@ -25076,25 +25522,28 @@ try {
   #ui .deco{font-family:Limelight,'Poiret One',Georgia,serif;letter-spacing:.18em}
   #ui kbd{display:inline-block;min-width:18px;padding:1px 6px;border-radius:6px;background:rgba(255,255,255,.14);font:600 12px system-ui;text-align:center}
   #ui .hide{display:none!important}
-  #ui #t-title{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:0 16px max(28px,env(safe-area-inset-bottom));pointer-events:none;background:linear-gradient(180deg,rgba(6,12,20,.55) 0,rgba(6,12,20,0) 30%,rgba(6,12,20,0) 45%,rgba(6,12,20,.75) 100%);transition:opacity .6s}
+  #ui #t-title{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:max(90px,12vh) 16px max(20px,env(safe-area-inset-bottom));pointer-events:none;background:radial-gradient(ellipse at 50% 55%,rgba(6,12,20,.35) 0,rgba(6,12,20,.78) 75%);transition:opacity .6s}
   #ui #t-title.out{opacity:0}
-  #ui #t-title .logo{position:absolute;top:max(7vh,20px);left:0;right:0;text-align:center}
-  #ui #t-title h1{margin:0;font:400 clamp(30px,6vw,60px)/1 Limelight,Georgia,serif;letter-spacing:.24em;padding-left:.24em;color:#ffe6a8;text-shadow:0 2px 0 rgba(60,36,8,.7),0 0 24px rgba(240,190,90,.35)}
+  #ui #t-title .logo{position:absolute;top:max(4vh,14px);left:0;right:0;text-align:center}
+  #ui #t-title h1{margin:0;font:400 clamp(28px,5.4vw,56px)/1 Limelight,Georgia,serif;letter-spacing:.24em;padding-left:.24em;color:#ffe6a8;text-shadow:0 2px 0 rgba(60,36,8,.7),0 0 24px rgba(240,190,90,.35)}
   #ui #t-title .sub{margin-top:8px;color:#e9dcc0;font-style:italic;text-shadow:0 1px 3px #000}
-  #ui #t-title .card{pointer-events:auto;width:min(720px,100%);padding:16px}
-  #ui #t-title .q{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);text-align:center;margin-bottom:10px}
-  #ui #t-title .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
-  #ui #t-title .pick{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 2px;border-radius:12px;border:1px solid transparent}
-  #ui #t-title .pick:hover{background:rgba(255,255,255,.07)}
-  #ui #t-title .pick.on{background:rgba(240,200,112,.14);border-color:rgba(240,200,112,.6)}
-  #ui #t-title .pick svg{width:54px;height:54px}
-  #ui #t-title .pick b{font-weight:600;font-size:13px}
-  #ui #t-title .info{display:flex;align-items:center;gap:14px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
-  #ui #t-title .info .txt{flex:1;min-width:0}
-  #ui #t-title .info .n{font-weight:700;font-size:16px}
-  #ui #t-title .info .d{color:var(--dim);font-size:13px}
-  #ui #t-title .info .btn{padding:12px 22px;font-size:15px;white-space:nowrap}
-  @media (max-width:620px){#ui #t-title .grid{grid-template-columns:repeat(4,1fr)} #ui #t-title .info{flex-direction:column;align-items:stretch;text-align:center}}
+  #ui #t-title .modal{pointer-events:auto;width:min(500px,94vw);max-height:100%;padding:16px 18px 18px;display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--bg2);animation:uiIn .35s ease}
+  #ui #t-title .q{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);text-align:center}
+  #ui #t-title .stage{position:relative;width:100%;height:min(44vh,360px);min-height:200px;margin:6px 0 4px;border-radius:14px;overflow:hidden;background:radial-gradient(ellipse at 50% 70%,rgba(240,200,112,.22) 0,rgba(240,200,112,0) 60%),linear-gradient(180deg,rgba(40,60,90,.55),rgba(12,20,32,.9))}
+  #ui #t-title .stage canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+  #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;background:rgba(10,20,30,.6);border:1px solid var(--line);font-size:28px;line-height:1;display:flex;align-items:center;justify-content:center;color:#ffe6a8;transition:background .15s,transform .1s}
+  #ui #t-title .arr:hover{background:rgba(240,200,112,.28)} #ui #t-title .arr:active{transform:translateY(-50%) scale(.94)}
+  #ui #t-title .arr.l{left:10px} #ui #t-title .arr.r{right:10px}
+  #ui #t-title .cnt{position:absolute;right:12px;top:10px;font-size:11px;color:var(--dim);letter-spacing:.12em}
+  #ui #t-title .n{font:400 26px Limelight,Georgia,serif;letter-spacing:.1em;color:#ffe6a8;text-align:center}
+  #ui #t-title .tg{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);text-align:center}
+  #ui #t-title .d{color:var(--ink);opacity:.85;font-size:14px;text-align:center;min-height:38px;max-width:420px}
+  #ui #t-title .dots{display:flex;gap:7px;margin:6px 0 10px}
+  #ui #t-title .dots button{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.22);padding:0}
+  #ui #t-title .dots button.on{background:var(--gold);transform:scale(1.25)}
+  #ui #t-title .go{padding:13px 30px;font-size:16px;display:inline-flex;align-items:center;gap:10px;letter-spacing:.04em}
+  #ui #t-title .go .ic{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1b1408;color:#f6d68a;font-size:11px;padding-left:2px}
+  @media (max-height:560px){#ui #t-title .logo{display:none} #ui #t-title{padding-top:12px} #ui #t-title .stage{height:38vh}}
   #ui.titling .hud{display:none!important}
   #ui #h-clock{position:absolute;left:max(14px,env(safe-area-inset-left));top:max(14px,env(safe-area-inset-top));padding:8px 14px;display:flex;flex-direction:column;gap:1px;min-width:120px}
   #ui #h-clock .t{font-size:20px;font-weight:600}
@@ -25189,8 +25638,10 @@ try {
 
   // ------------------------------------------------------------------ elements
   const title = h('div', '', `<div class="logo"><h1>PORT SOLACE</h1><div class="sub">a harbour city where the lights never quite go out</div></div>
-    <div class="card panel"><div class="q">Who are you today?</div><div class="grid"></div>
-    <div class="info"><div class="txt"><div class="n"></div><div class="d"></div></div><button class="btn primary go">Play</button></div></div>`); title.id = 't-title';
+    <div class="modal panel pe" role="dialog" aria-modal="true" aria-label="Choose your character"><div class="q">Who are you today?</div>
+    <div class="stage"><canvas aria-hidden="true"></canvas><button class="arr l" aria-label="Previous character">&#8249;</button><button class="arr r" aria-label="Next character">&#8250;</button><div class="cnt"></div></div>
+    <div class="n"></div><div class="tg"></div><div class="d"></div><div class="dots"></div>
+    <button class="btn primary go"><span class="ic">&#9654;</span><span class="lb">Let's Play</span></button></div>`); title.id = 't-title';
   const clock = h('div', 'panel hud', `<div class="t"><span class="tm">4:30</span><small class="ap">PM</small></div><div class="p">Port Solace</div>`); clock.id = 'h-clock';
   const right = h('div', 'hud', `<div id="h-mini" class="panel pe"><canvas width="220" height="220"></canvas><div class="n">N</div></div><div id="h-btns"><button class="panel round pe" data-k="map" title="Map (M)">&#x1F5FA;</button><button class="panel round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); right.id = 'h-right';
   const prompt = h('div', 'panel hud pe', ''); prompt.id = 'h-prompt';
@@ -25212,7 +25663,7 @@ try {
   help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>RUN button</span></div></div>
     <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Jump \u00b7 brake</span><span>round button</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
     : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('V', 'First person')}${K('Tab', 'Aerial view')}</div>
-    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('W+S', 'Throttle')}${K('Mouse', 'Pitch & bank')}${K('A+D', 'Bank')}${K('Q+E', 'Rudder')}${K('F', 'Get out (on the ground)')}</div>
+    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space', 'Engine up + climb / take off')}${K('Shift', 'Engine down + descend')}${K('W+S', 'Taxi / brake')}${K('A+D', 'Turn left / right')}${K('F', 'Get out (on the ground)')}</div>
     <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}</div>
     <div><h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}</div></div>`}
     <div class="stack"><button class="btn primary" data-k="closehelp">Got it</button></div></div>`;
@@ -25287,19 +25738,66 @@ try {
     bubbleEl.style.left = ((BV.x + 1) / 2 * r.width) + 'px'; bubbleEl.style.top = ((1 - BV.y) / 2 * r.height) + 'px'; show(bubbleEl, true);
   };
 
-  // ------------------------------------------------------------------ title: pick your friend
-  const grid = title.querySelector('.grid'), tName = title.querySelector('.n'), tDesc = title.querySelector('.d'), tGo = title.querySelector('.go');
+  // ------------------------------------------------------------------ title: pick your friend (modal, alphabetical, live 3D turntable)
+  const tName = title.querySelector('.n'), tTag = title.querySelector('.tg'), tDesc = title.querySelector('.d'), tGo = title.querySelector('.go'), tDots = title.querySelector('.dots'), tCnt = title.querySelector('.cnt');
+  const roster = () => ((AF.friends && AF.friends.cast) || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  UI.roster = roster;
+  const PV = { r: null, scene: null, cam: null, P: null, st: { phase: 0, speed: 0, air: 0, t: 0, land: 0 }, yaw: 0.4, spin: 0, drag: null, pop: 1 };
+  const pvInit = () => {
+    if (PV.r) return true;
+    if (PV.failed) return false;
+    try {
+      const cv = title.querySelector('.stage canvas');
+      const r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true, powerPreference: 'low-power' });
+      r.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.05;
+      const sc = new THREE.Scene();
+      sc.add(new THREE.HemisphereLight(0xfff2dc, 0x34465a, 1.9));
+      const key = new THREE.DirectionalLight(0xfff0d8, 2.6); key.position.set(2.5, 4, 3.5); sc.add(key);
+      const rim = new THREE.DirectionalLight(0x8ec0ff, 1.4); rim.position.set(-3, 2.5, -3); sc.add(rim);
+      const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.78, 0.08, 40), new THREE.MeshStandardMaterial({ color: 0x3a2c1e, roughness: 0.55, metalness: 0.25 }));
+      disc.position.y = -0.04; sc.add(disc);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.018, 8, 48), new THREE.MeshStandardMaterial({ color: 0xf0c870, emissive: 0x6a4a10, roughness: 0.3, metalness: 0.8 }));
+      ring.rotation.x = Math.PI / 2; sc.add(ring);
+      const cam = new THREE.PerspectiveCamera(28, 1, 0.1, 50); cam.position.set(0, 1.2, 5.2); cam.lookAt(0, 0.98, 0);
+      Object.assign(PV, { r, scene: sc, cam, cv });
+      cv.addEventListener('pointerdown', (e) => { PV.drag = { x: e.clientX, yaw: PV.yaw }; try { cv.setPointerCapture(e.pointerId); } catch (er) {} cv.style.cursor = 'grabbing'; });
+      cv.addEventListener('pointermove', (e) => { if (PV.drag) PV.yaw = PV.drag.yaw + (e.clientX - PV.drag.x) * 0.012; });
+      const up = () => { PV.drag = null; cv.style.cursor = ''; };
+      cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+      return true;
+    } catch (e) { PV.failed = true; console.warn('[af] character preview unavailable', e); return false; }
+  };
+  const pvShow = (look) => {
+    if (!pvInit() || !AF.avatar) return;
+    if (PV.P) PV.scene.remove(PV.P.root);
+    PV.P = AF.avatar.build(look); PV.scene.add(PV.P.root); PV.pop = 0;
+  };
+  AF.onTick('ui-preview', 946, (dt) => {
+    if (!S.title || !PV.r || !PV.P) return;
+    const cv = PV.cv, w = cv.clientWidth | 0, hh = cv.clientHeight | 0; if (!w || !hh) return;
+    if (PV.w !== w || PV.h !== hh) { PV.w = w; PV.h = hh; PV.r.setSize(w, hh, false); PV.cam.aspect = w / hh; PV.cam.updateProjectionMatrix(); }
+    if (!PV.drag) PV.yaw += dt * 0.55;
+    PV.pop = Math.min(1, PV.pop + dt * 4);
+    const e = 1 - Math.pow(1 - PV.pop, 3), s = (PV.P.root.userData.h0 || (PV.P.root.userData.h0 = PV.P.root.scale.x)) * (0.85 + 0.15 * e);
+    PV.P.root.scale.setScalar(s); PV.P.root.rotation.y = PV.yaw;
+    AF.avatar.animate(PV.P, PV.st, Math.min(dt, 0.05), 0, true);
+    PV.r.render(PV.scene, PV.cam);
+  });
   const select = (id) => {
     const c = AF.friends && AF.friends.byId[id]; if (!c) return;
+    const R = roster(), i = R.findIndex((q) => q.id === id);
     S.pick = id;
-    grid.querySelectorAll('.pick').forEach((b) => b.classList.toggle('on', b.dataset.id === id));
-    tName.textContent = c.name + ' \u00b7 ' + c.tag; tDesc.textContent = c.blurb; tGo.textContent = 'Play as ' + c.name;
+    tName.textContent = c.name; tTag.textContent = c.tag; tDesc.textContent = c.blurb; tCnt.textContent = (i + 1) + ' / ' + R.length;
+    tDots.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.id === id));
+    tGo.querySelector('.lb').textContent = "Let's Play as " + c.name;
+    pvShow(c.look);
   };
+  const step = (d) => { const R = roster(); if (!R.length) return; const i = Math.max(0, R.findIndex((c) => c.id === S.pick)); select(R[(i + d + R.length) % R.length].id); };
   const buildTitle = () => {
-    const cast = (AF.friends && AF.friends.cast) || [];
-    grid.innerHTML = cast.map((c) => `<button class="pick" data-id="${c.id}">${UI.portrait(c.look)}<b>${esc(c.name)}</b></button>`).join('');
+    const R = roster();
+    tDots.innerHTML = R.map((c) => `<button data-id="${c.id}" aria-label="${esc(c.name)}"></button>`).join('');
     let last = null; try { last = localStorage.getItem('portSolace.friend'); } catch (e) {}
-    select(cast.find((c) => c.id === last) ? last : cast[0] && cast[0].id);
+    select(R.find((c) => c.id === last) ? last : R[0] && R[0].id);
   };
   const start = () => {
     if (!AF.ready || !S.pick || !S.title) return;
@@ -25309,7 +25807,9 @@ try {
     UI.toast(`Welcome home, ${c.name}! Your friends live along Friends Lane \u2014 go say hi.`, 5200);
     setTimeout(() => UI.toast(TOUCH ? 'Tap a prompt to talk, or to get into a car, a bike or a plane.' : 'Walk up to anyone \u2014 or any car \u2014 and press E. M for the map, Esc for the menu.', 5400), 5600);
   };
-  grid.addEventListener('click', (e) => { const b = e.target.closest('.pick'); if (!b) return; if (S.pick === b.dataset.id && e.detail > 1) start(); else select(b.dataset.id); });
+  tDots.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) select(b.dataset.id); });
+  title.querySelector('.arr.l').addEventListener('click', () => step(-1));
+  title.querySelector('.arr.r').addEventListener('click', () => step(1));
   tGo.addEventListener('click', start);
   UI.showTitle = () => { S.title = true; root.classList.add('titling'); title.style.display = ''; title.classList.remove('out'); toggleMenu(false); closeDlg(); if (AF.mode !== 'aerial') AF.setMode('aerial', { keep: true }); if (AF.flyTo) AF.flyTo(AF.PLAN.views[0].pos, AF.PLAN.views[0].target, 3); };
   UI.go = (id) => { if (id) select(id); start(); };
@@ -25448,10 +25948,9 @@ try {
     frameN++;
     const I = AF.input;
     if (S.title) {
-      const cast = AF.friends ? AF.friends.cast : [], i = cast.findIndex((c) => c.id === S.pick);
       if (I.hit('Enter') || I.hit('Space')) start();
-      if (cast.length && (I.hit('ArrowRight') || I.hit('KeyD'))) select(cast[(i + 1) % cast.length].id);
-      if (cast.length && (I.hit('ArrowLeft') || I.hit('KeyA'))) select(cast[(i - 1 + cast.length) % cast.length].id);
+      if (I.hit('ArrowRight') || I.hit('KeyD')) step(1);
+      if (I.hit('ArrowLeft') || I.hit('KeyA')) step(-1);
     } else {
       if (I.hit('KeyM')) toggleMap();
       if (I.hit('KeyH') || I.hit('Slash')) toggleHelp();

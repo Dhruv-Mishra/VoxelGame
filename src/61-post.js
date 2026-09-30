@@ -63,20 +63,24 @@ try {
       void main() {
         vec4 src = texture2D(tDiffuse, vUv);
         vec3 c = max(src.rgb, 0.0);
-        // luminance-ratio sharpen (no colour shift, no halos on bright neon)
-        if (uSharp > 0.001) {
+        float dz = texture2D(tDepth, vUv).r;
+        float onSky = step(0.99999, dz);
+        float zz = 2.0 * uNF.x * uNF.y / (uNF.y + uNF.x - (dz * 2.0 - 1.0) * (uNF.y - uNF.x));
+        // distance softening: far geometry (coarse LOD, thin voxel edges) is gently averaged with its 4 neighbours so it
+        // melts into the haze instead of shimmering; near pixels get the luminance-ratio sharpen. Same 4 taps either way.
+        float farK = (1.0 - onSky) * smoothstep(150.0, 420.0, zz) * 0.6;
+        if (uSharp > 0.001 || farK > 0.001) {
           vec2 px = 1.0 / uRes;
-          float ln = lum(texture2D(tDiffuse, vUv + vec2(px.x, 0.0)).rgb) + lum(texture2D(tDiffuse, vUv - vec2(px.x, 0.0)).rgb)
-                   + lum(texture2D(tDiffuse, vUv + vec2(0.0, px.y)).rgb) + lum(texture2D(tDiffuse, vUv - vec2(0.0, px.y)).rgb);
-          float l0 = lum(c), la = ln * 0.25;
-          c *= clamp(1.0 + uSharp * (l0 - la) / max(l0 + 0.02, 1e-4), 0.75, 1.25);
+          vec3 n0 = texture2D(tDiffuse, vUv + vec2(px.x, 0.0)).rgb, n1 = texture2D(tDiffuse, vUv - vec2(px.x, 0.0)).rgb;
+          vec3 n2 = texture2D(tDiffuse, vUv + vec2(0.0, px.y)).rgb, n3 = texture2D(tDiffuse, vUv - vec2(0.0, px.y)).rgb;
+          vec3 avg = max((n0 + n1 + n2 + n3) * 0.25, 0.0);
+          float l0 = lum(c), la = lum(avg);
+          c *= clamp(1.0 + uSharp * (1.0 - farK / 0.6) * (l0 - la) / max(l0 + 0.02, 1e-4), 0.75, 1.25);
+          c = mix(c, avg, farK);
         }
         // god rays + restrained sun glare (linear light)
         // shafts matter most in FRONT of geometry (the sky around the sun already glows)
         // scattering grows with the air between the camera and the surface: no glow smeared over things close by
-        float dz = texture2D(tDepth, vUv).r;
-        float onSky = step(0.99999, dz);
-        float zz = 2.0 * uNF.x * uNF.y / (uNF.y + uNF.x - (dz * 2.0 - 1.0) * (uNF.y - uNF.x));
         float air = onSky > 0.5 ? 0.6 : 1.0 - exp(-zz / 140.0);
         c += texture2D(tRays, vUv).rgb * uSunCol * uRaysK * air;
         vec2 dv = (vUv - uSunUV) * vec2(uAspect, 1.0); float r2 = dot(dv, dv);

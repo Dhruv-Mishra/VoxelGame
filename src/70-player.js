@@ -14,14 +14,18 @@ try {
   //          shoe, hat: null|'cap'|'straw', hatCol, female, height (1 = 1.75 m), extra: 'headphones'|'chain'|'bow'|null }
   const AV = AF.avatar = {};
   const geoCache = new Map();
-  const cget = (key, fn, anchor) => { let g = geoCache.get(key); if (!g) { g = AF.meshModel(fn(), { vs: 1 / 16, anchor }); geoCache.set(key, g); } return g; };
+  // every avatar part is authored at 1/16 m, then doubled to 1/32 m and given a fine detail pass (see FINE below)
+  const cget = (key, fn, anchor, det) => { let g = geoCache.get(key); if (!g) { const m = up2(fn()); if (det) det(m); g = AF.meshModel(m, { vs: 1 / 32, anchor }); geoCache.set(key, g); } return g; };
+  const up2 = (m) => { const o = new AF.Model(m.w * 2, m.h * 2, m.d * 2); for (let x = 0; x < m.w; x++) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) { const c = m.get(x, y, z); if (c) o.box(x * 2, y * 2, z * 2, x * 2 + 2, y * 2 + 2, z * 2 + 2, c); } return o; };
+  const hsh = (x, y, z) => ((Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) >>> 0);
   const shade = (hex, k) => { const f = (s) => Math.max(0, Math.min(255, Math.round(((hex >> s) & 255) * k))); return (f(16) << 16) | (f(8) << 8) | f(0); };
   const pal = (L) => {
     const c = (h, j = 0.15, e = 0.25) => AF.col(h, { jitter: j, edge: e });
     const top = L.top || {}, bot = L.bottom || {};
     return {
       skin: c(L.skin, 0.08, 0.15), skinS: c(shade(L.skin, 0.88), 0.08, 0.15), eye: c(0x2a211c, 0, 0), white: c(0xf6f1e6, 0.05, 0.1), blush: c(shade(L.skin, 0.92) | 0x200000, 0.05, 0.1),
-      mouth: c(L.lips || shade(L.skin, 0.7), 0, 0.1), hair: c(L.hair, 0.3, 0.3), hairD: c(shade(L.hair, 0.8), 0.25, 0.3),
+      mouth: c(L.lips || shade(L.skin, 0.7), 0, 0.1), hair: c(L.hair, 0.3, 0.3), hairD: c(shade(L.hair, 0.8), 0.25, 0.3), hairL: c(shade(L.hair, 1.35) + 0x0a0806, 0.2, 0.3), brow: c(shade(L.hair, 0.7), 0.05, 0.1),
+      nose: c(shade(L.skin, 0.93), 0.05, 0.15), lace: c(0xf4f1ea, 0.05, 0.1),
       top: c(top.col, 0.2, 0.3), topD: c(shade(top.col, 0.78), 0.15, 0.3), topL: c(shade(top.col, 1.12), 0.2, 0.3), top2: c(top.col2 ?? 0xf2eee2, 0.08, 0.2), print: c(top.print ?? top.col2 ?? 0xffffff, 0.05, 0.1),
       bot: c(bot.col, 0.25, 0.3), botD: c(shade(bot.col, 0.82), 0.2, 0.3), shoe: c(L.shoe ?? 0x6a4028, 0.2, 0.35), sole: c(shade(L.shoe ?? 0x6a4028, 0.5), 0.1, 0.2),
       glass: L.glasses != null ? c(L.glasses, 0.05, 0.1) : 0, lens: AF.col(0xcfe6f0, { glass: true, jitter: 0, edge: 0 }), beard: L.beard != null ? c(L.beard, 0.3, 0.3) : 0,
@@ -111,13 +115,62 @@ try {
     for (let y = 2; y < 7; y++) m.box(3, y, 2, 9, y + 1, 6, 0);
     return m;
   };
+  // ---- fine detail passes (coordinates in 1/32 m cells of the doubled models)
+  const FINE = {
+    head(m, L, C) {
+      // hair: strand texture (light + dark flecks) on every hair cell
+      for (let x = 0; x < m.w; x++) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) if (m.get(x, y, z) === C.hair) { const q = hsh(x, y >> 1, z) % 9; if (q === 0) m.set(x, y, z, C.hairL); else if (q < 3) m.set(x, y, z, C.hairD); }
+      const F = 15;   // front face layer
+      // eyes: white on the outer column, iris inside, a catch-light on top
+      for (const [wx, ix] of [[6, 7], [13, 12]]) { m.set(wx, 14, F, C.white); m.set(wx, 15, F, C.white); m.set(ix, 14, F, C.eye); m.set(ix, 15, F, C.eye); m.set(ix, 16, F, C.skin); m.set(wx, 16, F, C.skin); }
+      // brows: a thin arched line
+      for (const [a, b] of [[5, 8], [12, 15]]) for (let x = a; x < b; x++) m.set(x, 17, F, C.brow);
+      if (L.female) { m.set(5, 15, F, C.eye); m.set(14, 15, F, C.eye); m.set(4, 16, F, C.skin); m.set(4, 17, F, C.skin); m.set(15, 16, F, C.skin); m.set(15, 17, F, C.skin); }
+      // nose: a narrow bridge with a shaded tip
+      for (let x = 8; x < 12; x++) for (let y = 12; y < 14; y++) { m.set(x, y, F + 1, 0); m.set(x, y, F + 2, 0); }
+      m.set(9, 13, F + 1, C.skin); m.set(10, 13, F + 1, C.skin); m.set(9, 12, F + 1, C.nose); m.set(10, 12, F + 1, C.nose);
+      // mouth: a small smile (not under a beard)
+      if (!C.beard) { for (let x = 8; x < 12; x++) { m.set(x, 11, F, C.skin); m.set(x, 10, F, C.skin); } m.set(9, 10, F, C.mouth); m.set(10, 10, F, C.mouth); m.set(8, 11, F, C.mouth); m.set(11, 11, F, C.mouth); }
+      // ears: an inner fold
+      for (const x of [2, 17]) { if (m.get(x, 13, 10)) m.set(x, 13, 10, C.nose); }
+    },
+    torso(m, L, C) {
+      const T = L.top || {}, st = T.style || 'tee', w = m.w, cx = w >> 1, F = m.d - 1;
+      // hem + side seams
+      for (let x = 0; x < w; x++) { if (m.get(x, 2, F) === C.top) m.set(x, 2, F, C.topD); }
+      for (let y = 3; y < 14; y++) { if (m.get(0, y, F) === C.top) m.set(0, y, F, C.topD); if (m.get(w - 1, y, F) === C.top) m.set(w - 1, y, F, C.topD); }
+      // belt buckle (trousers only)
+      if (!(L.bottom && L.bottom.style === 'skirt')) { m.set(cx - 1, 0, F, C.gold); m.set(cx, 0, F, C.gold); m.set(cx - 1, 1, F, C.gold); m.set(cx, 1, F, C.gold); }
+      if (st === 'shirt' || st === 'cardigan') for (let y = 4; y < 14; y += 3) m.set(cx, y, F, st === 'cardigan' ? C.gold : C.topD);
+      if (st === 'shirt') { m.set(cx - 3, 15, F, C.top2); m.set(cx + 2, 15, F, C.top2); m.set(cx - 2, 14, F, C.top2); m.set(cx + 1, 14, F, C.top2); }
+      if (st === 'hoodie') { for (let y = 9; y < 14; y++) { m.set(cx - 2, y, F, C.top2); m.set(cx + 1, y, F, C.top2); } m.set(cx - 2, 8, F, C.gold); m.set(cx + 1, 8, F, C.gold); for (let x = cx - 4; x < cx + 4; x++) m.set(x, 10, F, C.topD); }
+      if (st === 'tee' && T.print == null) for (let x = cx - 2; x < cx + 2; x++) m.set(x, 14, F, C.topD);
+    },
+    arm(m, L, C) {
+      // fingers: shaded tips + a thumb; cuff line at the sleeve end
+      for (let x = 0; x < m.w; x++) for (let z = 0; z < m.d; z++) if (m.get(x, 0, z) === C.skin) m.set(x, 0, z, C.skinS);
+      for (let z = 1; z < m.d; z += 2) if (m.get(0, 1, z) === C.skin) m.set(0, 1, z, C.skinS);
+      for (let y = 1; y < m.h; y++) { let cuff = false; for (let x = 0; x < m.w; x++) if (m.get(x, y, 0) === C.top && m.get(x, y - 1, 0) === C.skin) cuff = true; if (cuff) { for (let x = 0; x < m.w; x++) for (let z = 0; z < m.d; z++) if (m.get(x, y, z) === C.top) m.set(x, y, z, C.topD); break; } }
+    },
+    leg(m, L, C) {
+      const F = m.d - 1;
+      // laces over the instep + a toe cap
+      for (let x = 2; x < m.w - 2; x += 2) if (m.get(x, 5, F - 1) === C.shoe) { m.set(x, 5, F - 1, C.lace); m.set(x + 1, 5, F - 2, C.lace); }
+      for (let x = 0; x < m.w; x++) for (let y = 2; y < 4; y++) if (m.get(x, y, F) === C.shoe) m.set(x, y, F, C.sole);
+      // denim / jogger detail: knee crease + hem
+      const bs = L.bottom && L.bottom.style;
+      if (bs === 'jeans' || bs === 'joggers') for (let x = 0; x < m.w; x++) { for (let z = 0; z < m.d; z++) if (m.get(x, 13, z) === C.bot) m.set(x, 13, z, C.botD); }
+      if (bs === 'shorts') for (let x = 0; x < m.w; x++) for (let z = 0; z < m.d; z++) if (m.get(x, 14, z) === C.bot) m.set(x, 14, z, C.botD);
+    },
+    skirt(m, L, C) { for (let x = 0; x < m.w; x += 3) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) if (m.get(x, y, z) === C.bot) m.set(x, y, z, C.botD); },
+  };
   AV.build = (L) => {
     const C = pal(L), key = JSON.stringify(L);
-    const gLegL = cget('lL' + key, () => legModel(L, C, -1, false), [0.5, 1, 0.5]), gLegR = cget('lR' + key, () => legModel(L, C, 1, false), [0.5, 1, 0.5]);
+    const gLegL = cget('lL' + key, () => legModel(L, C, -1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C)), gLegR = cget('lR' + key, () => legModel(L, C, 1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C));
     const gBent = cget('lB' + key, () => legModel(L, C, 1, true), [0.5, 1, 2 / 11]);
-    const gTorso = cget('t' + key, () => torsoModel(L, C), [0.5, 0, 0.5]);
-    const gArm = cget('a' + key, () => armModel(L, C), [0.5, 1, 0.5]);
-    const gHead = cget('h' + key, () => headModel(L, C), [0.5, 4 / 15, 0.5]);
+    const gTorso = cget('t' + key, () => torsoModel(L, C), [0.5, 0, 0.5], (m) => FINE.torso(m, L, C));
+    const gArm = cget('a' + key, () => armModel(L, C), [0.5, 1, 0.5], (m) => FINE.arm(m, L, C));
+    const gHead = cget('h' + key, () => headModel(L, C), [0.5, 4 / 15, 0.5], (m) => FINE.head(m, L, C));
     const root = new THREE.Group(); root.name = 'avatar';
     const hips = new THREE.Group(); hips.position.y = 0.75; root.add(hips);
     const hw = L.female ? 0.11 : 0.125;
@@ -131,7 +184,7 @@ try {
     const head = new THREE.Group(); head.position.set(0, 0.52, 0); chest.add(head);
     const headM = AF.modelMesh(gHead); headM.position.z = -0.03; head.add(headM);
     let skirt = null;
-    if (L.bottom && L.bottom.style === 'skirt') { skirt = AF.modelMesh(cget('s' + key, () => skirtModel(L, C), [0.5, 1, 0.5])); skirt.position.y = 0.02; hips.add(skirt); }
+    if (L.bottom && L.bottom.style === 'skirt') { skirt = AF.modelMesh(cget('s' + key, () => skirtModel(L, C), [0.5, 1, 0.5], (m) => FINE.skirt(m, L, C))); skirt.position.y = 0.02; hips.add(skirt); }
     root.scale.setScalar(L.height || 1);
     const parts = { root, hips, legL, legR, chest, torso, armL, armR, head, skirt, gLeg: [gLegL, gLegR], gBent, sitting: false };
     for (const m of [legL, legR, torso, armL, armR, headM, skirt]) if (m) { m.castShadow = true; m.receiveShadow = true; }

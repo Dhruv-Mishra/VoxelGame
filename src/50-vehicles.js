@@ -961,7 +961,8 @@ function physics(car, dt, inp) {
   const dive = AF.clamp(-acc * 0.0035, -0.04, 0.05);
   car.pitch += (pT + dive - car.pitch) * Math.min(1, dt * 9);
   if (!car.type.solo) car.roll += (rT + lean - car.roll) * Math.min(1, dt * 9);
-  car.bobV += (-car.bob * 90 - car.bobV * 9) * dt + (Math.random() - 0.5) * sp * 0.01;
+  // a faint, position-keyed road texture (was per-frame random noise, which made flat asphalt feel bumpy)
+  car.bobV += (-car.bob * 90 - car.bobV * 9) * dt + (AF.noise2(car.x * 0.8, car.z * 0.8) - 0.5) * Math.min(sp, 20) * 0.02 * dt;
   car.bob += car.bobV * dt; car.bob = AF.clamp(car.bob, -0.06, 0.06);
 }
 VV.physics = physics;

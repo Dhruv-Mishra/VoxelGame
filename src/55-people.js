@@ -294,7 +294,7 @@ try {
   const LORE = [
     "They're showing 'Moonlight Over Solace' at the Paragon. Two bits for the matinee, and the organ plays before every show.",
     "The streetcar comes round every few minutes. Loop and Harbour, the blind says. Just listen for the bell.",
-    "Did you see the blimp this morning? SOLACE, right on the side, gliding over Solace Tower like a big silver fish.",
+    "Did you see the blimp this morning? Gliding over Solace Tower like a big silver fish.",
     "Mayor Fenwick cut the ribbon on the new harbour lights himself. Nearly fell in the drink, too.",
     "The fish market opens at four in the morning. By six the gulls have already eaten better than I will all day.",
     "WSOL plays Cab Harlow and his Harbour Serenaders after ten. Turn the dial to 880 and you'll never sleep again.",
@@ -1119,9 +1119,24 @@ try {
     if (pose === 'sit') { pr.legL.geometry = pr.legBG; pr.legR.geometry = pr.legBG; pr.armR.rotation.x = -0.55; pr.armL.rotation.x = -0.5; pr.hips.rotation.x = -0.02; }
     if (pose === 'work') { pr.armR.rotation.x = -1.0; pr.armL.rotation.x = -0.75; pr.hips.rotation.x = 0.06; }
     if (pose === 'hail') { pr.armR.rotation.x = -2.7; pr.armR.rotation.z = -0.2; }
+    // hand-holding: the inner arm reaches sideways toward the partner and does not swing
+    if (L.hold === 'L') { pr.armL.rotation.x = -0.08; pr.armL.rotation.z = L.holdZ; }
+    if (L.hold === 'R') { pr.armR.rotation.x = -0.08; pr.armR.rotation.z = -L.holdZ; }
+    const parts = [];
+    if (L.chair) { pr.root.position.y = 8 * VS - pr.hipY; parts.push([chairGeo(), new THREE.Matrix4()]); }
     pr.root.updateMatrixWorld(true);
-    const parts = []; pr.root.traverse((o) => { if (o.isMesh) parts.push([o.geometry, o.matrixWorld.clone()]); });
+    pr.root.traverse((o) => { if (o.isMesh) parts.push([o.geometry, o.matrixWorld.clone()]); });
     return mergeParts(parts);
+  }
+  let chairG = null;
+  function chairGeo() {
+    if (chairG) return chairG;
+    const m = new AF.Model(16, 15, 14), fr = ck(0x9aa0aa, 0.05, 0.1), tyre = ck(0x1c1c1e, 0.05, 0.05), seat = ck(0x2c3a5a, 0.1), cx = 7;
+    for (const x of [0, 15]) for (let y = 0; y < 11; y++) for (let z = 0; z < 11; z++) { const d = Math.hypot(y - 5, z - 5); if (d <= 5.2 && d >= 4.1) m.set(x, y, z, tyre); else if (d < 0.8 || ((y === 5 || z === 5) && d < 4.1)) m.set(x, y, z, fr); }
+    m.box(1, 7, 2, 15, 8, 11, seat); m.box(2, 8, 1, 14, 15, 2, seat);
+    for (const x of [1, 14]) { m.box(x, 0, 12, x + 1, 8, 13, fr); m.box(x, 8, 1, x + 1, 15, 2, fr); m.set(x, 0, 12, tyre); m.box(x, 11, 2, x + 1, 12, 9, fr); }
+    m.box(cx - 3, 1, 12, cx + 5, 2, 14, fr); m.box(1, 14, 0, 3, 15, 1, tyre); m.box(13, 14, 0, 15, 15, 1, tyre);
+    return (chairG = AF.meshModel(m, { vs: VS, anchor: [0.5, 0, 0.45] }));
   }
   // crowd looks: autumn 1936 street wear, >= 65% hats, a few sailors in whites (HARBOUR DAYS)
   function crowdLooks() {
@@ -1142,6 +1157,12 @@ try {
     // R2 EVENING WEAR (19:00 on): tails + top hats, gowns with fox stoles, a white dinner jacket, sailors and a naval officer on the town
     out.push(man({ set: { top: { style: 'suit', col: 0x2c3a5a, tie: 0xd1a23a, cuffs: true }, bottom: { style: 'pants', col: 0x2c3a5a, cuff: true }, hat: 'fedora', hatCol: 0x8a8a86, hatCol2: 0x2a2a30, propR: 'paper', skirt: null, apron: null, glasses: 'gold' } }));
     out.push(wom({ set: { top: { style: 'cardigan', col: 0xc19a62, col2: 0x8a6a40, col3: 0x6a4a32 }, skirt: { col: 0xc19a62, len: 8, flare: 1, hem: true }, bottom: { style: 'skirt', col: 0xc19a62 }, hat: 'cloche', hatCol: 0x6a4424, hatCol2: 0x3a2a20, propR: 'bag', lipstick: true } }));
+    out.push(wom({ set: { top: { style: 'dress', col: 0x3d6446, col2: 0x2a4a32, col3: 0xefe6cf }, skirt: coat(0x3d6446, 7), hat: 'beret', hatCol: 0x7a2630, propR: 'purse', purseCol: 0x2a2320 } }));
+    out.push(man({ set: { top: { style: 'vest', col: 0x6f7340, sleeve: 0xf3f0e6, tie: 0x7a2630, chain: true }, bottom: { style: 'pants', col: 0x6f7340, cuff: true }, hat: 'flatcap', hatCol: 0x5a5a55, skirt: null, apron: null, propR: null } }));
+    out.push(wom({ age: 'elder', set: { top: { style: 'cardigan', col: 0xb7a0cf, col2: 0xf3f0e6, col3: 0xf3f0e6 }, skirt: { col: 0x6a3b5c, len: 8, flare: 1, pleats: true }, bottom: { style: 'skirt', col: 0x6a3b5c }, hairStyle: 'bun', glasses: 'gold', hat: null, propR: 'bag' } }));
+    out.push(wom({ set: { top: { style: 'blouse', col: 0xf3f0e6, brooch: true }, skirt: { col: 0x2c3a5a, len: 7, flare: 1, pleats: true }, bottom: { style: 'skirt', col: 0x2c3a5a }, hat: 'straw', hatCol: 0xd8c08a, hatCol2: 0xb3342c, propR: null } }));
+    out.push(man({ set: { top: { style: 'plaid', col: 0xb0592c, col2: 0x2a2a2a }, bottom: { style: 'pants', col: 0x3e5f8a, cuff: true }, hat: 'flatcap', hatCol: 0x6a6258, skirt: null, apron: null, propR: 'paper', beard: true } }));
+    out.push(man({ age: 'teen', set: { top: { style: 'letterman', col: 0x3d6446, col2: 0xf3e7c8, col3: 0xf3e7c8, sleeve: 0xf3e7c8 }, bottom: { style: 'pants', col: 0x3e5f8a, cuff: true }, hat: null, skirt: null, apron: null, propR: 'book' } }));
     CR.nDay = out.length;
     const gown = (col, hat, hatCol, stole) => wom({ set: { top: { style: 'dress', col, col2: shade(col, 0.7), col3: stole || 0xc8844a }, skirt: { col, len: 10, flare: 1, hem: true }, bottom: { style: 'skirt', col }, hat, hatCol, hatCol2: 0x1c1c20, propR: 'purse', purseCol: 0xd8b84a, lipstick: true, hairStyle: 'wavy', apron: null } });
     out.push(man({ set: { top: { style: 'suit', col: 0x1c1c22, tie: 0xf6f4ee, cuffs: true }, bottom: { style: 'pants', col: 0x1c1c22 }, hat: 'tophat', hatCol: 0x141418, hatCol2: 0x2a2a30, propR: 'cane', skirt: null, apron: null, moustache: true } }));
@@ -1154,19 +1175,37 @@ try {
     out.push(man({ set: { top: { style: 'suit', col: 0x2a2a30, tie: 0x8a1c2a, cuffs: true }, skirt: coat(0x6a5a48, 7), bottom: { style: 'pants', col: 0x2a2a30 }, hat: 'fedora', hatCol: 0x2a2522, hatCol2: 0x141418, propR: null, apron: null } }));
     out.push(gown(0x3a1f4a, 'cloche', 0x3a1f4a, 0xe8e0d0));
     out.push(man({ set: { top: { style: 'suit', col: 0x1c1c22, tie: 0xf6f4ee, cuffs: true }, skirt: coat(0x141418, 7), bottom: { style: 'pants', col: 0x1c1c22 }, hat: 'tophat', hatCol: 0x141418, hatCol2: 0x6a1c24, propR: null, apron: null } }));
+    CR.nEve = out.length;
+    // group + rare looks (never swapped day/night): hand-holding couples, parent + child, wheelchair users, teen friends
+    const SP = CR.SP = {};
+    const sp = (name, L, o) => { Object.assign(L, o); SP[name] = out.length; out.push(L); };
+    const hands = (side, z) => side === 'L' ? { hold: 'L', holdZ: z, propL: null } : { hold: 'R', holdZ: z, propR: null };
+    sp('coupleM', man({ set: { top: { style: 'suit', col: 0x6a4a32, tie: 0xd1a23a, cuffs: true }, bottom: { style: 'pants', col: 0x6a4a32, cuff: true }, hat: 'fedora', hatCol: 0x3a3a40, hatCol2: 0x2a2522, skirt: null, apron: null } }), hands('L', 0.2));
+    sp('coupleF', wom({ set: { top: { style: 'dress', col: 0xe79aa8, col2: 0xd06a7c, col3: 0xf3f0e6, dots: true }, skirt: { col: 0xe79aa8, len: 7, flare: 2, hem: true }, bottom: { style: 'skirt', col: 0xe79aa8 }, hat: null, lipstick: true, hairStyle: 'wavy' } }), hands('R', 0.2));
+    sp('mom', wom({ set: { top: { style: 'cardigan', col: 0x3f7f7c, col2: 0x2a5a58, col3: 0xf3f0e6 }, skirt: { col: 0x45464b, len: 7, flare: 1 }, bottom: { style: 'skirt', col: 0x45464b }, hat: 'pillbox', hatCol: 0x3f7f7c, propR: 'bag' } }), hands('L', 0.32));
+    sp('girl', wom({ age: 'kid', set: { top: { style: 'dress', col: 0xf0dc7a, col2: 0xc8b050, col3: 0xf3f0e6, short: true }, skirt: { col: 0xf0dc7a, len: 3, flare: 1 }, bottom: { style: 'skirt', col: 0xf0dc7a, sock: 0xf6f2ea }, hairStyle: 'pigtails', ribbon: 0xd0404a, hat: null, propR: null } }), hands('R', 1.2));
+    sp('dad', man({ set: { top: { style: 'sweater', col: 0x2c3a5a, col2: 0xefe6cf, argyle: true }, bottom: { style: 'pants', col: 0xa99c6f, cuff: true }, hat: 'flatcap', hatCol: 0x6a6258, skirt: null, apron: null, propR: null } }), hands('L', 0.32));
+    sp('boy', man({ age: 'kid', set: { top: { style: 'striped', col: 0xf3f0e6, col2: 0xb3342c, short: true }, bottom: { style: 'shorts', col: 0x2c3a5a, sock: 0xf3f0e6 }, hat: 'baseball', hatCol: 0x2c3a5a, hatCol2: 0x1f1d1c, propL: null, apron: null, skirt: null } }), hands('R', 1.2));
+    sp('chairM', man({ age: 'elder', set: { top: { style: 'cardigan', col: 0x6a4a32, col2: 0x3a2a20, col3: 0xf3f0e6 }, bottom: { style: 'pants', col: 0x45464b }, hat: 'flatcap', hatCol: 0x5a5a55, skirt: null, apron: null, propR: null, propL: null } }), { chair: true });
+    sp('chairF', wom({ set: { top: { style: 'blouse', col: 0x86b3d6, brooch: true }, skirt: { col: 0x2c3a5a, len: 6, flare: 1 }, bottom: { style: 'skirt', col: 0x2c3a5a }, hat: null, propR: null, propL: null } }), { chair: true });
+    sp('teenF', wom({ age: 'teen', set: { top: { style: 'cardigan', col: 0xe79aa8, col2: 0xf3f0e6, col3: 0xf3f0e6 }, skirt: { col: 0x86b3d6, len: 5, flare: 3, poodle: true }, bottom: { style: 'skirt', col: 0x86b3d6, sock: 0xf6f2ea }, hat: null, propR: null } }));
+    sp('teenM', man({ age: 'teen', set: { top: { style: 'letterman', col: 0x7a2630, col2: 0xf3e7c8, col3: 0xf3e7c8, sleeve: 0xf3e7c8 }, bottom: { style: 'pants', col: 0x3e5f8a, cuff: true }, hat: null, skirt: null, apron: null, propR: null } }));
+    sp('teenM2', man({ age: 'teen', set: { top: { style: 'shirt', col: 0xf3f0e6, short: true }, bottom: { style: 'pants', col: 0x45464b, cuff: true }, hat: 'newsboy', hatCol: 0x6a6258, hatCol2: 0x4a4238, skirt: null, apron: null, propR: null } }));
     for (const L of out) { if (L.skirt === null) delete L.skirt; if (!L.bottom) L.bottom = { style: 'pants', col: 0x45464b }; if (L.skirt && L.bottom.style !== 'skirt' && !L.skirt.open) L.bottom = { style: 'skirt', col: L.skirt.col }; }
     return out;
   }
   const FRAMES = ['a', 'p', 'b', 'sit', 'work'];
   function buildCrowdMeshes() {
     const looks = crowdLooks(), tier = AF.GFX && AF.GFX.tier;
-    const NW = tier === 'low' ? 220 : tier === 'high' ? 420 : 520, NE = tier === 'low' ? 120 : 300;
+    const NW = tier === 'low' ? 150 : tier === 'high' ? 300 : 380, NE = tier === 'low' ? 100 : 260;
     CR.NW = NW; CR.NE = NE;
     for (let vi = 0; vi < looks.length; vi++) {
-      const L = looks[vi], kid = L.plan === 'kid', V = { L, im: {}, hipY: PLANS[L.plan].lh * VS, kid };
+      const L = looks[vi], kid = L.plan === 'kid', V = { L, im: {}, hipY: PLANS[L.plan].lh * VS, kid, chair: !!L.chair };
       for (const f of FRAMES) {
-        if (kid && (f === 'sit' || f === 'work')) continue;
-        const g = bakePose(L, f), cap = f === 'sit' || f === 'work' ? NE : (f === 'p' ? NW + NE : NW);
+        if ((kid || vi >= CR.nEve) && (f === 'sit' || f === 'work')) continue;
+        if (V.chair && f !== 'p') continue;
+        if (vi >= CR.nEve && f === 'b') continue;   // group looks walk on two frames (a / pass) to keep draw calls down
+        const g = bakePose(L, V.chair ? 'sit' : f), cap = f === 'sit' || f === 'work' ? NE : vi >= CR.nEve ? 48 : (f === 'p' ? NW + NE : NW);
         const im = new THREE.InstancedMesh(g, AF.mat.voxel, cap);
         im.count = 0; im.frustumCulled = false; im.castShadow = f !== 'sit' && f !== 'work'; im.receiveShadow = true; im.visible = false; im.name = 'crowd-' + vi + f;
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -1187,6 +1226,8 @@ try {
     const pier = (id) => piers.find((q) => q.id === id);
     const lines = [[[-288, CZ - 6], [-152, CZ - 6]], [[-286, CZ - 15], [-154, CZ - 15]], [[-148, CZ - 5], [-42, CZ - 5]], [[-38, CZ - 10], [38, CZ - 10]], [[-38, CZ - 24], [38, CZ - 24]], [[44, CZ - 6], [200, CZ - 6]]];
     for (const [id, off] of [['pleasure', 0.3], ['pleasure', 0.7], ['fish', 0.5], ['ferry', 0.3], ['ferry', 0.7]]) { const q = pier(id); if (q) { const x = q.x0 + (q.x1 - q.x0) * off; lines.push([[x, CZ + 3], [x, q.z1 - 4]]); } }
+    // zoo visitors: the promenade, the cross walk, the plains divider and the side walks
+    if (PL.west && PL.west.zoo) lines.push([[-549, -26], [-549, -278]], [[-543, -26], [-543, -278]], [[-636, -153], [-458, -153]], [[-599, -144], [-599, -30]], [[-636, -85], [-566, -85]], [[-490, -144], [-490, -30]], [[-490, -162], [-490, -278]], [[-598, -162], [-598, -278]], [[-556.5, -144], [-556.5, -30]], [[-636, -25.5], [-458, -25.5]]);
     let k = 0;
     for (const [[x0, z0], [x1, z1]] of lines) {
       const L = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(L / 6)), dx = (x1 - x0) / L, dz = (z1 - z0) / L;
@@ -1217,32 +1258,57 @@ try {
       if (d > C.R) continue;
       const main = Math.min(a.rw || 10, b.rw || 10) >= 14 || /Grand|Meridian|Park Row|Harbour Boulevard/.test(a.rn || '');
       const gww = CR.night && /Grand/.test(a.rn || '') && mz > 4 && mz < 165;   // the Great White Way after dark
-      const len = Math.hypot(b.x - a.x, b.z - a.z), wgt = Math.max(1, Math.round(len / (gww ? 3.2 : main ? 7 : 13.5)));
+      const len = Math.hypot(b.x - a.x, b.z - a.z), wgt = Math.max(1, Math.round(len / (gww ? 4.5 : main ? 8 : 13.5)));
       if (isCross(a, b)) continue;
       for (let k = 0; k < wgt; k++) candEdges.push(a.i < b.i ? [a, b] : [b, a]);
     }
   }
   const wr = AF.rng(4242);
+  // crowd density per 9 m cell (rebuilt each tick): spawns and turns avoid cells that are already busy
+  const dens = new Map(), DCAP = 4;
+  const cellK = (x, z) => (Math.floor(x / 9) + 500) * 4000 + Math.floor(z / 9) + 500;
+  const densAt = (x, z) => dens.get(cellK(x, z)) || 0;
   function spawnWalker(w, C, farOnly) {
     if (!candEdges.length) { w.act = false; return; }
-    let e = null;
-    for (let k = 0; k < 8; k++) { e = candEdges[Math.floor(wr() * candEdges.length)]; if (!farOnly) break; const d = Math.hypot((e[0].x + e[1].x) / 2 - C.x, (e[0].z + e[1].z) / 2 - C.z); if (d > C.R * 0.55) break; }
+    let e = null, best = null, bd = 1e9;
+    for (let k = 0; k < 10; k++) {
+      e = candEdges[Math.floor(wr() * candEdges.length)];
+      const mx = (e[0].x + e[1].x) / 2, mz = (e[0].z + e[1].z) / 2;
+      if (farOnly && Math.hypot(mx - C.x, mz - C.z) < C.R * 0.55) continue;
+      const n = densAt(mx, mz); if (n < bd) { bd = n; best = e; } if (n < DCAP) break;
+    }
+    e = best || e;
     const fw = wr() < 0.5; w.A = fw ? e[0] : e[1]; w.B = fw ? e[1] : e[0];
     w.len = Math.hypot(w.B.x - w.A.x, w.B.z - w.A.z) || 0.1; w.d = wr() * w.len; w.act = true; w.wait = 0;
-    const kid = CR.V[w.v].kid; w.speed = kid ? 1.5 + wr() * 0.5 : 1.05 + wr() * 0.45;
+    const V = CR.V[w.v]; w.speed = V.chair ? 0.75 + wr() * 0.15 : w.grp === 'kid' ? 0.9 + wr() * 0.15 : V.kid ? 1.5 + wr() * 0.5 : 1.05 + wr() * 0.45;
+    const k = cellK((w.A.x + w.B.x) / 2, (w.A.z + w.B.z) / 2); dens.set(k, (dens.get(k) || 0) + 1 + (w.nf || 0));
   }
   function initWalkers() {
     const C = crowdCentre(); refreshCand(C);
-    const nv = CR.V.length;
+    const nv = CR.nEve || CR.V.length;
     for (let i = 0; i < CR.NW; i++) {
       const nd = CR.nDay || nv, nn = nv - nd;
-      const w = { id: i, v: (i * 7 + (i >> 3)) % nd, lat: -0.25 + wr() * 1.2, s: 0.94 + wr() * 0.12, ph: wr() * 4, x: 0, y: 0.25, z: 0, yaw: 0, talk: 0, name: null };
+      const w = { id: i, v: (i * 7 + (i >> 3)) % nd, lat: -0.25 + wr() * 1.2, s: 0.92 + wr() * 0.16, ph: wr() * 4, x: 0, y: 0.25, z: 0, yaw: 0, talk: 0, name: null };
       if (CR.V[w.v].kid && wr() < 0.5) w.v = (w.v + 1) % nd;
       w.vd = w.v; w.vn = nn > 0 ? nd + (i * 3 + (i >> 2)) % nn : w.v;
-      spawnWalker(w, C, false); CR.walkers.push(w);
+      CR.walkers.push(w);
     }
-    // couples: every 9th walker shadows its neighbour
-    for (let i = 1; i < CR.walkers.length; i += 9) { const w = CR.walkers[i], L = CR.walkers[i - 1]; w.lead = L; w.v = w.vd = CR.V[L.v].L.female ? 0 : 2; if (CR.nDay) w.vn = CR.V[L.vn].L.female ? CR.nDay : CR.nDay + 1; }
+    // groups: every block of 12 walkers seeds one group; a rare wheelchair user every ~45
+    const SP = CR.SP || {}, W = CR.walkers;
+    const lead = (w, look, grp) => { w.v = w.vd = w.vn = SP[look]; w.grp = grp; w.lat = -0.45 + wr() * 0.2; w.s = 1; };
+    const follow = (f, L, look, lat, back) => { f.lead = L; f.v = f.vd = f.vn = SP[look]; f.fl = lat; f.fb = back || 0; f.s = CR.V[SP[look]].kid ? 1 : 0.97 + wr() * 0.06; L.nf = (L.nf || 0) + 1; };
+    if (SP.coupleM !== undefined) for (let i = 0, g = 0; i + 3 < W.length; i += 12, g++) {
+      const a = W[i], b = W[i + 1], c = W[i + 2];
+      switch (g % 6) {
+        case 0: case 4: lead(a, 'coupleM', 'couple'); follow(b, a, 'coupleF', 0.72); break;
+        case 1: lead(a, 'mom', 'kid'); follow(b, a, 'girl', 0.95); break;
+        case 2: lead(a, 'teenM', 'friends'); follow(b, a, 'teenF', 0.8, 0.15); follow(c, a, 'teenM2', 0.35, 0.95); break;
+        case 3: lead(a, 'dad', 'kid'); follow(b, a, 'boy', 0.95); break;
+        case 5: b.lead = a; b.fl = 0.55; a.grp = 'armin'; a.nf = 1; b.v = b.vd = CR.V[a.v].L.female ? 0 : 2; b.vn = CR.nDay ? (CR.V[a.vn].L.female ? CR.nDay : CR.nDay + 1) : b.v; break;
+      }
+    }
+    if (SP.chairM !== undefined) for (let i = 44, k = 0; i < W.length; i += 45, k++) { const w = W[i]; if (w.lead || w.grp) continue; w.v = w.vd = w.vn = SP[k & 1 ? 'chairF' : 'chairM']; w.grp = 'chair'; w.s = 1; }
+    for (const w of W) if (!w.lead) spawnWalker(w, C, false);
   }
   const E = new Float32Array(16);
   function putInst(im, i, x, y, z, yaw, s) {
@@ -1252,9 +1318,9 @@ try {
   }
   let lightT = 0;
   function stepWalker(w, dt, pp) {
-    if (w.lead) {   // arm-in-arm partner: stay at the leader's side
-      const L = w.lead, c = Math.cos(L.yaw), sn = Math.sin(L.yaw);
-      w.x = L.x + c * 0.55; w.z = L.z - sn * 0.55; w.yaw = L.yaw; w.moving = L.moving; w.ph = L.ph + 2; w.act = L.act; w.y = L.A && L.A.py !== undefined ? L.y : AF.W.groundY(w.x, w.z); return;
+    if (w.lead) {   // group member: keep station beside / behind the leader
+      const L = w.lead, c = Math.cos(L.yaw), sn = Math.sin(L.yaw), lat = w.fl ?? 0.55, bk = w.fb || 0;
+      w.x = L.x + c * lat - sn * bk; w.z = L.z - sn * lat - c * bk; w.yaw = L.yaw; w.moving = L.moving; w.ph = L.ph + 2; w.act = L.act; w.y = L.A && L.A.py !== undefined ? L.y : AF.W.groundY(w.x, w.z); return;
     }
     if (w.talk > 0) { w.talk -= dt; w.moving = false; w.yaw = Math.atan2(pp.x - w.x, pp.z - w.z); return; }
     const green = (A, B) => { const T = AF.trafficLight; if (!T || !T.state) return true; return T.state((A.x + B.x) / 2, (A.z + B.z) / 2, [B.x - A.x, B.z - A.z]) === 'green'; };
@@ -1273,13 +1339,14 @@ try {
         const A = w.A, B = w.B; let opts = B.adj.filter((e) => e.n !== A); if (!opts.length) opts = B.adj;
         if (!opts.length) { w.act = false; return; }
         let o = opts[Math.floor(wr() * opts.length)];
+        if (opts.length > 1) { const o2 = opts[Math.floor(wr() * opts.length)]; if (densAt(o2.n.x, o2.n.z) < densAt(o.n.x, o.n.z)) o = o2; }   // drift toward quieter blocks
         if (isCross(B, o.n) && opts.length > 1 && wr() < 0.4) o = opts.find((e) => !isCross(B, e.n)) || o;
         if (isCross(B, o.n) && !green(B, o.n)) { w.pend = o; w.wait = 0.4 + wr() * 0.6; w.d = w.len; }   // wait at the kerb for the lights
         else { w.A = B; w.B = o.n; w.d = 0; w.len = o.d || 0.1; if (wr() < 0.03) w.wait = 2 + wr() * 5; }   // or stop to look in a window
       }
     }
     const dx = (w.B.x - w.A.x) / w.len, dz = (w.B.z - w.A.z) / w.len, t = Math.min(w.d, w.len);
-    const cr = (isCross(w.A, w.B) ? 0.2 : w.lat) + (w.dodge || 0) * 0.6;
+    const cr = (isCross(w.A, w.B) ? (w.nf ? -0.3 : 0.2) : w.lat) + (w.dodge || 0) * 0.6;
     const tx = w.A.x + dx * t + dz * cr, tz = w.A.z + dz * t - dx * cr;
     if (w.moving || w.x === 0) { w.x = tx; w.z = tz; }
     const ty = Math.atan2(dx, dz); if (w.moving) w.yaw += AF.angDiff(w.yaw, ty) * Math.min(1, dt * 8);
@@ -1331,7 +1398,7 @@ try {
     }
     cand.sort((p, q) => p[0] - q[0]);
     CR.extras.length = 0;
-    const nd = CR.nDay || CR.V.length, adults = CR.V.map((V, i) => i).filter((i) => i < nd && !CR.V[i].kid), evening = CR.V.map((V, i) => i).filter((i) => i >= nd);
+    const nd = CR.nDay || CR.V.length, ne = CR.nEve || CR.V.length, adults = CR.V.map((V, i) => i).filter((i) => i < nd && !CR.V[i].kid), evening = CR.V.map((V, i) => i).filter((i) => i >= nd && i < ne);
     const nightOut = (h >= 19 || h < 3) && evening.length;
     for (let i = 0; i < Math.min(cand.length, CR.NE); i++) {
       const s = cand[i][1], k = s.kind || 'stand', fancy = nightOut && k !== 'work' && k !== 'counter' && /heron|rosewood|roseland|ballroom|club|paragon|rialto|theatre|audience|dance|hotel|queue/.test((s.building || '') + ' ' + k);
@@ -1353,15 +1420,21 @@ try {
     const cnt = CR.cnt || (CR.cnt = CR.V.map(() => ({ a: 0, p: 0, b: 0, sit: 0, work: 0 })));
     for (const c of cnt) { c.a = c.p = c.b = c.sit = c.work = 0; }
     let act = 0, mov = 0;
+    dens.clear();
+    for (const w of CR.walkers) if (w.act && !w.lead) { const k = cellK(w.x, w.z); dens.set(k, (dens.get(k) || 0) + 1 + (w.nf || 0)); }
+    const fr = AF.clock ? AF.clock.frame | 0 : 0, FAR2 = 65 * 65;
     for (const w of CR.walkers) {
-      if (!w.act) { spawnWalker(w, C, true); if (!w.act) continue; }
-      stepWalker(w, dt, pp);
+      if (!w.act && !w.lead) { spawnWalker(w, C, true); if (!w.act) continue; }
+      // far walkers step at half rate (their accumulated dt is applied next frame)
+      const ddx = w.x - C.x, ddz = w.z - C.z;
+      if (!w.lead && ddx * ddx + ddz * ddz > FAR2 && ((fr + w.id) & 1)) w.acc = (w.acc || 0) + dt;
+      else { stepWalker(w, Math.min(0.2, dt + (w.acc || 0)), pp); w.acc = 0; }
       if (!w.lead && Math.hypot(w.x - C.x, w.z - C.z) > C.R + 12) { spawnWalker(w, C, true); w.x = 0; continue; }
       if (!w.act) continue;
       act++; if (w.moving) mov++;
-      const V = CR.V[w.v], f = w.moving ? ['a', 'p', 'b', 'p'][Math.floor(w.ph) & 3] : 'p', im = V.im[f];
+      const V = CR.V[w.v]; let f = V.chair ? 'p' : w.moving ? ['a', 'p', 'b', 'p'][Math.floor(w.ph) & 3] : 'p'; if (!V.im[f]) f = 'a'; const im = V.im[f];
       const c = cnt[w.v]; if (c[f] >= im.instanceMatrix.count) continue;
-      putInst(im, c[f]++, w.x, w.y + (f === 'p' && w.moving ? 0 : -0.03), w.z, w.yaw, w.s);
+      putInst(im, c[f]++, w.x, w.y + (f === 'p' && w.moving && !V.chair ? 0 : -0.03), w.z, w.yaw, w.s);
     }
     // extras
     exT -= dt;
@@ -1393,11 +1466,22 @@ try {
     "I'm off to the Paragon. Two bits says the organist plays 'Stardust Avenue' again.", "My feet are killing me. Meridian's had a sale on everything but chairs.",
     "Gee whiz, did you see the blimp nosing up to the Solace mast?", "Evening! Mind the streetcar, they don't stop for daydreamers.",
     "I'm meeting my girl under the Terminal clock. Wish me luck.", "Buddy, can you spare a minute? No? Nobody can on Grand.", "That's the berries! The Blue Heron's got a new trumpet man.",
+    "Hats off to whoever fixed the streetlamp on my block. Slept like a baby.", "The automat's got pie for a nickel today. Rhubarb! Don't tell my wife.", "Say, is it true you can see the whole city from the Solace Tower deck?",
+    "I heard the zoo got a real giraffe. Neck like a lamppost!", "Gotta catch the ferry before the fog rolls in. Toodle-oo!", "Radio says fair skies all week. I'll believe it when my knees do.",
+    "They're laying new asphalt on Bay Street. Smells like progress, I suppose.", "My brother flies the Clipper out of Westgate. Says the clouds look like mashed potatoes.",
   ];
+  const GROUP_LINES = {
+    couple: ["We're celebrating our anniversary. Five years and she still laughs at my jokes!", "We're headed to the Paragon for the picture show. Care to recommend a candy?", "Don't mind us, we're just walking. Walking's free, and so is the view."],
+    kid: ["Hold on to my hand at the crossing, sweetheart. Oh, hello there!", "We're off to see the monkeys at the zoo. This one's been asking since breakfast.", "One scoop, I said ONE scoop. Kids, huh?", "Say hello to the nice stranger. No? Shy today."],
+    friends: ["We're cutting class. Don't tell Miss Pruitt!", "The soda fountain's got a new jukebox. Wanna come?", "We're gonna fly a plane someday. The real kind, at Westgate!"],
+    chair: ["Lovely day for a roll along the promenade. Kerbs could use some ramps, though!", "I used to sail the Solace harbour. Now I watch the boats, and that's fine too.", "Mind the cobbles on Bay Street, they rattle my teeth!"],
+    armin: ["We've been walking this street every evening for forty years.", "Arm in arm keeps us both upright, friend."],
+  };
   function nameWalker(w) {
     const V = CR.V[w.v], r = AF.rng(9001 + w.id * 31), f = V.L.female;
     w.first = V.kid ? pick(r, BOY) : f ? pick(r, FEMALE) : pick(r, MALE); w.last = pick(r, SURN);
-    w.lines = [pick(r, PASSER), LORE[Math.floor(r() * LORE.length)], pick(r, PASSER)]; w.li = 0;
+    const G = GROUP_LINES[w.grp];
+    w.lines = G ? [pick(r, G), pick(r, PASSER), pick(r, G)] : [pick(r, PASSER), LORE[Math.floor(r() * LORE.length)], pick(r, PASSER)]; w.li = 0;
   }
   AF.onBuild('people-crowd', 660, () => {
     const t0 = performance.now();
@@ -1539,7 +1623,7 @@ try {
   K.copTick = copTick;
 
   // ------------------------------------------------------------ tests
-  AF.test('people: crowd + extras populated', () => { if (!CR.V.length) return { ok: false, info: 'no crowd' }; for (let i = 0; i < 20; i++) crowdTick(0.05, AF.clock.t + i * 0.05); const s = CR.stats; return { ok: s.walkers >= 150 && s.draws <= 60, info: JSON.stringify(s) }; });
+  AF.test('people: crowd + extras populated', () => { if (!CR.V.length) return { ok: false, info: 'no crowd' }; for (let i = 0; i < 20; i++) crowdTick(0.05, AF.clock.t + i * 0.05); const s = CR.stats; return { ok: s.walkers >= Math.min(150, CR.NW * 0.8) && s.draws <= 110, info: JSON.stringify(s) }; });
   AF.test('people: names valid (no " home", no Court surnames)', () => { const bad = people.filter((p) => /\bhome\b|Court|Apartments|Building|undefined|null/i.test(p.name) || /\bhome place\b/.test(p.lines.join(' '))); return { ok: bad.length === 0, info: bad.length + ' bad ' + bad.slice(0, 5).map((p) => p.name).join(', ') }; });
   AF.test('people: nobody standing on awnings (> floor + 0.6 only on solid stoops/steps)', () => { const bad = []; for (const p of people) { if (p.pose === 'sit' || p.state === 'walk') continue; const g = AF.W.groundY(p.x, p.z), fl = p.spot ? Math.max(g, p.spot.y ?? g) : g; let hung = false; if (p.y > fl + 0.65) for (let y = g + 0.12; y < p.y - 0.3; y += 0.25) { const c = AF.W.getM(p.x, y, p.z); if (!(c && AF.PAL.solid[c])) { hung = true; break; } } if (hung) bad.push(p.name + '@' + p.x.toFixed(1) + ',' + p.y.toFixed(2) + ',' + p.z.toFixed(1)); } return { ok: bad.length === 0, info: bad.length + ' floating ' + bad.slice(0, 5).join(' | ') }; });
   AF.test('people: traffic cop signals with the lights (Grand x Meridian)', () => {

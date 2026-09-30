@@ -21,25 +21,28 @@ try {
   #ui .deco{font-family:Limelight,'Poiret One',Georgia,serif;letter-spacing:.18em}
   #ui kbd{display:inline-block;min-width:18px;padding:1px 6px;border-radius:6px;background:rgba(255,255,255,.14);font:600 12px system-ui;text-align:center}
   #ui .hide{display:none!important}
-  #ui #t-title{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:0 16px max(28px,env(safe-area-inset-bottom));pointer-events:none;background:linear-gradient(180deg,rgba(6,12,20,.55) 0,rgba(6,12,20,0) 30%,rgba(6,12,20,0) 45%,rgba(6,12,20,.75) 100%);transition:opacity .6s}
+  #ui #t-title{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:max(90px,12vh) 16px max(20px,env(safe-area-inset-bottom));pointer-events:none;background:radial-gradient(ellipse at 50% 55%,rgba(6,12,20,.35) 0,rgba(6,12,20,.78) 75%);transition:opacity .6s}
   #ui #t-title.out{opacity:0}
-  #ui #t-title .logo{position:absolute;top:max(7vh,20px);left:0;right:0;text-align:center}
-  #ui #t-title h1{margin:0;font:400 clamp(30px,6vw,60px)/1 Limelight,Georgia,serif;letter-spacing:.24em;padding-left:.24em;color:#ffe6a8;text-shadow:0 2px 0 rgba(60,36,8,.7),0 0 24px rgba(240,190,90,.35)}
+  #ui #t-title .logo{position:absolute;top:max(4vh,14px);left:0;right:0;text-align:center}
+  #ui #t-title h1{margin:0;font:400 clamp(28px,5.4vw,56px)/1 Limelight,Georgia,serif;letter-spacing:.24em;padding-left:.24em;color:#ffe6a8;text-shadow:0 2px 0 rgba(60,36,8,.7),0 0 24px rgba(240,190,90,.35)}
   #ui #t-title .sub{margin-top:8px;color:#e9dcc0;font-style:italic;text-shadow:0 1px 3px #000}
-  #ui #t-title .card{pointer-events:auto;width:min(720px,100%);padding:16px}
-  #ui #t-title .q{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);text-align:center;margin-bottom:10px}
-  #ui #t-title .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
-  #ui #t-title .pick{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 2px;border-radius:12px;border:1px solid transparent}
-  #ui #t-title .pick:hover{background:rgba(255,255,255,.07)}
-  #ui #t-title .pick.on{background:rgba(240,200,112,.14);border-color:rgba(240,200,112,.6)}
-  #ui #t-title .pick svg{width:54px;height:54px}
-  #ui #t-title .pick b{font-weight:600;font-size:13px}
-  #ui #t-title .info{display:flex;align-items:center;gap:14px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
-  #ui #t-title .info .txt{flex:1;min-width:0}
-  #ui #t-title .info .n{font-weight:700;font-size:16px}
-  #ui #t-title .info .d{color:var(--dim);font-size:13px}
-  #ui #t-title .info .btn{padding:12px 22px;font-size:15px;white-space:nowrap}
-  @media (max-width:620px){#ui #t-title .grid{grid-template-columns:repeat(4,1fr)} #ui #t-title .info{flex-direction:column;align-items:stretch;text-align:center}}
+  #ui #t-title .modal{pointer-events:auto;width:min(500px,94vw);max-height:100%;padding:16px 18px 18px;display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--bg2);animation:uiIn .35s ease}
+  #ui #t-title .q{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);text-align:center}
+  #ui #t-title .stage{position:relative;width:100%;height:min(44vh,360px);min-height:200px;margin:6px 0 4px;border-radius:14px;overflow:hidden;background:radial-gradient(ellipse at 50% 70%,rgba(240,200,112,.22) 0,rgba(240,200,112,0) 60%),linear-gradient(180deg,rgba(40,60,90,.55),rgba(12,20,32,.9))}
+  #ui #t-title .stage canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+  #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;background:rgba(10,20,30,.6);border:1px solid var(--line);font-size:28px;line-height:1;display:flex;align-items:center;justify-content:center;color:#ffe6a8;transition:background .15s,transform .1s}
+  #ui #t-title .arr:hover{background:rgba(240,200,112,.28)} #ui #t-title .arr:active{transform:translateY(-50%) scale(.94)}
+  #ui #t-title .arr.l{left:10px} #ui #t-title .arr.r{right:10px}
+  #ui #t-title .cnt{position:absolute;right:12px;top:10px;font-size:11px;color:var(--dim);letter-spacing:.12em}
+  #ui #t-title .n{font:400 26px Limelight,Georgia,serif;letter-spacing:.1em;color:#ffe6a8;text-align:center}
+  #ui #t-title .tg{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);text-align:center}
+  #ui #t-title .d{color:var(--ink);opacity:.85;font-size:14px;text-align:center;min-height:38px;max-width:420px}
+  #ui #t-title .dots{display:flex;gap:7px;margin:6px 0 10px}
+  #ui #t-title .dots button{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.22);padding:0}
+  #ui #t-title .dots button.on{background:var(--gold);transform:scale(1.25)}
+  #ui #t-title .go{padding:13px 30px;font-size:16px;display:inline-flex;align-items:center;gap:10px;letter-spacing:.04em}
+  #ui #t-title .go .ic{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1b1408;color:#f6d68a;font-size:11px;padding-left:2px}
+  @media (max-height:560px){#ui #t-title .logo{display:none} #ui #t-title{padding-top:12px} #ui #t-title .stage{height:38vh}}
   #ui.titling .hud{display:none!important}
   #ui #h-clock{position:absolute;left:max(14px,env(safe-area-inset-left));top:max(14px,env(safe-area-inset-top));padding:8px 14px;display:flex;flex-direction:column;gap:1px;min-width:120px}
   #ui #h-clock .t{font-size:20px;font-weight:600}
@@ -134,8 +137,10 @@ try {
 
   // ------------------------------------------------------------------ elements
   const title = h('div', '', `<div class="logo"><h1>PORT SOLACE</h1><div class="sub">a harbour city where the lights never quite go out</div></div>
-    <div class="card panel"><div class="q">Who are you today?</div><div class="grid"></div>
-    <div class="info"><div class="txt"><div class="n"></div><div class="d"></div></div><button class="btn primary go">Play</button></div></div>`); title.id = 't-title';
+    <div class="modal panel pe" role="dialog" aria-modal="true" aria-label="Choose your character"><div class="q">Who are you today?</div>
+    <div class="stage"><canvas aria-hidden="true"></canvas><button class="arr l" aria-label="Previous character">&#8249;</button><button class="arr r" aria-label="Next character">&#8250;</button><div class="cnt"></div></div>
+    <div class="n"></div><div class="tg"></div><div class="d"></div><div class="dots"></div>
+    <button class="btn primary go"><span class="ic">&#9654;</span><span class="lb">Let's Play</span></button></div>`); title.id = 't-title';
   const clock = h('div', 'panel hud', `<div class="t"><span class="tm">4:30</span><small class="ap">PM</small></div><div class="p">Port Solace</div>`); clock.id = 'h-clock';
   const right = h('div', 'hud', `<div id="h-mini" class="panel pe"><canvas width="220" height="220"></canvas><div class="n">N</div></div><div id="h-btns"><button class="panel round pe" data-k="map" title="Map (M)">&#x1F5FA;</button><button class="panel round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); right.id = 'h-right';
   const prompt = h('div', 'panel hud pe', ''); prompt.id = 'h-prompt';
@@ -157,7 +162,7 @@ try {
   help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>RUN button</span></div></div>
     <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Jump \u00b7 brake</span><span>round button</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
     : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('V', 'First person')}${K('Tab', 'Aerial view')}</div>
-    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('W+S', 'Throttle')}${K('Mouse', 'Pitch & bank')}${K('A+D', 'Bank')}${K('Q+E', 'Rudder')}${K('F', 'Get out (on the ground)')}</div>
+    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space', 'Engine up + climb / take off')}${K('Shift', 'Engine down + descend')}${K('W+S', 'Taxi / brake')}${K('A+D', 'Turn left / right')}${K('F', 'Get out (on the ground)')}</div>
     <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}</div>
     <div><h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}</div></div>`}
     <div class="stack"><button class="btn primary" data-k="closehelp">Got it</button></div></div>`;
@@ -232,19 +237,66 @@ try {
     bubbleEl.style.left = ((BV.x + 1) / 2 * r.width) + 'px'; bubbleEl.style.top = ((1 - BV.y) / 2 * r.height) + 'px'; show(bubbleEl, true);
   };
 
-  // ------------------------------------------------------------------ title: pick your friend
-  const grid = title.querySelector('.grid'), tName = title.querySelector('.n'), tDesc = title.querySelector('.d'), tGo = title.querySelector('.go');
+  // ------------------------------------------------------------------ title: pick your friend (modal, alphabetical, live 3D turntable)
+  const tName = title.querySelector('.n'), tTag = title.querySelector('.tg'), tDesc = title.querySelector('.d'), tGo = title.querySelector('.go'), tDots = title.querySelector('.dots'), tCnt = title.querySelector('.cnt');
+  const roster = () => ((AF.friends && AF.friends.cast) || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  UI.roster = roster;
+  const PV = { r: null, scene: null, cam: null, P: null, st: { phase: 0, speed: 0, air: 0, t: 0, land: 0 }, yaw: 0.4, spin: 0, drag: null, pop: 1 };
+  const pvInit = () => {
+    if (PV.r) return true;
+    if (PV.failed) return false;
+    try {
+      const cv = title.querySelector('.stage canvas');
+      const r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true, powerPreference: 'low-power' });
+      r.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.05;
+      const sc = new THREE.Scene();
+      sc.add(new THREE.HemisphereLight(0xfff2dc, 0x34465a, 1.9));
+      const key = new THREE.DirectionalLight(0xfff0d8, 2.6); key.position.set(2.5, 4, 3.5); sc.add(key);
+      const rim = new THREE.DirectionalLight(0x8ec0ff, 1.4); rim.position.set(-3, 2.5, -3); sc.add(rim);
+      const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.78, 0.08, 40), new THREE.MeshStandardMaterial({ color: 0x3a2c1e, roughness: 0.55, metalness: 0.25 }));
+      disc.position.y = -0.04; sc.add(disc);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.018, 8, 48), new THREE.MeshStandardMaterial({ color: 0xf0c870, emissive: 0x6a4a10, roughness: 0.3, metalness: 0.8 }));
+      ring.rotation.x = Math.PI / 2; sc.add(ring);
+      const cam = new THREE.PerspectiveCamera(28, 1, 0.1, 50); cam.position.set(0, 1.2, 5.2); cam.lookAt(0, 0.98, 0);
+      Object.assign(PV, { r, scene: sc, cam, cv });
+      cv.addEventListener('pointerdown', (e) => { PV.drag = { x: e.clientX, yaw: PV.yaw }; try { cv.setPointerCapture(e.pointerId); } catch (er) {} cv.style.cursor = 'grabbing'; });
+      cv.addEventListener('pointermove', (e) => { if (PV.drag) PV.yaw = PV.drag.yaw + (e.clientX - PV.drag.x) * 0.012; });
+      const up = () => { PV.drag = null; cv.style.cursor = ''; };
+      cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+      return true;
+    } catch (e) { PV.failed = true; console.warn('[af] character preview unavailable', e); return false; }
+  };
+  const pvShow = (look) => {
+    if (!pvInit() || !AF.avatar) return;
+    if (PV.P) PV.scene.remove(PV.P.root);
+    PV.P = AF.avatar.build(look); PV.scene.add(PV.P.root); PV.pop = 0;
+  };
+  AF.onTick('ui-preview', 946, (dt) => {
+    if (!S.title || !PV.r || !PV.P) return;
+    const cv = PV.cv, w = cv.clientWidth | 0, hh = cv.clientHeight | 0; if (!w || !hh) return;
+    if (PV.w !== w || PV.h !== hh) { PV.w = w; PV.h = hh; PV.r.setSize(w, hh, false); PV.cam.aspect = w / hh; PV.cam.updateProjectionMatrix(); }
+    if (!PV.drag) PV.yaw += dt * 0.55;
+    PV.pop = Math.min(1, PV.pop + dt * 4);
+    const e = 1 - Math.pow(1 - PV.pop, 3), s = (PV.P.root.userData.h0 || (PV.P.root.userData.h0 = PV.P.root.scale.x)) * (0.85 + 0.15 * e);
+    PV.P.root.scale.setScalar(s); PV.P.root.rotation.y = PV.yaw;
+    AF.avatar.animate(PV.P, PV.st, Math.min(dt, 0.05), 0, true);
+    PV.r.render(PV.scene, PV.cam);
+  });
   const select = (id) => {
     const c = AF.friends && AF.friends.byId[id]; if (!c) return;
+    const R = roster(), i = R.findIndex((q) => q.id === id);
     S.pick = id;
-    grid.querySelectorAll('.pick').forEach((b) => b.classList.toggle('on', b.dataset.id === id));
-    tName.textContent = c.name + ' \u00b7 ' + c.tag; tDesc.textContent = c.blurb; tGo.textContent = 'Play as ' + c.name;
+    tName.textContent = c.name; tTag.textContent = c.tag; tDesc.textContent = c.blurb; tCnt.textContent = (i + 1) + ' / ' + R.length;
+    tDots.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.id === id));
+    tGo.querySelector('.lb').textContent = "Let's Play as " + c.name;
+    pvShow(c.look);
   };
+  const step = (d) => { const R = roster(); if (!R.length) return; const i = Math.max(0, R.findIndex((c) => c.id === S.pick)); select(R[(i + d + R.length) % R.length].id); };
   const buildTitle = () => {
-    const cast = (AF.friends && AF.friends.cast) || [];
-    grid.innerHTML = cast.map((c) => `<button class="pick" data-id="${c.id}">${UI.portrait(c.look)}<b>${esc(c.name)}</b></button>`).join('');
+    const R = roster();
+    tDots.innerHTML = R.map((c) => `<button data-id="${c.id}" aria-label="${esc(c.name)}"></button>`).join('');
     let last = null; try { last = localStorage.getItem('portSolace.friend'); } catch (e) {}
-    select(cast.find((c) => c.id === last) ? last : cast[0] && cast[0].id);
+    select(R.find((c) => c.id === last) ? last : R[0] && R[0].id);
   };
   const start = () => {
     if (!AF.ready || !S.pick || !S.title) return;
@@ -254,7 +306,9 @@ try {
     UI.toast(`Welcome home, ${c.name}! Your friends live along Friends Lane \u2014 go say hi.`, 5200);
     setTimeout(() => UI.toast(TOUCH ? 'Tap a prompt to talk, or to get into a car, a bike or a plane.' : 'Walk up to anyone \u2014 or any car \u2014 and press E. M for the map, Esc for the menu.', 5400), 5600);
   };
-  grid.addEventListener('click', (e) => { const b = e.target.closest('.pick'); if (!b) return; if (S.pick === b.dataset.id && e.detail > 1) start(); else select(b.dataset.id); });
+  tDots.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) select(b.dataset.id); });
+  title.querySelector('.arr.l').addEventListener('click', () => step(-1));
+  title.querySelector('.arr.r').addEventListener('click', () => step(1));
   tGo.addEventListener('click', start);
   UI.showTitle = () => { S.title = true; root.classList.add('titling'); title.style.display = ''; title.classList.remove('out'); toggleMenu(false); closeDlg(); if (AF.mode !== 'aerial') AF.setMode('aerial', { keep: true }); if (AF.flyTo) AF.flyTo(AF.PLAN.views[0].pos, AF.PLAN.views[0].target, 3); };
   UI.go = (id) => { if (id) select(id); start(); };
@@ -393,10 +447,9 @@ try {
     frameN++;
     const I = AF.input;
     if (S.title) {
-      const cast = AF.friends ? AF.friends.cast : [], i = cast.findIndex((c) => c.id === S.pick);
       if (I.hit('Enter') || I.hit('Space')) start();
-      if (cast.length && (I.hit('ArrowRight') || I.hit('KeyD'))) select(cast[(i + 1) % cast.length].id);
-      if (cast.length && (I.hit('ArrowLeft') || I.hit('KeyA'))) select(cast[(i - 1 + cast.length) % cast.length].id);
+      if (I.hit('ArrowRight') || I.hit('KeyD')) step(1);
+      if (I.hit('ArrowLeft') || I.hit('KeyA')) step(-1);
     } else {
       if (I.hit('KeyM')) toggleMap();
       if (I.hit('KeyH') || I.hit('Slash')) toggleHelp();

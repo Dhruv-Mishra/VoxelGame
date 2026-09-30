@@ -629,6 +629,91 @@ try {
     const s = L.natureStats || {}; const ids = new Set((L.trees || []).map((t) => t.id));
     return { ok: (s.hero + s.forest + (s.far || 0)) > 150 && ids.size >= 8 && typeof AF.nature.tree === 'function', info: `hero ${s.hero} forest ${s.forest} far ${s.far} designs ${ids.size} placedQuads ${Math.round(s.placedQuads)} ms ${s.ms}` };
   });
+
+  // ============================================================ GROUND COVER: instanced grass tufts, low plants, wildflowers, ferns + small shrubs
+  // Scattered once over every green ground cell (lawns, park, colony yards, the heights), bucketed in 16 m cells. Only a
+  // radius around the camera is drawn (one InstancedMesh per kind, refreshed as the camera moves); instances shrink to
+  // nothing toward the edge of that radius so there is no pop-in line. Hidden from high above (you could not see it anyway).
+  const GC = AF.groundCover = { kinds: [], cells: new Map(), n: 0, at: { x: 1e9, z: 1e9 }, t: 0, shown: 0 };
+  const coverModels = () => {
+    const R = AF.rng(8080), K = [];
+    const plant = (S, H, fn) => { const m = new AF.Model(S, H, S); fn(m); return m; };
+    const blade = (m, x, z, h, c, lean) => { for (let y = 0; y < h; y++) m.set(x + (y > h * 0.6 ? lean : 0), y, z, c); };
+    const greens = [0x5f8f36, 0x6f9e3e, 0x80ac48, 0x4f7f30].map((h) => AF.col(h, { jitter: 0.5, edge: 0.1, solid: false }));
+    const dry = [0x9aa04a, 0xb0a458, 0x8a9a40].map((h) => AF.col(h, { jitter: 0.5, edge: 0.1, solid: false }));
+    for (const pal of [greens, greens, dry]) K.push({ id: 'tuft', vs: 1 / 16, w: 1, m: plant(10, 12, (m) => { for (let i = 0; i < 6; i++) blade(m, 2 + ((R() * 6) | 0), 2 + ((R() * 6) | 0), 4 + ((R() * 7) | 0), pal[(R() * pal.length) | 0], R() < 0.5 ? 1 : -1); }) });
+    K.push({ id: 'clover', vs: 1 / 16, w: 0.5, m: plant(10, 4, (m) => { const a = greens[0], b = greens[2]; for (let i = 0; i < 5; i++) { const x = 1 + ((R() * 7) | 0), z = 1 + ((R() * 7) | 0), y = (R() * 2) | 0; m.set(x, y, z, a); m.set(x + 1, y, z, b); m.set(x, y, z + 1, b); m.set(x, y + 1, z, a); } }) });
+    const bloom = (hexes) => plant(12, 10, (m) => { const fc = hexes.map((h) => AF.col(h, { jitter: 0.3, edge: 0.1, solid: false })); for (let i = 0; i < 5; i++) { const x = 2 + ((R() * 8) | 0), z = 2 + ((R() * 8) | 0), h = 4 + ((R() * 5) | 0), c = fc[(R() * fc.length) | 0]; blade(m, x, z, h, greens[1], 0); m.set(x, h, z, c); m.set(x + 1, h, z, c); m.set(x - 1, h, z, c); m.set(x, h, z + 1, c); m.set(x, h, z - 1, c); m.set(x, h + 1, z, fc[0]); } });
+    K.push({ id: 'daisy', vs: 1 / 16, w: 0.35, m: bloom([0xf6f2e6, 0xf6f2e6, 0xf0c840]) });
+    K.push({ id: 'poppy', vs: 1 / 16, w: 0.25, m: bloom([0xd8402a, 0xe8602e, 0x2a1a14]) });
+    K.push({ id: 'bell', vs: 1 / 16, w: 0.25, m: bloom([0x7a6ad8, 0x9a7ae0, 0xc8a8f0]) });
+    K.push({ id: 'fern', vs: 1 / 16, w: 0.25, m: plant(16, 9, (m) => { const c = greens[3], c2 = greens[1]; for (let a = 0; a < 6; a++) { const dx = Math.cos(a * 1.05), dz = Math.sin(a * 1.05); for (let t = 0; t < 7; t++) m.set(Math.round(7.5 + dx * t), Math.round(Math.sin(t / 7 * 2.4) * 6), Math.round(7.5 + dz * t), t & 1 ? c : c2); } }) });
+    K.push({ id: 'shrub', vs: 1 / 8, w: 0.12, m: plant(9, 7, (m) => { for (let x = 0; x < 9; x++) for (let y = 0; y < 7; y++) for (let z = 0; z < 9; z++) { const d = Math.hypot((x - 4) / 4.5, (y - 2) / 4, (z - 4) / 4.5); if (d < 1 - hash(x * 3 + y, z * 7) * 0.2) m.set(x, y, z, greens[(x + y * 2 + z) % 4]); } }) });
+    return K;
+  };
+  const greenAt = (i) => { const hx = AF.PAL.hex[W.C[i]]; if (hx == null) return false; const r = (hx >> 16) & 255, g = (hx >> 8) & 255, b = hx & 255; return g > r + 6 && g > b + 24; };
+  AF.onBuild('land-ground-cover', 520, () => {
+    const t0 = performance.now();
+    const K = GC.kinds = coverModels().map((k) => ({ ...k, geo: AF.meshModel(k.m, { vs: k.vs, anchor: [0.5, 0, 0.5], flat: true }), m: null }));
+    const wSum = K.reduce((s, k) => s + k.w, 0), R = AF.rng(4711), cells = GC.cells;
+    const B = P.bounds || { x0: -660, z0: -300, x1: 300, z1: 300 };
+    for (let x = B.x0 + 1; x < B.x1 - 1; x += 1.1) for (let z = B.z0 + 1; z < B.z1 - 1; z += 1.1) {
+      const jx = x + (R() - 0.5) * 0.9, jz = z + (R() - 0.5) * 0.9, i = W.col(jx, jz); if (i < 0 || !greenAt(i)) continue;
+      const n = N2(jx * 0.06, jz * 0.06); if (R() > 0.2 + n * 0.75) continue;
+      const gy = W.H[i] * 0.25; if (gy < -0.2) continue;
+      if (W.getM(jx, gy + 0.1, jz) || W.getM(jx, gy + 0.6, jz)) continue;
+      // kind: mostly tufts; wildflowers in drifts; ferns + shrubs along the shady edges
+      const fl = N2(jx * 0.035 + 17, jz * 0.035 - 5);
+      let v = R() * wSum, k = 0; for (; k < K.length - 1; k++) { v -= K[k].w * (K[k].id === 'daisy' || K[k].id === 'poppy' || K[k].id === 'bell' ? (fl > 0.6 ? 4 : 0.3) : 1); if (v <= 0) break; }
+      const key = Math.floor(jx / 16) * 1000 + Math.floor(jz / 16); let a = cells.get(key); if (!a) cells.set(key, a = []);
+      a.push(jx, gy, jz, R() * 6.2832, 0.75 + R() * 0.55, k); GC.n++;
+    }
+    for (const [key, a] of cells) cells.set(key, new Float32Array(a));
+    const tier = (AF.GFX && AF.GFX.tier) || 'high', cap = tier === 'low' ? 2200 : tier === 'high' ? 5000 : 9000;
+    for (const k of K) {
+      const im = new THREE.InstancedMesh(k.geo, AF.mat.voxel, Math.ceil(cap * (k.id === 'tuft' ? 0.45 : 0.25)));
+      im.count = 0; im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; im.name = 'cover-' + k.id; im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      AF.scene.add(im); k.im = im;
+    }
+    GC.ms = Math.round(performance.now() - t0);
+    console.log('[af] ground cover', GC.n, 'plants in', cells.size, 'cells,', GC.ms, 'ms');
+  });
+  const coverRadius = () => { const t = (AF.GFX && AF.GFX.tier) || 'high'; return t === 'low' ? 30 : t === 'high' ? 48 : 72; };
+  const refreshCover = (cx, cz, cy) => {
+    const K = GC.kinds, Rr = coverRadius(), R2 = Rr * Rr, fade0 = Rr * 0.62;
+    for (const k of K) k.n = 0;
+    const high = cy - Math.max(0, W.groundY(cx, cz)) > 45;
+    if (!high) {
+      const g0x = Math.floor((cx - Rr) / 16), g1x = Math.floor((cx + Rr) / 16), g0z = Math.floor((cz - Rr) / 16), g1z = Math.floor((cz + Rr) / 16);
+      for (let gx = g0x; gx <= g1x; gx++) for (let gz = g0z; gz <= g1z; gz++) {
+        const a = GC.cells.get(gx * 1000 + gz); if (!a) continue;
+        for (let i = 0; i < a.length; i += 6) {
+          const dx = a[i] - cx, dz = a[i + 2] - cz, d2 = dx * dx + dz * dz; if (d2 > R2) continue;
+          const k = K[a[i + 5]], im = k.im; if (k.n >= im.instanceMatrix.count) continue;
+          const d = Math.sqrt(d2), f = d < fade0 ? 1 : 1 - (d - fade0) / (Rr - fade0), s = a[i + 4] * f * f * (3 - 2 * f);
+          const c = Math.cos(a[i + 3]) * s, sn = Math.sin(a[i + 3]) * s, arr = im.instanceMatrix.array, o = k.n * 16;
+          arr[o] = c; arr[o + 1] = 0; arr[o + 2] = -sn; arr[o + 3] = 0; arr[o + 4] = 0; arr[o + 5] = s; arr[o + 6] = 0; arr[o + 7] = 0;
+          arr[o + 8] = sn; arr[o + 9] = 0; arr[o + 10] = c; arr[o + 11] = 0; arr[o + 12] = a[i]; arr[o + 13] = a[i + 1]; arr[o + 14] = a[i + 2]; arr[o + 15] = 1;
+          k.n++;
+        }
+      }
+    }
+    let shown = 0;
+    for (const k of K) { k.im.count = k.n; k.im.visible = k.n > 0; if (k.n) k.im.instanceMatrix.needsUpdate = true; shown += k.n; }
+    GC.shown = shown; GC.at = { x: cx, z: cz, y: cy };
+  };
+  AF.onTick('ground-cover', 445, (dt) => {
+    if (!GC.kinds.length || !GC.kinds[0].im) return;
+    const c = AF.camera.position, f = AF.player && AF.mode === 'walk' ? AF.player : c;
+    GC.t -= dt;
+    const moved = Math.abs(f.x - GC.at.x) + Math.abs(f.z - GC.at.z) > 5 || Math.abs(c.y - GC.at.y) > 12;
+    if (moved || GC.t <= 0) { GC.t = 1.5; refreshCover(f.x, f.z, c.y); }
+  });
+  AF.test('land: ground cover scattered + drawn near the camera', () => {
+    if (!GC.kinds.length) return { ok: false, info: 'no ground cover' };
+    refreshCover(-40, -200, 2); const n = GC.shown; GC.at = { x: 1e9, z: 1e9, y: 0 };
+    return { ok: GC.n > 5000 && n > 100 && GC.kinds.every((k) => k.im.count <= k.im.instanceMatrix.count), info: `plants ${GC.n}, drawn at the park ${n}, ${GC.ms} ms` };
+  });
 }
 
 } catch (e) { AF.partError('12-nature.js', e); }

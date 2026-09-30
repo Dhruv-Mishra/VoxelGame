@@ -388,6 +388,7 @@ try {
     {
       const strips = [[-253, -232, -248, 147], [248, -232, 253, -10]];
       for (const [x0, z0, x1, z1] of strips) W.eachCol(x0, z0, x1, z1, (bx, bz, i, x, z) => {
+        if (ST.mask[i] === 1) return;   // never raise a kerb across a road (Westgate Road runs through the west strip)
         if (W.getM(x, 0.375, z) || W.getM(x, 0.625, z) || W.getM(x, 0.875, z)) return;
         W.H[i] = 1; ST.mask[i] = 2; W.S[i] = k.kerb;
         W.C[i] = ST.paveCol(x, z, bx, bz);
