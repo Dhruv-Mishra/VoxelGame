@@ -666,10 +666,11 @@ try {
       const fl = N2(jx * 0.035 + 17, jz * 0.035 - 5);
       let v = R() * wSum, k = 0; for (; k < K.length - 1; k++) { v -= K[k].w * (K[k].id === 'daisy' || K[k].id === 'poppy' || K[k].id === 'bell' ? (fl > 0.6 ? 4 : 0.3) : 1); if (v <= 0) break; }
       const key = Math.floor(jx / 16) * 1000 + Math.floor(jz / 16); let a = cells.get(key); if (!a) cells.set(key, a = []);
+      if (AF.MOBILE && a.length >= 32 * 6) continue;
       a.push(jx, gy, jz, R() * 6.2832, 0.75 + R() * 0.55, k); GC.n++;
     }
     for (const [key, a] of cells) cells.set(key, new Float32Array(a));
-    const tier = (AF.GFX && AF.GFX.tier) || 'high', cap = tier === 'low' ? 2200 : tier === 'high' ? 5000 : 9000;
+    const tier = (AF.GFX && AF.GFX.tier) || 'high', cap = AF.MOBILE ? 1200 : tier === 'low' ? 3400 : tier === 'high' ? 7500 : 12000;
     for (const k of K) {
       const im = new THREE.InstancedMesh(k.geo, AF.mat.voxel, Math.ceil(cap * (k.id === 'tuft' ? 0.45 : 0.25)));
       im.count = 0; im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; im.name = 'cover-' + k.id; im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -678,15 +679,23 @@ try {
     GC.ms = Math.round(performance.now() - t0);
     console.log('[af] ground cover', GC.n, 'plants in', cells.size, 'cells,', GC.ms, 'ms');
   });
-  const coverRadius = () => { const t = (AF.GFX && AF.GFX.tier) || 'high'; return t === 'low' ? 30 : t === 'high' ? 48 : 72; };
+  const coverRadius = () => { const t = (AF.GFX && AF.GFX.tier) || 'high'; return AF.MOBILE ? 24 : t === 'low' ? 40 : t === 'high' ? 62 : 88; };
+  // 16 m cell offsets sorted nearest-first, so the instance cap always drops the farthest plants, never the ones at your feet
+  let ring = null, ringR = 0;
+  const cellRing = (Rr) => {
+    if (ringR === Rr) return ring;
+    const n = Math.ceil(Rr / 16) + 1, o = [];
+    for (let a = -n; a <= n; a++) for (let b = -n; b <= n; b++) o.push([a, b, Math.max(0, Math.hypot(a, b) - 1.5) * 16]);
+    o.sort((p, q) => p[2] - q[2]); ringR = Rr; return (ring = o.filter((p) => p[2] <= Rr));
+  };
   const refreshCover = (cx, cz, cy) => {
-    const K = GC.kinds, Rr = coverRadius(), R2 = Rr * Rr, fade0 = Rr * 0.62;
+    const K = GC.kinds, Rr = coverRadius(), R2 = Rr * Rr, fade0 = Rr * 0.72;
     for (const k of K) k.n = 0;
     const high = cy - Math.max(0, W.groundY(cx, cz)) > 45;
     if (!high) {
-      const g0x = Math.floor((cx - Rr) / 16), g1x = Math.floor((cx + Rr) / 16), g0z = Math.floor((cz - Rr) / 16), g1z = Math.floor((cz + Rr) / 16);
-      for (let gx = g0x; gx <= g1x; gx++) for (let gz = g0z; gz <= g1z; gz++) {
-        const a = GC.cells.get(gx * 1000 + gz); if (!a) continue;
+      const gcx = Math.floor(cx / 16), gcz = Math.floor(cz / 16);
+      for (const [ox, oz] of cellRing(Rr)) {
+        const a = GC.cells.get((gcx + ox) * 1000 + gcz + oz); if (!a) continue;
         for (let i = 0; i < a.length; i += 6) {
           const dx = a[i] - cx, dz = a[i + 2] - cz, d2 = dx * dx + dz * dz; if (d2 > R2) continue;
           const k = K[a[i + 5]], im = k.im; if (k.n >= im.instanceMatrix.count) continue;
@@ -705,9 +714,12 @@ try {
   AF.onTick('ground-cover', 445, (dt) => {
     if (!GC.kinds.length || !GC.kinds[0].im) return;
     const c = AF.camera.position, f = AF.player && AF.mode === 'walk' ? AF.player : c;
+    // centre the drawn disc ahead of the view so plants are already grown where you look
+    const e = AF.camera.matrixWorld.elements, fl = Math.hypot(e[8], e[10]) || 1, lead = coverRadius() * 0.3;
+    const fx = f.x - e[8] / fl * lead, fz = f.z - e[10] / fl * lead;
     GC.t -= dt;
-    const moved = Math.abs(f.x - GC.at.x) + Math.abs(f.z - GC.at.z) > 5 || Math.abs(c.y - GC.at.y) > 12;
-    if (moved || GC.t <= 0) { GC.t = 1.5; refreshCover(f.x, f.z, c.y); }
+    const moved = Math.abs(fx - GC.at.x) + Math.abs(fz - GC.at.z) > 5 || Math.abs(c.y - GC.at.y) > 12;
+    if (moved || GC.t <= 0) { GC.t = 1.5; refreshCover(fx, fz, c.y); }
   });
   AF.test('land: ground cover scattered + drawn near the camera', () => {
     if (!GC.kinds.length) return { ok: false, info: 'no ground cover' };

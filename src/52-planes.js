@@ -61,7 +61,7 @@ try {
     const body = AF.modelMesh(G.geo); root.add(body);
     const props = G.props.map((p) => { const pm = AF.modelMesh(G.pgeo); pm.position.copy(p); root.add(pm); return pm; });
     root.rotation.order = 'YXZ'; AF.scene.add(root);
-    const pl = { id, T, G, root, props, x, y: AF.W.groundY(x, z), z, yaw, pitch: 0, roll: 0, v: 0, throttle: 0, home: { x, z, yaw }, onGround: true, spin: 0, name: T.name };
+    const pl = { id, T, G, root, props, x, y: AF.W.groundY(x, z), z, yaw, pitch: 0, roll: 0, v: 0, throttle: 0, engine: false, home: { x, z, yaw }, onGround: true, spin: 0, name: T.name };
     pl.interact = AF.addInteract({ x, y: pl.y + 1, z, r: 2.2, label: 'Fly the ' + T.name, prio: 0.1,
       dist: (px, pz) => { const s = Math.sin(pl.yaw), c = Math.cos(pl.yaw), rx = px - pl.x, rz = pz - pl.z, lx = rx * c - rz * s, lz = rx * s + rz * c; return Math.hypot(Math.max(0, Math.abs(lx) - Math.min(1.5, G.halfW)), Math.max(0, Math.abs(lz) - G.halfL)); },
       can: () => AF.mode === 'walk' && PL.cur !== pl, act: () => AF.setMode('fly', { plane: pl }) });
@@ -71,7 +71,7 @@ try {
   const place = (pl) => { pl.root.position.set(pl.x, pl.y, pl.z); pl.root.rotation.set(-pl.pitch, pl.yaw, pl.roll, 'YXZ'); if (pl.interact) { pl.interact.x = pl.x; pl.interact.y = pl.y + 1; pl.interact.z = pl.z; } };
 
   // ---------------------------------------------------------------- the flight model
-  const FL = { cam: new THREE.Vector3(), look: new THREE.Vector3(), init: false, orbit: 0, orbitP: 0, mouseP: 0, mouseR: 0, crashT: 0 };
+  const FL = { cam: new THREE.Vector3(), look: new THREE.Vector3(), init: false, orbit: 0, orbitP: 0, idle: 0, zoom: 1 };
   const fwd = new THREE.Vector3(), upv = new THREE.Vector3(), E = new THREE.Euler(0, 0, 0, 'YXZ'), tmp = new THREE.Vector3();
   const ground = (x, z) => { const g = AF.W.groundY(x, z); return z > 206 && g < -1 ? -1.25 : g; };
   const crash = (pl, why) => {
@@ -79,76 +79,66 @@ try {
     PL.reset(pl);
     AF.setMode('walk', { x: pl.x + Math.cos(pl.yaw) * 4, z: pl.z - Math.sin(pl.yaw) * 4, yaw: pl.yaw + PI / 2 });
   };
-  PL.reset = (pl) => { pl.x = pl.home.x; pl.z = pl.home.z; pl.yaw = pl.home.yaw; pl.pitch = pl.roll = pl.v = pl.throttle = 0; pl.onGround = true; pl.y = AF.W.groundY(pl.x, pl.z); place(pl); };
+  PL.reset = (pl) => { pl.x = pl.home.x; pl.z = pl.home.z; pl.yaw = pl.home.yaw; pl.pitch = pl.roll = pl.v = pl.throttle = 0; pl.engine = false; pl.onGround = true; pl.y = AF.W.groundY(pl.x, pl.z); place(pl); };
   AF.modes.fly = {
     enter(o = {}) {
       const pl = o.plane; if (!pl) { AF.setMode('walk'); return; }
-      PL.cur = pl; FL.init = false; FL.orbit = FL.orbitP = 0; FL.mouseP = FL.mouseR = 0;
+      PL.cur = pl; FL.init = false; FL.orbit = FL.orbitP = FL.idle = 0; FL.zoom = 1;
       if (AF.player) AF.player.setVisible(false);
-      AF.emit('toast', 'Cleared for take-off in the ' + pl.name + '. W to taxi, hold Space to power up and lift off.');
-      AF.emit('hint', AF.touch ? '' : 'Space engine up + climb \u00b7 Shift engine down + descend \u00b7 W/S taxi / brake \u00b7 A/D turn \u00b7 F to get out on the ground');
-      if (!AF.touch) try { const r = AF.renderer.domElement.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+      AF.emit('toast', 'Cleared for take-off in the ' + pl.name + '. Engine off. ' + (AF.touch ? 'Tap ENGINE ON, push the stick up to lift off.' : 'Space starts the engine; hold W to lift off.'));
+      AF.emit('hint', AF.touch ? '' : 'Space engine on \u00b7 Shift engine off \u00b7 W/S nose up/down; taxi/brake/reverse \u00b7 A/D bank \u00b7 Mouse look \u00b7 Wheel zoom \u00b7 F/X exit');
     },
     exit() {
       const pl = PL.cur; PL.cur = null;
-      if (pl) { pl.throttle = 0; place(pl); }
+      if (pl) { pl.engine = false; pl.throttle = 0; place(pl); }
       if (AF.player) AF.player.setVisible(true);
       AF.emit('hud', { speed: null }); AF.emit('hint', '');
-      if (document.pointerLockElement) try { document.exitPointerLock(); } catch (e) {}
     },
     update(dt) {
       const pl = PL.cur; if (!pl) return;
       const I = AF.input, m = I.mouse, T = pl.T, S = I.stick, modal = AF.ui && AF.ui.modalOpen && AF.ui.modalOpen();
+      if (modal || (AF.ui && AF.ui.dialogueOpen && AF.ui.dialogueOpen())) return;
       dt = Math.min(dt, 0.05);
-      // ---- input
-      let thr = 0, pitchIn = 0, rollIn = 0, yawIn = 0, taxi = 0, brake = false, fine = false, diving = false;
-      if (!modal) {
-        const up = I.key('Space'), down = I.key('ShiftLeft') || I.key('ShiftRight');
-        diving = down;
-        if (up) { thr += 1.4; if (!pl.onGround || pl.v > T.stall) pitchIn += 1; }
-        if (down) { thr -= 2; if (!pl.onGround) pitchIn -= 1; }
-        if (I.key('KeyW')) { if (pl.onGround) taxi = 1; else thr += 0.6; }
-        if (I.key('KeyS')) { if (pl.onGround) brake = true; else thr -= 0.6; }
-        if (I.key('ArrowDown')) pitchIn += 1; if (I.key('ArrowUp')) pitchIn -= 1;
-        if (I.key('KeyA') || I.key('ArrowLeft')) rollIn -= 1; if (I.key('KeyD') || I.key('ArrowRight')) rollIn += 1;
-        if (I.key('KeyQ')) yawIn -= 1; if (I.key('KeyE')) yawIn += 1;
-        const locked = !!document.pointerLockElement;
-        if (locked) { FL.mouseP = AF.clamp(FL.mouseP + m.dy * 0.004, -1, 1); FL.mouseR = AF.clamp(FL.mouseR + m.dx * 0.004, -1, 1); }
-        FL.mouseP *= Math.exp(-dt * 2.2); FL.mouseR *= Math.exp(-dt * 2.2);
-        fine = I.key('ArrowDown') || I.key('ArrowUp') || Math.abs(FL.mouseP) > 0.15 || !!(S && S.y);
-        pitchIn = AF.clamp(pitchIn + FL.mouseP, -1, 1); rollIn = AF.clamp(rollIn + FL.mouseR, -1, 1);
-        if (S && (S.x || S.y)) { pitchIn = AF.clamp(pitchIn - S.y, -1, 1); rollIn = AF.clamp(rollIn + S.x, -1, 1); }
-        if (I.throttle) thr += I.throttle;
-        if (!locked && (m.buttons & 1) && (m.dx || m.dy)) { FL.orbit -= m.dx * 0.006; FL.orbitP = AF.clamp(FL.orbitP + m.dy * 0.004, -0.4, 0.9); FL.dragT = 1.2; }
-      }
-      if ((FL.dragT = (FL.dragT || 0) - dt) < 0) { FL.orbit *= Math.exp(-dt * 1.5); FL.orbitP *= Math.exp(-dt * 1.5); }
-      pl.throttle = AF.clamp(pl.throttle + thr * dt * 0.6, 0, 1);
-      // taxi: W holds a gentle idle power and caps ground speed until Space is used
-      if (pl.onGround && taxi && pl.throttle < 0.3) pl.throttle += (0.3 - pl.throttle) * Math.min(1, dt * 3);
+      const engine = I.key('ShiftLeft') || I.key('ShiftRight') || I.hit('ShiftLeft') || I.throttle < 0 ? false : I.key('Space') || I.hit('Space') || I.throttle > 0 ? true : !!pl.engine;
+      if (engine !== pl.engine) { pl.engine = engine; AF.emit('toast', 'Engine ' + (engine ? 'on.' : 'off.')); }
+      let pitchIn = (I.key('KeyW') || I.key('ArrowUp') ? 1 : 0) - (I.key('KeyS') || I.key('ArrowDown') ? 1 : 0);
+      let rollIn = (I.key('KeyD') || I.key('ArrowRight') ? 1 : 0) - (I.key('KeyA') || I.key('ArrowLeft') ? 1 : 0);
+      const yawIn = (I.key('KeyE') ? 1 : 0) - (I.key('KeyQ') ? 1 : 0);
+      if (S) { pitchIn = AF.clamp(pitchIn + S.y, -1, 1); rollIn = AF.clamp(rollIn + S.x, -1, 1); }
+      const taxi = pitchIn > 0.1, brake = pitchIn < -0.1, diving = pitchIn < 0;
+      if ((document.pointerLockElement || (AF.touch && (m.buttons & 1))) && (m.dx || m.dy)) {
+        FL.orbit = (FL.orbit - m.dx * 0.006) % (PI * 2); FL.orbitP = AF.clamp(FL.orbitP + m.dy * 0.004, -0.4, 0.9); FL.idle = 0;
+      } else FL.idle += dt;
+      if (FL.idle > 1.5) { FL.orbit = AF.angDiff(0, FL.orbit) * Math.exp(-dt * 2); FL.orbitP *= Math.exp(-dt * 2); }
+      FL.zoom = AF.clamp(FL.zoom * Math.exp(m.wheel * 0.001), 0.65, 2.5);
+      pl.throttle = AF.clamp(pl.throttle + (pl.engine ? 1 : -1) * dt / 1.5, 0, 1);
       // ---- dynamics
       const g = 9.8, vs = T.stall;
       const lift = AF.clamp((pl.v - vs * 0.6) / (vs * 0.5), 0, 1);           // 0 below ~0.6 stall, 1 above ~1.1 stall
-      pl.v += (pl.throttle * T.thrust - (T.thrust / (T.vmax * T.vmax)) * pl.v * pl.v - g * Math.sin(pl.pitch) * 0.9 - (pl.onGround ? (brake ? 8 : 0.4) : 0)) * dt;
-      pl.v = AF.clamp(pl.v, 0, T.vmax * 1.15);
-      if (pl.onGround && pl.throttle <= 0.31 && pl.v > 8) pl.v += (8 - pl.v) * Math.min(1, dt * 2);
+      if (pl.onGround && brake) pl.v = pl.v > 0 ? Math.max(0, pl.v - 8 * dt) : Math.max(-3, pl.v - 1.5 * dt);
+      else if (pl.onGround && taxi && !pl.engine && pl.throttle === 0) pl.v += (6 - pl.v) * Math.min(1, dt * 1.5);
+      else {
+        pl.v += (pl.throttle * T.thrust - (T.thrust / (T.vmax * T.vmax)) * pl.v * Math.abs(pl.v) - g * Math.sin(pl.pitch) * 0.9 - (pl.onGround ? Math.sign(pl.v) * 0.4 : 0)) * dt;
+        if (pl.onGround && !pl.engine && !taxi && pl.throttle === 0 && Math.abs(pl.v) < 0.05) pl.v = 0;
+      }
+      pl.v = AF.clamp(pl.v, pl.onGround ? -3 : 0, T.vmax * 1.15);
       if (pl.onGround) {
         pl.roll += (0 - pl.roll) * Math.min(1, dt * 6);
-        pl.yaw -= (rollIn * 0.6 + yawIn * 0.4) * Math.min(1, 0.3 + pl.v / 12) * dt;
+        pl.yaw -= (rollIn * 0.6 + yawIn * 0.4) * AF.clamp(pl.v / 8, -0.4, 1) * dt;
         const rest = 0;
-        if (pitchIn > 0.2 && pl.v > vs) { pl.onGround = false; pl.pitch = 0.05; AF.emit('toast', 'Wheels up!'); }
+        if (pitchIn > 0.2 && pl.v > vs) { pl.onGround = false; pl.pitch = 0.14; AF.emit('toast', 'Wheels up!'); }
         else pl.pitch += (rest - pl.pitch) * Math.min(1, dt * 5);
       } else {
-        // Space / Shift alone hold a comfortable climb / descent attitude; arrows or the mouse can go steeper
-        if (!fine && ((pitchIn > 0 && pl.pitch > 0.32) || (pitchIn < 0 && pl.pitch < -0.28))) pitchIn = 0;
+        if ((pitchIn > 0 && pl.pitch > 0.32) || (pitchIn < 0 && pl.pitch < -0.28)) pitchIn = 0;
         pl.pitch += pitchIn * T.pitch * dt * (0.35 + 0.65 * lift);
         if (!pitchIn) pl.pitch *= Math.exp(-dt * 0.7);
         // A/D: bank toward a comfortable turn angle and self-level on release
         if (rollIn) pl.roll += (rollIn * 0.75 - pl.roll) * Math.min(1, dt * T.roll * 1.2);
         else pl.roll *= Math.exp(-dt * 1.8);
         pl.roll = AF.clamp(pl.roll, -1.25, 1.25); pl.pitch = AF.clamp(pl.pitch, -0.9, 0.9);
-        if (!fine) { const pc = AF.clamp(pl.pitch, -0.3, 0.34); pl.pitch += (pc - pl.pitch) * Math.min(1, dt * 3); }
+        const pc = AF.clamp(pl.pitch, -0.3, 0.34); pl.pitch += (pc - pl.pitch) * Math.min(1, dt * 3);
         // auto-flare: close to the ground and not diving, the nose eases up so a gentle approach becomes a touchdown
-        if (!diving && !fine && pl.y - ground(pl.x, pl.z) < 10) pl.pitch += (Math.max(pl.pitch, -0.06) - pl.pitch) * Math.min(1, dt * 2.5);
+        if (!diving && pl.y - ground(pl.x, pl.z) < 10) pl.pitch += (Math.max(pl.pitch, -0.06) - pl.pitch) * Math.min(1, dt * 2.5);
         // stall: the nose drops, the plane mushes down
         if (lift < 1) pl.pitch -= (1 - lift) * dt * 0.9;
         pl.yaw -= (Math.tan(pl.roll) * g / Math.max(12, pl.v)) * dt * 0.9 + yawIn * 0.35 * dt;
@@ -165,23 +155,23 @@ try {
       }
       // hitting a building / hill face
       if (!pl.onGround && AF.solidAt(nx + fwd.x * pl.G.halfL, ny + 1, nz + fwd.z * pl.G.halfL)) { crash(pl, 'Crunch!'); return; }
-      if (pl.onGround && pl.v > 1 && AF.boxBlocked(nx + fwd.x * pl.G.halfL, gy + 0.3, nz + fwd.z * pl.G.halfL, 0.4, 1.2)) { pl.v = 0; }
+      if (pl.onGround && Math.abs(pl.v) > 1 && AF.boxBlocked(nx + fwd.x * pl.G.halfL * Math.sign(pl.v), gy + 0.3, nz + fwd.z * pl.G.halfL * Math.sign(pl.v), 0.4, 1.2)) { pl.v = 0; }
       else { pl.x = nx; pl.z = nz; pl.y = pl.onGround ? gy : Math.min(900, ny); }
       if (Math.abs(pl.x) > 2200 || Math.abs(pl.z) > 2200) { pl.yaw += PI; AF.emit('toast', 'Turning back toward Port Solace.'); }
       place(pl);
       pl.spin += dt * (4 + pl.throttle * 60); for (const p of pl.props) p.rotation.z = pl.spin;
       // ---- camera: behind + above, smoothed; drag to look around
-      const back = 9 + pl.G.halfL * 1.3, a = pl.yaw + PI + FL.orbit, pit = 0.16 + FL.orbitP - pl.pitch * 0.5;
+      const back = (9 + pl.G.halfL * 1.3) * FL.zoom, a = pl.yaw + PI + FL.orbit, pit = 0.16 + FL.orbitP - pl.pitch * 0.5;
       tmp.set(pl.x + Math.sin(a) * Math.cos(pit) * back, pl.y + 1.5 + pl.G.h * 0.5 + Math.sin(pit) * back, pl.z + Math.cos(a) * Math.cos(pit) * back);
       tmp.y = Math.max(tmp.y, ground(tmp.x, tmp.z) + 1);
       const k = FL.init ? 1 - Math.exp(-dt * 5) : 1; FL.init = true;
       FL.cam.lerp(tmp, k); FL.look.lerp(tmp.set(pl.x + fwd.x * 4, pl.y + 1.2 + fwd.y * 4, pl.z + fwd.z * 4), FL.init ? Math.min(1, k * 2) : 1);
       const cam = AF.camera; cam.position.copy(FL.cam); upv.set(0, 1, 0); cam.up.copy(upv); cam.lookAt(FL.look);
       AF.camTarget.copy(FL.look); AF.shadowFocus.set(pl.x, 0, pl.z); AF.shadowRadius = 90;
-      AF.emit('hud', { mode: 'fly', speed: pl.v * 2.237, alt: Math.max(0, pl.y - Math.max(0, ground(pl.x, pl.z))), throttle: pl.throttle, car: pl.name });
+      AF.emit('hud', { mode: 'fly', speed: Math.abs(pl.v) * 2.237, alt: Math.max(0, pl.y - Math.max(0, ground(pl.x, pl.z))), throttle: pl.throttle, engine: pl.engine, car: pl.name + ' \u00b7 Engine ' + (pl.engine ? 'on' : 'off') });
       // ---- getting out (on the ground, nearly stopped)
-      if (I.hit('KeyF') || I.hit('Escape') || I.hit('KeyX')) {
-        if (pl.onGround && pl.v < 4) { pl.v = 0; const sx = Math.cos(pl.yaw), sz = -Math.sin(pl.yaw), off = Math.min(pl.G.halfW, 3) + 1.2; AF.setMode('walk', { x: pl.x + sx * off, z: pl.z + sz * off, yaw: pl.yaw + PI / 2 }); }
+      if (I.hit('KeyF') || I.hit('KeyX')) {
+        if (pl.onGround && Math.abs(pl.v) < 4) { pl.v = 0; const sx = Math.cos(pl.yaw), sz = -Math.sin(pl.yaw), off = Math.min(pl.G.halfW, 3) + 1.2; AF.setMode('walk', { x: pl.x + sx * off, z: pl.z + sz * off, yaw: pl.yaw + PI / 2 }); }
         else AF.emit('toast', 'Land and slow down first!');
       }
     },
@@ -200,24 +190,43 @@ try {
       root.position.set(x, y, zz); root.rotation.set(0, Math.atan2(-Math.sin(a) * 1.3, Math.cos(a)), -0.35, 'YXZ'); prop.rotation.z = t * 40;
     });
   });
-  AF.test('planes: W taxis, Space takes off + climbs, Shift descends', () => {
-    const pl = PL.list.find((p) => p.id === 'cub'); if (!pl) return { ok: false, info: 'no cub' };
-    // drive the flight model directly (no mode switch, title modal bypassed) and put everything back afterwards
-    const I = AF.input, keys = ['KeyW', 'Space', 'ShiftLeft'], saveCur = PL.cur, saveModal = AF.ui && AF.ui.modalOpen, cam = AF.camera, cp = cam.position.clone(), cq = cam.quaternion.clone();
-    const run = (s) => { for (let i = 0; i < s * 30; i++) AF.modes.fly.update(1 / 30); };
-    let taxi = 0, up = {}, down = {};
+  AF.test('planes: latched engine + W runway takeoff within 30s; W/S airborne pitch', () => {
+    const source = PL.list.find((plane) => plane.id === 'cub'); if (!source) return { ok: false, info: 'no cub' };
+    const pl = Object.assign({}, source, { root: new THREE.Group(), props: [], interact: null, engine: false, v: 0, throttle: 0, pitch: 0, roll: 0, onGround: true });
+    const I = AF.input, saveDown = new Set(I.down), savePressed = new Set(I.pressed), saveMouse = Object.assign({}, I.mouse), saveStick = I.stick, saveThrottle = I.throttle;
+    const saveCur = PL.cur, saveModal = AF.ui && AF.ui.modalOpen, saveDialogue = AF.ui && AF.ui.dialogueOpen;
+    const cam = AF.camera, cp = cam.position.clone(), cq = cam.quaternion.clone(), cu = cam.up.clone(), target = AF.camTarget.clone(), focus = AF.shadowFocus.clone(), radius = AF.shadowRadius;
+    const saveFL = Object.assign({}, FL, { cam: FL.cam.clone(), look: FL.look.clone() });
+    const runway = () => { pl.x = A.runway.x0 + 20; pl.z = A.runway.z; pl.yaw = PI / 2; pl.y = AF.W.groundY(pl.x, pl.z); pl.v = pl.pitch = pl.roll = 0; pl.onGround = true; };
+    const run = (seconds) => { for (let frame = 0; frame < Math.round(seconds * 30); frame++) AF.modes.fly.update(1 / 30); };
+    let taxi = 0, reverse = 0, takeoff = 30, airborne = false, engineLatched = false, pitchUp = 0, pitchDown = 0, stopped = false;
     try {
-      if (AF.ui) AF.ui.modalOpen = () => false;
-      PL.cur = pl; pl.x = A.runway.x0 + 20; pl.z = A.runway.z; pl.yaw = PI / 2; pl.y = AF.W.groundY(pl.x, pl.z); pl.v = pl.throttle = pl.pitch = 0; pl.onGround = true;
-      I.down.add('KeyW'); run(3); taxi = pl.v; I.down.delete('KeyW');
-      I.down.add('Space'); run(9); up = { air: !pl.onGround, y: pl.y, pitch: pl.pitch }; I.down.delete('Space');
-      I.down.add('ShiftLeft'); run(2); down = { pitch: pl.pitch, thr: pl.throttle };
+      if (AF.ui) { AF.ui.modalOpen = () => false; AF.ui.dialogueOpen = () => false; }
+      I.down.clear(); I.pressed.clear(); I.stick = null; I.throttle = 0; I.mouse.dx = I.mouse.dy = I.mouse.wheel = I.mouse.buttons = 0;
+      PL.cur = pl; FL.init = false; FL.zoom = 1; FL.orbit = FL.orbitP = FL.idle = 0; runway();
+      I.down.add('KeyW'); run(3); taxi = pl.v; I.down.clear();
+      I.down.add('KeyS'); run(4); reverse = pl.v; I.down.clear(); runway();
+      I.down.add('Space'); run(1 / 30); I.down.clear(); run(1.5); engineLatched = pl.engine && pl.throttle > 0.99;
+      runway(); I.down.add('KeyW');
+      for (let frame = 0; frame < 900 && PL.cur === pl; frame++) { AF.modes.fly.update(1 / 30); if (!pl.onGround) { airborne = true; takeoff = (frame + 1) / 30; break; } }
+      I.down.clear();
+      if (airborne && PL.cur === pl) {
+        pl.y = 160; pl.v = pl.T.stall * 1.8; pl.pitch = pl.roll = 0;
+        I.down.add('KeyW'); run(0.25); pitchUp = pl.pitch; I.down.clear();
+        I.down.add('KeyS'); run(0.5); pitchDown = pl.pitch; I.down.clear();
+        I.down.add('ShiftLeft'); run(1 / 30); I.down.clear(); run(1.5); stopped = !pl.engine && pl.throttle < 0.01;
+      }
     } finally {
-      for (const k of keys) I.down.delete(k);
-      PL.cur = saveCur; if (AF.ui) AF.ui.modalOpen = saveModal; PL.reset(pl); AF.emit('hud', { speed: null }); cam.position.copy(cp); cam.quaternion.copy(cq); FL.init = false;
+      I.down.clear(); for (const key of saveDown) I.down.add(key);
+      I.pressed.clear(); for (const key of savePressed) I.pressed.add(key);
+      Object.assign(I.mouse, saveMouse); I.stick = saveStick; I.throttle = saveThrottle;
+      PL.cur = saveCur; if (AF.ui) { AF.ui.modalOpen = saveModal; AF.ui.dialogueOpen = saveDialogue; }
+      cam.position.copy(cp); cam.quaternion.copy(cq); cam.up.copy(cu); AF.camTarget.copy(target); AF.shadowFocus.copy(focus); AF.shadowRadius = radius;
+      FL.cam.copy(saveFL.cam); FL.look.copy(saveFL.look); Object.assign(FL, { init: saveFL.init, orbit: saveFL.orbit, orbitP: saveFL.orbitP, idle: saveFL.idle, zoom: saveFL.zoom });
+      AF.emit('hud', { speed: null });
     }
-    const ok = taxi > 3 && taxi < 9 && up.air && up.y > 20 && up.pitch < 0.4 && down.pitch < 0 && down.thr < 0.2;
-    return { ok, info: `taxi ${taxi.toFixed(1)} m/s, after Space y ${up.y.toFixed(1)} pitch ${up.pitch.toFixed(2)}, Shift pitch ${down.pitch.toFixed(2)} throttle ${down.thr.toFixed(2)}` };
+    return { ok: taxi > 3 && taxi < 7 && reverse < -2.5 && reverse >= -3 && engineLatched && airborne && takeoff <= 30 && pitchUp > 0.1 && pitchDown < 0 && stopped,
+      info: `taxi ${taxi.toFixed(1)}, reverse ${reverse.toFixed(1)} m/s; engine latched ${engineLatched}; takeoff ${takeoff.toFixed(1)}s; W pitch ${pitchUp.toFixed(2)}, S ${pitchDown.toFixed(2)}; engine stopped ${stopped}` };
   });
 }
 

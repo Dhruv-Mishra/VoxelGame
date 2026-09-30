@@ -57,41 +57,30 @@ try {
 
   // ------------------------------------------------------------ furniture kit (voxel furniture straight into the world grid)
   const FU = K.furn = {
-    rug(F, u0, v0, u1, v1, hex, hex2) { const c1 = col(hex, { pat: 'none', patTop: 'carpet', rough: 1 }), c2 = col(hex2 || hex, { pat: 'none', patTop: 'carpet', rough: 1 }); F.fill(u0, 0.5, v0, u1, 0.52, v1, c1); if (hex2) F.fill(u0 + 0.5, 0.5, v0 + 0.5, u1 - 0.5, 0.53, v1 - 0.5, c2); },
+    rug(F, u0, v0, u1, v1, hex, hex2) { F.place(PROPS.rug(u1 - u0, v1 - v0, hex, hex2), (u0 + u1) / 2, F.level ?? 0.5, (v0 + v1) / 2, 0); },
     sofa(F, u0, v0, u1, v1, hex, backSide) {        // backSide: 'u0'|'u1'|'v0'|'v1' — where the backrest is
-      const c = smoothC(hex), cd = smoothC(shade(hex, 0.78));
-      F.fill(u0, 0.5, v0, u1, 1.0, v1, cd); F.fill(u0, 1.0, v0, u1, 1.25, v1, c);
-      const t = 0.5;
-      if (backSide === 'u0') F.fill(u0, 1.0, v0, u0 + t, 2.0, v1, cd); if (backSide === 'u1') F.fill(u1 - t, 1.0, v0, u1, 2.0, v1, cd);
-      if (backSide === 'v0') F.fill(u0, 1.0, v0, u1, 2.0, v0 + t, cd); if (backSide === 'v1') F.fill(u0, 1.0, v1 - t, u1, 2.0, v1, cd);
-      if (backSide === 'u0' || backSide === 'u1') { F.fill(u0, 1.25, v0, u1, 1.75, v0 + 0.25, cd); F.fill(u0, 1.25, v1 - 0.25, u1, 1.75, v1, cd); }
-      else { F.fill(u0, 1.25, v0, u0 + 0.25, 1.75, v1, cd); F.fill(u1 - 0.25, 1.25, v0, u1, 1.75, v1, cd); }
+      const across = backSide === 'u0' || backSide === 'u1';
+      const rot = across ? (backSide === 'u0' ? F.rotBack : F.rotLane) : (backSide === 'v0' ? 0 : 2);
+      F.place(PROPS.sofa(hex, Math.min(2.75, across ? v1 - v0 : u1 - u0)), (u0 + u1) / 2, F.level ?? 0.5, (v0 + v1) / 2, rot);
     },
-    table(F, u0, v0, u1, v1, top, h = 0.75, leg) { const t = smoothC(top), l = col(leg ?? shade(top, 0.6)); F.fill(u0, h + 0.25, v0, u1, h + 0.5, v1, t); for (const [a, b] of [[u0, v0], [u1 - 0.25, v0], [u0, v1 - 0.25], [u1 - 0.25, v1 - 0.25]]) F.fill(a, 0.5, b, a + 0.25, h + 0.25, b + 0.25, l); },
+    table(F, u0, v0, u1, v1, top, h = 0.75, leg) { F.place(PROPS.worktable(Math.min(2, u1 - u0), Math.min(1, v1 - v0), h, top, leg ?? shade(top, 0.6)), (u0 + u1) / 2, F.level ?? 0.5, (v0 + v1) / 2, 0); },
     bed(F, u0, v0, u1, v1, sheet, frame, headSide) {
-      const fr = smoothC(frame), sh = smoothC(sheet), pw = smoothC(0xf6f2ea);
-      F.fill(u0, 0.5, v0, u1, 1.0, v1, fr); F.fill(u0, 1.0, v0, u1, 1.25, v1, sh);
-      if (headSide === 'u1') { F.fill(u1 - 0.25, 0.5, v0, u1, 2.0, v1, fr); F.fill(u1 - 1.0, 1.25, v0 + 0.25, u1 - 0.25, 1.5, v1 - 0.25, pw); }
-      else { F.fill(u0, 0.5, v0, u0 + 0.25, 2.0, v1, fr); F.fill(u0 + 0.25, 1.25, v0 + 0.25, u0 + 1.0, 1.5, v1 - 0.25, pw); }
+      F.place(PROPS.bed(sheet, frame), (u0 + u1) / 2, F.level ?? 0.5, (v0 + v1) / 2, headSide === 'u1' ? F.rotLane : F.rotBack);
     },
-    counter(F, u0, v0, u1, v1, body, top) { F.fill(u0, 0.5, v0, u1, 1.25, v1, smoothC(body)); F.fill(u0, 1.25, v0, u1, 1.5, v1, col(top ?? 0xeeeae0, { pat: 'marble', rough: 0.25 })); },
-    plant(F, u, v, big) { const pot = col(0xb8643a), lf = col(0x4f8a3a, { jitter: 0.6 }), lf2 = col(0x6aa84a, { jitter: 0.6 }); F.fill(u, 0.5, v, u + 0.5, 1.0, v + 0.5, pot); const h = big ? 2.25 : 1.5; F.fill(u - 0.25, 1.0, v - 0.25, u + 0.75, h, v + 0.75, lf); F.fill(u, h, v, u + 0.5, h + 0.5, v + 0.5, lf2); },
-    lamp(F, u, v, hex = 0xfff0c8) { F.fill(u, 0.5, v, u + 0.25, 2.0, v + 0.25, col(0x2a2a2a, { metal: 0.6, rough: 0.4 })); F.fill(u - 0.25, 2.0, v - 0.25, u + 0.5, 2.5, v + 0.5, glow(hex, 2, 'night')); },
-    screen(F, u0, y0, v0, u1, y1, v1, hex = 0x3aa0ff) { F.fill(u0, y0, v0, u1, y1, v1, glow(hex, 0.75)); },
+    counter(F, u0, v0, u1, v1, body, top) { F.place(PROPS.counter(u1 - u0, v1 - v0, body, top ?? 0xeeeae0), (u0 + u1) / 2, F.level ?? 0.5, (v0 + v1) / 2, 0); },
+    plant(F, u, v, big) { F.place(PROPS.plant(big), u, F.level ?? 0.5, v, 0); },
+    lamp(F, u, v, hex = 0xfff0c8) { F.place(PROPS.floorlamp(hex), u, F.level ?? 0.5, v, 0); },
+    screen(F, u0, y0, v0, u1, y1, v1, tile = 0) { addScreen(F, u0, y0, v0, u1, y1, v1, tile); },
     shelf(F, u0, v0, u1, v1, h, wood, items) {
-      const w = smoothC(wood); F.fill(u0, 0.5, v0, u1, h, v1, w);
-      const inset = (u1 - u0) < (v1 - v0);
-      for (let y = 1.0; y < h - 0.25; y += 0.75) {
-        if (inset) F.clear(u0 + 0.25, y, v0 + 0.25, u1, y + 0.5, v1 - 0.25); else F.clear(u0 + 0.25, y, v0 + 0.25, u1 - 0.25, y + 0.5, v1);
-        let k = 0; for (let t = (inset ? v0 : u0) + 0.25; t < (inset ? v1 : u1) - 0.25; t += 0.25) { const c = items[(k++ * 7 + (y * 4 | 0)) % items.length]; if (!c) continue; const hh = 0.25 + ((k * 13) % 3) * 0.125; if (inset) F.fill(u0 + 0.25, y, t, u1 - 0.25, y + hh, t + 0.25, c); else F.fill(t, y, v0 + 0.25, t + 0.25, y + hh, v1 - 0.25, c); }
-      }
+      const inset = u1 - u0 < v1 - v0;
+      F.place(PROPS.books(Math.min(2, inset ? v1 - v0 : u1 - u0), Math.min(3, h - (F.level ?? 0.5)), wood, items), (u0 + u1) / 2, F.level ?? 0.5, (v0 + v1) / 2, inset ? F.rotLane : 0);
     },
   };
   function shade(hex, k) { const f = (s) => Math.max(0, Math.min(255, Math.round(((hex >> s) & 255) * k))); return (f(16) << 16) | (f(8) << 8) | f(0); }
   K.shade = shade;
 
   // ------------------------------------------------------------ one house: shell, garage, yard; interior only for the friends
-  const FLOOR = 0.5, CEIL = 3.75, TOP = 7.25;
+  const FLOOR = 0.5, CEIL = 3.75, UPPER = 4, TOP = 7.25;
   const house = (pl, th, owner) => {
     const F = K.frame(pl);
     const wall = col(th.wall, { pat: 'stucco', rough: 0.9, jitter: 0.12 }), trim = col(th.trim, { rough: 0.5 }), roof = col(th.roof, { pat: 'none', patTop: 'tar' });
@@ -111,8 +100,8 @@ try {
     F.fill(7.75, TOP - 0.25, 2.75, 24.25, TOP + 0.5, 24.25, trim); F.clear(8.25, TOP, 3.25, 23.75, TOP + 0.5, 23.75);   // parapet
     F.fill(8.25, TOP - 0.25, 3.25, 23.75, TOP, 23.75, roof);
     // upper storey windows: facade-only rooms (lit at night by the shader)
-    for (const [v0, v1] of [[4.5, 9], [12, 16], [18.5, 22.5]]) F.fill(8, CEIL + 1, v0, 8.25, CEIL + 2.75, v1, AF.MAT.winApartment);
-    for (const [u0, u1] of [[10, 14], [17, 22]]) { F.fill(u0, CEIL + 1, 3, u1, CEIL + 2.75, 3.25, AF.MAT.winApartment); F.fill(u0, CEIL + 1, 23.75, u1, CEIL + 2.75, 24, AF.MAT.winApartment); }
+    for (const [v0, v1] of [[4.5, 9], [12, 16], [18.5, 22.5]]) F.fill(8, CEIL + 1, v0, 8.25, CEIL + 2.75, v1, owner ? glass : AF.MAT.winApartment);
+    for (const [u0, u1] of [[10, 14], [17, 22]]) { F.fill(u0, CEIL + 1, 3, u1, CEIL + 2.75, 3.25, owner ? glass : AF.MAT.winApartment); F.fill(u0, CEIL + 1, 23.75, u1, CEIL + 2.75, 24, owner ? glass : AF.MAT.winApartment); }
     // front door
     const doorV0 = 10, doorV1 = 11.75;
     F.fill(7.75, FLOOR, doorV0 - 0.5, 8, 3.25, doorV0, trim); F.fill(7.75, FLOOR, doorV1, 8, 3.25, doorV1 + 0.5, trim); F.fill(7.75, 3.0, doorV0, 8, 3.25, doorV1, trim);   // door surround
@@ -144,7 +133,9 @@ try {
     F.clear(8.25, FLOOR, 3.25, 23.75, CEIL, 23.75);                           // the room
     F.fill(8.25, CEIL - 0.25, 3.25, 23.75, CEIL, 23.75, smoothC(0xf6f2ea));   // ceiling
     F.fill(8.25, 0.25, 3.25, 23.75, FLOOR, 23.75, col(th.floor, { pat: 'none', patTop: 'parquet', rough: 0.45 }));
-    F.clear(7.9, FLOOR, doorV0, 8.3, 3.0, doorV1);                             // doorway
+    F.clear(7.75, FLOOR, doorV0, 8.5, 2.75, doorV1);
+    F.fill(7.75, 2.75, doorV0, 8.25, 3.0, doorV1, trim);
+    F.place(PROPS.lintel(1.75, th.trim), 8.125, FLOOR + 2.125, (doorV0 + doorV1) / 2, F.rotLane);
     F.fill(8, FLOOR - 0.05, doorV0, 8.25, FLOOR, doorV1, trim);
     for (const [v0, v1] of [[4, 8.75], [13.25, 22.75]]) { F.fill(8, 1.25, v0, 8.25, 3.0, v1, glass); F.fill(8, 1.0, v0 - 0.25, 8.25, 1.25, v1 + 0.25, frameC); }
     for (const [u0, u1] of [[10, 14], [17, 22]]) { F.fill(u0, 1.25, 3, u1, 3.0, 3.25, glass); F.fill(u0, 1.25, 23.75, u1, 3.0, 24, glass); }
@@ -174,108 +165,64 @@ try {
       for (let i = 0; i < 6; i++) { g(12 + i * 2, 30 + i, 4, 2, '#f4efe4'); g(44 - i * 2, 30 + i, 4, 2, '#f4efe4'); g(12 + i * 2, 38 - i, 4, 2, '#f4efe4'); g(44 - i * 2, 38 - i, 4, 2, '#f4efe4'); }
     },
   };
-  const INTERIOR = {
-    dhruv(F, th) {            // computers + gym
-      FU.rug(F, 12, 12, 19, 21, th.rug, 0x3aa0ff);
-      FU.sofa(F, 12.5, 20.5, 18.5, 22.75, th.sofa, 'v1');
-      F.fill(14, 0.5, 13, 17, 1.0, 13.75, smoothC(0x2a2a2e)); FU.screen(F, 14.25, 1.0, 13.25, 16.75, 2.75, 13.5, 0x5ab4ff);  // TV
-      // the battlestation: long desk, three glowing monitors, tower PC with RGB, a gaming chair
-      FU.table(F, 20.5, 14, 23.5, 22.5, 0x1d1d20, 0.75, 0x1d1d20);
-      FU.screen(F, 23, 1.5, 14.75, 23.25, 2.5, 16.75, 0x6adf8a); FU.screen(F, 23, 1.5, 17.25, 23.25, 2.75, 19.75, 0x5ab4ff); FU.screen(F, 23, 1.5, 20.25, 23.25, 2.5, 22.25, 0x6adf8a);
-      F.fill(22.75, 0.5, 22.5, 23.5, 1.75, 23.5, smoothC(0x141416)); F.fill(22.7, 0.75, 22.6, 22.75, 1.6, 23.4, glow(0xff3aa0, 2.4)); F.fill(22.7, 0.75, 22.6, 22.75, 0.9, 23.4, glow(0x3affd0, 2.4));
-      F.fill(19.25, 0.5, 17.5, 20, 1.25, 18.5, smoothC(0x202024)); F.fill(18.75, 1.25, 17.5, 19.25, 2.5, 18.5, smoothC(0x3a6ad0));   // chair
-      // server rack with blinking LEDs
-      F.fill(22.5, 0.5, 9.5, 23.75, 3.0, 11, smoothC(0x18181a)); for (let y = 0.75; y < 2.75; y += 0.25) F.fill(22.45, y, 9.75, 22.5, y + 0.125, 10.75, glow(y % 0.5 ? 0x3aff6a : 0x3aa0ff, 3));
-      // gym corner: bench press, rack of dumbbells, a treadmill
-      F.fill(15, 0.5, 4.5, 16.5, 1.0, 7.5, smoothC(0x202024)); F.fill(14.5, 1.0, 5, 17, 1.25, 7, smoothC(0x2d3e57));
-      F.fill(14, 1.0, 4, 14.25, 2.5, 4.25, col(0x8b9097, { metal: 0.8 })); F.fill(17.25, 1.0, 4, 17.5, 2.5, 4.25, col(0x8b9097, { metal: 0.8 }));
-      F.fill(13.75, 2.25, 4, 17.75, 2.5, 4.25, col(0xc3c8cf, { metal: 0.9 })); F.fill(13.5, 2.0, 3.75, 14, 2.75, 4.5, smoothC(0x141414)); F.fill(17.5, 2.0, 3.75, 18, 2.75, 4.5, smoothC(0x141414));
-      F.fill(19, 0.5, 3.5, 22, 1.0, 4.25, smoothC(0x2a2a2e)); for (let i = 0; i < 6; i++) F.fill(19.25 + i * 0.5, 1.0, 3.6, 19.5 + i * 0.5, 1.25, 4.15, smoothC(i % 2 ? 0x141414 : 0x3a3a3e));
-      F.fill(19.5, 0.5, 6, 22.5, 0.75, 7.25, smoothC(0x202024)); F.fill(22.25, 0.75, 6, 22.5, 2.25, 7.25, smoothC(0x2a2a2e)); FU.screen(F, 22.2, 1.75, 6.25, 22.25, 2.0, 7.0, 0x3aff6a);
-      return { sign: ['console.log', 0x3affd0], npc: [19.6, 18, 'sit', 'back'] };
-    },
-    hunar(F, th) {            // pink, Barbie, fashion
-      FU.rug(F, 11.5, 11.5, 20, 21.5, 0xff8fc8, 0xffc4e1);
-      FU.sofa(F, 12, 20.75, 19, 23, th.sofa, 'v1'); FU.table(F, 14.5, 16, 17, 18, 0xffffff, 0.5, 0xff4fa3);
-      F.fill(14, 0.5, 12.5, 17, 1.0, 13.25, smoothC(0xffffff)); FU.screen(F, 14.25, 1.0, 12.75, 16.75, 2.5, 13.0, 0xff8fd0);
-      // the wardrobe: clothes rails with dresses in every colour + a wall of shoes
-      const dress = [0xff4fa3, 0xffffff, 0xf7b6cf, 0xc02a7a, 0x9a6ad6, 0xffd0e8, 0x2a2a2e, 0xe8c23a];
-      F.fill(23, 2.75, 13, 23.25, 2.9, 22.5, col(0xd8b04a, { metal: 0.9, rough: 0.3 }));
-      for (let v = 13.25, i = 0; v < 22.25; v += 0.5, i++) F.fill(22.25, 1.25, v, 23.25, 2.75, v + 0.25, smoothC(dress[i % dress.length]));
-      FU.shelf(F, 22.75, 7.5, 23.75, 11.5, 3.0, 0xffffff, [smoothC(0xff4fa3), smoothC(0xffc4e1), smoothC(0xc02a7a), 0, smoothC(0xffffff)]);
-      // the vanity with a bulb-lit mirror
-      FU.table(F, 18, 3.25, 21, 4.25, 0xffffff, 0.75, 0xffc4e1);
-      F.fill(18.25, 1.5, 3.25, 20.75, 3.25, 3.4, col(0xe8f0f6, { metal: 1, rough: 0.05 }));
-      for (let u = 18.25; u <= 20.5; u += 0.5) { F.fill(u, 3.25, 3.3, u + 0.25, 3.5, 3.5, glow(0xfff0d0, 3)); }
-      F.fill(19, 0.5, 5, 20, 1.25, 6, smoothC(0xff4fa3));   // stool
-      FU.bed(F, 17, 7.5, 21.5, 11, 0xff8fc8, 0xffffff, 'u1');
-      F.fill(20.5, 1.5, 7.75, 21.25, 2.25, 8.5, smoothC(0xffffff)); F.fill(20.5, 1.5, 10, 21.25, 2.25, 10.75, smoothC(0xff4fa3));
-      return { sign: ['Barbie', 0xff4fa3, { font: 'script' }], npc: [16, 9.5, 'stand', 'front'] };
-    },
-    tanishk(F, th) {          // crypto + gym
-      FU.rug(F, 12, 12, 19, 21, 0x2a2a2e, 0xd4a84a);
-      FU.sofa(F, 12.5, 20.5, 18.5, 22.75, 0x202024, 'v1'); FU.table(F, 14.5, 16, 17, 18, 0xd4a84a, 0.5, 0x202024);
-      // the trading desk: six screens of green candles
-      FU.table(F, 20.5, 13, 23.5, 22.75, 0x141416, 0.75, 0x141416);
-      for (const [v0, y0] of [[13.5, 1.5], [16.5, 1.5], [19.5, 1.5], [13.5, 2.5], [16.5, 2.5], [19.5, 2.5]]) {
-        F.fill(23.1, y0, v0, 23.25, y0 + 0.875, v0 + 2.75, smoothC(0x0a0a0c));
-        for (let k = 0; k < 10; k++) { const up = (k * 7 + v0 * 3) % 5 < 3, h = 0.125 + ((k * 13 + y0 * 8) % 5) * 0.0625; F.fill(23.05, y0 + 0.25 + (k % 3) * 0.125, v0 + 0.25 + k * 0.25, 23.1, y0 + 0.25 + (k % 3) * 0.125 + h, v0 + 0.375 + k * 0.25, glow(up ? 0x2adf6a : 0xff3a3a, 2.2)); }
+  const INTERIOR = {};
+  const SCREEN_THEME = { dhruv: 3, hunar: 7, tanishk: 2, diksha: 6, kush: 4, kaybee: 4 };
+  const TV_THEME = { dhruv: 1, hunar: 0, tanishk: 5, diksha: 6, kush: 4, kaybee: 7 };
+  const SIGNS = { dhruv: ['console.log', 0x3affd0], hunar: ['Barbie', 0xff4fa3, { font: 'script' }], tanishk: ['HODL', 0xf7931a], diksha: ['Eras', 0xd6b1e8, { font: 'script' }], kush: ['Kush & Div', 0xff4f7a, { font: 'script' }], kaybee: ['ONE PIECE', 0xf2c21b] };
+  for (const owner of Object.keys(TH)) INTERIOR[owner] = (F, th) => {
+    FU.rug(F, 9.5, 13.5, 13.75, 19, th.rug, th.accent);
+    F.place(PROPS.sofa(th.sofa), 11.75, FLOOR, 17, 2);
+    F.place(PROPS.worktable(1, 0.6, 0.4375, th.trim, th.trim), 11.75, FLOOR, 15.2, 0);
+    F.place(PROPS.tvStand(th.trim), 11.75, FLOOR, 12.5, 0);
+    F.place(PROPS.monitorStand(), 11.75, FLOOR + 0.5, 12.5, 0);
+    FU.screen(F, 11.0625, 1.125, 12.6, 12.4375, 1.875, 12.6, TV_THEME[owner]);
+    for (const v of [6, 7.5]) F.place(PROPS.chair(th.trim), 12.75, FLOOR, v, F.rotLane);
+    const desk = (v, count, tile) => {
+      F.place(PROPS.worktable(1.875, 0.75, 0.75, th.trim, th.trim), 22.25, FLOOR, v, F.rotLane);
+      F.place(PROPS.chair(th.sofa), 21.25, FLOOR, v, F.rotBack);
+      for (let screen = 0; screen < count; screen++) {
+        const sv = v + (screen - (count - 1) / 2) * 0.625;
+        F.place(PROPS.monitorStand(), 22.4, 1.25, sv, F.rotLane);
+        FU.screen(F, 22.32, 1.4375, sv - 0.28125, 22.32, 1.75, sv + 0.28125, tile);
+        if (owner === 'tanishk') FU.screen(F, 22.32, 1.875, sv - 0.28125, 22.32, 2.1875, sv + 0.28125, tile);
       }
-      F.fill(19.25, 0.5, 17, 20, 1.25, 18, smoothC(0x202024)); F.fill(18.75, 1.25, 17, 19.25, 2.5, 18, smoothC(0xd4a84a));
-      // a gold vault door + stacks of gold coins, the gym corner: squat rack + punching bag
-      F.fill(23.5, 0.5, 8.5, 23.75, 3.0, 11, col(0xd4a84a, { metal: 1, rough: 0.25 })); F.fill(23.4, 1.5, 9.5, 23.5, 2.0, 10, col(0x8a6a2a, { metal: 1 }));
-      for (let i = 0; i < 5; i++) F.fill(21.5 + (i % 2) * 0.5, 0.5, 8.75 + i * 0.4, 21.75 + (i % 2) * 0.5, 0.75 + (i % 3) * 0.25, 9.0 + i * 0.4, col(0xf2c65a, { metal: 1, rough: 0.2 }));
-      for (const u of [14, 17]) { F.fill(u, 0.5, 4, u + 0.25, 3.0, 4.25, col(0x2a2a2e, { metal: 0.6 })); F.fill(u, 0.5, 6.5, u + 0.25, 3.0, 6.75, col(0x2a2a2e, { metal: 0.6 })); }
-      F.fill(13.5, 2.0, 4, 17.75, 2.25, 6.75, col(0xc3c8cf, { metal: 0.9 })); F.clear(14.25, 2.0, 4.25, 17, 2.25, 6.5);
-      F.fill(13.25, 1.75, 5.25, 17.75, 2.0, 5.5, col(0xc3c8cf, { metal: 0.9 })); F.fill(13, 1.5, 5, 13.5, 2.25, 5.75, smoothC(0x141414)); F.fill(17.5, 1.5, 5, 18, 2.25, 5.75, smoothC(0x141414));
-      F.fill(20.5, 3.25, 4.5, 20.75, CEIL - 0.25, 4.75, col(0x2a2a2e)); F.fill(20.25, 1.0, 4.25, 21, 3.25, 5, smoothC(0xb8322a));
-      return { sign: ['HODL', 0xf7931a, { font: 'deco' }], sign2: ['BTC', 0xf7931a], npc: [19.6, 17.5, 'sit', 'back'] };
-    },
-    diksha(F, th) {           // Taylor Swift + Barbie
-      FU.rug(F, 11.5, 11.5, 20, 21.5, 0xc27ad6, 0xf2c6e6);
-      FU.sofa(F, 12, 20.75, 19, 23, 0xf7b6cf, 'v1'); FU.table(F, 14.5, 16, 17, 18, 0xfaf6ff, 0.5, 0x7a4fb8);
-      // a white upright piano, a guitar on a stand, the record wall, the lucky 13
-      F.fill(21.75, 0.5, 13, 23.5, 2.25, 16.5, smoothC(0xf8f6f2)); F.fill(21.25, 1.25, 13.25, 21.75, 1.5, 16.25, smoothC(0x141414));
-      for (let v = 13.25; v < 16.25; v += 0.25) F.fill(21.25, 1.5, v, 21.75, 1.55, v + 0.125, smoothC(0xffffff));
-      F.fill(22.5, 0.5, 18, 22.75, 1.75, 18.25, col(0x2a2a2a)); F.fill(22.25, 0.75, 17.75, 23.0, 1.5, 18.5, smoothC(0xc8844a)); F.fill(22.5, 1.5, 18, 22.75, 2.75, 18.25, smoothC(0x6a3a1a));
-      const eras = [0xd6b1e8, 0x9a6ad6, 0xe8c23a, 0x2a2a2e, 0xc02a2a, 0x7ab8e8, 0xf2c6e6, 0x5a3a2a, 0xa8b8c8, 0xe86aa6];
-      for (let i = 0; i < 10; i++) { const v = 18.75 + (i % 5) * 0.9, y = 1.75 + Math.floor(i / 5) * 0.9; F.fill(23.6, y, v, 23.75, y + 0.75, v + 0.75, smoothC(eras[i])); F.fill(23.55, y + 0.25, v + 0.25, 23.6, y + 0.5, v + 0.5, smoothC(0x141414)); }
-      FU.bed(F, 17, 3.5, 21.5, 7, 0xd6b1e8, 0xfaf6ff, 'u1');
-      F.fill(20.5, 1.5, 3.75, 21.25, 2.25, 4.5, smoothC(0xff8fc8)); F.fill(20.5, 1.5, 6, 21.25, 2.25, 6.75, smoothC(0xc27ad6));
-      FU.table(F, 18, 8.5, 21, 9.5, 0xffffff, 0.75, 0xff8fc8); F.fill(18.25, 1.5, 8.5, 20.75, 3.0, 8.65, col(0xe8f0f6, { metal: 1, rough: 0.05 }));
-      return { sign: ['Eras', 0xd6b1e8, { font: 'script' }], sign2: ['13', 0x8e5ad6], npc: [19.5, 11, 'stand', 'front'] };
-    },
-    kush(F, th) {             // video games + cash, with Divyangana
-      FU.rug(F, 11.5, 11.5, 20, 21.5, 0x2f7a4a, 0x8adf9a);
-      FU.sofa(F, 12, 20.75, 19.5, 23, 0x3a5a3a, 'v1');
-      F.fill(13.5, 0.5, 12, 18, 1.0, 12.75, smoothC(0x141416)); FU.screen(F, 13.75, 1.0, 12.25, 17.75, 3.0, 12.5, 0x7a5aff);   // the big TV
-      F.fill(15, 1.0, 12.8, 16.5, 1.25, 13.3, smoothC(0xf2f2f2));                                                              // console
-      // an arcade cabinet, the money safe with stacks of cash, two gaming chairs
-      F.fill(22.5, 0.5, 19.5, 23.75, 3.0, 21, smoothC(0x2a2a8a)); FU.screen(F, 22.4, 1.75, 19.75, 22.5, 2.5, 20.75, 0xffd23a); F.fill(22, 1.25, 19.5, 22.5, 1.5, 21, smoothC(0x141414));
-      F.fill(22.75, 0.5, 8.5, 23.75, 2.0, 10.5, col(0x3a3a40, { metal: 0.8, rough: 0.4 })); F.fill(22.7, 1.0, 9.25, 22.75, 1.5, 9.75, col(0xd4a84a, { metal: 1 }));
-      for (let i = 0; i < 8; i++) F.fill(20.5 + (i % 4) * 0.5, 0.5, 8.75 + Math.floor(i / 4) * 0.75, 20.75 + (i % 4) * 0.5, 0.75 + (i % 3) * 0.125, 9.25 + Math.floor(i / 4) * 0.75, smoothC(0x5aa84a));
-      for (const v of [14.25, 16.5]) { F.fill(19, 0.5, v, 19.75, 1.25, v + 1, smoothC(0x141416)); F.fill(19.75, 1.25, v, 20.25, 2.5, v + 1, smoothC(v < 15 ? 0x2f7a4a : 0xff6fae)); }
-      FU.bed(F, 17, 3.5, 21.5, 7.5, 0xf2f2f2, 0x2f7a4a, 'u1');
-      F.fill(20.5, 1.5, 3.75, 21.25, 2.25, 4.75, smoothC(0xff4f7a)); F.fill(20.5, 1.5, 6.25, 21.25, 2.25, 7.25, smoothC(0xff4f7a));
-      return { sign: ['Kush & Div', 0xff4f7a, { font: 'script' }], npc: [15, 21.7, 'sit', 'v-'], npc2: [16.9, 21.7, 'sit', 'v-'] };
-    },
-    kaybee(F, th) {           // video games, One Piece, chess
-      // a giant chessboard floor with waist-high pieces
-      const cw = col(0xf2ecd8, { pat: 'none', rough: 0.4 }), cb = col(0x2a2a2e, { pat: 'none', rough: 0.4 });
-      for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) F.fill(12 + i, 0.5, 13.5 + j, 13 + i, 0.55, 14.5 + j, (i + j) % 2 ? cb : cw);
-      const piece = (u, v, dark, tall) => { const c = dark ? cb : cw; F.fill(u + 0.25, 0.55, v + 0.25, u + 0.75, 0.8, v + 0.75, c); F.fill(u + 0.375, 0.8, v + 0.375, u + 0.625, tall ? 1.8 : 1.3, v + 0.625, c); F.fill(u + 0.25, tall ? 1.8 : 1.3, v + 0.25, u + 0.75, tall ? 2.05 : 1.55, v + 0.75, c); };
-      piece(12, 13.5, false, true); piece(15, 13.5, false, false); piece(16, 14.5, false, false); piece(19, 21.5, true, true); piece(16, 18.5, true, false); piece(14, 19.5, true, false);
-      // gaming desk, the straw hat on a stand, a treasure chest, a ship's wheel on the wall
-      FU.table(F, 20.75, 3.5, 23.5, 9, 0x3a2a1a, 0.75, 0x2a1a0a); FU.screen(F, 23, 1.5, 4.25, 23.25, 2.75, 8.25, 0x3affd0);
-      F.fill(19.5, 0.5, 5.75, 20.25, 1.25, 6.75, smoothC(0x202024)); F.fill(19.0, 1.25, 5.75, 19.5, 2.5, 6.75, smoothC(0xb8322a));
-      F.fill(22.75, 0.5, 11, 23, 1.75, 11.25, col(0x6a4a2a)); F.fill(22.25, 1.75, 10.5, 23.5, 1.85, 11.75, smoothC(0xf2c21b)); F.fill(22.5, 1.85, 10.75, 23.25, 2.25, 11.5, smoothC(0xf2c21b)); F.fill(22.5, 1.85, 10.75, 23.25, 1.95, 11.5, smoothC(0xc8322a));
-      F.fill(21.5, 0.5, 21.75, 23.25, 1.25, 23.5, smoothC(0x6a4a2a)); F.fill(21.5, 1.25, 21.75, 23.25, 1.5, 23.5, smoothC(0x8a5a2a)); F.fill(21.5, 0.75, 21.7, 23.25, 0.9, 21.75, col(0xd8b04a, { metal: 1 }));
-      F.fill(22.4, 1.5, 22, 23, 1.75, 23.2, col(0xf2c65a, { metal: 1, rough: 0.2 }));
-      const wc = smoothC(0x8a5a2a); F.fill(23.6, 2.0, 16.75, 23.75, 3.25, 17.0, wc); F.fill(23.6, 2.5, 16.25, 23.75, 2.75, 17.5, wc);
-      FU.sofa(F, 12, 3.5, 18, 5.5, 0x6a4a2a, 'v0');
-      FU.bed(F, 8.5, 18, 12, 23.5, 0xb8322a, 0x6a4a2a, 'u0');
-      return { sign: ['ONE PIECE', 0xf2c21b, { font: 'deco' }], npc: [19.85, 6.25, 'sit', 'back'], flag: true };
-    },
+      F.place(PROPS.desklamp(th.accent), 22.25, 1.25, v + 0.8, 0);
+      F.place(PROPS.tower(th.accent), 22.25, FLOOR, v + 1.1, F.rotLane);
+    };
+    if (owner === 'dhruv' || owner === 'tanishk') {
+      desk(18, 3, SCREEN_THEME[owner]);
+      F.place(PROPS.bench(th.trim), 16, FLOOR, 5.75, 0);
+      F.place(PROPS.treadmill(), 20, FLOOR, 6, F.rotLane);
+      F.place(PROPS.weights(), 16, FLOOR, 9, 0);
+      F.place(PROPS.safe(), 23, FLOOR, 9.5, F.rotLane);
+    } else if (owner === 'hunar') {
+      F.place(PROPS.worktable(1.25, 0.5, 0.75, th.trim, th.trim), 20, FLOOR, 5, 0);
+      F.place(PROPS.mirror(), 20, 1.375, 4.9, 0);
+      F.place(PROPS.desklamp(th.accent), 20.5, 1.25, 5, 0);
+      F.place(PROPS.chair(th.sofa), 20, FLOOR, 6, 0);
+      F.place(PROPS.wardrobe(th.accent), 23, FLOOR, 18, F.rotLane);
+      FU.shelf(F, 22.75, 8, 23.5, 10, 2.5, th.trim, [smoothC(th.accent), smoothC(0xffffff), smoothC(0xe8c23a)]);
+    } else if (owner === 'diksha') {
+      F.place(PROPS.piano(), 22.75, FLOOR, 15, F.rotLane);
+      F.place(PROPS.chair(th.sofa), 21.75, FLOOR, 15, F.rotBack);
+      F.place(PROPS.guitar(), 22.5, FLOOR, 18, F.rotLane);
+      FU.shelf(F, 22.75, 19.5, 23.5, 21.5, 2.5, th.trim, [smoothC(th.accent), smoothC(0xd6b1e8), smoothC(0xff8fc8)]);
+    } else {
+      desk(6, 1, 4);
+      F.place(PROPS.console(), 12.25, FLOOR + 0.5, 12.5, 0);
+      F.place(PROPS.arcade(th.trim), 22.8, FLOOR, 20, F.rotLane);
+      FU.screen(F, 22.28, 1.625, 19.71875, 22.28, 2.125, 20.28125, 4);
+      F.place(PROPS.safe(), 22.8, FLOOR, 10, F.rotLane);
+      if (owner === 'kaybee') {
+        F.place(PROPS.chest(), 22, FLOOR, 22.5, 0);
+        F.place(PROPS.worktable(1, 1, 0.75, th.floor, th.trim), 19, FLOOR, 16, 0);
+        F.place(PROPS.chess(), 19, 1.25, 16, 0);
+        F.place(PROPS.hat(), 22.25, 1.25, 6.6, 0);
+      } else {
+        F.place(PROPS.chair(0xff6fae), 20.5, FLOOR, 7, F.rotBack);
+      }
+    }
+    return { sign: SIGNS[owner], sign2: owner === 'tanishk' ? ['BTC', th.accent] : owner === 'diksha' ? ['13', th.accent] : null, npc: owner === 'dhruv' || owner === 'tanishk' ? [21.25, 18, 'sit', 'back'] : owner === 'kaybee' ? [21.25, 6, 'sit', 'back'] : [11.25, 17, 'sit', 'v-'], npc2: owner === 'kush' ? [12.3, 17, 'sit', 'v-'] : null, flag: owner === 'kaybee' };
   };
 
   // ------------------------------------------------------------ friend homes v2: a distinct silhouette per friend, a bathroom annex, a kitchen
@@ -284,9 +231,37 @@ try {
   const pm = (k, fn) => PM[k] || (PM[k] = fn());
   const M16 = (w, h, d, fn) => K.model(w, h, d, fn, 1 / 16);
   const PROPS = {
+    lintel: (width, hex) => pm('lintel' + [width, hex], () => M16(Math.round(width * 16), 2, 4, (m) => m.box(0, 0, 0, m.w, 2, 4, smoothC(hex)))),
+    rug: (w, d, hex, border) => pm('rug' + [w, d, hex, border], () => M16(Math.round(w * 16), 1, Math.round(d * 16), (m) => { m.box(0, 0, 0, m.w, 1, m.d, smoothC(border ?? hex)); m.box(2, 0, 2, m.w - 2, 1, m.d - 2, smoothC(hex)); })),
+    worktable: (w, d, h, hex, leg) => pm('desk' + [w, d, h, hex, leg], () => M16(Math.round(w * 16), Math.round(h * 16), Math.round(d * 16), (m) => { const c = smoothC(leg); for (const x of [1, m.w - 3]) for (const z of [1, m.d - 3]) m.box(x, 0, z, x + 2, m.h - 1, z + 2, c); m.box(0, m.h - 1, 0, m.w, m.h, m.d, smoothC(hex)); })),
+    sofa: (hex, width = 2.25) => pm('sofa' + [hex, width], () => M16(Math.round(width * 16), 14, 15, (m) => { const c = smoothC(hex), dark = smoothC(shade(hex, 0.75)); for (const x of [1, m.w - 3]) for (const z of [1, 12]) m.box(x, 0, z, x + 2, 3, z + 2, dark); m.box(0, 3, 0, m.w, 6, 15, dark); m.box(2, 6, 3, m.w - 2, 7, 14, c); m.box(0, 6, 0, m.w, 14, 3, dark); m.box(0, 6, 0, 2, 10, 15, dark); m.box(m.w - 2, 6, 0, m.w, 10, 15, dark); })),
+    bed: (sheet, frame) => pm('bed' + [sheet, frame], () => M16(26, 18, 34, (m) => { const fr = smoothC(frame), wt = smoothC(0xf6f2ea); m.box(1, 2, 1, 25, 6, 34, fr); m.box(2, 6, 2, 24, 8, 33, wt); m.box(2, 8, 10, 24, 9, 33, smoothC(sheet)); m.box(0, 0, 0, 26, 18, 2, fr); for (const x of [3, 14]) m.box(x, 8, 3, x + 9, 10, 9, wt); for (const x of [2, 22]) for (const z of [2, 30]) m.box(x, 0, z, x + 2, 2, z + 2, fr); })),
+    counter: (w, d, body, top) => pm('counter' + [w, d, body, top], () => M16(Math.round(w * 16), 14, Math.round(d * 16), (m) => { m.box(0, 0, 0, m.w, 13, m.d, smoothC(body)); m.box(0, 13, 0, m.w, 14, m.d, smoothC(top)); for (let x = 8; x < m.w; x += 10) m.box(x, 9, m.d - 1, x + 2, 10, m.d, col(0xc8ccd2, { metal: 0.8 })); })),
+    books: (width, height, wood, items) => pm('books' + [width, height, wood, ...items], () => M16(Math.round(width * 16), Math.round(height * 16), 6, (m) => { const fr = smoothC(wood); m.box(0, 0, 0, 1, m.h, 6, fr); m.box(m.w - 1, 0, 0, m.w, m.h, 6, fr); m.box(0, 0, 0, m.w, m.h, 1, fr); for (let y = 0; y < m.h; y += 7) { m.box(0, y, 0, m.w, y + 1, 6, fr); for (let x = 2; x < m.w - 2; x += 2) { const c = items[(x + y) % items.length]; if (c) m.box(x, y + 1, 1, x + 1, Math.min(m.h, y + 4 + x % 3), 5, c); } } m.box(0, m.h - 1, 0, m.w, m.h, 6, fr); })),
+    plant: (big) => pm('plant' + big, () => M16(10, big ? 26 : 16, 10, (m) => { m.box(2, 0, 2, 8, 5, 8, smoothC(0xb8643a)); m.box(4, 5, 4, 6, m.h - 2, 6, smoothC(0x426b35)); for (let y = 6; y < m.h - 2; y += 4) m.box(y % 8 ? 1 : 4, y, 1, y % 8 ? 6 : 9, y + 3, 9, smoothC(0x649a48)); })),
+    floorlamp: (hex) => pm('floorlamp' + hex, () => M16(7, 26, 7, (m) => { const fr = smoothC(0x28282c); m.box(1, 0, 1, 6, 1, 6, fr); m.box(3, 1, 3, 4, 22, 4, fr); m.box(0, 22, 0, 7, 26, 7, glow(hex, 1.3, 'night')); })),
+    desklamp: (hex) => pm('desklamp' + hex, () => M16(5, 7, 5, (m) => { const fr = smoothC(hex); m.box(0, 0, 0, 5, 1, 5, fr); m.box(2, 1, 2, 3, 5, 3, fr); m.box(0, 5, 0, 5, 7, 5, glow(0xffebc4, 1.1, 'night')); })),
+    wardrobe: (hex) => pm('wardrobe' + hex, () => M16(24, 35, 11, (m) => { m.box(0, 0, 0, 24, 35, 10, smoothC(hex)); const h = col(0xc8ccd2, { metal: 0.8 }); m.box(11, 2, 9, 12, 34, 10, smoothC(shade(hex, 0.8))); for (const x of [9, 13]) m.box(x, 15, 10, x + 1, 19, 11, h); })),
+    bezel: (width, height) => pm('bezel' + [width, height], () => M16(Math.round(width * 16) + 2, Math.round(height * 16) + 2, 1, (m) => { m.box(0, 0, 0, m.w, m.h, 1, smoothC(0x151519)); m.box(1, 1, 0, m.w - 1, m.h - 1, 1, 0); })),
+    monitorStand: () => pm('monitorStand', () => M16(7, 3, 5, (m) => { const c = smoothC(0x28282c); m.box(0, 0, 0, 7, 1, 5, c); m.box(3, 1, 1, 4, 3, 3, c); })),
+    tvStand: (hex) => pm('tvstand' + hex, () => M16(26, 8, 7, (m) => { const c = smoothC(hex); m.box(0, 1, 0, 26, 8, 7, c); m.box(1, 3, 5, 12, 6, 7, smoothC(shade(hex, 0.65))); m.box(14, 3, 5, 25, 6, 7, smoothC(shade(hex, 0.65))); for (const x of [1, 23]) m.box(x, 0, 1, x + 2, 1, 6, c); })),
+    bench: (hex) => pm('bench' + hex, () => M16(29, 22, 23, (m) => { const steel = col(0x9ba1a9, { metal: 0.8 }), dark = smoothC(0x202024); m.box(12, 5, 3, 17, 7, 22, smoothC(hex)); for (const z of [5, 19]) m.box(13, 0, z, 16, 5, z + 2, steel); for (const x of [4, 24]) m.box(x, 0, 2, x + 1, 19, 3, steel); m.box(0, 18, 2, 29, 19, 3, steel); for (const x of [2, 25]) m.box(x, 15, 0, x + 2, 22, 5, dark); })),
+    weights: () => pm('weights', () => M16(14, 12, 6, (m) => { const steel = col(0x9ba1a9, { metal: 0.8 }), dark = smoothC(0x202024); for (const x of [0, 13]) m.box(x, 0, 0, x + 1, 11, 6, steel); for (const y of [4, 8]) { m.box(0, y, 0, 14, y + 1, 6, steel); for (const x of [2, 6, 10]) { m.box(x, y + 1, 2, x + 3, y + 2, 3, steel); for (const end of [x, x + 2]) m.box(end, y + 1, 1, end + 1, y + 4, 4, dark); } } })),
+    console: () => pm('console', () => M16(7, 2, 5, (m) => { m.box(0, 0, 0, 7, 2, 5, smoothC(0xf1f2ee)); m.box(0, 1, 4, 7, 2, 5, smoothC(0x28282c)); m.set(6, 1, 4, glow(0x75d0a4, 0.7)); })),
+    treadmill: () => pm('treadmill', () => M16(13, 21, 29, (m) => { const fr = smoothC(0x303038); m.box(0, 0, 0, 13, 3, 29, fr); m.box(2, 3, 2, 11, 4, 28, smoothC(0x151519)); for (const x of [0, 12]) m.box(x, 3, 2, x + 1, 18, 3, fr); m.box(0, 17, 1, 13, 19, 5, fr); m.box(3, 19, 1, 10, 21, 4, smoothC(0x697881)); })),
+    tower: (hex) => pm('tower' + hex, () => M16(4, 8, 7, (m) => { m.box(0, 0, 0, 4, 8, 7, smoothC(0x202024)); m.box(1, 2, 6, 3, 6, 7, glow(hex, 1)); })),
+    arcade: (hex) => pm('arcade' + hex, () => M16(12, 30, 12, (m) => { const c = smoothC(hex); m.box(0, 0, 0, 12, 30, 8, c); m.box(0, 0, 8, 12, 16, 12, c); m.box(1, 16, 8, 11, 17, 12, smoothC(0x202024)); m.box(1, 27, 8, 11, 29, 9, glow(hex, 0.7)); for (const x of [3, 7]) m.set(x, 17, 10, smoothC(0xf2c21b)); })),
+    piano: () => pm('piano', () => M16(23, 20, 10, (m) => { const white = smoothC(0xf8f6f2); m.box(0, 0, 0, 23, 20, 6, white); m.box(0, 11, 6, 23, 12, 10, white); for (let x = 1; x < 22; x += 2) m.box(x, 12, 6, x + 1, 13, 8, smoothC(0x18181a)); })),
+    guitar: () => pm('guitar', () => M16(6, 18, 4, (m) => { const wood = smoothC(0xb87943); m.box(0, 2, 1, 6, 9, 3, wood); m.box(1, 9, 1, 5, 11, 3, wood); m.box(2, 11, 1, 4, 18, 2, smoothC(0x603820)); m.box(2, 5, 2, 4, 7, 3, smoothC(0x28282c)); m.box(0, 0, 0, 6, 1, 4, smoothC(0x28282c)); })),
+    safe: () => pm('safe', () => M16(10, 13, 11, (m) => { m.box(0, 0, 0, 10, 13, 10, col(0x434349, { metal: 0.7 })); m.box(4, 6, 10, 6, 8, 11, col(0xd4a84a, { metal: 0.9 })); })),
+    chest: () => pm('chest', () => M16(14, 9, 9, (m) => { m.box(0, 0, 0, 14, 9, 8, smoothC(0x8a5a34)); for (const x of [2, 11]) m.box(x, 0, 7, x + 1, 9, 8, col(0xd8b04a, { metal: 0.8 })); m.box(6, 4, 8, 8, 6, 9, col(0xd8b04a, { metal: 0.8 })); })),
+    hat: () => pm('hat', () => M16(10, 4, 10, (m) => { const straw = smoothC(0xf2c21b); m.box(0, 0, 0, 10, 1, 10, straw); m.box(2, 1, 2, 8, 2, 8, smoothC(0xc8322a)); m.box(2, 2, 2, 8, 4, 8, straw); })),
+    chess: () => pm('chess', () => M16(10, 4, 10, (m) => { const white = smoothC(0xf2ecd8), black = smoothC(0x242429); for (let x = 1; x < 9; x++) for (let z = 1; z < 9; z++) m.set(x, 0, z, (x + z) % 2 ? white : black); for (let x = 1; x < 9; x++) for (const z of [1, 2, 7, 8]) { const c = z < 3 ? white : black; m.set(x, 1, z, c); m.set(x, 2, z, c); if (z === 1 || z === 8) m.set(x, 3, z, c); } })),
+    cooktop: () => pm('cooktop', () => M16(10, 1, 8, (m) => { m.box(0, 0, 0, 10, 1, 8, smoothC(0x35353a)); for (const x of [1, 6]) for (const z of [1, 5]) m.box(x, 0, z, x + 3, 1, z + 2, smoothC(0x101014)); })),
+    kitchenSink: () => pm('kitchenSink', () => M16(10, 6, 8, (m) => { const c = col(0xc8ccd2, { metal: 0.9 }); m.box(0, 0, 0, 10, 1, 8, c); m.box(1, 0, 1, 9, 1, 7, smoothC(0x617580)); m.box(4, 1, 0, 5, 5, 1, c); m.box(4, 4, 0, 5, 5, 4, c); })),
     toilet: () => pm('toilet', () => M16(8, 15, 12, (m) => { const wt = smoothC(0xf6f6f2), ch = col(0xc8ccd2, { metal: 0.9, rough: 0.2 }); m.box(2, 0, 4, 6, 6, 10, wt); m.box(1, 6, 3, 7, 7, 11, wt); m.box(2, 6, 5, 6, 7, 10, smoothC(0xdfe6ea)); m.box(1, 6, 0, 7, 13, 3, wt); m.box(0, 13, 0, 8, 14, 3, wt); m.set(4, 14, 1, ch); })),
     sink: () => pm('sink', () => M16(10, 18, 8, (m) => { const wt = smoothC(0xf6f6f2), ch = col(0xc8ccd2, { metal: 0.9, rough: 0.2 }); m.box(4, 0, 2, 6, 12, 5, wt); m.box(0, 12, 0, 10, 15, 8, wt); m.box(1, 14, 1, 9, 15, 7, 0); m.box(4, 15, 0, 6, 17, 2, ch); m.set(5, 16, 2, ch); m.set(5, 16, 3, ch); })),
-    tub: () => pm('tub', () => M16(14, 9, 28, (m) => { const wt = smoothC(0xf6f6f2); m.box(0, 0, 0, 14, 9, 28, wt); m.box(1, 2, 1, 13, 9, 27, 0); m.box(1, 2, 1, 13, 6, 27, col(0x8fd0ea, { glass: true, jitter: 0.02, edge: 0 })); m.box(6, 9, 0, 8, 11, 2, col(0xc8ccd2, { metal: 0.9 })); })),
+    tub: () => pm('tub', () => M16(14, 11, 28, (m) => { const wt = smoothC(0xf6f6f2); m.box(0, 0, 0, 14, 9, 28, wt); m.box(1, 2, 1, 13, 9, 27, 0); m.box(1, 2, 1, 13, 6, 27, col(0x8fd0ea, { glass: true, jitter: 0.02, edge: 0 })); m.box(6, 9, 0, 8, 11, 2, col(0xc8ccd2, { metal: 0.9 })); })),
     mirror: () => pm('mirror', () => M16(12, 14, 1, (m) => { m.box(0, 0, 0, 12, 14, 1, col(0xd8b04a, { metal: 0.9, rough: 0.3 })); m.box(1, 1, 0, 11, 13, 1, col(0xe8f0f6, { metal: 1, rough: 0.05, jitter: 0, edge: 0 })); })),
     fridge: () => pm('fridge', () => M16(14, 32, 13, (m) => { const b = col(0xe6eaee, { metal: 0.35, rough: 0.3, jitter: 0.03 }), ch = col(0xc8ccd2, { metal: 0.9, rough: 0.2 }); m.box(0, 0, 0, 14, 32, 12, b); m.box(0, 21, 11, 14, 22, 12, smoothC(0x5a5e64)); m.box(11, 6, 12, 12, 19, 13, ch); m.box(11, 23, 12, 12, 30, 13, ch); })),
     lounger: (hex) => pm('lounger' + hex, () => M16(11, 9, 30, (m) => { const fr = smoothC(0xf2f2ee), cu = smoothC(hex); for (const x of [0, 10]) for (const z of [2, 27]) m.box(x, 0, z, x + 1, 3, z + 1, fr); m.box(0, 3, 0, 11, 4, 30, fr); m.box(1, 4, 9, 10, 5, 29, cu); for (let z = 0; z < 9; z++) { const t = 4 + Math.round((9 - z) * 0.55); m.box(1, 4, z, 10, t, z + 1, cu); } })),
@@ -299,9 +274,174 @@ try {
     trampoline: () => pm('tramp', () => M16(48, 12, 48, (m) => { const pad = smoothC(0x2f7a4a), mat = smoothC(0x1a1a1c), leg = col(0x8a8e94, { metal: 0.8 }); for (let x = 0; x < 48; x++) for (let z = 0; z < 48; z++) { const d = Math.hypot(x - 23.5, z - 23.5); if (d < 20) m.set(x, 9, z, mat); else if (d < 24) m.box(x, 9, z, x + 1, 11, z + 1, pad); } for (const a of [0, 1, 2, 3, 4, 5]) { const x = Math.round(23.5 + Math.cos(a * PI / 3) * 21), z = Math.round(23.5 + Math.sin(a * PI / 3) * 21); m.box(x, 0, z, x + 1, 9, z + 1, leg); } })),
     lamp: () => pm('glamp', () => M16(3, 14, 3, (m) => { m.box(1, 0, 1, 2, 11, 2, smoothC(0x2a2a2e)); m.box(0, 11, 0, 3, 13, 3, glow(0xffe6b0, 2.2, 'night')); m.box(0, 13, 0, 3, 14, 3, smoothC(0x2a2a2e)); })),
     table: (hex) => pm('ptable' + hex, () => M16(16, 12, 16, (m) => { const t = smoothC(hex), lg = smoothC(shade(hex, 0.6)); m.sphere(7.5, 11.5, 7.5, 8, t, (x, y) => (y === 11 ? t : 0)); m.box(7, 0, 7, 9, 11, 9, lg); m.box(4, 0, 4, 12, 1, 12, lg); })),
-    chair: (hex) => pm('pchair' + hex, () => M16(8, 14, 8, (m) => { const c = smoothC(hex); for (const [x, z] of [[0, 0], [7, 0], [0, 7], [7, 7]]) m.box(x, 0, z, x + 1, 7, z + 1, c); m.box(0, 7, 0, 8, 8, 8, c); m.box(0, 8, 0, 8, 14, 1, c); })),
+    chair: (hex) => pm('pchair' + hex, () => M16(8, 14, 8, (m) => { const c = smoothC(hex); for (const [x, z] of [[0, 0], [7, 0], [0, 7], [7, 7]]) m.box(x, 0, z, x + 1, 6, z + 1, c); m.box(0, 6, 0, 8, 7, 8, c); m.box(0, 7, 0, 8, 14, 1, c); })),
     float: () => pm('float', () => M16(14, 8, 14, (m) => { const p = smoothC(0xff7fbf); for (let x = 0; x < 14; x++) for (let z = 0; z < 14; z++) { const d = Math.hypot(x - 6.5, z - 6.5); if (d < 7 && d > 3.5) m.box(x, 0, z, x + 1, 2, z + 1, p); } m.box(9, 2, 5, 11, 7, 7, p); m.box(9, 7, 5, 13, 8, 7, p); m.set(12, 6, 6, smoothC(0x1a1a1a)); })),
     hottub: () => pm('hottub', () => M16(36, 12, 36, (m) => { const w = smoothC(0x2a2a2e), g = col(0xd4a84a, { metal: 1, rough: 0.25 }); m.box(0, 0, 0, 36, 12, 36, w); m.box(0, 11, 0, 36, 12, 36, g); m.box(2, 3, 2, 34, 12, 34, 0); m.box(2, 3, 2, 34, 9, 34, col(0x6ad8e8, { glass: true, jitter: 0.02, edge: 0 })); })),
+  };
+  const screenPositions = [], screenUVs = [], screenIndices = [];
+  const screens = K.screens = { mesh: null, quads: 0, redraws: 0 };
+  let atlasContext = null, atlasTexture = null, screenWait = 0, screenTime = 0;
+  const addScreen = (F, u0, y0, v0, u1, y1, v1, tile) => {
+    const alongV = Math.abs(u1 - u0) < Math.abs(v1 - v0);
+    const width = Math.min(1.375, alongV ? Math.abs(v1 - v0) : Math.abs(u1 - u0));
+    const height = Math.min(0.75, y1 - y0), u = (u0 + u1) / 2, v = (v0 + v1) / 2;
+    const back = !alongV && v > 21;
+    const a = alongV ? F.w(u, v - F.dir * width / 2) : [F.X(u) + (back ? 1 : -1) * width / 2, F.Z(v)];
+    const b = alongV ? F.w(u, v + F.dir * width / 2) : [F.X(u) + (back ? -1 : 1) * width / 2, F.Z(v)];
+    const first = screenPositions.length / 3;
+    screenPositions.push(a[0], y0, a[1], b[0], y0, b[1], b[0], y0 + height, b[1], a[0], y0 + height, a[1]);
+    tile = Number.isInteger(tile) && tile >= 0 && tile < 8 ? tile : 0;
+    const left = (tile % 4 * 256 + 0.5) / 1024, right = (tile % 4 * 256 + 255.5) / 1024;
+    const top = 1 - (Math.floor(tile / 4) * 256 + 0.5) / 512, bottom = top - 255 / 512;
+    screenUVs.push(left, bottom, right, bottom, right, top, left, top);
+    screenIndices.push(first, first + 1, first + 2, first, first + 2, first + 3);
+    F.place(PROPS.bezel(width, height), alongV ? u + 0.055 : u, y0 - 0.0625, alongV ? v : v + (back ? 0.055 : -0.055), alongV ? F.rotLane : back ? 2 : 0);
+    screens.quads++;
+  };
+  const drawAtlas = (frame) => {
+    const ctx = atlasContext;
+    for (let tile = 0; tile < 8; tile++) {
+      ctx.save(); ctx.translate(tile % 4 * 256, Math.floor(tile / 4) * 256);
+      ctx.beginPath(); ctx.rect(0, 0, 256, 256); ctx.clip();
+      ctx.fillStyle = '#172027'; ctx.fillRect(0, 0, 256, 256);
+      ctx.font = 'bold 16px monospace'; ctx.textBaseline = 'top';
+      if (tile === 0) {
+        ctx.fillStyle = '#83c5dd'; ctx.fillRect(0, 0, 256, 160);
+        ctx.fillStyle = '#ecc16a'; ctx.fillRect(0, 160, 256, 96);
+        ctx.fillStyle = '#6c9970'; ctx.fillRect(12, 22, 70, 113);
+        ctx.fillStyle = '#efe4c3'; ctx.fillRect(18, 28, 58, 100);
+        ctx.fillStyle = '#bc586b'; ctx.fillRect(82, 132, 149, 60);
+        for (let actor = 0; actor < 2; actor++) { const x = 100 + actor * 84 + Math.sin(frame * 0.3 + actor) * 3; ctx.fillStyle = '#f0c5a1'; ctx.fillRect(x, 101, 27, 32); ctx.fillStyle = actor ? '#e9ca51' : '#357ca5'; ctx.fillRect(x - 2, 133, 32, 45); }
+        ctx.fillStyle = '#ffffff'; ctx.fillText('PORT SOLACE STORIES', 12, 226);
+      } else if (tile === 1) {
+        ctx.fillStyle = '#387c42'; ctx.fillRect(0, 0, 256, 256);
+        ctx.strokeStyle = '#e4efdc'; ctx.lineWidth = 2; ctx.strokeRect(12, 38, 232, 190);
+        ctx.beginPath(); ctx.moveTo(128, 38); ctx.lineTo(128, 228); ctx.arc(128, 133, 30, 0, PI * 2); ctx.stroke();
+        ctx.strokeRect(12, 90, 32, 82); ctx.strokeRect(212, 90, 32, 82);
+        for (let player = 0; player < 12; player++) { ctx.fillStyle = player % 2 ? '#f5f5ee' : '#ef5c4c'; ctx.fillRect(27 + player % 6 * 37 + Math.sin(frame * 0.13 + player) * 8, 62 + Math.floor(player / 6) * 113 + Math.cos(frame * 0.11 + player) * 16, 7, 11); }
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(115 + Math.sin(frame * 0.17) * 54, 127 + Math.cos(frame * 0.11) * 30, 5, 5);
+        ctx.fillStyle = '#142528'; ctx.fillRect(8, 6, 195, 25); ctx.fillStyle = '#ffffff'; ctx.fillText('PS FC 2 : 1 UNITED', 12, 10);
+      } else if (tile === 2) {
+        ctx.fillStyle = '#28373e'; for (let line = 0; line < 6; line++) ctx.fillRect(12, 40 + line * 34, 232, 1);
+        for (let candle = 0; candle < 22; candle++) { const x = 16 + candle * 10, y = 156 - candle * 3 + Math.sin(candle * 1.5 + frame * 0.1) * 24; ctx.fillStyle = candle % 4 ? '#43d18f' : '#ef6672'; ctx.fillRect(x + 2, y - 9, 1, 40); ctx.fillRect(x, y, 6, 16 + candle % 3 * 3); ctx.fillRect(x, 219 - candle % 5 * 4, 6, 16 + candle % 5 * 4); }
+        ctx.fillStyle = '#dfb955'; ctx.fillText('BTC / USD', 12, 9); ctx.fillStyle = '#43d18f'; ctx.fillText('+2.40%', 163, 9);
+      } else if (tile === 3) {
+        ctx.fillStyle = '#263441'; ctx.fillRect(0, 0, 256, 26); ctx.fillStyle = '#dce8ed'; ctx.fillText('port-solace.js', 10, 5);
+        ctx.fillStyle = '#c393e8'; ctx.fillText('const city = {', 28, 45);
+        ctx.fillStyle = '#93c997'; ctx.fillText('  friends: 7,', 28, 75); ctx.fillText('  homes: 6,', 28, 105);
+        ctx.fillStyle = '#e4bf71'; ctx.fillText('  welcome: true', 28, 135);
+        ctx.fillStyle = '#c393e8'; ctx.fillText('};', 28, 165); ctx.fillStyle = '#72b6dc'; ctx.fillText('city.render();', 28, 195);
+        if (frame % 6 < 3) { ctx.fillStyle = '#f0f0e6'; ctx.fillRect(165, 195, 2, 19); }
+        ctx.fillStyle = '#3c8169'; ctx.fillRect(0, 235, 256, 21); ctx.fillStyle = '#ffffff'; ctx.fillText('build passed', 12, 237);
+      } else if (tile === 4) {
+        ctx.fillStyle = '#70bfd9'; ctx.fillRect(0, 0, 256, 256); ctx.fillStyle = '#eef5eb'; ctx.fillRect(34, 48, 45, 14); ctx.fillRect(180, 67, 53, 14);
+        ctx.fillStyle = '#4b9348'; ctx.fillRect(0, 206, 256, 50); ctx.fillRect(69, 145, 75, 12); ctx.fillRect(169, 111, 63, 12);
+        ctx.fillStyle = '#dcc05b'; for (let coin = 0; coin < 5; coin++) ctx.fillRect(75 + coin * 13, 124, 7, 11);
+        const jump = Math.abs(Math.sin(frame * 0.23)); ctx.fillStyle = '#dc4b57'; ctx.fillRect(22 + frame * 3 % 202, 180 - jump * 66, 15, 18); ctx.fillStyle = '#283441'; ctx.fillRect(22 + frame * 3 % 202, 198 - jump * 66, 15, 8);
+        ctx.fillStyle = '#ffffff'; ctx.fillText('PLAYER 1   008400', 12, 12);
+      } else if (tile === 5) {
+        ctx.fillStyle = '#398eb4'; ctx.fillRect(0, 0, 256, 205); ctx.fillStyle = '#b9dfe2'; ctx.fillRect(134, 35, 110, 100);
+        ctx.fillStyle = '#577f91'; ctx.fillRect(150, 52, 28, 60); ctx.fillRect(184, 66, 42, 46);
+        ctx.fillStyle = '#f0c9ac'; ctx.fillRect(52, 72, 34, 42); ctx.fillStyle = '#e8eceb'; ctx.fillRect(48, 115, 42, 57);
+        ctx.fillStyle = '#b73c48'; ctx.fillRect(0, 165, 256, 40); ctx.fillStyle = '#ffffff'; ctx.fillText('PORT SOLACE NEWS', 10, 177);
+        ctx.fillStyle = '#f2e9d3'; ctx.fillRect(0, 216, 256, 40); ctx.fillStyle = '#263441'; ctx.fillText('CITY LIVE  NEW FRIENDS MOVE IN  HARBOUR OPEN', 256 - frame * 4 % 720, 229);
+      } else if (tile === 6) {
+        ctx.fillStyle = '#e49da8'; ctx.fillText('THE ERAS / LIVE', 13, 13);
+        for (let bar = 0; bar < 20; bar++) { const height = 18 + Math.abs(Math.sin(bar * 0.6 + frame * 0.35)) * 150; ctx.fillStyle = bar % 3 ? '#65c6b1' : '#dfad54'; ctx.fillRect(12 + bar * 12, 210 - height, 8, height); }
+        ctx.fillStyle = '#eeeeea'; ctx.fillRect(12, 235, 232, 3); ctx.fillStyle = '#e49da8'; ctx.fillRect(12, 235, frame * 3 % 232, 3);
+      } else {
+        ctx.fillStyle = '#e9add0'; ctx.fillRect(0, 0, 256, 256); ctx.fillStyle = '#78b9ba'; ctx.fillRect(0, 190, 256, 66);
+        for (let star = 0; star < 7; star++) { ctx.fillStyle = '#f4d760'; ctx.fillRect(18 + star * 33, 30 + star % 3 * 22, 8, 8); }
+        const bounce = Math.sin(frame * 0.27) * 9;
+        ctx.fillStyle = '#f7f4df'; ctx.fillRect(95, 79 + bounce, 68, 64); ctx.fillStyle = '#405c78'; ctx.fillRect(105, 96 + bounce, 48, 23); ctx.fillStyle = '#7be6d7'; ctx.fillRect(113, 102 + bounce, 9, 10); ctx.fillRect(135, 102 + bounce, 9, 10);
+        ctx.fillStyle = '#d16b93'; ctx.fillRect(106, 143 + bounce, 46, 42); ctx.fillStyle = '#f7f4df'; ctx.fillRect(85, 147 + bounce, 21, 12); ctx.fillRect(152, 147 + bounce, 21, 12);
+        ctx.fillStyle = '#ffffff'; ctx.fillText('DREAMHOUSE ADVENTURE', 15, 225);
+      }
+      ctx.restore();
+    }
+    atlasTexture.needsUpdate = true; screens.redraws++;
+  };
+  const buildScreens = () => {
+    const canvas = document.createElement('canvas'); canvas.width = 1024; canvas.height = 512;
+    atlasContext = canvas.getContext('2d'); atlasTexture = new THREE.CanvasTexture(canvas);
+    atlasTexture.colorSpace = THREE.SRGBColorSpace; atlasTexture.generateMipmaps = false;
+    atlasTexture.minFilter = atlasTexture.magFilter = THREE.LinearFilter;
+    drawAtlas(0);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(screenPositions, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(screenUVs, 2)); geo.setIndex(screenIndices); geo.computeBoundingSphere();
+    screens.mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: atlasTexture, toneMapped: false, side: THREE.DoubleSide }));
+    screens.mesh.name = 'colony-screen-atlas'; AF.scene.add(screens.mesh);
+  };
+  AF.onTick('colony-screens', 705, (dt) => {
+    if (!screens.mesh) return;
+    const cp = AF.camera.position;
+    let near = false;
+    for (let plot = 0; plot < WS.plots.length; plot++) {
+      const pl = WS.plots[plot], dx = Math.max(pl.x0 - cp.x, 0, cp.x - pl.x1), dz = Math.max(pl.z0 - cp.z, 0, cp.z - pl.z1);
+      if (dx * dx + dz * dz + Math.max(0, cp.y - TOP) ** 2 < 4900) { near = true; break; }
+    }
+    screens.mesh.visible = near;
+    if (!near) { screenWait = 0; return; }
+    screenTime += dt; screenWait += dt;
+    if (screenWait < 0.2) return;
+    screenWait %= 0.2; drawAtlas(Math.floor(screenTime * 5));
+  });
+  const upperHome = (owner, F, th, rec, c) => {
+    const u0 = owner === 'dhruv' ? 12.25 : owner === 'kaybee' ? 11.25 : 8.25;
+    const u1 = owner === 'tanishk' ? 17.75 : owner === 'kaybee' ? 20.75 : 23.75;
+    F.clear(u0, UPPER, 3.25, u1, TOP - 0.25, 23.75);
+    F.fill(8.25, CEIL, 3.25, 23.75, UPPER, 23.75, col(th.floor, { pat: 'none', patTop: 'parquet', rough: 0.5 }));
+    for (const [a, b] of [[10, 14], [17, 22]]) {
+      if (a >= u1 || b <= u0) continue;
+      F.fill(Math.max(a, u0), UPPER + 1, 3, Math.min(b, u1), UPPER + 2.5, 3.25, c.glass);
+      F.fill(Math.max(a, u0), UPPER + 1, 23.75, Math.min(b, u1), UPPER + 2.5, 24, c.glass);
+    }
+    if (owner === 'dhruv') {
+      F.clear(24, UPPER, 3.25, 29.75, TOP - 0.25, 11.75);
+      F.fill(24, CEIL, 3.25, 29.75, UPPER, 11.75, col(th.floor));
+      F.clear(12, UPPER, 11, 12.5, UPPER + 2.25, 12.25);
+      F.place(PROPS.lintel(1.25, th.trim), 12.125, UPPER + 2.125, 11.625, F.rotLane);
+    } else if (owner === 'tanishk' || owner === 'kaybee') {
+      const edge = owner === 'tanishk' ? 17.75 : 20.75;
+      F.clear(edge - 0.25, UPPER, 11, edge + 0.5, UPPER + 2.25, 12.25);
+      F.place(PROPS.lintel(1.25, th.trim), edge + 0.125, UPPER + 2.125, 11.625, F.rotBack);
+    } else if (owner === 'kush') {
+      F.clear(8.25, UPPER, 24.25, 21.75, TOP - 0.25, 32.75);
+      F.fill(8.25, CEIL, 24, 21.75, UPPER, 32.75, col(th.floor));
+      F.clear(12, UPPER, 23.5, 13.25, UPPER + 2.25, 24.5);
+      F.place(PROPS.lintel(1.25, th.trim), 12.625, UPPER + 2.125, 24, 0);
+    }
+    F.fill(u0, UPPER, 10.5, u1, TOP - 0.25, 10.75, c.wall);
+    F.clear(13, UPPER, 10.25, 14.25, UPPER + 2.25, 11);
+    F.place(PROPS.lintel(1.25, th.trim), 13.625, UPPER + 2.125, 10.625, 0);
+    F.clear(14.25, CEIL - 0.25, 11.25, 16, UPPER + 0.25, 19);
+    for (let step = 0; step < 14; step++) F.fill(14.5, FLOOR, 12 + step * 0.5, 15.75, FLOOR + (step + 1) * 0.25, 12.5 + step * 0.5, c.trim);
+    for (const edge of [14, 16]) F.fill(edge, UPPER, 11.25, edge + 0.25, UPPER + 1, 19, c.trim);
+    F.fill(14.25, UPPER, 11, 16, UPPER + 1, 11.25, c.trim);
+    F.level = UPPER;
+    FU.rug(F, 12.75, 4.5, 16.75, 9, th.rug, th.accent);
+    F.place(PROPS.bed(th.accent, th.trim), 14.75, UPPER, 6.75, 0);
+    for (const u of [13.5, 16]) {
+      F.place(PROPS.worktable(0.5, 0.5, 0.5, th.trim, th.trim), u, UPPER, 6, 0);
+      F.place(PROPS.desklamp(th.accent), u, UPPER + 0.5, 6, 0);
+    }
+    F.place(PROPS.wardrobe(th.trim), u1 - 0.65, UPPER, 8.5, F.rotLane);
+    const books = [smoothC(th.accent), smoothC(0x588eac), smoothC(0xb84b48), smoothC(0xe7c25e), smoothC(0x579b72), smoothC(0xe9ddd1)];
+    for (const v of [13.5, 16.5, 22]) F.place(PROPS.books(1.5, 3, th.trim, books), u0 + 0.35, UPPER, v, F.rotBack);
+    F.place(PROPS.worktable(1.5, 0.75, 0.75, th.floor, th.trim), 14, UPPER, 22.75, 0);
+    F.place(PROPS.chair(th.sofa), 14, UPPER, 21.65, 0);
+    F.place(PROPS.monitorStand(), 14, UPPER + 0.75, 22.75, 2);
+    FU.screen(F, 13.71875, UPPER + 0.9375, 22.68, 14.28125, UPPER + 1.25, 22.68, SCREEN_THEME[owner]);
+    F.place(PROPS.desklamp(th.accent), 14.55, UPPER + 0.75, 22.75, 0);
+    F.place(PROPS.sofa(th.sofa, 0.875), u0 + 1.25, UPPER, 20, F.rotBack);
+    FU.lamp(F, u0 + 0.5, 19.75);
+    if (owner === 'kaybee') F.place(PROPS.hat(), 16, UPPER + 0.5, 6, 0);
+    if (owner === 'diksha') F.place(PROPS.guitar(), u1 - 1, UPPER, 20, F.rotLane);
+    if (owner === 'hunar') F.place(PROPS.mirror(), u1 - 0.25, UPPER + 1.1, 8.5, F.rotLane);
+    F.level = FLOOR;
+    rec.upper = { y: UPPER, slab: F.w(14.75, 9.5), stair: F.w(15.125, 12), steps: 14, rise: 0.25, tread: 0.5 };
+    const light = F.w(14, 6.5); AF.addLight({ x: light[0], y: TOP - 0.7, z: light[1], color: th.accent, intensity: 0.5, range: 8, kind: 'interior' });
   };
   // sunken pool (heightmap basin + stepped entry + a water plane), in plot coordinates
   const yardPool = (F, u0, v0, u1, v1, tileHex, copingHex) => {
@@ -334,29 +474,32 @@ try {
     const glass = col(0xa9c9d6, { glass: true, jitter: 0.05, edge: 0 }), win = AF.MAT.winApartment;
     // ---- kitchen: fridge, a cooktop, a sink with a tap
     F.place(PROPS.fridge(), 8.75, FLOOR, 7.5, F.rotBack);
-    F.fill(11, 1.5, 3.5, 11.25, 1.75, 3.75, smoothC(0x1d1d20)); F.fill(11.75, 1.5, 3.5, 12, 1.75, 3.75, smoothC(0x1d1d20));
-    F.fill(8.25, 1.25, 5, 9.25, 1.5, 6, col(0xc8ccd2, { metal: 0.9, rough: 0.2 })); F.fill(8.25, 1.5, 5.25, 8.5, 2.0, 5.5, col(0xc8ccd2, { metal: 0.9, rough: 0.2 }));
+    F.place(PROPS.cooktop(), 11.5, FLOOR + 0.875, 3.75, 0);
+    F.place(PROPS.kitchenSink(), 8.75, FLOOR + 0.875, 5.5, F.rotBack);
     // ---- the bathroom annex behind the house
     const dv = BATH_V[owner] ?? (owner === 'tanishk' ? 6.75 : 5), a = dv - 1.25, b = a + 5.5;
     F.fill(24, 0.25, a, 29.5, CEIL, b, wall); F.fill(23.75, CEIL - 0.25, a - 0.25, 29.75, CEIL, b + 0.25, trim);
     F.clear(24, FLOOR, a + 0.25, 29.25, CEIL - 0.25, b - 0.25);
     F.fill(24, 0.25, a + 0.25, 29.25, FLOOR, b - 0.25, col(0xe8eef2, { pat: 'none', patTop: 'slab', rough: 0.3 }));
     F.fill(24, CEIL - 0.5, a + 0.25, 29.25, CEIL - 0.25, b - 0.25, smoothC(0xf6f2ea));
-    F.clear(23.7, FLOOR, dv, 24.3, 3.0, dv + 1.25);
+    F.clear(23.5, FLOOR, dv, 24.5, 2.75, dv + 1.25);
+    F.place(PROPS.lintel(1.25, th.trim), 24, FLOOR + 2.125, dv + 0.625, F.rotLane);
     F.fill(29.25, 1.75, a + 2, 29.5, 2.75, a + 3.5, glass);
     F.place(PROPS.toilet(), 28.75, FLOOR, a + 1, F.rotLane);
     F.place(PROPS.sink(), 28.9, FLOOR, a + 2.75, F.rotLane); F.place(PROPS.mirror(), 29.2, 1.75, a + 2.75, F.rotLane);
     F.place(PROPS.tub(), 25.4, FLOOR, a + 4.1, (F.rotLane + 1) % 4);
     F.fill(26.5, CEIL - 0.75, a + 2.25, 27.25, CEIL - 0.5, a + 3, glow(0xfff4dc, 1.8, 'night'));
-    F.fill(24.25, 1.75, b - 0.5, 25.5, 2.0, b - 0.25, smoothC(th.accent));   // towel rail
+    F.place(PROPS.mirror(), 27.75, 1.5, b - 0.3, 2);
     { const [x, z] = F.w(26.75, a + 2.75); AF.addLight({ x, y: CEIL - 0.9, z, color: 0xfff0dc, intensity: 0.6, range: 6, kind: 'interior' }); }
     // ---- patio door onto the garden + a patio
-    F.clear(23.7, FLOOR, 12, 24.3, 3.0, 13.25);
+    F.clear(23.5, FLOOR, 12, 24.5, 2.75, 13.25);
+    F.place(PROPS.lintel(1.25, th.trim), 24, FLOOR + 2.125, 12.625, F.rotBack);
     F.paint(24, 11, 30.5, 17, col(0xd8cfbe, { pat: 'none', patTop: 'slab', jitter: 0.25 }));
     stones(F, 31, 13, 38);
     F.place(PROPS.lamp(), 30.75, 0.25, 11.25, 0); F.place(PROPS.lamp(), 30.75, 0.25, 16.5, 0);
     // ---- the silhouette
     SHAPE[owner](F, th, { wall, trim, roof, glass, win });
+    upperHome(owner, F, th, rec, { wall, trim, roof, glass, win });
     // ---- the garden
     GARDEN[owner](F, th);
     rec.box[4] = TOP + 6;
@@ -410,8 +553,8 @@ try {
     },
     kush(F, th, c) {            // L-shape: a second storey over the garage and a green roof garden
       F.fill(8, 3.75, 24, 22, TOP, 33, c.wall);
-      for (const [v0, v1] of [[25.5, 31.5]]) F.fill(8, CEIL + 1, v0, 8.25, CEIL + 2.75, v1, c.win);
-      F.fill(12, CEIL + 1, 32.75, 18, CEIL + 2.75, 33, c.win); F.fill(21.75, CEIL + 1, 26, 22, CEIL + 2.75, 31, c.win);
+      for (const [v0, v1] of [[25.5, 31.5]]) F.fill(8, CEIL + 1, v0, 8.25, CEIL + 2.75, v1, c.glass);
+      F.fill(12, CEIL + 1, 32.75, 18, CEIL + 2.75, 33, c.glass); F.fill(21.75, CEIL + 1, 26, 22, CEIL + 2.75, 31, c.glass);
       F.clear(8.25, TOP, 23.75, 21.75, TOP + 0.5, 24.25);
       F.fill(7.75, TOP - 0.25, 23.75, 22.25, TOP + 0.5, 33.25, c.trim); F.clear(8.25, TOP, 24, 21.75, TOP + 0.5, 32.75);
       const turf = col(0x5f9a3a, { jitter: 0.9 });
@@ -422,7 +565,7 @@ try {
     kaybee(F, th, c) {          // ship: a narrow upper 'cabin' with portholes, wooden deck rails, a crow's nest by the flag
       F.clear(7.75, CEIL + 0.25, 2.75, 11, TOP + 0.5, 24.25); F.clear(21, CEIL + 0.25, 2.75, 24.25, TOP + 0.5, 24.25);
       F.fill(11, CEIL + 0.25, 3, 11.25, TOP, 24, c.wall); F.fill(20.75, CEIL + 0.25, 3, 21, TOP, 24, c.wall);
-      const port = glow(0xffe6a0, 1.4, 'night'), brass = col(0xd8b04a, { metal: 1 });
+      const port = c.glass, brass = col(0xd8b04a, { metal: 1 });
       for (let v = 5; v < 23; v += 3) { F.fill(11, CEIL + 1.5, v, 11.25, CEIL + 2.25, v + 0.75, port); F.fill(10.75, CEIL + 1.25, v - 0.25, 11, CEIL + 1.5, v + 1, brass); F.fill(20.75, CEIL + 1.5, v, 21, CEIL + 2.25, v + 0.75, port); }
       const wood = col(0x8a5a34, { pat: 'none' });
       for (const u of [7.75, 23.75]) { F.fill(u, CEIL + 1, 2.75, u + 0.25, CEIL + 1.25, 24.25, wood); for (let v = 3; v < 24.25; v += 1.5) F.fill(u, CEIL + 0.25, v, u + 0.25, CEIL + 1, v + 0.25, wood); }
@@ -511,13 +654,13 @@ try {
       AF.addBuilding({ id: owner ? 'friend-' + owner : 'colony-' + pl.i, name: name || 'a neighbour\u2019s house', label: !!owner, kind: 'house', box: rec.box, doors: [rec.door], interior: !!owner, owner: 'west' });
       if (!owner) continue;
       const S = INTERIOR[owner](F, th);
-      try { upgradeHome(owner, F, th, rec); } catch (e) { console.warn('[af] home upgrade failed', owner, e); }
+      upgradeHome(owner, F, th, rec);
       // the name plate over the door + an indoor neon sign on the back wall
       F.place(K.text(owner === 'kush' ? 'KUSH & DIV' : owner.toUpperCase(), th.trim === 0xffffff ? 0x2a2a2e : th.trim, { lit: false, font: 'deco', vs: 1 / 12 }), 7.9, 3.55, 10.9, F.rotLane);
       F.place(K.text(S.sign[0], S.sign[1], S.sign[2] || {}), 23.6, 2.35, 13, F.rotLane);
       if (S.sign2) F.place(K.text(S.sign2[0], S.sign2[1], { font: 'deco', vs: 1 / 10 }), 23.6, 2.3, 5.5, F.rotLane);
       if (S.flag && AF.makeFlag) {
-        const [x, z] = F.w(20, 20); F.fill(19.9, TOP, 19.9, 20.1, TOP + 5, 20.1, col(0x6a4a2a));
+        const [x, z] = F.w(20, 20); F.fill(19.75, TOP, 19.75, 20.25, TOP + 5, 20.25, col(0x6a4a2a));
         AF.makeFlag({ x, y: TOP + 5, z, w: 2.4, h: 1.6, design: 'custom', key: 'jolly', draw: flagDraw.jollyRoger });
       }
       const at = (u, v) => xz(F, u, v);
@@ -525,8 +668,9 @@ try {
       const npc = [];
       for (const q of [S.npc, S.npc2]) if (q) npc.push({ ...at(q[0], q[1]), y: FLOOR, yaw: face(q[3]), pose: q[2] });
       const sp = at(10, 11); sp.y = FLOOR; sp.yaw = F.inYaw;
-      WS.homes[owner] = { door: rec.door, spawn: sp, npc, garage: rec.garage, box: rec.box, frame: F, theme: th };
+      WS.homes[owner] = { door: rec.door, spawn: sp, npc, garage: rec.garage, box: rec.box, frame: F, theme: th, upper: rec.upper };
     }
+    buildScreens();
     // ---- the colony gateway over Friends Lane (clear 6 m for the buses)
     {
       const x = WS.lane, z = -11.5, pc = col(0xf2ece0, { pat: 'stone' }), cap = col(0x2f6a8a);
@@ -540,6 +684,24 @@ try {
     // trees in the back gardens + along the plots' back line
     if (AF.TREEKIT) for (const pl of WS.plots) { const F = K.frame(pl); for (const [u, v] of [[36, 8], [44, 25], [40, 16]]) { const [x, z] = F.w(u, v); AF.TREEKIT.place(x, z, pl.i % 3 ? 'autumn' : 'maple', pl.i % 2 ? 1 : 0, pl.i * 7 + u); } }
     AF.stats.westColonyMs = Math.round(performance.now() - t0);
+  });
+  AF.test('colony: furnished upper floors, climbable quarter-metre stairs and merged screens', () => {
+    const failures = [];
+    for (const owner of Object.keys(TH)) {
+      const home = WS.homes[owner], upper = home && home.upper;
+      if (!upper) { failures.push(owner + ': no upper floor'); continue; }
+      if (!W.getM(upper.slab[0], UPPER - 0.125, upper.slab[1])) failures.push(owner + ': slab missing');
+      for (let step = 0; step < upper.steps; step++) {
+        const y = FLOOR + (step + 1) * upper.rise, z = upper.stair[1] + step * upper.tread + upper.tread / 2;
+        if (!W.getM(upper.stair[0], y - 0.125, z) || W.getM(upper.stair[0], y + 0.125, z) || AF.surfaceBelow(upper.stair[0], z, y + 0.125, 0.5) !== y) failures.push(owner + ': tread ' + step);
+        if (AF.boxBlocked(upper.stair[0], y + 0.25, z, 0.3, 2.1)) failures.push(owner + ': headroom ' + step);
+      }
+      const body = { x: upper.stair[0], y: FLOOR, z: upper.stair[1] - 1, vy: 0, r: 0.3, h: 1.7, onGround: true };
+      for (let move = 0; move < 90; move++) { AF.moveBody(body, 0, 0.1, 1 / 60, { step: 0.55 }); if (body.hitWall) { failures.push(owner + ': ascent blocked'); break; } }
+      if (Math.abs(body.y - UPPER) > 0.01) failures.push(owner + ': ascent height ' + body.y);
+    }
+    if (!screens.mesh || screens.quads <= 0 || screens.mesh.geometry.getAttribute('position').count !== screens.quads * 4 || screens.mesh.geometry.groups.length) failures.push('screen mesh');
+    return { ok: failures.length === 0, info: failures.join(', ') || Object.keys(WS.homes).length + ' homes; ' + screens.quads + ' screen quads' };
   });
 }
 

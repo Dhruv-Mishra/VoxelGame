@@ -5,7 +5,8 @@ try {
 // happen ONCE in the FINAL pass (AgX-punchy or ACES, per-hour grade), so every pass after it works in display space.
 {
   const P = AF.post = AF.post || {};
-  P.enabled = !AF.Q.has('nopost');
+  P.bypass = AF.MOBILE || AF.Q.has('nopost') || !AF.gfx.halfFloatTargets || !AF.gfx.depthTextures;
+  P.enabled = !P.bypass;
   P.quality = AF.Q.get('post') || 'high';     // legacy: 'high' | 'low' (low = no MSAA). The GFX tier decides now.
   P.tiltEnabled = AF.Q.has('tilt');   // ROUND 2: clarity is sacred — no miniature blur by default (?tilt to enable)
   P.dofEnabled = AF.Q.has('dof');   // owner 09-23: 'a bit fuzzy/foggy — needs to be clearer and sharper' → depth of field off by default (?dof to enable)
@@ -187,12 +188,20 @@ try {
 
   AF.onBuild('post', 700, () => {
     const R = AF.renderer, S = AF.scene, C = AF.camera;
+    if (P.bypass) return;
     if (!X.EffectComposer || !X.RenderPass || !X.UnrealBloomPass || !X.ShaderPass || !X.OutputPass) { P.enabled = false; AF.warnOnce('post: addons missing'); return; }
     const size = R.getSize(new THREE.Vector2());
     const pr = R.getPixelRatio();
     const isGL2 = R.capabilities.isWebGL2;
     const W0 = Math.max(1, Math.round(size.x * pr)), H0 = Math.max(1, Math.round(size.y * pr));
-    const msaa = () => (isGL2 && tier() !== 'low' && P.quality !== 'low') ? (tier() === 'high' ? 2 : 4) : 0;
+    const gl = R.getContext();
+    const sampleCounts = isGL2 ? gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES) : [];
+    const depthSamples = isGL2 ? gl.getInternalformatParameter(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, gl.SAMPLES) : [];
+    const msaa = () => {
+      const want = isGL2 && tier() !== 'low' && P.quality !== 'low' ? (tier() === 'high' ? 2 : 4) : 0;
+      for (const count of sampleCounts) if (count <= want && depthSamples.includes(count)) return count;
+      return 0;
+    };
     // scene target: MSAA + depth texture (the depth is never touched by post passes)
     const mkScene = (w, h) => {
       const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: msaa() });
@@ -394,7 +403,7 @@ try {
   AF.test('post: renderFrame renders without throwing', () => {
     let err = '';
     try { AF.renderFrame(); } catch (e) { err = String(e && e.message); }
-    return { ok: !err && !!P.composer && P.enabled, info: err || ('passes ' + (P.composer ? P.composer.passes.length : 0) + ', tier ' + tier() + ', msaa ' + (P.sceneRT ? P.sceneRT.samples : '?') + ', AO ' + !!P.aoPass + ', tone ' + P.tone) };
+    return { ok: !err && (P.bypass ? !P.composer && !P.enabled && AF.renderer.toneMapping !== THREE.NoToneMapping : !!P.composer && P.enabled), info: err || (P.bypass ? 'direct renderer (mobile, nopost or unsupported targets)' : 'passes ' + (P.composer ? P.composer.passes.length : 0) + ', tier ' + tier() + ', msaa ' + (P.sceneRT ? P.sceneRT.samples : '?') + ', AO ' + !!P.aoPass + ', tone ' + P.tone) };
   });
 }
 

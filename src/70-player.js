@@ -534,7 +534,7 @@ try {
         if ((locked || ((m.buttons & 3) && !onPanel())) && (m.dx || m.dy)) {
           const ks = AF.lookSens(); WK.camYaw -= m.dx * 0.0045 * ks; WK.camPitch = AF.clamp(WK.camPitch + m.dy * 0.0035 * ks, -0.75, 1.25); WK.lastMouse = AF.clock.t;
         }
-        if (!locked && m.clicked && !onPanel() && !AF.touch && AF.renderer) { try { const r = AF.renderer.domElement.requestPointerLock({ unadjustedMovement: true }); if (r && r.catch) r.catch(() => { try { AF.renderer.domElement.requestPointerLock(); } catch (e) {} }); } catch (e) { try { AF.renderer.domElement.requestPointerLock(); } catch (e2) {} } }
+        if (!locked && m.clicked && !onPanel()) I.requestLock();
         if (m.wheel) {
           if (WK.fp) { if (m.wheel > 0) { WK.fp = false; PL.hideMesh = false; WK.boom = 0.5; } }
           else if (m.wheel > 0 && (WK.zoom || 1) >= 2.19) { WK.zout = (WK.zout || 0) + m.wheel; if (WK.zout > 120) { WK.zout = 0; AF.setMode('aerial', { focusPlayer: true }); return; } }
@@ -639,6 +639,5 @@ try {
 // mouse-look sensitivity (saved per browser)
 AF.lookSens = () => { if (AF._lookSens == null) { let v = NaN; try { v = parseFloat(localStorage.getItem('portSolace.lookSens')); } catch (e) {} AF._lookSens = isFinite(v) ? v : 0.45; } return AF._lookSens; };
 AF.setLookSens = (v) => { AF._lookSens = AF.clamp(+v || 0.45, 0.05, 2); try { localStorage.setItem('portSolace.lookSens', String(AF._lookSens)); } catch (e) {} };
-AF.on('mode', () => { if (AF.mode !== 'walk' && document.pointerLockElement) { try { document.exitPointerLock(); } catch (e) {} } });
 
 } catch (e) { AF.partError('70-player.js', e); }

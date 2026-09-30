@@ -7,6 +7,9 @@ AF.Q = new URLSearchParams(location.search);
 AF.TEST = AF.Q.has('test');
 AF.SHOT = AF.Q.has('shot');
 AF.DBG = AF.Q.has('dbg');
+AF.IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+AF.MOBILE = AF.Q.has('mobile') || AF.IOS || /Android/i.test(navigator.userAgent) || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
+AF.HAS_POINTER_LOCK = typeof HTMLCanvasElement.prototype.requestPointerLock === 'function';
 AF.ready = false;
 
 // ---------------------------------------------------------------- graphics tier (R1). Read AF.GFX.tier every frame or AF.GFX.onChange(fn).
@@ -55,7 +58,7 @@ AF.fbm2 = (x, z, oct = 4) => { let s = 0, a = 0.5, f = 1, n = 0; for (let i = 0;
 AF.angDiff = (a, b) => { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; };
 
 // ---------------------------------------------------------------- palette
-// AF.col(0xRRGGBB, opts?) -> palette index (1..4095). Same args -> same index.
+// AF.col(0xRRGGBB, opts?) -> palette index (1..8191). Same args -> same index.
 // opts: { emit: 0xRRGGBB, emitK: strength(1), mode: 'night'|'always', jitter: 0..1 (0.5), edge: 0..1 (0.5), smooth: true (edge 0, jitter <= 0.04, no pattern),
 //         solid: true, glass: false, sat: 1 (extra saturation multiplier) }
 //   emit+mode 'night'  : glows only when AF.time.night rises (windows, street lamps)
@@ -66,10 +69,10 @@ AF.angDiff = (a, b) => { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= 
 //   solid:false        : visible but walk-through (flowers, tall grass, curtains, hanging signs)
 AF.SAT = 1.18;
 AF.PAL = {
-  n: 1, key: new Map(), hex: [0], solid: new Uint8Array(4096), glass: new Uint8Array(4096), opaque: new Uint8Array(4096),
-  albedo: new Float32Array(4096 * 4), emit: new Float32Array(4096 * 4), dirty: true, names: {},
+  n: 1, key: new Map(), hex: [0], solid: new Uint8Array(8192), glass: new Uint8Array(8192), opaque: new Uint8Array(8192),
+  albedo: new Float32Array(8192 * 4), emit: new Float32Array(8192 * 4), dirty: true, names: {},
   // R1 material channel: r = roughness (-1 = material default), g = metalness, b = pattern (side + 32 * top), a = window kind
-  mat: new Float32Array(4096 * 4), explicitPat: new Uint8Array(4096),
+  mat: new Float32Array(8192 * 4), explicitPat: new Uint8Array(8192),
 };
 // ---- surface patterns + material options (R1). AF.col(hex, { rough:0..1, metal:0..1, pat:'brick', patTop:'plank', win:'office' })
 //   pat    : sub-block pattern drawn in the shader on SIDE faces (and top faces too unless patTop is given). 'none' opts out of auto-assign.
@@ -83,7 +86,7 @@ AF.PAL.setMat = (i, o) => {
   P.explicitPat[i] = (o.pat != null || o.patTop != null) ? 1 : 0;
   M[i * 4 + 2] = Math.max(0, ps) + 32 * Math.max(0, pt);
   M[i * 4 + 3] = o.win == null ? 0 : (typeof o.win === 'number' ? o.win : (AF.WIN[o.win] ?? 0));
-  P.explicitWin = P.explicitWin || new Uint8Array(4096); P.explicitWin[i] = o.win != null ? 1 : 0;
+  P.explicitWin = P.explicitWin || new Uint8Array(8192); P.explicitWin[i] = o.win != null ? 1 : 0;
   P.dirty = true;
 };
 // change material options of an existing index (art agents: prefer passing options to AF.col)
@@ -159,7 +162,7 @@ AF.col = (hex, o = {}) => {
   let k = hex + '|' + (o.emit ?? '') + '|' + (o.emitK ?? '') + '|' + (o.mode ?? '') + '|' + (o.jitter ?? '') + '|' + (o.edge ?? '') + '|' + (o.solid ?? '') + '|' + (o.glass ?? '') + '|' + (o.sat ?? '');
   if (o.rough != null || o.metal != null || o.pat != null || o.patTop != null || o.win != null) k += '|m' + (o.rough ?? '') + '|' + (o.metal ?? '') + '|' + (o.pat ?? '') + '|' + (o.patTop ?? '') + '|' + (o.win ?? '');
   const P = AF.PAL; let i = P.key.get(k); if (i) return i;
-  if (P.n >= 4095) { AF.warnOnce('palette full'); return 1; }
+  if (P.n >= 8192) { AF.warnOnce('palette full'); return 1; }
   i = P.n++; P.key.set(k, i); P.hex[i] = hex;
   const c = new THREE.Color(hex); const hsl = {}; c.getHSL(hsl, THREE.SRGBColorSpace);
   c.setHSL(hsl.h, Math.min(1, hsl.s * AF.SAT * (o.sat ?? 1)), hsl.l, THREE.SRGBColorSpace);
@@ -210,6 +213,7 @@ AF.input = { down: new Set(), pressed: new Set(), released: new Set(), mouse: { 
   const I = AF.input;
   addEventListener('keydown', (e) => {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.code === 'Escape') { if (!e.repeat) AF.emit('escape'); return; }
     if (!I.down.has(e.code)) I.pressed.add(e.code);
     I.down.add(e.code);
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
@@ -217,6 +221,32 @@ AF.input = { down: new Set(), pressed: new Set(), released: new Set(), mouse: { 
   addEventListener('keyup', (e) => { I.down.delete(e.code); I.released.add(e.code); });
   addEventListener('blur', () => { I.down.clear(); I.mouse.buttons = 0; });
   const cv = document.getElementById('cv');
+  let lockRequested = false, lockReleased = false, wasLocked = false;
+  I.requestLock = () => {
+    if (AF.touch || typeof cv.requestPointerLock !== 'function' || document.pointerLockElement || lockRequested) return;
+    if (!AF.ui || AF.ui.modalOpen() || AF.ui.dialogueOpen()) return;
+    lockRequested = true;
+    try {
+      const result = cv.requestPointerLock();
+      if (result && typeof result.catch === 'function') result.catch(() => { lockRequested = false; });
+    } catch (error) { lockRequested = false; }
+  };
+  I.releaseLock = () => {
+    if (!document.pointerLockElement || typeof document.exitPointerLock !== 'function') return;
+    lockReleased = true;
+    try { document.exitPointerLock(); } catch (error) { lockReleased = false; }
+  };
+  document.addEventListener('pointerlockerror', () => { lockRequested = false; });
+  document.addEventListener('pointerlockchange', () => {
+    const locked = document.pointerLockElement === cv;
+    lockRequested = false; I.mouse.dx = I.mouse.dy = 0;
+    if (wasLocked && !locked) {
+      I.down.clear(); I.pressed.delete('Escape'); I.mouse.buttons = 0;
+      AF.emit('pointerunlock', lockReleased);
+    }
+    wasLocked = locked; lockReleased = false;
+  });
+  cv.addEventListener('click', () => { if (AF.ui && AF.ui.resume) AF.ui.resume(); I.requestLock(); });
   cv.addEventListener('mousedown', (e) => { I.mouse.buttons = e.buttons; I.mouse.x = e.clientX; I.mouse.y = e.clientY; I.mouse.downX = e.clientX; I.mouse.downY = e.clientY; cv.focus(); });
   addEventListener('mouseup', (e) => {
     const m = I.mouse; m.buttons = e.buttons;

@@ -606,6 +606,7 @@ try {
     { const grp = new THREE.Group(); grp.name = 'land-horizon'; let nq = 0;
       for (const b of chunks.values()) { if (!b.n) continue;
         const meshH = new THREE.Mesh(b.geometry(), AF.mat.voxel);
+        AF.releaseStaticGeometry(meshH.geometry);
         meshH.name = 'land-horizon-chunk'; meshH.receiveShadow = false; meshH.castShadow = false; meshH.matrixAutoUpdate = false; meshH.updateMatrix();
         meshH.frustumCulled = true; grp.add(meshH); nq += b.n / 4; }
       grp.matrixAutoUpdate = false; AF.scene.add(grp); L.horizon = grp;

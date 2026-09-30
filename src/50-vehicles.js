@@ -677,6 +677,14 @@ const trafficRnd = AF.rng(1952);
 const PED = { ped: true };
 function aiStep(car, dt, all) {
   const A = car.ai; let pc = A.piece;
+  const recovering = (A.pushT || 0) > 0 || Math.abs(A.offsetX || 0) + Math.abs(A.offsetZ || 0) > 0.05;
+  if ((A.pushT || 0) > 0) {
+    A.pushT = Math.max(0, A.pushT - dt);
+    A.stuck = A.stuckLong = A.ghost = 0; A.ghostAll = false; A.blocker = null;
+    car.v = A.v;
+    stepPush(car, dt);
+    return;
+  }
   if (!A.next) A.next = pickNext(pc, trafficRnd);
   const toEnd = pc.len - A.s;
   let vT = A.v0;
@@ -775,7 +783,7 @@ function aiStep(car, dt, all) {
   A.blocker = blocker;
   if (blocker) vT = Math.min(vT, gap < 1.2 ? 0 : Math.sqrt(2 * 4 * Math.max(0, gap - 1.2)));
   // stuck -> briefly ignore crossing traffic
-  if (A.v < 0.2 && blocker && blocker !== P && blocker !== PED && !A.light) { A.stuck += dt; A.stuckLong = (A.stuckLong || 0) + dt; if (A.stuck > 4) { A.ghost = 2.5; A.stuck = 0; A.ghostAll = A.stuckLong > 12; } } else if (A.v > 3) { A.stuck = 0; A.stuckLong = 0; }
+  if (!recovering && A.v < 0.2 && blocker && blocker !== P && blocker !== PED && !A.light) { A.stuck += dt; A.stuckLong = (A.stuckLong || 0) + dt; if (A.stuck > 4) { A.ghost = 2.5; A.stuck = 0; A.ghostAll = A.stuckLong > 12; } } else if (recovering || A.v > 3) { A.stuck = 0; A.stuckLong = 0; }
   if (A.ghost > 0) A.ghost -= dt; else A.ghostAll = false;
   A.light = false;
   // speed
@@ -790,8 +798,17 @@ function aiStep(car, dt, all) {
   const newYaw = Math.atan2(PP.dx, PP.dz);
   const dy = AF.angDiff(car.yaw, newYaw);
   const yawRate = dt > 0 ? dy / dt : 0;
+  const previousYaw = car.yaw;
   car.yaw = car.yaw + dy;
-  car.x = PP.x; car.z = PP.z; car.v = A.v;
+  if (recovering) {
+    const ease = Math.exp(-dt * 0.75), nx = PP.x + (A.offsetX || 0) * ease, nz = PP.z + (A.offsetZ || 0) * ease;
+    const pushYaw = (A.pushYaw || 0) * Math.exp(-dt * 1.5);
+    if (!worldHits(car, nx, nz, newYaw + pushYaw)) { car.x = nx; car.z = nz; car.yaw = newYaw + pushYaw; A.pushYaw = pushYaw; }
+    else { car.yaw = previousYaw; A.pushYaw = AF.angDiff(newYaw, previousYaw); }
+    A.offsetX = car.x - PP.x; A.offsetZ = car.z - PP.z;
+  } else { car.x = PP.x; car.z = PP.z; }
+  car.v = A.v;
+  stepPush(car, dt);
   if ((A.yT = (A.yT || 0) + 1) % 4 === 0) { const gy = AF.surfaceBelow(car.x, car.z, car.y + 1.2, 2.5); car.y += (gy - car.y) * 0.5; }
   const st = A.v > 0.5 ? Math.atan(car.wheelbase * yawRate / A.v) : 0;
   car.steer += (AF.clamp(st, -0.6, 0.6) - car.steer) * Math.min(1, dt * 8);
@@ -850,6 +867,7 @@ VV.simTraffic = (dt) => {
     if (cam && ((fr + c.id) & 3) !== 0 && (c.x - cam.x) ** 2 + (c.z - cam.z) ** 2 > 240 * 240) continue;
     aiStep(c, Math.min(c.aiAcc, 0.25), all); c.aiAcc = 0;
   }
+  for (const car of all) if (!car.ai && !car.player && car.pushLife > 0) stepPush(car, dt);
 };
 const spawnTraffic = (n) => {
   const rnd = AF.rng(777);
@@ -875,43 +893,138 @@ const spawnTraffic = (n) => {
 };
 
 // ---------------------------------------------------------------- drive mode
-const DR = { car: null, camPos: new THREE.Vector3(), camLook: new THREE.Vector3(), orbit: 0, orbitP: 0, dist: 8.5, init: false };
+const DR = { car: null, camPos: new THREE.Vector3(), camLook: new THREE.Vector3(), want: new THREE.Vector3(), orbit: 0, orbitP: 0, dist: 8.5, init: false };
+const DRIVE_INPUT = { up: false, down: false, left: 0, right: 0, brake: false };
+const POINTS = new Float64Array(24), LOCAL_POINTS = new Float64Array([1, 1, -1, 1, 0, 1, 1, -1, -1, -1, 0, -1, 1, 0, -1, 0, 1, 0.5, -1, 0.5, 1, -0.5, -1, -0.5]);
+const CONTACT = new Float64Array(3), AXES = new Float64Array(8);
 const carPts = (car, x, z, yaw, inset = 0) => {
   const s = Math.sin(yaw), c = Math.cos(yaw), hl = car.halfL - 0.1 - inset, hw = car.halfW - 0.08 - inset;
-  const pts = [];
-  for (const [lx, lz] of [[hw, hl], [-hw, hl], [0, hl], [hw, -hl], [-hw, -hl], [0, -hl], [hw, 0], [-hw, 0], [hw, hl * 0.5], [-hw, hl * 0.5], [hw, -hl * 0.5], [-hw, -hl * 0.5]])
-    pts.push([x + lx * c + lz * s, z - lx * s + lz * c]);
-  return pts;
+  for (let index = 0; index < 24; index += 2) {
+    const lx = LOCAL_POINTS[index] * hw, lz = LOCAL_POINTS[index + 1] * hl;
+    POINTS[index] = x + lx * c + lz * s; POINTS[index + 1] = z - lx * s + lz * c;
+  }
+  return POINTS;
 };
-const carBlocked = (car, x, z, yaw) => {
+const worldHits = (car, x, z, yaw) => {
   const feet = car.y + 0.5, h = Math.min(1.2, car.height - 0.6);
-  for (const [px, pz] of carPts(car, x, z, yaw)) if (AF.boxBlocked(px, feet, pz, 0.12, h)) return 'world';
-  // other cars (oriented boxes)
+  const pts = carPts(car, x, z, yaw); let hits = 0;
+  for (let index = 0; index < 24; index += 2) if (AF.boxBlocked(pts[index], feet, pts[index + 1], 0.12, h)) hits++;
+  return hits;
+};
+const overlap = (car, x, z, yaw, other) => {
+  const sine = Math.sin(yaw), cosine = Math.cos(yaw), os = Math.sin(other.yaw), oc = Math.cos(other.yaw);
+  AXES[0] = cosine; AXES[1] = -sine; AXES[2] = sine; AXES[3] = cosine;
+  AXES[4] = oc; AXES[5] = -os; AXES[6] = os; AXES[7] = oc;
+  const dx = x - other.x, dz = z - other.z;
+  let depth = Infinity, normalX = 0, normalZ = 0;
+  for (let index = 0; index < 8; index += 2) {
+    const ax = AXES[index], az = AXES[index + 1], distance = dx * ax + dz * az;
+    const radius = car.halfW * Math.abs(cosine * ax - sine * az) + car.halfL * Math.abs(sine * ax + cosine * az)
+      + other.halfW * Math.abs(oc * ax - os * az) + other.halfL * Math.abs(os * ax + oc * az);
+    const penetration = radius - Math.abs(distance);
+    if (penetration <= 0) { CONTACT[2] = 0; return 0; }
+    if (penetration < depth) { depth = penetration; const sign = distance < 0 ? -1 : 1; normalX = ax * sign; normalZ = az * sign; }
+  }
+  CONTACT[0] = normalX; CONTACT[1] = normalZ; CONTACT[2] = depth;
+  return depth;
+};
+const nearby = (car, x, z, other) => other !== car && Math.abs(other.x - x) < car.halfL + other.halfL + 1 && Math.abs(other.z - z) < car.halfL + other.halfL + 1 && Math.abs((other.y || 0) - car.y) < 2;
+const carBlocked = (car, x, z, yaw) => {
+  if (worldHits(car, x, z, yaw)) return 'world';
   for (const o of VV.cars) {
-    if (o === car || Math.abs(o.x - x) > 8 || Math.abs(o.z - z) > 8) continue;
-    const s = Math.sin(o.yaw), c = Math.cos(o.yaw);
-    for (const [px, pz] of carPts(car, x, z, yaw)) {
-      const rx = px - o.x, rz = pz - o.z, lx = rx * c - rz * s, lz = rx * s + rz * c;
-      if (Math.abs(lx) < o.halfW && Math.abs(lz) < o.halfL) return o;
-    }
-    const s2 = Math.sin(yaw), c2 = Math.cos(yaw);
-    for (const [px, pz] of carPts(o, o.x, o.z, o.yaw)) {
-      const rx = px - x, rz = pz - z, lx = rx * c2 - rz * s2, lz = rx * s2 + rz * c2;
-      if (Math.abs(lx) < car.halfW && Math.abs(lz) < car.halfL) return o;
-    }
+    if (nearby(car, x, z, o) && overlap(car, x, z, yaw, o)) return o;
   }
   return null;
 };
+const moveAllowed = (car, x, z, yaw) => {
+  const hits = worldHits(car, x, z, yaw);
+  if (hits && hits >= worldHits(car, car.x, car.z, car.yaw)) return false;
+  for (let group = 0; group < 2; group++) {
+    const cars = group ? VV.parkedStatic : VV.cars;
+    for (const other of cars) {
+      if (!nearby(car, x, z, other)) continue;
+      const next = overlap(car, x, z, yaw, other);
+      if (next > 0 && next >= overlap(car, car.x, car.z, car.yaw, other)) return false;
+    }
+  }
+  return true;
+};
+function stepPush(car, dt) {
+  if (car.player || !(car.pushLife > 0)) return;
+  car.pushLife = Math.max(0, car.pushLife - dt);
+  const steps = Math.max(1, Math.ceil(Math.hypot(car.pushX || 0, car.pushZ || 0) * dt / 0.2)), slice = dt / steps;
+  for (let index = 0; index < steps; index++) {
+    const nx = car.x + (car.pushX || 0) * slice, nz = car.z + (car.pushZ || 0) * slice, yaw = car.yaw + (car.pushSpin || 0) * slice;
+    if (!worldHits(car, nx, nz, yaw)) { car.x = nx; car.z = nz; car.yaw = yaw; }
+    else { car.pushX = car.pushZ = car.pushSpin = 0; break; }
+  }
+  const decay = Math.exp(-dt * 3);
+  car.pushX *= decay; car.pushZ *= decay; car.pushSpin *= decay;
+  if (car.ai) {
+    pieceAt(car.ai.piece, car.ai.s, PP);
+    car.ai.offsetX = car.x - PP.x; car.ai.offsetZ = car.z - PP.z;
+    car.ai.pushYaw = AF.angDiff(Math.atan2(PP.dx, PP.dz), car.yaw);
+  } else car.v = (car.pushX || 0) * Math.sin(car.yaw) + (car.pushZ || 0) * Math.cos(car.yaw);
+  if (car.interact) { car.interact.x = car.x; car.interact.z = car.z; }
+  placeMesh(car);
+}
+function carContacts(car, dt) {
+  for (let group = 0; group < 2; group++) {
+    const cars = group ? VV.parkedStatic : VV.cars;
+    for (const other of cars) {
+      if (!nearby(car, car.x, car.z, other)) continue;
+      const depth = overlap(car, car.x, car.z, car.yaw, other);
+      if (!depth) continue;
+      const normalX = CONTACT[0], normalZ = CONTACT[1];
+      const approach = Math.max(0, -(car.vx * normalX + car.vz * normalZ));
+      if (car.player && !other.static && approach > 0.05) {
+        const share = other.type.big ? 0.035 : other.type.kind === 'bike' ? 0.8 : other.type.kind === 'van' ? 0.3 : 0.5;
+        const nudge = Math.min(depth + 0.03, 0.2 + approach * dt) * share;
+        const ox = other.x - normalX * nudge, oz = other.z - normalZ * nudge;
+        if (!worldHits(other, ox, oz, other.yaw)) {
+          other.x = ox; other.z = oz;
+          const impulse = Math.min(12, approach) * share;
+          other.pushX = AF.clamp((other.pushX || 0) - normalX * impulse, -12, 12);
+          other.pushZ = AF.clamp((other.pushZ || 0) - normalZ * impulse, -12, 12);
+          other.pushSpin = AF.clamp((other.pushSpin || 0) + ((car.x - other.x) * normalZ - (car.z - other.z) * normalX) * impulse * 0.12, -1, 1);
+          other.pushLife = 2;
+          if (other.ai) { other.ai.pushT = 0.35; other.ai.stuck = other.ai.stuckLong = other.ai.ghost = 0; other.ai.ghostAll = false; }
+          stepPush(other, 0);
+        }
+      }
+      const remaining = overlap(car, car.x, car.z, car.yaw, other);
+      const separateX = car.x + normalX * (remaining + 0.025), separateZ = car.z + normalZ * (remaining + 0.025);
+      if (remaining && moveAllowed(car, separateX, separateZ, car.yaw)) { car.x = separateX; car.z = separateZ; }
+      else if (remaining) {
+        const distance = Math.min(remaining + 0.025, 0.25);
+        if (moveAllowed(car, car.x + normalX * distance, car.z + normalZ * distance, car.yaw)) { car.x += normalX * distance; car.z += normalZ * distance; }
+      }
+      if (approach > 0) {
+        const rebound = other.static || other.type.big ? 1.2 : 0.75;
+        car.vx += normalX * approach * rebound; car.vz += normalZ * approach * rebound;
+        car.lastHit = other; car.hitT = (car.hitT || 0) + 1;
+        if (approach > 6 && !(car.crunchCd > 0)) { car.crunchCd = 1.2; AF.emit('toast', 'Crunch! Easy there.'); }
+      }
+    }
+  }
+}
 VV.carBlocked = carBlocked;
 VV.makeCar = (...a) => makeCar(...a);
 VV.placeMesh = (c) => placeMesh(c);
+const GROUND = { front: 0, rear: 0, left: 0, right: 0 }, GROUND_HEIGHTS = new Float64Array(4);
 const groundUnder = (car) => {
   const s = Math.sin(car.yaw), c = Math.cos(car.yaw), hb = car.wheelbase / 2, hw = car.halfW - 0.2, top = car.y + 0.6;
-  const h = (lx, lz) => AF.surfaceBelow(car.x + lx * c + lz * s, car.z - lx * s + lz * c, top, 3);
-  const fl = h(hw, hb), fr = h(-hw, hb), rl = h(hw, -hb), rr = h(-hw, -hb);
-  return { front: (fl + fr) / 2, rear: (rl + rr) / 2, left: (fl + rl) / 2, right: (fr + rr) / 2 };
+  for (let index = 0; index < 4; index++) {
+    const lx = index % 2 ? -hw : hw, lz = index < 2 ? hb : -hb;
+    GROUND_HEIGHTS[index] = AF.surfaceBelow(car.x + lx * c + lz * s, car.z - lx * s + lz * c, top, 3);
+  }
+  GROUND.front = (GROUND_HEIGHTS[0] + GROUND_HEIGHTS[1]) / 2; GROUND.rear = (GROUND_HEIGHTS[2] + GROUND_HEIGHTS[3]) / 2;
+  GROUND.left = (GROUND_HEIGHTS[0] + GROUND_HEIGHTS[2]) / 2; GROUND.right = (GROUND_HEIGHTS[1] + GROUND_HEIGHTS[3]) / 2;
+  return GROUND;
 };
 function physics(car, dt, inp) {
+  car.crunchCd = Math.max(0, (car.crunchCd || 0) - dt);
+  carContacts(car, dt);
   const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), rx = -hz, rz = hx;   // right-hand (screen) vector = -local x
   let f = car.vx * hx + car.vz * hz, lat = car.vx * rx + car.vz * rz;
   const big = car.type.big ? 0.7 : 1;
@@ -930,26 +1043,34 @@ function physics(car, dt, inp) {
   const maxSteer = 0.62 / (1 + sp * 0.07);
   car.steer += ((inp.left - inp.right) * maxSteer - car.steer) * Math.min(1, dt * 7);
   const yawRate = f / car.wheelbase * Math.tan(car.steer) * (inp.brake ? 1.35 : 1);
-  car.yaw += yawRate * dt;
+  const nextYaw = car.yaw + yawRate * dt;
+  if (moveAllowed(car, car.x, car.z, nextYaw)) car.yaw = nextYaw;
   const nhx = Math.sin(car.yaw), nhz = Math.cos(car.yaw), nrx = -nhz, nrz = nhx;
   car.vx = nhx * f + nrx * lat; car.vz = nhz * f + nrz * lat;
   car.v = f;
   // move with collision + slide
-  const nx = car.x + car.vx * dt, nz = car.z + car.vz * dt;
-  let hit = carBlocked(car, nx, nz, car.yaw);
-  if (!hit) { car.x = nx; car.z = nz; }
-  else {
-    const hx2 = carBlocked(car, nx, car.z, car.yaw), hz2 = carBlocked(car, car.x, nz, car.yaw);
-    if (!hx2 && Math.abs(car.vx) > 0.05) { car.x = nx; car.vz *= -0.1; }
-    else if (!hz2 && Math.abs(car.vz) > 0.05) { car.z = nz; car.vx *= -0.1; }
-    else { car.vx *= -0.2; car.vz *= -0.2; }
-    const nf = car.vx * nhx + car.vz * nhz;
-    car.vx *= 0.6; car.vz *= 0.6; car.v = nf * 0.6;
-    if (carBlocked(car, car.x, car.z, car.yaw)) { car.yaw -= yawRate * dt; }
-    if (hit && hit.ai && hit.ai) hit.ai.v = 0;
-    car.lastHit = hit; car.hitT = (car.hitT || 0) + 1;
-    if (typeof hit === 'object' && sp > 6) AF.emit('toast', 'Crunch! Easy there.');
+  const steps = Math.max(1, Math.ceil(Math.hypot(car.vx, car.vz) * dt / 0.2)), slice = dt / steps;
+  for (let index = 0; index < steps; index++) {
+    const nx = car.x + car.vx * slice, nz = car.z + car.vz * slice;
+    if (moveAllowed(car, nx, nz, car.yaw)) { car.x = nx; car.z = nz; }
+    else {
+      const savedX = car.x, savedZ = car.z;
+      car.x = nx; car.z = nz;
+      carContacts(car, slice);
+      const correctedX = car.x, correctedZ = car.z;
+      car.x = savedX; car.z = savedZ;
+      if (moveAllowed(car, correctedX, correctedZ, car.yaw)) { car.x = correctedX; car.z = correctedZ; }
+      else {
+        const slideX = car.x + car.vx * slice, slideZ = car.z + car.vz * slice;
+        const clearX = moveAllowed(car, slideX, car.z, car.yaw), clearZ = moveAllowed(car, car.x, slideZ, car.yaw);
+        if (clearX) car.x = slideX;
+        if (clearZ && moveAllowed(car, car.x, slideZ, car.yaw)) car.z = slideZ;
+        if (!clearX) car.vx *= -0.12;
+        if (!clearZ) car.vz *= -0.12;
+      }
+    }
   }
+  car.v = car.vx * nhx + car.vz * nhz;
   // ground follow: pitch / roll / height
   const g = groundUnder(car);
   const gy = (g.front + g.rear) / 2;
@@ -987,10 +1108,11 @@ AF.modes.drive = {
     DR.car = car; VV.player = car;
     if (car.ai) { VV.ai.splice(VV.ai.indexOf(car), 1); car.ai = null; }
     car.player = true; car.parked = false; car.driver = -1;
+    car.pushLife = car.pushX = car.pushZ = car.pushSpin = 0;
     car.vx = Math.sin(car.yaw) * car.v; car.vz = Math.cos(car.yaw) * car.v;
     DR.bike = car.type.kind === 'bike' && !!car.type.solo;
     if (AF.player && AF.player.setVisible) AF.player.setVisible(DR.bike);
-    DR.orbit = 0; DR.orbitP = 0; DR.dist = car.type.big ? 13 : DR.bike ? 5.5 : 8.5; DR.init = false;
+    DR.orbit = 0; DR.orbitP = 0; DR.dragT = 0; DR.dist = car.type.big ? 13 : DR.bike ? 5.5 : 8.5; DR.init = false;
     AF.emit('toast', (DR.bike ? 'You swing onto the ' : 'You slide behind the wheel of the ') + car.name + '.');
     AF.emit('hint', AF.touch ? '' : 'W/S throttle · A/D steer · Space brake · E to get out');
   },
@@ -1005,7 +1127,9 @@ AF.modes.drive = {
   update(dt) {
     const car = DR.car; if (!car) return;
     const I = AF.input, S = I.stick;
-    const inp = { up: I.key('KeyW') || I.key('ArrowUp'), down: I.key('KeyS') || I.key('ArrowDown'), left: (I.key('KeyA') || I.key('ArrowLeft')) ? 1 : 0, right: (I.key('KeyD') || I.key('ArrowRight')) ? 1 : 0, brake: I.key('Space') };
+    const inp = DRIVE_INPUT;
+    inp.up = I.key('KeyW') || I.key('ArrowUp'); inp.down = I.key('KeyS') || I.key('ArrowDown');
+    inp.left = (I.key('KeyA') || I.key('ArrowLeft')) ? 1 : 0; inp.right = (I.key('KeyD') || I.key('ArrowRight')) ? 1 : 0; inp.brake = I.key('Space');
     if (S && (S.x || S.y)) { if (S.y > 0.3) inp.up = true; if (S.y < -0.3) inp.down = true; if (S.x < -0.15) inp.left = Math.min(1, -S.x * 1.3); if (S.x > 0.15) inp.right = Math.min(1, S.x * 1.3); }
     if (VV.autoInput) Object.assign(inp, VV.autoInput);
     physics(car, dt, inp);
@@ -1019,13 +1143,13 @@ AF.modes.drive = {
     if (car.interact) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; }
     // chase camera
     const m = I.mouse;
-    if (m.buttons & 1) { DR.orbit -= m.dx * 0.006; DR.orbitP = AF.clamp(DR.orbitP + m.dy * 0.004, -0.25, 0.9); DR.dragT = 1.2; }
+    if ((document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { DR.orbit = (DR.orbit - m.dx * 0.006) % (Math.PI * 2); DR.orbitP = AF.clamp(DR.orbitP + m.dy * 0.004, -0.25, 0.9); DR.dragT = 1.5; }
     else if ((DR.dragT = (DR.dragT || 0) - dt) < 0) { DR.orbit *= Math.exp(-dt * 1.8); DR.orbitP *= Math.exp(-dt * 1.8); }
     if (m.wheel) DR.dist = AF.clamp(DR.dist * Math.exp(m.wheel * 0.001), 4, 28);
     const a = car.yaw + DR.orbit, pitch = 0.2 + DR.orbitP + DR.dist * 0.004;
     const tx = car.x + Math.sin(car.yaw) * 1.5, ty = car.y + (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), tz = car.z + Math.cos(car.yaw) * 1.5;
     let d = DR.dist;
-    const want = new THREE.Vector3(tx - Math.sin(a) * Math.cos(pitch) * d, ty + Math.sin(pitch) * d, tz - Math.cos(a) * Math.cos(pitch) * d);
+    const want = DR.want.set(tx - Math.sin(a) * Math.cos(pitch) * d, ty + Math.sin(pitch) * d, tz - Math.cos(a) * Math.cos(pitch) * d);
     // keep the camera out of walls
     for (let t = 0.25; t <= 1.0001; t += 0.125) {
       const px = tx + (want.x - tx) * t, py = ty + (want.y - ty) * t, pz = tz + (want.z - tz) * t;
@@ -1041,7 +1165,7 @@ AF.modes.drive = {
     AF.shadowFocus.set(car.x, car.y, car.z); AF.shadowRadius = 60;
     const kmh = Math.abs(car.v) * 3.6;
     AF.emit('hud', { speed: Math.round(kmh / 1.609), unit: 'mph', kmh: Math.round(kmh), mode: 'drive', car: car.name, gear: car.v < -0.3 ? 'R' : 'D' });
-    if (I.hit('KeyE') || I.hit('KeyF') || I.hit('Escape')) VV.exitCar();
+    if (I.hit('KeyE') || I.hit('KeyF')) VV.exitCar();
   },
 };
 
@@ -1462,6 +1586,32 @@ AF.test('vehicles: drive mode enter + exit returns to walk', () => {
   const ok = inDrive && AF.mode === 'walk' && !car.player && car.parked;
   if (prev && prev !== 'walk' && AF.modes[prev]) AF.setMode(prev);
   return { ok, info: `drive ${inDrive}, now ${AF.mode}` };
+});
+AF.test('vehicles: player bump displaces AI and can drive away', () => {
+  const source = VV.cars.find((car) => !car.type.big && car.type.kind === 'car');
+  if (!source) return { ok: false, info: 'no car' };
+  const savedCars = VV.cars, savedStatic = VV.parkedStatic, savedBlocked = AF.boxBlocked, savedSurface = AF.surfaceBelow, savedEmit = AF.emit;
+  const player = Object.assign({}, source, { mesh: new THREE.Object3D(), interact: null, ai: null, player: true, x: 10000, z: 0, y: 0, yaw: 0, vx: 0, vz: 10, v: 10, steer: 0, bob: 0, bobV: 0, pitch: 0, roll: 0, pushLife: 0, crunchCd: 0, hitT: 0 });
+  const lane = { kind: 'lane', pts: [10000, 5, 10000, 1005], cum: [0, 1000], len: 1000, next: [], B: { light: false } };
+  const other = Object.assign({}, player, { mesh: new THREE.Object3D(), id: player.id + 1, player: false, parked: false, z: 5, v: 2, vx: 0, vz: 0, ai: { piece: lane, s: 0, v: 2, v0: 2, next: null, stuck: 0, ghost: 0 } });
+  const input = { up: true, down: false, left: 0, right: 0, brake: false };
+  let offset = 0, afterContact = 0, forward = 0, reverse = 0;
+  try {
+    VV.cars = [player, other]; VV.parkedStatic = [];
+    AF.boxBlocked = () => false; AF.surfaceBelow = () => 0; AF.emit = () => {};
+    for (let frame = 0; frame < 120; frame++) {
+      physics(player, 1 / 60, input); aiStep(other, 1 / 60, VV.cars);
+      offset = Math.max(offset, Math.hypot(other.ai.offsetX || 0, other.ai.offsetZ || 0));
+      if (frame === 89) afterContact = player.z;
+    }
+    forward = player.z - afterContact;
+    input.up = false; input.down = true;
+    for (let frame = 0; frame < 120; frame++) physics(player, 1 / 60, input);
+    const reverseStart = player.z;
+    for (let frame = 0; frame < 60; frame++) physics(player, 1 / 60, input);
+    reverse = reverseStart - player.z;
+    return { ok: player.hitT > 0 && offset > 0.05 && forward > 0.1 && reverse > 0.5 && Number.isFinite(player.z), info: `hits ${player.hitT}, push ${offset.toFixed(2)}, forward ${forward.toFixed(2)}, reverse ${reverse.toFixed(2)}` };
+  } finally { VV.cars = savedCars; VV.parkedStatic = savedStatic; AF.boxBlocked = savedBlocked; AF.surfaceBelow = savedSurface; AF.emit = savedEmit; }
 });
 AF.test('vehicles: player car cannot pass through a wall', () => {
   // a temporary voxel wall across Charter Street at x = 200; drive east into it from x = 185

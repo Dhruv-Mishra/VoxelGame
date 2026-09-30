@@ -3,9 +3,9 @@ try {
 // ===== 03-render: renderer, scene, camera, baseline lights, loop, debug handle  (OWNER: coordinator) =====
 {
   const cv = document.getElementById('cv');
-  const R = AF.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: AF.SHOT || AF.TEST, powerPreference: 'high-performance' });
-  // base pixel ratio per tier (Low 1.0 · Balanced 1.25 · High 1.5); ?shot renders at 1 (or ?dpr=N)
-  AF.basePR = () => AF.SHOT ? AF.clamp(+AF.Q.get('dpr') || 1, 0.5, 3) : Math.min(devicePixelRatio || 1, AF.GFX.tier === 'low' ? 1 : AF.GFX.tier === 'high' ? 1.25 : 1.5);
+  const R = AF.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: !AF.MOBILE, preserveDrawingBuffer: AF.SHOT || AF.TEST, powerPreference: AF.MOBILE ? 'default' : 'high-performance' });
+  // base pixel ratio per tier (Low 0.75 · Balanced 0.9 · High 1.25); ?shot renders at 1 (or ?dpr=N)
+  AF.basePR = () => AF.MOBILE ? 0.75 * Math.min(devicePixelRatio || 1, 1) : AF.SHOT ? AF.clamp(+AF.Q.get('dpr') || 1, 0.5, 3) : Math.min(devicePixelRatio || 1, AF.GFX.tier === 'low' ? 0.75 : AF.GFX.tier === 'high' ? 0.9 : 1.25);
   R.setPixelRatio(AF.basePR());
   R.outputColorSpace = THREE.SRGBColorSpace;
   R.toneMapping = THREE.ACESFilmicToneMapping;
@@ -24,7 +24,7 @@ try {
   // Baseline lights — the atmosphere part (60-atmos.js) takes these over (AF.sun, AF.hemi, AF.amb) and drives them.
   const sun = AF.sun = new THREE.DirectionalLight(0xfff0d8, 2.6);
   sun.position.set(120, 180, 80); sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
+  sun.shadow.mapSize.set(AF.MOBILE ? 1024 : 4096, AF.MOBILE ? 1024 : 4096);
   const sc = sun.shadow.camera; sc.left = -140; sc.right = 140; sc.top = 140; sc.bottom = -140; sc.near = 1; sc.far = 900;
   sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.06;
   S.add(sun); S.add(sun.target);
@@ -87,35 +87,83 @@ try {
   // render: post part may replace AF.renderFrame
   AF.renderFrame = () => R.render(S, cam);
 
+  const uploadScene = new THREE.Scene(), uploadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 2);
+  const uploadMaterial = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false });
+  const uploadMesh = new THREE.Mesh(new THREE.BufferGeometry(), uploadMaterial);
+  uploadMesh.frustumCulled = false; uploadScene.add(uploadMesh);
+  uploadCamera.position.set(0, 100000, 0); uploadCamera.lookAt(0, 100000, -1);
+  let uploadTarget = null, uploadHead = 0;
+  AF.onTick('static-uploads', 875, () => {
+    const queue = AF.staticUploadQueue;
+    if (!AF.ready || !queue || uploadHead >= queue.length) return;
+    if (!uploadTarget) uploadTarget = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false });
+    const previousTarget = R.getRenderTarget(), previousShadow = R.shadowMap.enabled;
+    const started = performance.now(); let bytes = 0, count = 0;
+    try {
+      R.shadowMap.enabled = false; R.setRenderTarget(uploadTarget);
+      while (uploadHead < queue.length && count < 8 && bytes < 8 * 1048576 && performance.now() - started < 4) {
+        const geo = queue[uploadHead]; queue[uploadHead++] = null;
+        if (geo.userData.memDisposed || !geo.attributes.position.array) continue;
+        for (const attribute of Object.values(geo.attributes)) if (attribute.array) bytes += attribute.array.byteLength;
+        if (geo.index && geo.index.array) bytes += geo.index.array.byteLength;
+        uploadMesh.geometry = geo;
+        R.render(uploadScene, uploadCamera); count++;
+      }
+    } finally {
+      R.setRenderTarget(previousTarget); R.shadowMap.enabled = previousShadow;
+    }
+    if (uploadHead >= queue.length) {
+      queue.length = 0; uploadHead = 0;
+      uploadMesh.geometry = null; uploadTarget.dispose(); uploadTarget = null;
+    }
+  });
+
   // loop
   let last = performance.now(), fpsAcc = 0, fpsN = 0;
   AF.fps = 60;
   AF.paused = false;
+  let graphicsReset = false;
+  const graphicsNotice = () => {
+    if (document.getElementById('af-graphics-reset')) return;
+    const notice = document.createElement('button');
+    notice.id = 'af-graphics-reset';
+    notice.textContent = 'Graphics were reset by the device \u2014 tap to reload';
+    notice.style.cssText = 'position:fixed;left:12px;right:12px;bottom:20px;z-index:2147483647;padding:16px;background:#20252a;color:#fff;border:1px solid #fff;border-radius:4px;font:16px sans-serif;white-space:normal';
+    notice.addEventListener('click', () => location.reload());
+    document.body.appendChild(notice);
+  };
+  cv.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault(); AF.contextLost = true; graphicsReset = true; AF.paused = true; graphicsNotice();
+  });
+  cv.addEventListener('webglcontextrestored', () => {
+    AF.contextLost = false; AF.paused = true; graphicsNotice();
+  });
   // near sun shadows re-render every frame on High, every 2nd on Balanced, every 3rd on Low (the map stays consistent in between)
   R.shadowMap.autoUpdate = false;
   const frame = (dt) => {
+    if (graphicsReset) return;
     AF.clock.dt = dt; AF.clock.t += dt; AF.clock.frame++;
     for (const h of AF.hooks.tick) {
       try { h.fn(dt, AF.clock.t); }
-      catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
+      catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (AF.MOBILE) AF.reportError(e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
     }
     const every = AF.SHOT || AF.TEST ? 1 : AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' ? 2 : 3;
     if (AF.clock.frame % every === 0 || AF.shadowDirty) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
-    try { AF.renderFrame(); } catch (e) { AF.warnOnce('render threw', e); }
+    try { AF.renderFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
   };
   AF.frame = frame;
   let lastTick = 0;
   const loop = (now) => {
     requestAnimationFrame(loop);
-    if (!AF.ready || AF.paused) { last = now; return; }
+    if (!AF.ready || AF.paused || graphicsReset || (AF.MOBILE && document.hidden)) { last = now; return; }
     const dt = Math.min(0.1, (now - last) / 1000); last = now; lastTick = now;
     fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { AF.fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
     frame(dt);
   };
   requestAnimationFrame(loop);
   // hidden-tab pump (the Claude browser pane never fires rAF). Only runs while hidden.
-  {
+  if (!AF.MOBILE) {
     const MC = new MessageChannel(); let pumping = false;
     MC.port1.onmessage = () => {
       if (!document.hidden || AF.SHOT) { pumping = false; return; }
@@ -129,7 +177,7 @@ try {
   // deterministic stepping for tests / headless shots
   AF.step = (n = 1, dt = 1 / 60) => { const was = AF.paused; AF.paused = true; for (let i = 0; i < n; i++) frame(dt); AF.paused = was; return AF.clock.frame; };
   AF.pause = () => { AF.paused = true; };
-  AF.resume = () => { AF.paused = false; };
+  AF.resume = () => { AF.paused = graphicsReset; };
   AF.capture = () => { AF.renderFrame(); return cv.toDataURL('image/png'); };
 
   // yield between boot stages (setTimeout is clamped to 1 s in hidden tabs)
@@ -182,6 +230,8 @@ try {
 {
   const R = AF.renderer, S = AF.scene, cam = AF.camera, G = AF.GFX, U = AF.mat.uniforms;
   AF.gfx = AF.gfx || {};
+  AF.gfx.halfFloatTargets = R.capabilities.isWebGL2 ? R.extensions.has('EXT_color_buffer_float') : R.extensions.has('EXT_color_buffer_half_float') && R.extensions.has('OES_texture_half_float') && R.extensions.has('OES_texture_half_float_linear');
+  AF.gfx.depthTextures = R.capabilities.isWebGL2 || R.extensions.has('WEBGL_depth_texture');
   // ---------------------------------------------------------------- tier auto-pick (ultra on capable GPUs; low on software / integrated)
   {
     let gpu = '';
@@ -191,11 +241,12 @@ try {
       // Balanced ('high') is the default everywhere; phones, tablets and software renderers start on Low. High ('ultra') is opt-in.
       let t = 'high';
       const saved = (() => { try { return localStorage.getItem('portSolace.gfx'); } catch (e) { return null; } })();
-      if (/swiftshader|llvmpipe|software|mali|adreno|powervr|apple gpu/i.test(gpu) || !R.capabilities.isWebGL2 || R.capabilities.maxTextureSize < 8192 || matchMedia('(pointer: coarse)').matches) t = 'low';
+      if (AF.MOBILE || /swiftshader|llvmpipe|software|mali|adreno|powervr|apple gpu/i.test(gpu) || !R.capabilities.isWebGL2 || R.capabilities.maxTextureSize < 8192) t = 'low';
       if (saved && ['low', 'high', 'ultra'].includes(saved)) { t = saved; G.auto = false; }
       G.tier = t;
     }
   }
+  if (AF.MOBILE) { G.tier = 'low'; G.cinema = false; G.auto = false; }
   // per-tier settings (read by R1 code every frame). near/far = shadow map sizes, lights = physical point lights, ao = SAO samples
   const TIER = {
     ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 12, pools: 24, regLod: 150, lod: 110, propCull: 900 },
@@ -204,9 +255,12 @@ try {
     cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
-  const cur = AF.gfx.tierCfg = () => G.cinema ? TIER.cinema : (TIER[G.tier] || TIER.ultra);
+  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 0, regLod: 45, lod: 40, propCull: 160 };
+  if (AF.MOBILE) TIER.low = mobileTier;
+  const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : (TIER[G.tier] || TIER.ultra);
   const texSeen = new WeakSet();
   const sharpenTextures = () => {     // anisotropic filtering on every mip-mapped texture in the scene (signs, decals, sky cards)
+    if (AF.MOBILE) return;
     const a = G.cinema ? AF.maxAniso : Math.min(4, AF.maxAniso);
     AF.scene.traverse((o) => {
       const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : null; if (!mats) return;
@@ -218,6 +272,7 @@ try {
   };
   AF.gfx.sharpenTextures = sharpenTextures;
   const applyTier = () => {
+    if (AF.MOBILE) { G.tier = 'low'; G.cinema = false; G.auto = false; G.scale = Math.min(1, G.scale); }
     const T = cur(), sun = AF.sun;
     AF.LOD_DIST = T.lod || 110;
     AF.REGION_LOD = T.regLod || 130;
@@ -258,12 +313,13 @@ try {
   // A second, wide sun depth map (±farR m) rendered by R1 from the static world only (region base + far-LOD meshes), refreshed when
   // the sun turns > 0.2° or the view centre moves > 32 m (never per frame). The voxel shader blends three's near map into it.
   {
-    const F = AF.gfx.far = { on: !AF.Q.has('nofar'), size: 0, R: 380, rt: null, renders: 0, ms: 0, dir: new THREE.Vector3(), cx: 1e9, cz: 1e9, dirty: true, frameN: 0 };
+    const F = AF.gfx.far = { on: !AF.MOBILE && !AF.Q.has('nofar'), size: 0, R: 380, rt: null, renders: 0, ms: 0, dir: new THREE.Vector3(), cx: 1e9, cz: 1e9, dirty: true, frameN: 0 };
     const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.BackSide });
     const fcam = F.cam = new THREE.OrthographicCamera(-380, 380, 380, -380, 1, 1600);
     const fscene = new THREE.Scene(); fscene.overrideMaterial = depthMat; fscene.matrixWorldAutoUpdate = false;
     const bias = new THREE.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
     F.resize = (size, rad) => {
+      if (!F.on) { U.uFarOn.value = 0; return; }
       if (F.size !== size) {
         if (F.rt) F.rt.dispose();
         F.rt = new THREE.WebGLRenderTarget(size, size, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false, depthBuffer: true });
@@ -314,7 +370,7 @@ try {
 
   // ---------------------------------------------------------------- environment reflections (PMREM of R2's AF.sky.envScene; analytic fallback)
   {
-    const E = AF.gfx.env = { on: !AF.Q.has('noenv'), rt: null, ver: -1, t: 0, n: 0, ms: 0, src: '' };
+    const E = AF.gfx.env = { on: !AF.MOBILE && AF.gfx.halfFloatTargets && !AF.Q.has('noenv'), rt: null, ver: -1, t: 0, n: 0, ms: 0, src: '' };
     let pmrem = null;
     // fallback: a gradient sphere fed by the atmosphere's sky uniforms (or fixed golden-hour colours)
     const fbU = { uZen: { value: new THREE.Color(0x5a8ccc) }, uHor: { value: new THREE.Color(0xf0d0a0) }, uGnd: { value: new THREE.Color(0x3a3026) }, uSunDir: { value: new THREE.Vector3(0.5, 0.3, 0.3) }, uSunCol: { value: new THREE.Color(0xffd9a0) }, uSunK: { value: 1 } };
@@ -387,6 +443,13 @@ try {
   });
   // expose for tests / debugging
   AF.gfx.stats = () => ({ tier: G.tier, cinema: G.cinema, lod: AF.LOD_DIST, pr: R.getPixelRatio(), scale: G.scale, near: AF.sun.shadow.mapSize.x, nearR: AF.shadowNear.r, far: AF.gfx.far && { on: AF.gfx.far.on, size: AF.gfx.far.size, R: AF.gfx.far.R, renders: AF.gfx.far.renders, ms: AF.gfx.far.ms }, env: AF.gfx.env && { src: AF.gfx.env.src, n: AF.gfx.env.n, ms: AF.gfx.env.ms }, autoSurf: AF.PAL.autoCount });
+  AF.test('renderer: mobile GPU budgets stay bounded', () => {
+    if (!AF.MOBILE) return { ok: true, info: 'desktop profile' };
+    const cfg = cur(), context = R.getContext().getContextAttributes();
+    const ok = !context.antialias && R.getPixelRatio() <= 0.75 * Math.min(devicePixelRatio || 1, 2) && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools === 0 && AF.LOD_DIST === 40 && AF.REGION_LOD === 45 && AF.PROP_CULL === 160 && (!AF.atmos.pool || AF.atmos.pool.length === 0);
+    return { ok, info: 'pr ' + R.getPixelRatio() + ', near ' + sunSize() + ', direct renderer, no far/env/AO/light pools' };
+  });
+  function sunSize() { return AF.sun.shadow.mapSize.x; }
 }
 
 // ================================================================ R1: screen-space ambient occlusion pass (half-res SAO + bilateral blur + depth-aware upsample)
@@ -475,6 +538,7 @@ try {
       gl_FragColor = uDebug > 2.5 ? vec4(vec3(texture2D(tAO, vUv).x), 1.0) : uDebug > 1.5 ? vec4(vec3(fract(z / 10.0)), 1.0) : uDebug > 0.5 ? vec4(vec3(ao), 1.0) : vec4(col.rgb * ao, col.a);
     }`;
   AF.gfx.makeAOPass = (renderer, scene, camera) => {
+    if (AF.MOBILE || !AF.gfx.halfFloatTargets || !AF.gfx.depthTextures) return null;
     const quadGeo = new THREE.PlaneGeometry(2, 2); const qcam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     const mkMat = (fs, uniforms) => new THREE.ShaderMaterial({ uniforms, vertexShader: VS, fragmentShader: fs, depthTest: false, depthWrite: false });
     const uAO = { tDepth: { value: null }, uInvProj: { value: new THREE.Matrix4() }, uProj: { value: new THREE.Matrix4() }, uFull: { value: new THREE.Vector2(1, 1) }, uRadius: { value: AO.radius }, uIntensity: { value: AO.intensity }, uBias: { value: AO.bias }, uMaxDist: { value: AO.maxDist }, uN: { value: 12 }, uDbgAO: { value: 0 } };

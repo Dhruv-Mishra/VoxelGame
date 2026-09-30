@@ -9,6 +9,53 @@ const X0 = -660, Y0 = -16, Z0 = -300;
 const CX = NX / CS, CY = NY / CS, CZ = NZ / CS;
 const W = AF.W = { VS, NX, NY, NZ, X0, Y0, Z0, CS, x1: X0 + NX * VS, z1: Z0 + NZ * VS };
 W.chunks = new Array(CX * CY * CZ).fill(null);
+const uniformChunks = new Map(), sharedChunks = new WeakSet(), compactPending = new Set();
+let compactEnabled = false;
+const chunkValue = (chunk, index) => !chunk ? 0 : !chunk.pal ? chunk[index] : chunk.pal[chunk.bits === 4 ? (chunk.idx[index >> 1] >> ((index & 1) * 4)) & 15 : chunk.idx[index]];
+const expandChunk = (chunk) => {
+  const dense = new Uint16Array(4096);
+  for (let index = 0; index < 4096; index++) dense[index] = chunkValue(chunk, index);
+  return dense;
+};
+const compactChunk = (key) => {
+  const chunk = W.chunks[key];
+  compactPending.delete(key);
+  if (!chunk || chunk.pal || sharedChunks.has(chunk)) return;
+  const palette = [], lookup = new Map();
+  for (let index = 0; index < 4096; index++) {
+    const value = chunk[index];
+    if (!lookup.has(value)) { lookup.set(value, palette.length); palette.push(value); if (palette.length > 256) return; }
+  }
+  if (palette.length === 1) {
+    const value = palette[0];
+    if (!value) { W.chunks[key] = null; return; }
+    let shared = uniformChunks.get(value);
+    if (!shared) { shared = new Uint16Array(4096).fill(value); uniformChunks.set(value, shared); sharedChunks.add(shared); }
+    W.chunks[key] = shared;
+    return;
+  }
+  const bits = palette.length <= 16 ? 4 : 8, indices = new Uint8Array(bits === 4 ? 2048 : 4096);
+  for (let index = 0; index < 4096; index++) {
+    const value = lookup.get(chunk[index]);
+    if (bits === 4) indices[index >> 1] |= value << ((index & 1) * 4); else indices[index] = value;
+  }
+  W.chunks[key] = { pal: new Uint16Array(palette), idx: indices, bits };
+};
+W.compactChunks = () => {
+  let samples = 0, mismatches = 0;
+  for (let key = 0; key < W.chunks.length; key++) {
+    const chunk = W.chunks[key];
+    if (chunk && samples < 8192 && key % 7 === 0) {
+      const index = (key * 53) & 4095, before = chunkValue(chunk, index);
+      compactChunk(key);
+      const column = Math.floor(key / CZ), bx = (Math.floor(column / CY) << 4) + (index >> 8), by = ((column % CY) << 4) + ((index >> 4) & 15), bz = ((key % CZ) << 4) + (index & 15);
+      if (W.get(bx, by, bz) !== before) mismatches++;
+      samples++;
+    } else compactChunk(key);
+  }
+  AF.chunkCompactionCheck = { samples, mismatches };
+  compactEnabled = true;
+};
 W.H = new Int16Array(NX * NZ);        // ground top in blocks above y=0 (top surface y = H*0.25)
 W.C = new Uint16Array(NX * NZ);       // top colour index
 W.S = new Uint16Array(NX * NZ);       // side colour index (0 = use top colour for the top block, dirt below)
@@ -23,14 +70,18 @@ W.xOf = (bx) => X0 + bx * VS; W.yOf = (by) => Y0 + by * VS; W.zOf = (bz) => Z0 +
 W.get = (bx, by, bz) => {
   if (bx < 0 || by < 0 || bz < 0 || bx >= NX || by >= NY || bz >= NZ) return 0;
   const ch = W.chunks[((bx >> 4) * CY + (by >> 4)) * CZ + (bz >> 4)];
-  return ch ? ch[((bx & 15) * 16 + (by & 15)) * 16 + (bz & 15)] : 0;
+  return chunkValue(ch, ((bx & 15) * 16 + (by & 15)) * 16 + (bz & 15));
 };
 W.set = (bx, by, bz, c) => {
   if (bx < 0 || by < 0 || bz < 0 || bx >= NX || by >= NY || bz >= NZ) return;
   const ci = ((bx >> 4) * CY + (by >> 4)) * CZ + (bz >> 4);
   let ch = W.chunks[ci];
+  const index = ((bx & 15) * 16 + (by & 15)) * 16 + (bz & 15);
+  if (chunkValue(ch, index) === c) return;
   if (!ch) { if (!c) return; ch = W.chunks[ci] = new Uint16Array(4096); }
-  ch[((bx & 15) * 16 + (by & 15)) * 16 + (bz & 15)] = c;
+  else if (ch.pal || sharedChunks.has(ch)) ch = W.chunks[ci] = expandChunk(ch);
+  ch[index] = c;
+  if (compactEnabled) compactPending.add(ci);
   W.dirty.add(((bx >> 7) * 64 + (bz >> 7)));
 };
 W.dirty = new Set();
@@ -259,7 +310,7 @@ AF.greedy = greedy;
 AF.lodOf = (g) => {
   if (g.userData.lod !== undefined) return g.userData.lod;
   const src = g.userData.src;
-  if (!src || src.vs >= 0.45 || src.m.w * src.m.h * src.m.d > 4e6) { g.userData.lod = null; return null; }   // already coarse: keep as is
+  if (!src || src.vs >= 0.45 || src.m.w * src.m.h * src.m.d > 4e6) { g.userData.lod = null; delete g.userData.src; return null; }   // already coarse: keep as is
   const m = src.m, F = src.vs >= 0.2 ? 2 : Math.max(2, Math.round(0.33 / src.vs)), w = Math.ceil(m.w / F), h = Math.ceil(m.h / F), d = Math.ceil(m.d / F);
   const L = new Model(w, h, d);
   const cnt = new Map();
@@ -275,6 +326,7 @@ AF.lodOf = (g) => {
   const vs2 = src.vs * F, an = src.anchor;
   greedyPad(w, h, d, padModel(L), vs2, [-m.w * src.vs * an[0], -m.h * src.vs * an[1], -m.d * src.vs * an[2]], [0, 0, 0], out, true);
   g.userData.lod = out.opaque.n ? out.opaque.geometry() : null;
+  delete g.userData.src;
   return g.userData.lod;
 };
 AF.meshModel = (m, o = {}) => {
@@ -300,9 +352,9 @@ AF.modelMesh = (m, o = {}) => {
 AF.mat = {};
 {
   const P = AF.PAL;
-  const texA = new THREE.DataTexture(P.albedo, 64, 64, THREE.RGBAFormat, THREE.FloatType);
-  const texE = new THREE.DataTexture(P.emit, 64, 64, THREE.RGBAFormat, THREE.FloatType);
-  const texM = new THREE.DataTexture(P.mat, 64, 64, THREE.RGBAFormat, THREE.FloatType);   // R1: rough, metal, pattern, window
+  const texA = new THREE.DataTexture(P.albedo, 128, 64, THREE.RGBAFormat, THREE.FloatType);
+  const texE = new THREE.DataTexture(P.emit, 128, 64, THREE.RGBAFormat, THREE.FloatType);
+  const texM = new THREE.DataTexture(P.mat, 128, 64, THREE.RGBAFormat, THREE.FloatType);   // R1: rough, metal, pattern, window
   for (const t of [texA, texE, texM]) { t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true; }
   AF.PAL.upload = () => { texA.needsUpdate = true; texE.needsUpdate = true; texM.needsUpdate = true; P.dirty = false; };
   AF.onTick('palette', 1, () => { if (P.dirty) AF.PAL.upload(); });
@@ -339,7 +391,7 @@ AF.mat = {};
     #endif
   `;
   const palCode = `
-    vec2 pUV = vec2((mod(aPal, 64.0) + 0.5) / 64.0, (floor(aPal / 64.0) + 0.5) / 64.0);
+    vec2 pUV = vec2((mod(aPal, 128.0) + 0.5) / 128.0, (floor(aPal / 128.0) + 0.5) / 64.0);
     vec4 pa = texture2D(uPalA, pUV); vec4 pe = texture2D(uPalE, pUV);
     vAlb = pa.rgb; vJit = pa.a; vEmi = pe; vBU = aBU; vNI = mod(aAN, 8.0);
     vAO = floor(aAN / 8.0 + 0.001);
@@ -816,7 +868,7 @@ function meshTerrainRegion(rx, rz, buf) {
       // corners in (u=z? ) we use u = x, v = z for the top plane
       ao = A(s10, s01, c00) | (A(s12, s01, c20) << 2) | (A(s12, s21, c22) << 4) | (A(s10, s21, c02) << 6);
     }
-    key[i * d + k] = ((h + 32768) * 4096 + C[ci]) * 256 + ao + 1;
+    key[i * d + k] = ((h + 32768) * 8192 + C[ci]) * 256 + ao + 1;
   }
   for (let i = 0; i < w; i++) for (let k = 0; k < d;) {
     const kk = key[i * d + k]; if (!kk) { k++; continue; }
@@ -824,7 +876,7 @@ function meshTerrainRegion(rx, rz, buf) {
     let len = 1; if (lit) while (k + len < d && key[i * d + k + len] === kk) len++;
     let wid = 1, stop = false;
     while (lit && i + wid < w) { for (let t = 0; t < len; t++) if (key[(i + wid) * d + k + t] !== kk) { stop = true; break; } if (stop) break; wid++; }
-    const v = kk - 1, aob = v % 256, rest = Math.floor(v / 256), c = rest % 4096, h = Math.floor(rest / 4096) - 32768;
+    const v = kk - 1, aob = v % 256, rest = Math.floor(v / 256), c = rest % 8192, h = Math.floor(rest / 8192) - 32768;
     const y = h * VS, xa = X0 + (bx0 + i) * VS, xb = xa + wid * VS, za = Z0 + (bz0 + k) * VS, zb = za + len * VS;
     const ao = aob === 255 ? [3, 3, 3, 3] : [aob & 3, (aob >> 2) & 3, (aob >> 4) & 3, (aob >> 6) & 3];
     const u0 = bx0 + i, v0 = bz0 + k;
@@ -882,7 +934,7 @@ function meshVoxelRegion(rx, rz, out) {
   const isFull = (cx, cy, cz) => {
     if (cx < 0 || cz < 0 || cx >= CX || cz >= CZ || cy < 0 || cy >= CY) return false;
     const key = (cx * CY + cy) * CZ + cz; let f = fullC.get(key);
-    if (f === undefined) { const ch = W.chunks[key]; f = !!ch; if (ch) for (let i = 0; i < 4096; i++) { const c = ch[i]; if (c === 0 || OPq[c] !== 1) { f = false; break; } } fullC.set(key, f); }
+    if (f === undefined) { const ch = W.chunks[key]; f = !!ch; if (ch) for (let i = 0; i < 4096; i++) { const c = chunkValue(ch, i); if (c === 0 || OPq[c] !== 1) { f = false; break; } } fullC.set(key, f); }
     return f;
   };
   const pad = new Uint16Array(18 * 18 * 18);
@@ -896,7 +948,7 @@ function meshVoxelRegion(rx, rz, out) {
       const ch = W.chunks[(cx * CY + cy) * CZ + cz]; if (!ch) continue;
       cnt[0].fill(0); cnt[1].fill(0); cnt[2].fill(0);
       let any = false;
-      for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { const b = (x * 16 + y) * 16; for (let z = 0; z < 16; z++) if (ch[b + z]) { any = true; cnt[0][x]++; cnt[1][y]++; cnt[2][z]++; } }
+      for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { const b = (x * 16 + y) * 16; for (let z = 0; z < 16; z++) if (chunkValue(ch, b + z)) { any = true; cnt[0][x]++; cnt[1][y]++; cnt[2][z]++; } }
       if (!any) continue;
       // skip chunks buried inside solid mass (all 6 neighbours fully opaque): no face can be visible (coordinator perf, Port Solace)
       if (isFull(cx, cy, cz) && isFull(cx - 1, cy, cz) && isFull(cx + 1, cy, cz) && isFull(cx, cy, cz - 1) && isFull(cx, cy, cz + 1) && isFull(cx, cy + 1, cz) && (cy === 0 || isFull(cx, cy - 1, cz))) { AF.stats.skipFull = (AF.stats.skipFull || 0) + 1; continue; }
@@ -906,7 +958,7 @@ function meshVoxelRegion(rx, rz, out) {
       // interior
       for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) {
         const src = (x * 16 + y) * 16, dst = ((x + 1) * 18 + (y + 1)) * 18 + 1;
-        for (let z = 0; z < 16; z++) pad[dst + z] = ch[src + z];
+        for (let z = 0; z < 16; z++) pad[dst + z] = chunkValue(ch, src + z);
       }
       // border shell from the 26 neighbour chunks, read directly (engine R2 boot: no per-voxel W.get; same values —
       // an out-of-world or empty neighbour chunk reads 0 exactly like W.get)
@@ -922,7 +974,7 @@ function meshVoxelRegion(rx, rz, out) {
           for (let z = -1; z <= 16; z++) {
             if (inner && z === 0) { z = 15; continue; }
             const nch = NB[ax * 9 + ay * 3 + (z < 0 ? 0 : z > 15 ? 2 : 1)];
-            pad[row + z] = nch ? nch[lx + ly + (z & 15)] : 0;
+            pad[row + z] = chunkValue(nch, lx + ly + (z & 15));
           }
         }
       }
@@ -951,7 +1003,7 @@ const coarseChunk = (key) => {
   for (let X = 0; X < 8; X++) for (let Y = 0; Y < 8; Y++) for (let Z = 0; Z < 8; Z++) {
     let n = 0, nOp = 0, gl = 0, nc = 0;
     for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) for (let d = 0; d < 2; d++) {
-      const v = ch[(((X * 2 + a) * 16) + Y * 2 + b) * 16 + Z * 2 + d]; if (!v) continue;
+      const v = chunkValue(ch, (((X * 2 + a) * 16) + Y * 2 + b) * 16 + Z * 2 + d); if (!v) continue;
       n++;
       if (OP[v] !== 1) { gl = v; continue; }
       nOp++;
@@ -1013,12 +1065,13 @@ function mergeProps(list, pick) {
   let vo = 0, io = 0;
   for (const [pr, g] of parts) {
     const p = g.attributes.position.array, uv = g.attributes.aBU.array, pal = g.attributes.aPal.array, an = g.attributes.aAN.array, ix = g.index.array, r = pr.rot, rn = ROTN[r];
+    const positionScale = g.userData.positionScale || 1;
     const n = g.attributes.position.count;
     for (let i = 0; i < n; i++) {
-      let x = p[i * 3], z = p[i * 3 + 2];
+      let x = p[i * 3] * positionScale, z = p[i * 3 + 2] * positionScale;
       if (r === 1) { const t = x; x = z; z = -t; } else if (r === 2) { x = -x; z = -z; } else if (r === 3) { const t = x; x = -z; z = t; }
       const j = vo + i;
-      P[j * 3] = pr.x + x; P[j * 3 + 1] = pr.y + p[i * 3 + 1]; P[j * 3 + 2] = pr.z + z;
+      P[j * 3] = pr.x + x; P[j * 3 + 1] = pr.y + p[i * 3 + 1] * positionScale; P[j * 3 + 2] = pr.z + z;
       U[j * 2] = uv[i * 2]; U[j * 2 + 1] = uv[i * 2 + 1]; L[j] = pal[i];
       const a = an[i], nidx = a % 8; N[j] = a - nidx + rn[nidx];
     }
@@ -1035,11 +1088,31 @@ function mergeProps(list, pick) {
   return geo;
 }
 function afDisposeArray() { this.array = null; }
+function afDisposeRegionArray() { if (this.array) AF.regionArrayBytesFreed = (AF.regionArrayBytesFreed || 0) + this.array.byteLength; this.array = null; }
+AF.staticUploadQueue = [];
+AF.releaseStaticGeometry = (geo) => {
+  if (geo.userData.releaseStatic) return;
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  if (!geo.boundingSphere) geo.computeBoundingSphere();
+  geo.userData.releaseStatic = true;
+  for (const attribute of Object.values(geo.attributes)) attribute.onUpload(afDisposeRegionArray);
+  if (geo.index) geo.index.onUpload(afDisposeRegionArray);
+  AF.staticUploadQueue.push(geo);
+};
 const regMesh = (geo, mat, cast) => {
-  // static region data: once uploaded, drop the JS copies of the shading attributes (positions + index stay for raycasts)
-  for (const k of ['aBU', 'aPal', 'aAN']) { const at = geo.attributes[k]; if (at) at.onUpload(afDisposeArray); }
+  geo.computeBoundingBox();
+  AF.releaseStaticGeometry(geo);
   const m = new THREE.Mesh(geo, mat); m.castShadow = cast; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); if (mat === AF.mat.glass) m.renderOrder = 2; AF.world.group.add(m); return m; };
-const dropMesh = (m) => { if (!m) return; AF.world.group.remove(m); m.geometry.dispose(); };
+AF.test('voxel: uploaded region arrays are released', () => {
+  let bad = 0;
+  for (const mesh of AF.world.group.children) {
+    const geo = mesh.geometry, position = geo && geo.attributes.position;
+    if (!position || position.onUploadCallback !== afDisposeRegionArray || position.array !== null) continue;
+    if (!geo.boundingSphere || !geo.boundingBox || (geo.index && geo.index.array !== null)) bad++;
+  }
+  return { ok: !bad && AF.regionArrayBytesFreed > 0, info: ((AF.regionArrayBytesFreed || 0) / 1048576).toFixed(1) + ' MiB position/index arrays released; invalid bounds/index ' + bad };
+});
+const dropMesh = (m) => { if (!m) return; AF.world.group.remove(m); m.geometry.userData.memDisposed = true; m.geometry.dispose(); };
 AF.world.lod = new Map();   // key -> {cx, cz, far, near, nearGlass, props}
 AF.world.coarse = new Map(); // key -> [coarse region meshes] (shown instead of the full region beyond AF.REGION_LOD)
 AF.LOD_DIST = 110;
@@ -1078,17 +1151,17 @@ AF.meshRegion = (rx, rz) => {
   T.terrain += performance.now() - tt; tt = performance.now();
   // coarse copy first (terrain quads are shared: copy them before the fine voxels are appended)
   const cout = { opaque: new GeoBuf(), glass: new GeoBuf() };
-  if (terrainQ) { const o = out.opaque, c = cout.opaque; c.p = o.p.slice(); c.uv = o.uv.slice(); c.pal = o.pal.slice(); c.an = o.an.slice(); c.idx = o.idx.slice(); c.n = o.n; }
+  if (!AF.MOBILE && terrainQ) { const o = out.opaque, c = cout.opaque; c.p = o.p.slice(); c.uv = o.uv.slice(); c.pal = o.pal.slice(); c.an = o.an.slice(); c.idx = o.idx.slice(); c.n = o.n; }
   meshVoxelRegion(rx, rz, out);
   T.voxel += performance.now() - tt; tt = performance.now();
   for (let cx = (rx * REG) >> 4, e = Math.min(CX, (rx * REG + REG) >> 4); cx < e; cx++) for (let cz = (rz * REG) >> 4, f = Math.min(CZ, (rz * REG + REG) >> 4); cz < f; cz++) for (let cy = 0; cy < CY; cy++) coarseCache.delete((cx * CY + cy) * CZ + cz);
-  meshVoxelRegionCoarse(rx, rz, cout);
+  if (!AF.MOBILE) meshVoxelRegionCoarse(rx, rz, cout);
   T.coarse += performance.now() - tt; tt = performance.now();
   const meshes = [], cmeshes = [];
   if (out.opaque.n) { const m = regMesh(out.opaque.geometry(), AF.mat.voxel, true); m.userData.region = k; meshes.push(m); }
   if (out.glass.n) meshes.push(regMesh(out.glass.geometry(), AF.mat.glass, false));
   // only keep a coarse copy when it actually saves something
-  if (out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8) {
+  if (!AF.MOBILE && out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8) {
     if (cout.opaque.n) { const m = regMesh(cout.opaque.geometry(), AF.mat.voxel, true); m.userData.region = k; m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
     if (cout.glass.n) { const m = regMesh(cout.glass.geometry(), AF.mat.glass, false); m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
   }
@@ -1157,14 +1230,100 @@ AF.meshWorld = async (progress) => {
     if (progress) await progress(done / (NRX * NRZ));
   }
   coarseCache.clear();
-  for (const w of AF.world.water) { const m = new THREE.Mesh(w.geo, w.mat || AF.mat.water); m.receiveShadow = true; m.renderOrder = 1; m.name = 'water'; AF.world.group.add(m); w.mesh = m; }
+  W.compactChunks();
+  for (const w of AF.world.water) { AF.releaseStaticGeometry(w.geo); const m = new THREE.Mesh(w.geo, w.mat || AF.mat.water); m.receiveShadow = true; m.renderOrder = 1; m.name = 'water'; AF.world.group.add(m); w.mesh = m; }
   W.dirty.clear(); W.tDirty = false;
   AF.stats = Object.assign(AF.stats || {}, { quads, meshMs: Math.round(performance.now() - t0) });
   for (const k in AF.stats.meshT) AF.stats.meshT[k] = Math.round(AF.stats.meshT[k]);
   console.log('[af] world meshed:', quads, 'quads in', AF.stats.meshMs, 'ms', JSON.stringify(AF.stats.meshT));
 };
 // re-mesh regions touched by W.set since the last mesh (for runtime edits: doors, etc.)
-AF.remeshDirty = () => { for (const k of W.dirty) AF.meshRegion(k >> 6, k & 63); W.dirty.clear(); };
+AF.remeshDirty = () => { for (const k of W.dirty) AF.meshRegion(k >> 6, k & 63); W.dirty.clear(); coarseCache.clear(); for (const key of compactPending) compactChunk(key); };
+AF.onTick('chunk-compaction', 870, () => {
+  if (!compactEnabled || !compactPending.size) return;
+  let budget = 8;
+  for (const key of compactPending) { compactChunk(key); if (--budget === 0) break; }
+});
+AF.onBuild('prop-source-memory', 905, () => {
+  const seen = new Set();
+  AF.scene.traverse((object) => { if (object.geometry) seen.add(object.geometry); });
+  for (const prop of AF.world.props) {
+    const geo = prop.geo.userData.lod;
+    if (!geo || seen.has(geo)) continue;
+    seen.add(geo);
+    const attribute = geo.attributes.position, positions = attribute.array;
+    if (!(positions instanceof Float32Array)) continue;
+    let exact = true;
+    for (let index = 0; index < positions.length; index++) {
+      const value = positions[index] * 32;
+      if (value !== Math.round(value) || value < -32768 || value > 32767) { exact = false; break; }
+    }
+    if (!exact) continue;
+    const packed = new Int16Array(positions.length);
+    for (let index = 0; index < positions.length; index++) packed[index] = positions[index] * 32;
+    geo.setAttribute('position', new THREE.BufferAttribute(packed, 3));
+    geo.userData.positionScale = 1 / 32;
+  }
+});
+AF.memStats = () => {
+  const chunkBuffers = new Set(), staticBuffers = new Set(), sceneBuffers = new Set(), propBuffers = new Set(), modelBuffers = new Set(), sourceGeometries = new Set();
+  const addArray = (buffers, array) => { if (array && array.buffer) buffers.add(array.buffer); };
+  const addGeometry = (buffers, geo) => {
+    if (!geo) return;
+    for (const attribute of Object.values(geo.attributes)) addArray(buffers, attribute.array);
+    if (geo.index) addArray(buffers, geo.index.array);
+  };
+  for (const chunk of W.chunks) {
+    if (!chunk) continue;
+    if (chunk.pal) { addArray(chunkBuffers, chunk.pal); addArray(chunkBuffers, chunk.idx); }
+    else addArray(chunkBuffers, chunk);
+  }
+  for (const chunk of uniformChunks.values()) addArray(chunkBuffers, chunk);
+  for (const props of AF.world.propsByRegion.values()) for (const prop of props) {
+    sourceGeometries.add(prop.geo);
+    if (prop.geo.userData.glass) sourceGeometries.add(prop.geo.userData.glass);
+    if (prop.geo.userData.lod) sourceGeometries.add(prop.geo.userData.lod);
+  }
+  for (const geo of sourceGeometries) {
+    addGeometry(propBuffers, geo);
+    if (geo.userData.src) addArray(modelBuffers, geo.userData.src.m.v);
+  }
+  AF.scene.traverse((object) => {
+    const geo = object.geometry;
+    if (!geo || sourceGeometries.has(geo)) return;
+    addGeometry(sceneBuffers, geo);
+    if (geo.userData.releaseStatic) addGeometry(staticBuffers, geo);
+  });
+  for (const geo of AF.staticUploadQueue) if (geo && !sourceGeometries.has(geo)) { addGeometry(staticBuffers, geo); addGeometry(sceneBuffers, geo); }
+  const mib = (buffers) => { let bytes = 0; for (const buffer of buffers) bytes += buffer.byteLength; return bytes / 1048576; };
+  return { chunks: mib(chunkBuffers), staticGeometry: mib(staticBuffers), sceneGeometry: mib(sceneBuffers), propSources: mib(propBuffers), propModels: mib(modelBuffers), releasedStatic: (AF.regionArrayBytesFreed || 0) / 1048576 };
+};
+AF.test('voxel: compact chunks stay below 180 MiB and preserve sampled cells', () => {
+  const stats = AF.memStats(), check = AF.chunkCompactionCheck;
+  return { ok: stats.chunks < 180 && !!check && check.samples >= 3000 && check.mismatches === 0, info: stats.chunks.toFixed(1) + ' MiB; ' + (check ? check.samples + ' samples, ' + check.mismatches + ' mismatches' : 'not compacted') };
+});
+AF.test('voxel: compact chunk formats and copy-on-write preserve every cell', () => {
+  const saved = W.chunks[0], savedOther = W.chunks[1], dirty = W.dirty.has(0), pending = compactPending.has(0);
+  let ok = true;
+  try {
+    for (const count of [1, 16, 32, 257]) {
+      const dense = new Uint16Array(4096);
+      for (let index = 0; index < 4096; index++) dense[index] = index % count + 1;
+      W.chunks[0] = dense; compactChunk(0);
+      for (let index = 0; index < 4096; index++) if (W.get(index >> 8, (index >> 4) & 15, index & 15) !== dense[index]) ok = false;
+      if (count === 1) W.chunks[1] = W.chunks[0];
+      W.set(0, 0, 0, 0);
+      if (W.get(0, 0, 0) !== 0 || W.get(0, 0, 1) !== dense[1] || (count === 1 && W.get(0, 0, 16) !== 1)) ok = false;
+    }
+    W.chunks[0] = new Uint16Array(4096); compactChunk(0);
+    if (W.chunks[0] !== null) ok = false;
+  } finally {
+    W.chunks[0] = saved; W.chunks[1] = savedOther;
+    if (!dirty) W.dirty.delete(0);
+    if (!pending) compactPending.delete(0);
+  }
+  return { ok, info: '16384 cells; uniform/nibble/byte/dense/air and isolated writes' };
+});
 
 // ---------------------------------------------------------------- collision
 AF.colliders = new Map();  // 8 m hash -> [box]

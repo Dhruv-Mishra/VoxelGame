@@ -1112,13 +1112,22 @@ try {
   // pose a built person and bake it to one geometry
   function bakePose(L, pose) {
     const pr = buildPerson(L);
-    const k = pose === 'a' ? 1 : pose === 'b' ? -1 : 0, A = L.plan === 'kid' ? 0.62 : 0.5;
+    const running = pose === 'runA' || pose === 'runB';
+    const k = pose === 'a' || pose === 'runA' ? 1 : pose === 'b' || pose === 'runB' ? -1 : 0, A = running ? 0.85 : L.gait ?? (L.plan === 'kid' ? 0.62 : 0.5);
     pr.legL.rotation.x = k * A; pr.legR.rotation.x = -k * A;
     pr.armL.rotation.x = -k * A * 0.8; pr.armR.rotation.x = L.propR === 'cane' || L.propR === 'briefcase' ? k * 0.15 : k * A * 0.8;
     if (pose === 'p') pr.body.position.y = 0.03;
+    if (running) pr.hips.rotation.x = 0.1;
     if (pose === 'sit') { pr.legL.geometry = pr.legBG; pr.legR.geometry = pr.legBG; pr.armR.rotation.x = -0.55; pr.armL.rotation.x = -0.5; pr.hips.rotation.x = -0.02; }
     if (pose === 'work') { pr.armR.rotation.x = -1.0; pr.armL.rotation.x = -0.75; pr.hips.rotation.x = 0.06; }
     if (pose === 'hail') { pr.armR.rotation.x = -2.7; pr.armR.rotation.z = -0.2; }
+    if (pose === 'phone') {
+      pr.armL.rotation.x = -1.65; pr.head.rotation.x = 0.35;
+      const handset = new AF.Model(2, 4, 1); handset.box(0, 0, 0, 2, 4, 1, ck(0x252a2e)); handset.box(0, 1, 0, 2, 3, 1, ck(0xb0c9cf));
+      const device = mesh(geo('crowd-phone', () => handset, [0.5, 1, 0.5]), false); device.position.set(0, -pr.B.ah * VS, 0.1); pr.armL.add(device);
+    }
+    if (pose === 'chat') { pr.armR.rotation.x = -0.6; pr.armR.rotation.z = -0.3; pr.head.rotation.y = 0.35; }
+    if (pose === 'look') { pr.head.rotation.y = -0.6; pr.hips.rotation.z = 0.035; }
     // hand-holding: the inner arm reaches sideways toward the partner and does not swing
     if (L.hold === 'L') { pr.armL.rotation.x = -0.08; pr.armL.rotation.z = L.holdZ; }
     if (L.hold === 'R') { pr.armR.rotation.x = -0.08; pr.armR.rotation.z = -L.holdZ; }
@@ -1163,6 +1172,12 @@ try {
     out.push(wom({ set: { top: { style: 'blouse', col: 0xf3f0e6, brooch: true }, skirt: { col: 0x2c3a5a, len: 7, flare: 1, pleats: true }, bottom: { style: 'skirt', col: 0x2c3a5a }, hat: 'straw', hatCol: 0xd8c08a, hatCol2: 0xb3342c, propR: null } }));
     out.push(man({ set: { top: { style: 'plaid', col: 0xb0592c, col2: 0x2a2a2a }, bottom: { style: 'pants', col: 0x3e5f8a, cuff: true }, hat: 'flatcap', hatCol: 0x6a6258, skirt: null, apron: null, propR: 'paper', beard: true } }));
     out.push(man({ age: 'teen', set: { top: { style: 'letterman', col: 0x3d6446, col2: 0xf3e7c8, col3: 0xf3e7c8, sleeve: 0xf3e7c8 }, bottom: { style: 'pants', col: 0x3e5f8a, cuff: true }, hat: null, skirt: null, apron: null, propR: 'book' } }));
+    for (let index = 0; index < out.length; index++) {
+      const L = out[index]; L.gait = 0.36 + r() * 0.28;
+      if (index % 4 === 0) { L.top.col = pick(r, CL); L.bottom.col = pick(r, CL); }
+      if (index % 5 === 0) { L.hat = null; L.hairStyle = L.female ? 'ponytail' : 'curly'; }
+      if (index % 6 === 0) L.newsbag = true;
+    }
     CR.nDay = out.length;
     const gown = (col, hat, hatCol, stole) => wom({ set: { top: { style: 'dress', col, col2: shade(col, 0.7), col3: stole || 0xc8844a }, skirt: { col, len: 10, flare: 1, hem: true }, bottom: { style: 'skirt', col }, hat, hatCol, hatCol2: 0x1c1c20, propR: 'purse', purseCol: 0xd8b84a, lipstick: true, hairStyle: 'wavy', apron: null } });
     out.push(man({ set: { top: { style: 'suit', col: 0x1c1c22, tie: 0xf6f4ee, cuffs: true }, bottom: { style: 'pants', col: 0x1c1c22 }, hat: 'tophat', hatCol: 0x141418, hatCol2: 0x2a2a30, propR: 'cane', skirt: null, apron: null, moustache: true } }));
@@ -1194,14 +1209,18 @@ try {
     for (const L of out) { if (L.skirt === null) delete L.skirt; if (!L.bottom) L.bottom = { style: 'pants', col: 0x45464b }; if (L.skirt && L.bottom.style !== 'skirt' && !L.skirt.open) L.bottom = { style: 'skirt', col: L.skirt.col }; }
     return out;
   }
-  const FRAMES = ['a', 'p', 'b', 'sit', 'work'];
+  const FRAMES = ['a', 'p', 'b', 'sit', 'work', 'phone', 'chat', 'look', 'hail', 'runA', 'runB'];
+  const WALK_FRAMES = ['a', 'p', 'b', 'p'];
   function buildCrowdMeshes() {
     const looks = crowdLooks(), tier = AF.GFX && AF.GFX.tier;
-    const NW = tier === 'low' ? 150 : tier === 'high' ? 300 : 380, NE = tier === 'low' ? 100 : 260;
+    const NW = tier === 'low' ? 100 : tier === 'high' ? 195 : 247, NE = tier === 'low' ? 100 : 260;
     CR.NW = NW; CR.NE = NE;
     for (let vi = 0; vi < looks.length; vi++) {
       const L = looks[vi], kid = L.plan === 'kid', V = { L, im: {}, hipY: PLANS[L.plan].lh * VS, kid, chair: !!L.chair };
       for (const f of FRAMES) {
+        if ((f === 'runA' || f === 'runB') && (vi % 6 !== 0 || vi >= CR.nEve || kid || L.plan === 'elder')) continue;
+        if ((f === 'phone' || f === 'hail') && (vi % 6 !== 0 || vi >= CR.nEve || kid)) continue;
+        if ((f === 'chat' || f === 'look') && (V.chair || (vi < CR.nEve && vi % 4 !== 0))) continue;
         if ((kid || vi >= CR.nEve) && (f === 'sit' || f === 'work')) continue;
         if (V.chair && f !== 'p') continue;
         if (vi >= CR.nEve && f === 'b') continue;   // group looks walk on two frames (a / pass) to keep draw calls down
@@ -1213,6 +1232,8 @@ try {
       }
       CR.V.push(V);
     }
+    CR.cnt = CR.V.map(() => ({ a: 0, p: 0, b: 0, sit: 0, work: 0, phone: 0, chat: 0, look: 0, hail: 0, runA: 0, runB: 0 }));
+    CR.stats = { walkers: 0, moving: 0, extras: 0, cand: 0, draws: 0, stopped: 0 };
   }
   // ---- walkers
   const crossC = new Map();
@@ -1246,10 +1267,12 @@ try {
     }
     CR.promEdges = PROM.length;
   }
+  const crowdView = { x: 0, z: 0, R: 120 }, crowdPlayer = { x: 0, z: 0, walk: false };
   function crowdCentre() {
     const c = AF.camera.position;
-    if (c.y > 25 && AF.shadowFocus) return { x: AF.shadowFocus.x, z: AF.shadowFocus.z, R: 150 };
-    return { x: c.x, z: c.z, R: 120 };
+    const focus = c.y > 25 && AF.shadowFocus ? AF.shadowFocus : c;
+    crowdView.x = focus.x; crowdView.z = focus.z; crowdView.R = focus === c ? 120 : 150;
+    return crowdView;
   }
   function refreshCand(C) {
     candEdges = []; candAt = { x: C.x, z: C.z };
@@ -1258,38 +1281,49 @@ try {
       if (d > C.R) continue;
       const main = Math.min(a.rw || 10, b.rw || 10) >= 14 || /Grand|Meridian|Park Row|Harbour Boulevard/.test(a.rn || '');
       const gww = CR.night && /Grand/.test(a.rn || '') && mz > 4 && mz < 165;   // the Great White Way after dark
-      const len = Math.hypot(b.x - a.x, b.z - a.z), wgt = Math.max(1, Math.round(len / (gww ? 4.5 : main ? 8 : 13.5)));
+      const len = Math.hypot(b.x - a.x, b.z - a.z), busy = main || mz > 170;
+      const wgt = Math.max(1, Math.round(len / (CR.night ? gww ? 9 : 26 : busy ? 12 : 21)));
       if (isCross(a, b)) continue;
       for (let k = 0; k < wgt; k++) candEdges.push(a.i < b.i ? [a, b] : [b, a]);
     }
   }
   const wr = AF.rng(4242);
   // crowd density per 9 m cell (rebuilt each tick): spawns and turns avoid cells that are already busy
-  const dens = new Map(), DCAP = 4;
+  const dens = new Map(), flows = new Map(), DCAP = 3;
+  const flowKey = (a, b) => Math.min(a.i, b.i) * 100000 + Math.max(a.i, b.i);
+  const flowSign = (a, b) => a.i < b.i ? 1 : -1;
   const cellK = (x, z) => (Math.floor(x / 9) + 500) * 4000 + Math.floor(z / 9) + 500;
   const densAt = (x, z) => dens.get(cellK(x, z)) || 0;
   function spawnWalker(w, C, farOnly) {
+    if (w.bench && CR.benchTaken) CR.benchTaken.delete(w.bench);
     if (!candEdges.length) { w.act = false; return; }
-    let e = null, best = null, bd = 1e9;
-    for (let k = 0; k < 10; k++) {
-      e = candEdges[Math.floor(wr() * candEdges.length)];
-      const mx = (e[0].x + e[1].x) / 2, mz = (e[0].z + e[1].z) / 2;
-      if (farOnly && Math.hypot(mx - C.x, mz - C.z) < C.R * 0.55) continue;
-      const n = densAt(mx, mz); if (n < bd) { bd = n; best = e; } if (n < DCAP) break;
+    let edge = null, start = 0;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const candidate = candEdges[Math.floor(wr() * candEdges.length)], phase = wr();
+      const x = candidate[0].x + (candidate[1].x - candidate[0].x) * phase, z = candidate[0].z + (candidate[1].z - candidate[0].z) * phase;
+      if (farOnly && Math.hypot(x - C.x, z - C.z) < C.R * 0.55) continue;
+      if (densAt(x, z) + 1 + (w.nf || 0) > DCAP) continue;
+      edge = candidate; start = phase; break;
     }
-    e = best || e;
-    const fw = wr() < 0.5; w.A = fw ? e[0] : e[1]; w.B = fw ? e[1] : e[0];
-    w.len = Math.hypot(w.B.x - w.A.x, w.B.z - w.A.z) || 0.1; w.d = wr() * w.len; w.act = true; w.wait = 0;
-    const V = CR.V[w.v]; w.speed = V.chair ? 0.75 + wr() * 0.15 : w.grp === 'kid' ? 0.9 + wr() * 0.15 : V.kid ? 1.5 + wr() * 0.5 : 1.05 + wr() * 0.45;
-    const k = cellK((w.A.x + w.B.x) / 2, (w.A.z + w.B.z) / 2); dens.set(k, (dens.get(k) || 0) + 1 + (w.nf || 0));
+    if (!edge) { w.act = false; return; }
+    const key = flowKey(edge[0], edge[1]), balance = flows.get(key) || 0, fw = balance ? balance * flowSign(edge[0], edge[1]) < 0 : wr() < 0.5;
+    w.A = fw ? edge[0] : edge[1]; w.B = fw ? edge[1] : edge[0];
+    flows.set(key, balance + flowSign(w.A, w.B));
+    w.len = Math.hypot(w.B.x - w.A.x, w.B.z - w.A.z) || 0.1; w.d = (fw ? start : 1 - start) * w.len;
+    w.x = w.A.x + (w.B.x - w.A.x) * w.d / w.len; w.z = w.A.z + (w.B.z - w.A.z) * w.d / w.len;
+    w.yaw = Math.atan2(w.B.x - w.A.x, w.B.z - w.A.z); w.act = true; w.wait = 0; w.pend = null; w.state = 'walk'; w.bench = null; w.decide = 0.5 + wr() * 2;
+    const V = CR.V[w.v]; w.speed = V.chair ? 0.75 + wr() * 0.15 : V.L.plan === 'elder' ? 0.9 + wr() * 0.2 : V.kid ? 1.3 + wr() * 0.3 : 0.9 + wr() * 0.7;
+    if (!w.grp && V.im.runA && wr() < 0.2) w.speed = 2.5 + wr() * 0.5;
+    const cell = cellK(w.x, w.z); dens.set(cell, (dens.get(cell) || 0) + 1 + (w.nf || 0));
   }
   function initWalkers() {
     const C = crowdCentre(); refreshCand(C);
     const nv = CR.nEve || CR.V.length;
     for (let i = 0; i < CR.NW; i++) {
       const nd = CR.nDay || nv, nn = nv - nd;
-      const w = { id: i, v: (i * 7 + (i >> 3)) % nd, lat: -0.25 + wr() * 1.2, s: 0.92 + wr() * 0.16, ph: wr() * 4, x: 0, y: 0.25, z: 0, yaw: 0, talk: 0, name: null };
+      const w = { id: i, v: (i * 7 + (i >> 3)) % nd, lat: -0.55 + wr() * 1.1, s: 0.88 + wr() * 0.24, width: 0.88 + wr() * 0.25, ph: wr() * 4, age: wr() * 20, x: 0, y: 0.25, z: 0, yaw: 0, talk: 0, name: null, state: 'walk' };
       if (CR.V[w.v].kid && wr() < 0.5) w.v = (w.v + 1) % nd;
+      if (i && w.v === CR.walkers[i - 1].vd) w.v = (w.v + 1) % nd;
       w.vd = w.v; w.vn = nn > 0 ? nd + (i * 3 + (i >> 2)) % nn : w.v;
       CR.walkers.push(w);
     }
@@ -1309,24 +1343,82 @@ try {
     }
     if (SP.chairM !== undefined) for (let i = 44, k = 0; i < W.length; i += 45, k++) { const w = W[i]; if (w.lead || w.grp) continue; w.v = w.vd = w.vn = SP[k & 1 ? 'chairF' : 'chairM']; w.grp = 'chair'; w.s = 1; }
     for (const w of W) if (!w.lead) spawnWalker(w, C, false);
+    CR.benches = AF.spots.filter((spot) => spot.kind === 'bench' && !spotsTaken.has(spot));
+    CR.benchTaken = new Set();
   }
   const E = new Float32Array(16);
-  function putInst(im, i, x, y, z, yaw, s) {
+  function putInst(im, i, x, y, z, yaw, s, width = 1) {
     const c = Math.cos(yaw) * s, sn = Math.sin(yaw) * s, a = im.instanceMatrix.array, o = i * 16;
-    a[o] = c; a[o + 1] = 0; a[o + 2] = -sn; a[o + 3] = 0; a[o + 4] = 0; a[o + 5] = s; a[o + 6] = 0; a[o + 7] = 0;
+    a[o] = c * width; a[o + 1] = 0; a[o + 2] = -sn * width; a[o + 3] = 0; a[o + 4] = 0; a[o + 5] = s; a[o + 6] = 0; a[o + 7] = 0;
     a[o + 8] = sn; a[o + 9] = 0; a[o + 10] = c; a[o + 11] = 0; a[o + 12] = x; a[o + 13] = y; a[o + 14] = z; a[o + 15] = 1;
   }
-  let lightT = 0;
-  function stepWalker(w, dt, pp) {
+  const crossingAxis = [0, 0];
+  function crowdGreen(A, B) {
+    const lights = AF.trafficLight; if (!lights || !lights.state) return true;
+    crossingAxis[0] = B.x - A.x; crossingAxis[1] = B.z - A.z;
+    return lights.state((A.x + B.x) / 2, (A.z + B.z) / 2, crossingAxis) === 'green';
+  }
+  function crowdDecision(w, pp) {
+    w.decide = 0.5 + wr() * 1.5;
+    if (w.state !== 'walk' || w.wait > 0 || w.pend || isCross(w.A, w.B)) return;
+    const chance = wr(), V = CR.V[w.v];
+    if (chance < 0.035 && !w.grp) {
+      const node = w.A; w.A = w.B; w.B = node; w.d = w.len - w.d; return;
+    }
+    if (chance > 0.18) return;
+    w.wait = 2.5 + wr() * 5; w.state = 'idle';
+    if (w.nf) { w.state = 'chat'; w.chatYaw = w.yaw; return; }
+    if (!V.chair && V.im.sit && CR.benches) {
+      for (const bench of CR.benches) {
+        if (CR.benchTaken.has(bench) || occupied(bench, AF.time.hours) || Math.hypot(bench.x - w.x, bench.z - w.z) > 2.2 || Math.abs((bench.y ?? 0.75) - w.y) > 1) continue;
+        let clear = true;
+        for (let sample = 1; sample <= 4; sample++) if (AF.boxBlocked(w.x + (bench.x - w.x) * sample / 4, w.y + 0.8, w.z + (bench.z - w.z) * sample / 4, 0.2, 0.7)) { clear = false; break; }
+        if (!clear) continue;
+        w.bench = bench; CR.benchTaken.add(bench); w.state = 'seatApproach'; w.wait = 8 + wr() * 12; return;
+      }
+    }
+    if (V.im.phone && chance < 0.09) w.state = 'phone';
+    else if (/Grand|Meridian|Harbour/.test(w.A.rn || '') && chance < 0.13) {
+      w.state = 'browse';
+      const dx = (w.B.x - w.A.x) / w.len, dz = (w.B.z - w.A.z) / w.len;
+      const outward = PL.onRoad(w.x + dz * 3, w.z - dx * 3) ? -1 : 1;
+      w.yaw = Math.atan2(dz * outward, -dx * outward);
+    } else if (V.im.hail) {
+      let passer = null;
+      for (const other of CR.walkers) if (other !== w && other.act && other.moving && Math.hypot(other.x - w.x, other.z - w.z) < 3) { passer = other; break; }
+      if (passer || (pp.walk && Math.hypot(pp.x - w.x, pp.z - w.z) < 4)) {
+        w.state = 'wave'; w.wait = 1.5; w.yaw = Math.atan2((passer || pp).x - w.x, (passer || pp).z - w.z);
+      }
+    }
+  }
+  function stepWalker(w, dt, pp, near = true) {
+    w.age += dt;
     if (w.lead) {   // group member: keep station beside / behind the leader
-      const L = w.lead, c = Math.cos(L.yaw), sn = Math.sin(L.yaw), lat = w.fl ?? 0.55, bk = w.fb || 0;
-      w.x = L.x + c * lat - sn * bk; w.z = L.z - sn * lat - c * bk; w.yaw = L.yaw; w.moving = L.moving; w.ph = L.ph + 2; w.act = L.act; w.y = L.A && L.A.py !== undefined ? L.y : AF.W.groundY(w.x, w.z); return;
+      const L = w.lead, heading = L.state === 'chat' ? L.chatYaw : L.yaw, c = Math.cos(heading), sn = Math.sin(heading), lat = w.fl ?? 0.55, bk = w.fb || 0;
+      w.x = L.x + c * lat - sn * bk; w.z = L.z - sn * lat - c * bk; w.yaw = L.state === 'chat' ? Math.atan2(L.x - w.x, L.z - w.z) : L.yaw;
+      w.state = L.state; w.moving = L.moving; w.ph = L.ph + 2; w.act = L.act; w.y = L.A && L.A.py !== undefined ? L.y : AF.W.groundY(w.x, w.z); return;
     }
     if (w.talk > 0) { w.talk -= dt; w.moving = false; w.yaw = Math.atan2(pp.x - w.x, pp.z - w.z); return; }
-    const green = (A, B) => { const T = AF.trafficLight; if (!T || !T.state) return true; return T.state((A.x + B.x) / 2, (A.z + B.z) / 2, [B.x - A.x, B.z - A.z]) === 'green'; };
+    if (near) { w.decide -= dt; if (w.decide <= 0) crowdDecision(w, pp); }
+    if (w.state === 'seatApproach' || w.state === 'seatLeave') {
+      const leaving = w.state === 'seatLeave', bench = w.bench;
+      const dx = (w.B.x - w.A.x) / w.len, dz = (w.B.z - w.A.z) / w.len;
+      const targetX = leaving ? w.A.x + dx * w.d + dz * w.lat : bench.x, targetZ = leaving ? w.A.z + dz * w.d - dx * w.lat : bench.z;
+      const distance = Math.hypot(targetX - w.x, targetZ - w.z), fraction = Math.min(1, dt * w.speed / Math.max(0.001, distance));
+      w.y = AF.W.groundY(w.x, w.z); w.x += (targetX - w.x) * fraction; w.z += (targetZ - w.z) * fraction; w.moving = true; w.ph += dt * w.speed * 2.3 / w.s;
+      w.yaw = Math.atan2(targetX - w.x, targetZ - w.z);
+      if (distance < 0.08) {
+        if (leaving) { CR.benchTaken.delete(bench); w.bench = null; w.state = 'walk'; w.wait = 0; }
+        else { w.state = 'sit'; w.moving = false; w.yaw = bench.yaw || 0; w.y = (bench.y ?? 0.75) - CR.V[w.v].hipY * w.s + 0.02; }
+      }
+      return;
+    }
     if (w.wait > 0) {
       w.wait -= dt; w.moving = false;
-      if (w.wait <= 0 && w.pend) { if (green(w.B, w.pend.n)) { const o = w.pend; w.pend = null; w.A = w.B; w.B = o.n; w.d = 0; w.len = o.d || 0.1; } else w.wait = 0.5; }
+      if (w.state === 'chat') w.yaw = w.chatYaw + Math.PI / 2;
+      if (w.state === 'sit') { if (w.wait <= 0) w.state = 'seatLeave'; return; }
+      if (w.wait <= 0 && w.pend) { if (crowdGreen(w.B, w.pend.n)) { const o = w.pend; w.pend = null; w.A = w.B; w.B = o.n; w.d = 0; w.len = o.d || 0.1; } else w.wait = 0.5; }
+      if (w.wait <= 0) w.state = 'walk';
     } else {
       let sp = w.speed;
       let dg = 0;
@@ -1334,21 +1426,29 @@ try {
         if (d2 < 1.0 && fwd > 0) sp = 0;
         else if (d2 < 7 && fwd > 0) { const side = ax * Math.cos(w.yaw) - az * Math.sin(w.yaw); dg = side > 0 ? -0.9 : 0.9; sp *= 0.8; } }   // step aside for the player
       w.dodge = (w.dodge || 0) + (dg - (w.dodge || 0)) * Math.min(1, dt * 3);
-      w.d += sp * dt; w.moving = sp > 0; w.ph += dt * sp * 2.3;
+      if (near && CR.V[w.v].kid) sp *= 0.94 + Math.sin(w.age * 2.1 + w.id) * 0.06;
+      w.d += sp * dt; w.moving = sp > 0; w.ph += dt * sp * 2.3 / w.s;
       if (w.d >= w.len) {
-        const A = w.A, B = w.B; let opts = B.adj.filter((e) => e.n !== A); if (!opts.length) opts = B.adj;
-        if (!opts.length) { w.act = false; return; }
-        let o = opts[Math.floor(wr() * opts.length)];
-        if (opts.length > 1) { const o2 = opts[Math.floor(wr() * opts.length)]; if (densAt(o2.n.x, o2.n.z) < densAt(o.n.x, o.n.z)) o = o2; }   // drift toward quieter blocks
-        if (isCross(B, o.n) && opts.length > 1 && wr() < 0.4) o = opts.find((e) => !isCross(B, e.n)) || o;
-        if (isCross(B, o.n) && !green(B, o.n)) { w.pend = o; w.wait = 0.4 + wr() * 0.6; w.d = w.len; }   // wait at the kerb for the lights
-        else { w.A = B; w.B = o.n; w.d = 0; w.len = o.d || 0.1; if (wr() < 0.03) w.wait = 2 + wr() * 5; }   // or stop to look in a window
+        const A = w.A, B = w.B;
+        if (!B.adj.length) { w.act = false; return; }
+        let choice = null, bestScore = Infinity;
+        for (const option of B.adj) {
+          if (option.n === A && B.adj.length > 1) continue;
+          const balance = (flows.get(flowKey(B, option.n)) || 0) * flowSign(B, option.n);
+          const score = densAt(option.n.x, option.n.z) + Math.max(0, balance) * 0.65 + wr() * 2;
+          if (score < bestScore) { bestScore = score; choice = option; }
+        }
+        choice = choice || B.adj[0];
+        if (isCross(B, choice.n) && !crowdGreen(B, choice.n)) { w.pend = choice; w.wait = 0.4 + wr() * 0.6; w.d = w.len; w.state = 'crossing'; }
+        else { w.A = B; w.B = choice.n; w.d = 0; w.len = choice.d || 0.1; }
       }
     }
     const dx = (w.B.x - w.A.x) / w.len, dz = (w.B.z - w.A.z) / w.len, t = Math.min(w.d, w.len);
-    const cr = (isCross(w.A, w.B) ? (w.nf ? -0.3 : 0.2) : w.lat) + (w.dodge || 0) * 0.6;
+    const wander = near && !w.nf ? Math.sin(w.age * (CR.V[w.v].kid ? 1.1 : 0.36) + w.id) * 0.12 : 0;
+    const cr = (isCross(w.A, w.B) ? (w.nf ? -0.3 : 0.2) : w.lat + wander) + (w.dodge || 0) * 0.35;
     const tx = w.A.x + dx * t + dz * cr, tz = w.A.z + dz * t - dx * cr;
-    if (w.moving || w.x === 0) { w.x = tx; w.z = tz; }
+    if (w.moving && (!near || !AF.boxBlocked(tx, w.y + 0.3, tz, 0.2, 1.2))) { w.x = tx; w.z = tz; }
+    else if (w.moving) { w.d = Math.max(0, w.d - w.speed * dt); w.dodge = 0; w.lat *= -0.5; w.moving = false; }
     const ty = Math.atan2(dx, dz); if (w.moving) w.yaw += AF.angDiff(w.yaw, ty) * Math.min(1, dt * 8);
     w.y = w.A.py !== undefined ? w.A.py + (w.B.py - w.A.py) * (t / w.len) : AF.W.groundY(w.x, w.z);
   }
@@ -1376,7 +1476,7 @@ try {
   const hash = (s) => { const h = Math.sin((s.x * 12.9898 + s.z * 78.233 + (s.y || 0) * 37.719)) * 43758.5453; return h - Math.floor(h); };
   function occupied(s, h) {
     const id = (s.building || '') + ' ' + (s.kind || ''), q = hash(s);
-    if (spotsTaken.has(s)) return false;
+    if (spotsTaken.has(s) || (CR.benchTaken && CR.benchTaken.has(s))) return false;
     if (/school/.test(id)) return h >= 8 && h < 15.2 && q < 0.85;
     if (/bank|trust/.test(id)) return h >= 9 && h < 15.5 ? q < 0.85 : /work/.test(s.kind) && h < 18 && q < 0.4;
     if (/heron|rosewood|roseland|ballroom|club|bar|anchor|dance/.test(id)) return h >= 20 || h < 2 ? q < 0.95 : q < 0.45;
@@ -1411,30 +1511,63 @@ try {
   }
   function crowdTick(dt, t) {
     if (!CR.V.length || !CR.on) return;
-    const C = crowdCentre(), pp = playerPos();
+    const C = crowdCentre(), pp = crowdPlayer, player = AF.player, camera = AF.camera.position;
+    pp.walk = AF.mode === 'walk' && !!player && (player.x ?? (player.body && player.body.x)) != null;
+    pp.x = pp.walk ? player.x ?? player.body.x : camera.x; pp.z = pp.walk ? player.z ?? player.body.z : camera.z;
     const hN = AF.time ? AF.time.hours : 12, nightW = hN >= 19.2 || hN < 5;
-    if (nightW !== CR.night) { CR.night = nightW; for (const w of CR.walkers) w.v = nightW ? w.vn : w.vd; candAt = { x: 1e9, z: 1e9 }; }
+    if (nightW !== CR.night) { CR.night = nightW; for (const w of CR.walkers) w.v = nightW ? w.vn : w.vd; candAt.x = candAt.z = 1e9; }
     const jump = Math.hypot(C.x - candAt.x, C.z - candAt.z);
-    if (jump > 25) { refreshCand(C); if (jump > 45) for (const w of CR.walkers) { if (!w.lead) { spawnWalker(w, C, false); w.x = 0; } } }
+    if (jump > 25) {
+      refreshCand(C);
+      if (jump > 45) {
+        dens.clear(); flows.clear();
+        for (const w of CR.walkers) if (!w.lead) spawnWalker(w, C, false);
+      }
+    }
     dt = Math.min(dt, 0.1);
-    const cnt = CR.cnt || (CR.cnt = CR.V.map(() => ({ a: 0, p: 0, b: 0, sit: 0, work: 0 })));
-    for (const c of cnt) { c.a = c.p = c.b = c.sit = c.work = 0; }
-    let act = 0, mov = 0;
-    dens.clear();
-    for (const w of CR.walkers) if (w.act && !w.lead) { const k = cellK(w.x, w.z); dens.set(k, (dens.get(k) || 0) + 1 + (w.nf || 0)); }
+    const cnt = CR.cnt;
+    for (const c of cnt) for (const frame of FRAMES) c[frame] = 0;
+    let act = 0, mov = 0, stopped = 0, draws = 0;
+    const eveningDistrict = Math.abs(C.x) < 35 && C.z > 4 && C.z < 165;
+    const population = Math.floor(CR.NW * (hN < 5 || hN >= 23 ? 0.45 : nightW ? eveningDistrict ? 0.8 : 0.6 : hN < 8 ? 0.75 : 1));
+    dens.clear(); flows.clear();
+    for (const w of CR.walkers) if (w.act && !w.lead && w.id < population) {
+      const cell = cellK(w.x, w.z); dens.set(cell, (dens.get(cell) || 0) + 1 + (w.nf || 0));
+      const key = flowKey(w.A, w.B); flows.set(key, (flows.get(key) || 0) + flowSign(w.A, w.B));
+    }
     const fr = AF.clock ? AF.clock.frame | 0 : 0, FAR2 = 65 * 65;
     for (const w of CR.walkers) {
+      if ((w.lead ? w.lead.id : w.id) >= population) {
+        w.act = false;
+        if (w.bench) { CR.benchTaken.delete(w.bench); w.bench = null; }
+        continue;
+      }
       if (!w.act && !w.lead) { spawnWalker(w, C, true); if (!w.act) continue; }
       // far walkers step at half rate (their accumulated dt is applied next frame)
       const ddx = w.x - C.x, ddz = w.z - C.z;
       if (!w.lead && ddx * ddx + ddz * ddz > FAR2 && ((fr + w.id) & 1)) w.acc = (w.acc || 0) + dt;
-      else { stepWalker(w, Math.min(0.2, dt + (w.acc || 0)), pp); w.acc = 0; }
-      if (!w.lead && Math.hypot(w.x - C.x, w.z - C.z) > C.R + 12) { spawnWalker(w, C, true); w.x = 0; continue; }
+      else { stepWalker(w, Math.min(0.2, dt + (w.acc || 0)), pp, ddx * ddx + ddz * ddz <= FAR2); w.acc = 0; }
+      if (!w.lead && Math.hypot(w.x - C.x, w.z - C.z) > C.R + 12) { spawnWalker(w, C, true); continue; }
       if (!w.act) continue;
-      act++; if (w.moving) mov++;
-      const V = CR.V[w.v]; let f = V.chair ? 'p' : w.moving ? ['a', 'p', 'b', 'p'][Math.floor(w.ph) & 3] : 'p'; if (!V.im[f]) f = 'a'; const im = V.im[f];
+      act++; if (w.moving) mov++; else stopped++;
+      const V = CR.V[w.v], near = ddx * ddx + ddz * ddz <= FAR2;
+      let f = V.chair ? 'p' : w.moving ? WALK_FRAMES[Math.floor(w.ph) & 3] : 'p';
+      if (near && w.moving && w.speed > 2.3 && V.im.runA) f = Math.floor(w.ph) & 1 ? 'runA' : 'runB';
+      if (near && !w.moving && !V.chair) {
+        if (w.state === 'sit') f = 'sit';
+        else if (w.state === 'phone') f = 'phone';
+        else if (w.state === 'wave') f = Math.sin(w.age * 7) > -0.5 ? 'hail' : 'p';
+        else if (w.state === 'chat') f = Math.sin(w.age * 2 + w.id) > 0 ? 'chat' : 'look';
+        else if (w.state === 'idle' || w.state === 'browse') f = Math.sin(w.age * 0.7 + w.id) > 0 ? 'look' : 'p';
+      }
+      if (!V.im[f]) f = 'p';
+      if (!cnt[w.v][f] && draws >= 100 && f !== 'sit') f = 'p';
+      const im = V.im[f];
       const c = cnt[w.v]; if (c[f] >= im.instanceMatrix.count) continue;
-      putInst(im, c[f]++, w.x, w.y + (f === 'p' && w.moving && !V.chair ? 0 : -0.03), w.z, w.yaw, w.s);
+      if (!c[f] && draws >= 110) continue;
+      if (!c[f]) draws++;
+      const sway = near && !w.moving && w.state !== 'sit' ? Math.sin(w.age * 1.3 + w.id) * 0.025 : 0;
+      putInst(im, c[f]++, w.x + Math.cos(w.yaw) * sway, w.y + (f === 'p' && w.moving && !V.chair ? 0 : -0.03), w.z - Math.sin(w.yaw) * sway, w.yaw, w.s, w.width);
     }
     // extras
     exT -= dt;
@@ -1444,13 +1577,14 @@ try {
       const V = CR.V[e.v]; let f = 'p';
       if (e.pose === 'sit') f = 'sit';
       else if (e.pose === 'work') f = (Math.sin(t * 1.6 + e.ph) > 0.2) ? 'work' : 'p';
-      else if (e.pose === 'dance') f = ['a', 'p', 'b', 'p'][Math.floor(t * 3 + e.ph) & 3];
+      else if (e.pose === 'dance') f = WALK_FRAMES[Math.floor(t * 3 + e.ph) & 3];
       const im = V.im[f]; if (!im) continue; const c = cnt[e.v]; if (c[f] >= im.instanceMatrix.count) continue;
+      if (!c[f]) { if (draws >= 110) continue; draws++; }
       const sway = e.pose === 'stand' ? Math.sin(t * 0.4 + e.ph) * 0.25 : e.pose === 'dance' ? t * 0.8 + e.ph : 0;
       putInst(im, c[f]++, e.x, e.y, e.z, e.yaw + sway, 1);
     }
     for (let v = 0; v < CR.V.length; v++) for (const f in CR.V[v].im) { const im = CR.V[v].im[f], n = cnt[v][f]; if (im.count !== n || n) { im.count = n; im.visible = n > 0; if (n) im.instanceMatrix.needsUpdate = true; } }
-    CR.stats = { walkers: act, moving: mov, extras: CR.extras.length, cand: candEdges.length, draws: CR.V.reduce((s, V) => s + Object.values(V.im).filter((m) => m.visible).length, 0) };
+    const stats = CR.stats; stats.walkers = act; stats.moving = mov; stats.extras = CR.extras.length; stats.cand = candEdges.length; stats.draws = draws; stats.stopped = stopped;
     // talkable passer-by: the nearest walker within 2 m of the player
     if (CR.it && pp.walk) {
       let best = null, bd = 2.2;
@@ -1623,7 +1757,30 @@ try {
   K.copTick = copTick;
 
   // ------------------------------------------------------------ tests
-  AF.test('people: crowd + extras populated', () => { if (!CR.V.length) return { ok: false, info: 'no crowd' }; for (let i = 0; i < 20; i++) crowdTick(0.05, AF.clock.t + i * 0.05); const s = CR.stats; return { ok: s.walkers >= Math.min(150, CR.NW * 0.8) && s.draws <= 110, info: JSON.stringify(s) }; });
+  AF.test('people: crowd + extras populated', () => { if (!CR.V.length) return { ok: false, info: 'no crowd' }; for (let i = 0; i < 20; i++) crowdTick(0.05, AF.clock.t + i * 0.05); const s = CR.stats; return { ok: s.walkers >= Math.min(60, CR.NW * 0.35) && s.draws <= 110, info: JSON.stringify(s) }; });
+  AF.test('people: busy sidewalk two-way flow + near idle behaviour', () => {
+    const edge = G.edges.find(([a, b]) => /Grand|Meridian/.test(a.rn || '') && !isCross(a, b) && Math.hypot(b.x - a.x, b.z - a.z) > 4);
+    if (!edge || !CR.V.length) return { ok: false, info: 'no busy sidewalk' };
+    const savedEdges = candEdges, savedDensity = new Map(dens), savedFlows = new Map(flows), savedBenches = new Set(CR.benchTaken), probes = [];
+    const centre = { x: edge[0].x, z: edge[0].z, R: 120 }, observer = { x: 1e6, z: 1e6, walk: false };
+    let forward = 0, stopped = 0;
+    try {
+      candEdges = [edge]; flows.clear();
+      for (let index = 0; index < 24; index++) {
+        dens.clear();
+        const probe = { id: 1000 + index, v: index % CR.nDay, lat: (index % 3 - 1) * 0.3, s: 1, ph: index * 0.37, age: index, talk: 0, x: 0, z: 0, y: 0.25 };
+        spawnWalker(probe, centre, false); probes.push(probe); if (probe.A.i < probe.B.i) forward++;
+      }
+      for (let tick = 0; tick < 80; tick++) for (const probe of probes) if (probe.act) stepWalker(probe, 0.1, observer, true);
+      for (const probe of probes) if (probe.act && probe.state !== 'walk') stopped++;
+      return { ok: forward >= 10 && forward <= 14 && stopped > 0, info: forward + '/24 forward, ' + stopped + ' stopped after 8 s' };
+    } finally {
+      candEdges = savedEdges; dens.clear(); flows.clear(); CR.benchTaken.clear();
+      for (const [key, value] of savedDensity) dens.set(key, value);
+      for (const [key, value] of savedFlows) flows.set(key, value);
+      for (const bench of savedBenches) CR.benchTaken.add(bench);
+    }
+  });
   AF.test('people: names valid (no " home", no Court surnames)', () => { const bad = people.filter((p) => /\bhome\b|Court|Apartments|Building|undefined|null/i.test(p.name) || /\bhome place\b/.test(p.lines.join(' '))); return { ok: bad.length === 0, info: bad.length + ' bad ' + bad.slice(0, 5).map((p) => p.name).join(', ') }; });
   AF.test('people: nobody standing on awnings (> floor + 0.6 only on solid stoops/steps)', () => { const bad = []; for (const p of people) { if (p.pose === 'sit' || p.state === 'walk') continue; const g = AF.W.groundY(p.x, p.z), fl = p.spot ? Math.max(g, p.spot.y ?? g) : g; let hung = false; if (p.y > fl + 0.65) for (let y = g + 0.12; y < p.y - 0.3; y += 0.25) { const c = AF.W.getM(p.x, y, p.z); if (!(c && AF.PAL.solid[c])) { hung = true; break; } } if (hung) bad.push(p.name + '@' + p.x.toFixed(1) + ',' + p.y.toFixed(2) + ',' + p.z.toFixed(1)); } return { ok: bad.length === 0, info: bad.length + ' floating ' + bad.slice(0, 5).join(' | ') }; });
   AF.test('people: traffic cop signals with the lights (Grand x Meridian)', () => {

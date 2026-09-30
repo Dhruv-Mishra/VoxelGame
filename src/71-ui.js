@@ -162,7 +162,7 @@ try {
   help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>RUN button</span></div></div>
     <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Jump \u00b7 brake</span><span>round button</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
     : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('V', 'First person')}${K('Tab', 'Aerial view')}</div>
-    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space', 'Engine up + climb / take off')}${K('Shift', 'Engine down + descend')}${K('W+S', 'Taxi / brake')}${K('A+D', 'Turn left / right')}${K('F', 'Get out (on the ground)')}</div>
+    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space', 'Start engine')}${K('Shift', 'Stop engine')}${K('W+S', 'Nose up / down; taxi / brake / reverse')}${K('A+D', 'Bank / ground steer (arrows also work)')}${K('Mouse', 'Free look')}${K('Wheel', 'Camera zoom')}${K('F+X', 'Get out (on the ground)')}</div>
     <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}</div>
     <div><h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}</div></div>`}
     <div class="stack"><button class="btn primary" data-k="closehelp">Got it</button></div></div>`;
@@ -196,9 +196,9 @@ try {
     dN.textContent = d.name || ''; dR.textContent = d.role ? '\u00b7 ' + String(d.role).replace(/\s*\u00b7\s*lives on .*$/i, '') : ''; dL.textContent = '';
     const fr = AF.friends && AF.friends.byId[String(d.name || '').toLowerCase()];
     dF.innerHTML = UI.portrait(fr ? fr.look : d.look || null);
-    show(dlg, true); show(bubbleEl, false); BB.cur = null;
+    show(dlg, true); show(bubbleEl, false); BB.cur = null; exitLock();
   });
-  const closeDlg = () => { S.dlg = null; show(dlg, false); };
+  const closeDlg = () => { const open = !!S.dlg; S.dlg = null; show(dlg, false); if (open) AF.input.requestLock(); };
   const advanceDlg = () => {
     const D = S.dlg; if (!D) return;
     const line = D.lines[D.i] || '';
@@ -242,20 +242,46 @@ try {
   const roster = () => ((AF.friends && AF.friends.cast) || []).slice().sort((a, b) => a.name.localeCompare(b.name));
   UI.roster = roster;
   const PV = { r: null, scene: null, cam: null, P: null, st: { phase: 0, speed: 0, air: 0, t: 0, land: 0 }, yaw: 0.4, spin: 0, drag: null, pop: 1 };
+  const pvDispose = () => {
+    if (!PV.r) return;
+    const renderer = PV.r, canvas = PV.cv;
+    PV.r = null;
+    if (PV.owned) for (const mesh of PV.owned) { mesh.geometry.dispose(); mesh.material.dispose(); }
+    renderer.dispose(); renderer.forceContextLoss();
+    if (canvas.parentNode) canvas.replaceWith(canvas.cloneNode(false));
+    Object.assign(PV, { scene: null, cam: null, cv: null, P: null, owned: null, drag: null, w: 0, h: 0 });
+  };
+  const pvPlaceholder = () => {
+    const canvas = title.querySelector('.stage canvas');
+    if (!canvas || PV.placeholder === canvas) return;
+    PV.placeholder = canvas; canvas.width = canvas.height = 160;
+    const ctx = canvas.getContext('2d'); if (!ctx) return;
+    ctx.clearRect(0, 0, 160, 160);
+    ctx.fillStyle = '#375c66'; ctx.fillRect(48, 66, 64, 48);
+    ctx.fillStyle = '#e8b68c'; ctx.fillRect(60, 26, 40, 40); ctx.fillRect(36, 70, 12, 40); ctx.fillRect(112, 70, 12, 40);
+    ctx.fillStyle = '#453934'; ctx.fillRect(56, 22, 48, 12); ctx.fillRect(56, 34, 8, 16);
+    ctx.fillStyle = '#293b4b'; ctx.fillRect(52, 114, 24, 32); ctx.fillRect(84, 114, 24, 32);
+    ctx.fillStyle = '#20252a'; ctx.fillRect(48, 142, 28, 8); ctx.fillRect(84, 142, 28, 8);
+    canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', 'Character');
+  };
   const pvInit = () => {
+    if (AF.MOBILE || PV.failed) { pvPlaceholder(); return false; }
     if (PV.r) return true;
-    if (PV.failed) return false;
     try {
       const cv = title.querySelector('.stage canvas');
       const r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true, powerPreference: 'low-power' });
+      Object.assign(PV, { r, cv, owned: [] });
+      cv.addEventListener('webglcontextlost', (event) => { if (PV.r !== r) return; event.preventDefault(); PV.failed = true; pvDispose(); pvPlaceholder(); });
       r.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.05;
       const sc = new THREE.Scene();
       sc.add(new THREE.HemisphereLight(0xfff2dc, 0x34465a, 1.9));
       const key = new THREE.DirectionalLight(0xfff0d8, 2.6); key.position.set(2.5, 4, 3.5); sc.add(key);
       const rim = new THREE.DirectionalLight(0x8ec0ff, 1.4); rim.position.set(-3, 2.5, -3); sc.add(rim);
       const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.78, 0.08, 40), new THREE.MeshStandardMaterial({ color: 0x3a2c1e, roughness: 0.55, metalness: 0.25 }));
+      PV.owned.push(disc);
       disc.position.y = -0.04; sc.add(disc);
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.018, 8, 48), new THREE.MeshStandardMaterial({ color: 0xf0c870, emissive: 0x6a4a10, roughness: 0.3, metalness: 0.8 }));
+      PV.owned.push(ring);
       ring.rotation.x = Math.PI / 2; sc.add(ring);
       const cam = new THREE.PerspectiveCamera(28, 1, 0.1, 50); cam.position.set(0, 1.2, 5.2); cam.lookAt(0, 0.98, 0);
       Object.assign(PV, { r, scene: sc, cam, cv });
@@ -264,15 +290,21 @@ try {
       const up = () => { PV.drag = null; cv.style.cursor = ''; };
       cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
       return true;
-    } catch (e) { PV.failed = true; console.warn('[af] character preview unavailable', e); return false; }
+    } catch (e) { PV.failed = true; pvDispose(); pvPlaceholder(); console.warn('[af] character preview unavailable', e); return false; }
   };
   const pvShow = (look) => {
+    PV.look = look;
+    if (!S.title) { pvDispose(); return; }
     if (!pvInit() || !AF.avatar) return;
     if (PV.P) PV.scene.remove(PV.P.root);
     PV.P = AF.avatar.build(look); PV.scene.add(PV.P.root); PV.pop = 0;
   };
+  new MutationObserver(() => { if (!S.title) pvDispose(); }).observe(title, { attributes: true, attributeFilter: ['class', 'style'] });
   AF.onTick('ui-preview', 946, (dt) => {
-    if (!S.title || !PV.r || !PV.P) return;
+    if (!S.title) { pvDispose(); return; }
+    if (AF.MOBILE || PV.failed) return;
+    if (!PV.r && PV.look) pvShow(PV.look);
+    if (!PV.r || !PV.P) return;
     const cv = PV.cv, w = cv.clientWidth | 0, hh = cv.clientHeight | 0; if (!w || !hh) return;
     if (PV.w !== w || PV.h !== hh) { PV.w = w; PV.h = hh; PV.r.setSize(w, hh, false); PV.cam.aspect = w / hh; PV.cam.updateProjectionMatrix(); }
     if (!PV.drag) PV.yaw += dt * 0.55;
@@ -282,6 +314,7 @@ try {
     AF.avatar.animate(PV.P, PV.st, Math.min(dt, 0.05), 0, true);
     PV.r.render(PV.scene, PV.cam);
   });
+  AF.test('ui: mobile title uses no WebGL preview', () => ({ ok: !AF.MOBILE || !PV.r && !!PV.placeholder, info: AF.MOBILE ? 'static character placeholder' : 'desktop turntable' }));
   const select = (id) => {
     const c = AF.friends && AF.friends.byId[id]; if (!c) return;
     const R = roster(), i = R.findIndex((q) => q.id === id);
@@ -301,6 +334,7 @@ try {
   const start = () => {
     if (!AF.ready || !S.pick || !S.title) return;
     S.title = false; root.classList.remove('titling'); title.classList.add('out'); setTimeout(() => { if (!S.title) title.style.display = 'none'; }, 600);
+    AF.input.requestLock();
     AF.friends.play(S.pick);
     const c = AF.friends.current;
     UI.toast(`Welcome home, ${c.name}! Your friends live along Friends Lane \u2014 go say hi.`, 5200);
@@ -310,7 +344,8 @@ try {
   title.querySelector('.arr.l').addEventListener('click', () => step(-1));
   title.querySelector('.arr.r').addEventListener('click', () => step(1));
   tGo.addEventListener('click', start);
-  UI.showTitle = () => { S.title = true; root.classList.add('titling'); title.style.display = ''; title.classList.remove('out'); toggleMenu(false); closeDlg(); if (AF.mode !== 'aerial') AF.setMode('aerial', { keep: true }); if (AF.flyTo) AF.flyTo(AF.PLAN.views[0].pos, AF.PLAN.views[0].target, 3); };
+  addEventListener('keydown', (event) => { if (S.title && (event.code === 'Enter' || event.code === 'Space') && !event.repeat && !(event.target && /INPUT|TEXTAREA/.test(event.target.tagName))) start(); });
+  UI.showTitle = () => { S.title = true; root.classList.add('titling'); title.style.display = ''; title.classList.remove('out'); exitLock(); toggleMenu(false); closeDlg(); if (AF.mode !== 'aerial') AF.setMode('aerial', { keep: true }); if (AF.flyTo) AF.flyTo(AF.PLAN.views[0].pos, AF.PLAN.views[0].target, 3); };
   UI.go = (id) => { if (id) select(id); start(); };
   root.classList.add('titling');
 
@@ -322,9 +357,17 @@ try {
     const hr = menu.querySelector('[data-k=hour]'); if (document.activeElement !== hr) hr.value = AF.time.hours.toFixed(2);
     menu.querySelector('[data-k=sens]').value = String(AF.lookSens());
   };
-  const exitLock = () => { if (document.pointerLockElement) try { document.exitPointerLock(); } catch (e) {} };
-  const toggleMenu = (on) => { S.menu = on ?? !S.menu; if (S.menu) { syncMenu(); S.help = false; S.map = false; mapEl.classList.remove('open'); help.classList.remove('open'); exitLock(); } menu.classList.toggle('open', S.menu); };
-  const toggleHelp = (on) => { S.help = on ?? !S.help; help.classList.toggle('open', S.help); if (S.help) { S.menu = false; menu.classList.remove('open'); exitLock(); } };
+  const exitLock = () => AF.input.releaseLock();
+  const toggleMenu = (on, resume = true) => { S.menu = on ?? !S.menu; if (S.menu) { syncMenu(); S.help = false; S.map = false; mapEl.classList.remove('open'); help.classList.remove('open'); exitLock(); } menu.classList.toggle('open', S.menu); if (!S.menu && resume) AF.input.requestLock(); };
+  const toggleHelp = (on) => { S.help = on ?? !S.help; help.classList.toggle('open', S.help); if (S.help) { S.menu = false; menu.classList.remove('open'); exitLock(); } else AF.input.requestLock(); };
+  UI.resume = () => { if (S.menu) toggleMenu(false); };
+  AF.on('pointerunlock', (intentional) => { if (!intentional && !S.title && !UI.modalOpen() && !S.dlg) toggleMenu(true); });
+  AF.on('escape', () => {
+    if (S.title) return;
+    if (S.map || S.help) { toggleMap(false); toggleHelp(false); }
+    else if (S.dlg) closeDlg();
+    else toggleMenu(true);
+  });
   menu.addEventListener('click', (e) => {
     if (e.target === menu) { toggleMenu(false); return; }
     const b = e.target.closest('button'); if (!b) return;
@@ -332,9 +375,9 @@ try {
     if (seg === 'gfx') { G.auto = false; G.set(b.dataset.v, 'menu'); try { localStorage.setItem('portSolace.gfx', b.dataset.v); } catch (er) {} }
     else if (seg === 'clock') AF.time.paused = b.dataset.v === 'stop';
     else if (b.dataset.k === 'resume') toggleMenu(false);
-    else if (b.dataset.k === 'map') { toggleMenu(false); toggleMap(true); }
-    else if (b.dataset.k === 'help') { toggleMenu(false); toggleHelp(true); }
-    else if (b.dataset.k === 'switch') { toggleMenu(false); UI.showTitle(); }
+    else if (b.dataset.k === 'map') { toggleMenu(false, false); toggleMap(true); }
+    else if (b.dataset.k === 'help') { toggleMenu(false, false); toggleHelp(true); }
+    else if (b.dataset.k === 'switch') { toggleMenu(false, false); UI.showTitle(); }
     syncMenu();
   });
   menu.querySelector('[data-k=hour]').addEventListener('input', (e) => { AF.time.hours = +e.target.value; });
@@ -428,6 +471,7 @@ try {
       buildLabels(); drawMap(); S.menu = false; menu.classList.remove('open'); exitLock();
     }
     mapEl.classList.toggle('open', S.map);
+    if (!S.map) AF.input.requestLock();
   };
   mapEl.addEventListener('click', (e) => { if (e.target === mapEl || e.target.closest('[data-k=closemap]')) toggleMap(false); else { const pk = labs.querySelector('.pick'); if (pk && !e.target.closest('.pick')) pk.remove(); } });
   UI.toggleMap = toggleMap; UI.toggleHelp = toggleHelp; UI.toggleMenu = toggleMenu;
@@ -453,7 +497,7 @@ try {
     } else {
       if (I.hit('KeyM')) toggleMap();
       if (I.hit('KeyH') || I.hit('Slash')) toggleHelp();
-      if (I.hit('Escape')) { if (S.map || S.help) { toggleMap(false); toggleHelp(false); } else if (S.dlg) closeDlg(); else if (AF.mode === 'walk' || AF.mode === 'aerial') toggleMenu(); }
+      if (I.hit('Escape')) AF.emit('escape');
     }
     const D = S.dlg;
     if (D) {

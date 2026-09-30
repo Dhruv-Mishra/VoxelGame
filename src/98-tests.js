@@ -3,7 +3,26 @@ try {
 // ===== 98-tests: core self-tests (?test)  (OWNER: coordinator; agents add AF.test() calls in their own parts) =====
 AF.test('no part or build stage threw', () => ({ ok: AF.errors.length === 0, info: AF.errors.map((e) => e.part + ': ' + e.msg.split('\n')[0]).join(' | ') }));
 AF.test('world meshed with geometry', () => ({ ok: (AF.stats && AF.stats.quads > 200), info: 'quads ' + (AF.stats && AF.stats.quads) }));
-AF.test('palette under capacity', () => ({ ok: AF.PAL.n < 4000, info: 'colours ' + AF.PAL.n }));
+AF.test('palette under capacity', () => ({ ok: AF.PAL.n < 8000, info: 'colours ' + AF.PAL.n }));
+AF.test('palette arrays and textures cover 8192 entries', () => {
+  const palette = AF.PAL, uniforms = AF.mat.uniforms;
+  const arrays = ['solid', 'glass', 'opaque', 'explicitPat', 'explicitWin'].every((name) => palette[name].length === 8192);
+  const textures = [['uPalA', 'albedo'], ['uPalE', 'emit'], ['uPalM', 'mat']].every(([uniform, name]) => {
+    const image = uniforms[uniform].value.image;
+    return image.width === 128 && image.height === 64 && image.data === palette[name] && image.data.length === 8192 * 4;
+  });
+  return { ok: arrays && textures, info: 'arrays ' + arrays + ' textures ' + textures };
+});
+AF.test('palette terrain keys round-trip without precision loss', () => {
+  let largest = 0;
+  for (const height of [-32768, 0, 32767]) for (let colour = 0; colour < 8192; colour++) for (const ao of [0, 255]) {
+    const packed = ((height + 32768) * 8192 + colour) * 256 + ao + 1;
+    const value = packed - 1, rest = Math.floor(value / 256);
+    if (!Number.isSafeInteger(packed) || value % 256 !== ao || rest % 8192 !== colour || Math.floor(rest / 8192) - 32768 !== height) return { ok: false, info: 'key ' + packed };
+    largest = Math.max(largest, packed);
+  }
+  return { ok: largest === 2 ** 37 && largest < 2 ** 53, info: 'maximum key ' + largest };
+});
 AF.test('a mode is active', () => ({ ok: !!AF.mode, info: String(AF.mode) }));
 AF.test('boot under 25 s', () => ({ ok: AF.bootMs < 25000, info: AF.bootMs + ' ms ' + JSON.stringify(AF.stageTimes) }));
 AF.test('ground at spawn is walkable', () => { const s = AF.PLAN.spawn; const y = AF.surfaceBelow(s.x, s.z, 40); return { ok: y > -1 && y < 3, info: 'y=' + y }; });
