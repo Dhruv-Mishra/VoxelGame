@@ -1030,7 +1030,7 @@ function physics(car, dt, inp) {
   const big = car.type.big ? 0.7 : 1;
   const maxF = (car.type.vmax || 27) * (big < 1 ? 0.72 : 1), maxR = 7, pull = car.type.acc || 7.5;
   let acc = 0;
-  if (inp.up) acc = f < 0 ? 14 : pull * big * (1 - Math.max(0, f) / maxF);
+  if (inp.up) acc = f < 0 ? 14 : pull * big * (1 - Math.max(0, f) / maxF) * (inp.thr ?? 1);
   else if (inp.down) acc = f > 0.3 ? -15 : -4.5 * (1 + f / maxR);
   acc -= f * 0.08 + Math.sign(f) * (inp.up || inp.down ? 0 : 1.1);
   if (inp.brake) acc -= Math.sign(f) * 9;
@@ -1129,10 +1129,17 @@ AF.modes.drive = {
     const I = AF.input, S = I.stick;
     const inp = DRIVE_INPUT;
     inp.up = I.key('KeyW') || I.key('ArrowUp'); inp.down = I.key('KeyS') || I.key('ArrowDown');
-    inp.left = (I.key('KeyA') || I.key('ArrowLeft')) ? 1 : 0; inp.right = (I.key('KeyD') || I.key('ArrowRight')) ? 1 : 0; inp.brake = I.key('Space');
-    if (S && (S.x || S.y)) { if (S.y > 0.3) inp.up = true; if (S.y < -0.3) inp.down = true; if (S.x < -0.15) inp.left = Math.min(1, -S.x * 1.3); if (S.x > 0.15) inp.right = Math.min(1, S.x * 1.3); }
+    inp.left = (I.key('KeyA') || I.key('ArrowLeft')) ? 1 : 0; inp.right = (I.key('KeyD') || I.key('ArrowRight')) ? 1 : 0; inp.brake = I.key('Space'); inp.thr = 1;
+    // touch stick: analog throttle past a dead zone, and a soft (squared) steering curve so a wobbling thumb doesn't twitch the car
+    if (S && (S.x || S.y)) {
+      if (S.y > 0.18) { inp.up = true; inp.thr = Math.min(1, 0.35 + (S.y - 0.18) / 0.55); } else if (S.y < -0.4) inp.down = true;
+      const ax = Math.max(0, Math.abs(S.x) - 0.14) / 0.72, st = Math.min(1, ax * ax * 0.6 + ax * 0.4);
+      if (S.x < 0) inp.left = st; else inp.right = st;
+    }
     if (VV.autoInput) Object.assign(inp, VV.autoInput);
-    physics(car, dt, inp);
+    // fixed <= 1/60 s substeps: a phone's uneven frame times no longer shake the suspension and contacts
+    const nSub = Math.min(4, Math.ceil(dt * 60 - 0.01)) || 1;
+    for (let i = 0; i < nSub; i++) physics(car, dt / nSub, inp);
     if (DR.bike) {
       const lean = -car.steer * AF.clamp(Math.abs(car.v) / 9, 0, 1) * 1.1;
       car.roll += (lean - car.roll) * Math.min(1, dt * 6);

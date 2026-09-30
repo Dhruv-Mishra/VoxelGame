@@ -562,7 +562,7 @@ try {
       if (wl > 0) { wx = wx / wl * sp; wz = wz / wl * sp; }
       const acc = 1 - Math.exp(-dt * (body.onGround ? 18 : 3));
       vel.x = AF.lerp(vel.x, wx, acc); vel.z = AF.lerp(vel.z, wz, acc);
-      if (!modal && I.hit('Space') && body.onGround) { body.vy = 6.4; body.onGround = false; }
+      if (!modal && I.hit('Space') && body.onGround) { body.vy = 7.2; body.onGround = false; }
       const wasAir = !body.onGround;
       const ox = body.x, oz = body.z;
       AF.moveBody(body, vel.x * dt, vel.z * dt, dt, { step: 0.55 });

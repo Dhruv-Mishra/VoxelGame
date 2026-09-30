@@ -1694,6 +1694,7 @@ const dropRegion = (k) => {
   if (AF.world.regLod) AF.world.regLod.delete(k);
 };
 AF.meshRegion = (rx, rz) => runSync(meshRegionG(rx, rz));
+const COARSE_ON = !AF.Q.has('nocoarse');
 function* meshRegionG(rx, rz) {
   const k = rx * 64 + rz;
   dropRegion(k);
@@ -1707,15 +1708,15 @@ function* meshRegionG(rx, rz) {
   tt = performance.now();
   // coarse copy first (terrain quads are shared: copy them before the fine voxels are appended)
   const cout = { opaque: new GeoBuf(), glass: new GeoBuf() };
-  if (!AF.MOBILE && terrainQ) { const o = out.opaque, c = cout.opaque; c.p = o.p.slice(); c.uv = o.uv.slice(); c.pal = o.pal.slice(); c.an = o.an.slice(); c.idx = o.idx.slice(); c.n = o.n; }
+  if (COARSE_ON && terrainQ) { const o = out.opaque, c = cout.opaque; c.p = o.p.slice(); c.uv = o.uv.slice(); c.pal = o.pal.slice(); c.an = o.an.slice(); c.idx = o.idx.slice(); c.n = o.n; }
   yield* meshVoxelRegionG(rx, rz, out);
   T.voxel += performance.now() - tt; tt = performance.now();
   for (let cx = (rx * REG) >> 4, e = Math.min(CX, (rx * REG + REG) >> 4); cx < e; cx++) for (let cz = (rz * REG) >> 4, f = Math.min(CZ, (rz * REG + REG) >> 4); cz < f; cz++) for (let cy = 0; cy < CY; cy++) coarseCache.delete((cx * CY + cy) * CZ + cz);
-  if (!AF.MOBILE) yield* meshVoxelRegionCoarseG(rx, rz, cout);
+  if (COARSE_ON) yield* meshVoxelRegionCoarseG(rx, rz, cout);
   T.coarse += performance.now() - tt;
   yield;
   const meshes = [], cmeshes = [];
-  const keepC = !AF.MOBILE && out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8;
+  const keepC = COARSE_ON && out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8;
   // typed-array conversion happens here: one geometry per step so a dense block never costs a streamed frame much
   const nO = out.opaque.n, nC = cout.opaque.n;
   const gO = nO ? out.opaque.geometry() : null; out.opaque = null; yield;
@@ -1775,7 +1776,7 @@ AF.onTick('region-stream', 878, (dt) => {
     STR.t = 0;
     const cur = STR.gen ? regionCluster(STR.key) : null;
     for (const cl of CLS.values()) {
-      if (cl.pending > 0 || !cl.built || cl === cur || clDist(cl, c, vy) < FD + 220) continue;
+      if (cl.pending > 0 || !cl.built || cl === cur || clDist(cl, c, vy) < FD + (AF.MOBILE ? 140 : 220)) continue;
       for (const k of cl.regs) { dropRegion(k); STR.pending.add(k); }
       cl.pending = cl.regs.length; STR.unloaded++;
     }
@@ -1808,7 +1809,8 @@ AF.onTick('prop-lod', 880, () => {
       }
       // full-detail regions away from the near shadow cascade cast through their 0.5 m copy (layer 1 = shadow pass only):
       // a tower 60 m up the sun line still shadows the street, at a fraction of the depth-pass triangles
-      if (want === 0 && r.coarse.length) {
+      // (phones keep no 0.5 m copy: their far regions simply stop casting)
+      if (want === 0 && (r.coarse.length || AF.MOBILE)) {
         const SN = AF.shadowNear, dx = Math.max(Math.abs(r.cx - SN.cx) - 16, 0), dz = Math.max(Math.abs(r.cz - SN.cz) - 16, 0);
         const sh = dx * dx + dz * dz > (SN.r + 6) * (SN.r + 6);
         if (sh !== r.sh) {
@@ -1840,6 +1842,7 @@ AF.onTick('prop-lod', 880, () => {
     const proxy = showNear && !!r.far && Math.hypot(r.cx - SN.cx, r.cz - SN.cz) > 26;
     if (r.near && r.near.castShadow === proxy) r.near.castShadow = !proxy;
     if (r.far) { r.far.visible = showNear ? proxy : d < (AF.PROP_CULL || 900); r.far.layers.set(showNear ? 1 : 0); }
+    if (AF.MOBILE && r.far) r.far.castShadow = Math.hypot(r.cx - SN.cx, r.cz - SN.cz) < SN.r + 24;
   }
   if (best && performance.now() - t0 < budget) buildNear(best);
 });
@@ -2274,7 +2277,7 @@ try {
       r = AF.lerp(rs, Math.min(AF.shadowRadius, AF.GFX.lite || AF.GFX.tier === 'low' ? 80 : 110), k);   // beyond: the far cascade (similar texel size from the air)
       fx = AF.lerp(cxs, fx, k); fz = AF.lerp(czs, fz, k);
       r = Math.round(r / 4) * 4;
-    }
+    } else if (AF.MOBILE) r = Math.min(r, alt < 30 ? 36 : 72);   // phones: a small near map (fewer casters, sharper texels)
     AF.shadowNear.r = r; AF.shadowNear.cx = fx; AF.shadowNear.cz = fz; AF.shadowNear.k = far ? AF.smooth(12, 60, alt) : 0;
     const fy = AF.shadowFocus.y || 0;
     if (sc.right !== r || sc.far !== 400 + r + 60) { sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.far = 400 + r + 60; sc.updateProjectionMatrix(); sun.shadow.bias = -0.36 / (sc.far - sc.near); }
@@ -2421,6 +2424,7 @@ try {
 {
   AF.CULL = { dist: 150, shadow: 40, radius: 3.5, list: [], inst: [], frame: 0, stats: { managed: 0, culled: 0, noShadow: 0, emptyInst: 0 } };
   const C = AF.CULL, v = new THREE.Vector3();
+  if (AF.MOBILE) { C.dist = 75; C.shadow = 25; }
   const skipNames = new Set(['world', 'sky', 'clouds', 'land-horizon']);
   const collect = () => {
     C.list.length = 0; C.inst.length = 0;
@@ -2512,7 +2516,7 @@ try {
     cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
-  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 0, regLod: 45, lod: 40, propCull: 160 };
+  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 0, regLod: 45, farLod: 110, lod: 40, propCull: 160 };
   if (AF.MOBILE) TIER.low = mobileTier;
   const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : G.lite && G.tier === 'high' ? TIER.lite : (TIER[G.tier] || TIER.ultra);
   const texSeen = new WeakSet();
@@ -20937,7 +20941,7 @@ function physics(car, dt, inp) {
   const big = car.type.big ? 0.7 : 1;
   const maxF = (car.type.vmax || 27) * (big < 1 ? 0.72 : 1), maxR = 7, pull = car.type.acc || 7.5;
   let acc = 0;
-  if (inp.up) acc = f < 0 ? 14 : pull * big * (1 - Math.max(0, f) / maxF);
+  if (inp.up) acc = f < 0 ? 14 : pull * big * (1 - Math.max(0, f) / maxF) * (inp.thr ?? 1);
   else if (inp.down) acc = f > 0.3 ? -15 : -4.5 * (1 + f / maxR);
   acc -= f * 0.08 + Math.sign(f) * (inp.up || inp.down ? 0 : 1.1);
   if (inp.brake) acc -= Math.sign(f) * 9;
@@ -21036,10 +21040,17 @@ AF.modes.drive = {
     const I = AF.input, S = I.stick;
     const inp = DRIVE_INPUT;
     inp.up = I.key('KeyW') || I.key('ArrowUp'); inp.down = I.key('KeyS') || I.key('ArrowDown');
-    inp.left = (I.key('KeyA') || I.key('ArrowLeft')) ? 1 : 0; inp.right = (I.key('KeyD') || I.key('ArrowRight')) ? 1 : 0; inp.brake = I.key('Space');
-    if (S && (S.x || S.y)) { if (S.y > 0.3) inp.up = true; if (S.y < -0.3) inp.down = true; if (S.x < -0.15) inp.left = Math.min(1, -S.x * 1.3); if (S.x > 0.15) inp.right = Math.min(1, S.x * 1.3); }
+    inp.left = (I.key('KeyA') || I.key('ArrowLeft')) ? 1 : 0; inp.right = (I.key('KeyD') || I.key('ArrowRight')) ? 1 : 0; inp.brake = I.key('Space'); inp.thr = 1;
+    // touch stick: analog throttle past a dead zone, and a soft (squared) steering curve so a wobbling thumb doesn't twitch the car
+    if (S && (S.x || S.y)) {
+      if (S.y > 0.18) { inp.up = true; inp.thr = Math.min(1, 0.35 + (S.y - 0.18) / 0.55); } else if (S.y < -0.4) inp.down = true;
+      const ax = Math.max(0, Math.abs(S.x) - 0.14) / 0.72, st = Math.min(1, ax * ax * 0.6 + ax * 0.4);
+      if (S.x < 0) inp.left = st; else inp.right = st;
+    }
     if (VV.autoInput) Object.assign(inp, VV.autoInput);
-    physics(car, dt, inp);
+    // fixed <= 1/60 s substeps: a phone's uneven frame times no longer shake the suspension and contacts
+    const nSub = Math.min(4, Math.ceil(dt * 60 - 0.01)) || 1;
+    for (let i = 0; i < nSub; i++) physics(car, dt / nSub, inp);
     if (DR.bike) {
       const lean = -car.steer * AF.clamp(Math.abs(car.v) / 9, 0, 1) * 1.1;
       car.roll += (lean - car.roll) * Math.min(1, dt * 6);
@@ -22915,7 +22926,7 @@ try {
     for (let i = 0; i < people.length; i++) {
       const p = people[i];
       const dc = Math.hypot(p.x - cam.x, p.z - cam.z);
-      const far = dc > 90, hide = dc > 220;
+      const far = dc > 90, hide = dc > (AF.MOBILE ? 70 : 150);
       if (hide !== !p.root.visible) p.root.visible = !hide;
       if (dc < 140 && p.parts.torso.layers.mask !== 1) p.root.traverse((o) => { if (o.isMesh && o.layers.mask !== 1) o.layers.set(0); });   // workaround: AF.CULL never restores layer 31 (unsigned mask compare)
       p.visible = !hide;
@@ -23178,7 +23189,7 @@ try {
   function crowdCentre() {
     const c = AF.camera.position;
     const focus = c.y > 25 && AF.shadowFocus ? AF.shadowFocus : c;
-    crowdView.x = focus.x; crowdView.z = focus.z; crowdView.R = focus === c ? 100 : 130;
+    crowdView.x = focus.x; crowdView.z = focus.z; crowdView.R = (focus === c ? 100 : 130) * (AF.MOBILE ? 0.6 : 1);
     return crowdView;
   }
   function refreshCand(C) {
@@ -23642,7 +23653,7 @@ try {
   function vignetteTick(dt, t) {
     const cam = AF.camera.position;
     for (const v of VIG) {
-      const pr = v.pr, near = Math.abs(cam.x - (v.x0 ?? v.ax)) + Math.abs(cam.z - (v.z0 ?? v.az)) < 170; pr.root.visible = near; if (v.hat) v.hat.visible = near; if (pr.crate) pr.crate.visible = near; if (!near) continue;
+      const pr = v.pr, near = Math.abs(cam.x - (v.x0 ?? v.ax)) + Math.abs(cam.z - (v.z0 ?? v.az)) < (AF.MOBILE ? 90 : 170); pr.root.visible = near; if (v.hat) v.hat.visible = near; if (pr.crate) pr.crate.visible = near; if (!near) continue;
       const k = (((t + v.off) % v.T) + v.T) % v.T / v.T;
       if (v.kind === 'hat') {
         // 0-.08 strolling, .08 gust: hat lifts + bowls along the pavement; .12-.62 he runs after it; .62 catches it; .62-1 strolls back, hat on
@@ -27798,7 +27809,7 @@ try {
       if (wl > 0) { wx = wx / wl * sp; wz = wz / wl * sp; }
       const acc = 1 - Math.exp(-dt * (body.onGround ? 18 : 3));
       vel.x = AF.lerp(vel.x, wx, acc); vel.z = AF.lerp(vel.z, wz, acc);
-      if (!modal && I.hit('Space') && body.onGround) { body.vy = 6.4; body.onGround = false; }
+      if (!modal && I.hit('Space') && body.onGround) { body.vy = 7.2; body.onGround = false; }
       const wasAir = !body.onGround;
       const ox = body.x, oz = body.z;
       AF.moveBody(body, vel.x * dt, vel.z * dt, dt, { step: 0.55 });
@@ -27954,7 +27965,11 @@ try {
   @keyframes uiIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
   #ui #h-hint{position:absolute;left:50%;bottom:max(16px,env(safe-area-inset-bottom));transform:translateX(-50%);padding:5px 14px;border-radius:999px;font-size:12px;color:var(--dim);display:none;white-space:nowrap}
   #ui #h-speed{position:absolute;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));padding:10px 16px;display:none;text-align:right;min-width:120px}
-  #ui.touch #h-speed{right:auto;left:50%;transform:translateX(-50%);bottom:auto;top:max(66px,env(safe-area-inset-top));padding:6px 14px;min-width:0}
+  #ui.touch #h-speed{display:none!important}
+  #ui #h-rot{display:none;position:absolute;inset:0;z-index:30;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(6,12,18,.9);color:#ffe6a8;font-size:17px;letter-spacing:.04em}
+  #ui #h-rot svg{width:64px;height:64px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;animation:uiRot 2.4s ease-in-out infinite}
+  @keyframes uiRot{0%,20%{transform:rotate(0)}50%,80%{transform:rotate(-90deg)}100%{transform:rotate(0)}}
+  @media (orientation:portrait){#ui.touch:not(.titling):not(.portraitok) #h-rot{display:flex}}
   #ui #h-speed .v{font-size:30px;font-weight:700;line-height:1} #ui #h-speed .v small{font-size:12px;color:var(--dim);margin-left:4px;font-weight:500}
   #ui #h-speed .s{font-size:12px;color:var(--dim);margin-top:4px}
   #ui #h-speed .bar{height:4px;border-radius:4px;background:rgba(255,255,255,.12);margin-top:6px;overflow:hidden} #ui #h-speed .bar i{display:block;height:100%;background:var(--gold)}
@@ -28032,7 +28047,21 @@ try {
     <div class="n"></div><div class="tg"></div><div class="d"></div><div class="dots"></div>
     <button class="btn primary go"><span class="ic">&#9654;</span><span class="lb">Let's Play</span></button></div>`); title.id = 't-title';
   const clock = h('div', 'panel hud', `<div class="t"><span class="tm">4:30</span><small class="ap">PM</small></div><div class="p">Port Solace</div>`); clock.id = 'h-clock';
-  const right = h('div', 'hud', `<div id="h-mini" class="panel pe"><canvas width="220" height="220"></canvas><div class="n">N</div></div><div id="h-btns"><button class="panel round pe" data-k="map" title="Map (M)">&#x1F5FA;</button><button class="panel round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); right.id = 'h-right';
+  const right = h('div', 'hud', `<div id="h-mini" class="panel pe"><canvas width="220" height="220"></canvas><div class="n">N</div></div><div id="h-btns">${TOUCH ? '<button class="panel round pe" data-k="full" title="Fullscreen">&#x26F6;</button>' : ''}<button class="panel round pe" data-k="map" title="Map (M)">&#x1F5FA;</button><button class="panel round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); right.id = 'h-right';
+  // phones: fullscreen + landscape lock from the Play tap (a user gesture); iOS Safari has neither API, so portrait gets a rotate hint
+  const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  const goFull = (on = true) => {
+    const lock = () => { try { const o = screen.orientation; if (o && o.lock) o.lock('landscape').catch(() => {}); } catch (e) {} };
+    try {
+      if (!on) { if (isFull()) (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+      const el = document.documentElement, rq = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!rq || isFull()) { lock(); return; }
+      const p = rq.call(el, { navigationUI: 'hide' }); if (p && p.then) p.then(lock, () => {}); else lock();
+    } catch (e) { /* not allowed here */ }
+  };
+  UI.fullscreen = goFull;
+  const rot = h('div', 'pe', `<svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M4 14a8 8 0 0 0 6 6M20 10a8 8 0 0 0-6-6"/></svg><div>Turn your phone sideways</div><button class="btn">Play in portrait</button>`); rot.id = 'h-rot';
+  rot.querySelector('button').addEventListener('click', () => root.classList.add('portraitok'));
   const prompt = h('div', 'panel hud pe', ''); prompt.id = 'h-prompt';
   const toasts = h('div', '', ''); toasts.id = 'h-toasts';
   const hint = h('div', 'panel hud', ''); hint.id = 'h-hint';
@@ -28217,6 +28246,7 @@ try {
   const start = () => {
     if (!AF.ready || !S.pick || !S.title) return;
     S.title = false; root.classList.remove('titling'); title.classList.add('out'); setTimeout(() => { if (!S.title) title.style.display = 'none'; }, 600);
+    if (TOUCH) goFull();
     AF.input.requestLock();
     AF.friends.play(S.pick);
     const c = AF.friends.current;
@@ -28305,7 +28335,7 @@ try {
   menu.querySelector('[data-k=hour]').addEventListener('input', (e) => { AF.time.hours = +e.target.value; });
   menu.querySelector('[data-k=sens]').addEventListener('input', (e) => AF.setLookSens(e.target.value));
   help.addEventListener('click', (e) => { if (e.target === help || e.target.closest('[data-k=closehelp]')) toggleHelp(false); });
-  right.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
+  right.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); else if (b.dataset.k === 'full') goFull(!isFull()); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
   prompt.addEventListener('click', () => AF.input.tap('KeyE'));
 
   // map base: 1.5 px per metre over the whole world (AF.PLAN.bounds)

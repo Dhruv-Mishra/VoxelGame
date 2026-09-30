@@ -1023,7 +1023,7 @@ try {
     for (let i = 0; i < people.length; i++) {
       const p = people[i];
       const dc = Math.hypot(p.x - cam.x, p.z - cam.z);
-      const far = dc > 90, hide = dc > 220;
+      const far = dc > 90, hide = dc > (AF.MOBILE ? 70 : 150);
       if (hide !== !p.root.visible) p.root.visible = !hide;
       if (dc < 140 && p.parts.torso.layers.mask !== 1) p.root.traverse((o) => { if (o.isMesh && o.layers.mask !== 1) o.layers.set(0); });   // workaround: AF.CULL never restores layer 31 (unsigned mask compare)
       p.visible = !hide;
@@ -1286,7 +1286,7 @@ try {
   function crowdCentre() {
     const c = AF.camera.position;
     const focus = c.y > 25 && AF.shadowFocus ? AF.shadowFocus : c;
-    crowdView.x = focus.x; crowdView.z = focus.z; crowdView.R = focus === c ? 100 : 130;
+    crowdView.x = focus.x; crowdView.z = focus.z; crowdView.R = (focus === c ? 100 : 130) * (AF.MOBILE ? 0.6 : 1);
     return crowdView;
   }
   function refreshCand(C) {
@@ -1750,7 +1750,7 @@ try {
   function vignetteTick(dt, t) {
     const cam = AF.camera.position;
     for (const v of VIG) {
-      const pr = v.pr, near = Math.abs(cam.x - (v.x0 ?? v.ax)) + Math.abs(cam.z - (v.z0 ?? v.az)) < 170; pr.root.visible = near; if (v.hat) v.hat.visible = near; if (pr.crate) pr.crate.visible = near; if (!near) continue;
+      const pr = v.pr, near = Math.abs(cam.x - (v.x0 ?? v.ax)) + Math.abs(cam.z - (v.z0 ?? v.az)) < (AF.MOBILE ? 90 : 170); pr.root.visible = near; if (v.hat) v.hat.visible = near; if (pr.crate) pr.crate.visible = near; if (!near) continue;
       const k = (((t + v.off) % v.T) + v.T) % v.T / v.T;
       if (v.kind === 'hat') {
         // 0-.08 strolling, .08 gust: hat lifts + bowls along the pavement; .12-.62 he runs after it; .62 catches it; .62-1 strolls back, hat on

@@ -1296,6 +1296,7 @@ const dropRegion = (k) => {
   if (AF.world.regLod) AF.world.regLod.delete(k);
 };
 AF.meshRegion = (rx, rz) => runSync(meshRegionG(rx, rz));
+const COARSE_ON = !AF.Q.has('nocoarse');
 function* meshRegionG(rx, rz) {
   const k = rx * 64 + rz;
   dropRegion(k);
@@ -1309,15 +1310,15 @@ function* meshRegionG(rx, rz) {
   tt = performance.now();
   // coarse copy first (terrain quads are shared: copy them before the fine voxels are appended)
   const cout = { opaque: new GeoBuf(), glass: new GeoBuf() };
-  if (!AF.MOBILE && terrainQ) { const o = out.opaque, c = cout.opaque; c.p = o.p.slice(); c.uv = o.uv.slice(); c.pal = o.pal.slice(); c.an = o.an.slice(); c.idx = o.idx.slice(); c.n = o.n; }
+  if (COARSE_ON && terrainQ) { const o = out.opaque, c = cout.opaque; c.p = o.p.slice(); c.uv = o.uv.slice(); c.pal = o.pal.slice(); c.an = o.an.slice(); c.idx = o.idx.slice(); c.n = o.n; }
   yield* meshVoxelRegionG(rx, rz, out);
   T.voxel += performance.now() - tt; tt = performance.now();
   for (let cx = (rx * REG) >> 4, e = Math.min(CX, (rx * REG + REG) >> 4); cx < e; cx++) for (let cz = (rz * REG) >> 4, f = Math.min(CZ, (rz * REG + REG) >> 4); cz < f; cz++) for (let cy = 0; cy < CY; cy++) coarseCache.delete((cx * CY + cy) * CZ + cz);
-  if (!AF.MOBILE) yield* meshVoxelRegionCoarseG(rx, rz, cout);
+  if (COARSE_ON) yield* meshVoxelRegionCoarseG(rx, rz, cout);
   T.coarse += performance.now() - tt;
   yield;
   const meshes = [], cmeshes = [];
-  const keepC = !AF.MOBILE && out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8;
+  const keepC = COARSE_ON && out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8;
   // typed-array conversion happens here: one geometry per step so a dense block never costs a streamed frame much
   const nO = out.opaque.n, nC = cout.opaque.n;
   const gO = nO ? out.opaque.geometry() : null; out.opaque = null; yield;
@@ -1377,7 +1378,7 @@ AF.onTick('region-stream', 878, (dt) => {
     STR.t = 0;
     const cur = STR.gen ? regionCluster(STR.key) : null;
     for (const cl of CLS.values()) {
-      if (cl.pending > 0 || !cl.built || cl === cur || clDist(cl, c, vy) < FD + 220) continue;
+      if (cl.pending > 0 || !cl.built || cl === cur || clDist(cl, c, vy) < FD + (AF.MOBILE ? 140 : 220)) continue;
       for (const k of cl.regs) { dropRegion(k); STR.pending.add(k); }
       cl.pending = cl.regs.length; STR.unloaded++;
     }
@@ -1410,7 +1411,8 @@ AF.onTick('prop-lod', 880, () => {
       }
       // full-detail regions away from the near shadow cascade cast through their 0.5 m copy (layer 1 = shadow pass only):
       // a tower 60 m up the sun line still shadows the street, at a fraction of the depth-pass triangles
-      if (want === 0 && r.coarse.length) {
+      // (phones keep no 0.5 m copy: their far regions simply stop casting)
+      if (want === 0 && (r.coarse.length || AF.MOBILE)) {
         const SN = AF.shadowNear, dx = Math.max(Math.abs(r.cx - SN.cx) - 16, 0), dz = Math.max(Math.abs(r.cz - SN.cz) - 16, 0);
         const sh = dx * dx + dz * dz > (SN.r + 6) * (SN.r + 6);
         if (sh !== r.sh) {
@@ -1442,6 +1444,7 @@ AF.onTick('prop-lod', 880, () => {
     const proxy = showNear && !!r.far && Math.hypot(r.cx - SN.cx, r.cz - SN.cz) > 26;
     if (r.near && r.near.castShadow === proxy) r.near.castShadow = !proxy;
     if (r.far) { r.far.visible = showNear ? proxy : d < (AF.PROP_CULL || 900); r.far.layers.set(showNear ? 1 : 0); }
+    if (AF.MOBILE && r.far) r.far.castShadow = Math.hypot(r.cx - SN.cx, r.cz - SN.cz) < SN.r + 24;
   }
   if (best && performance.now() - t0 < budget) buildNear(best);
 });

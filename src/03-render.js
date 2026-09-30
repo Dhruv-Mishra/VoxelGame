@@ -57,7 +57,7 @@ try {
       r = AF.lerp(rs, Math.min(AF.shadowRadius, AF.GFX.lite || AF.GFX.tier === 'low' ? 80 : 110), k);   // beyond: the far cascade (similar texel size from the air)
       fx = AF.lerp(cxs, fx, k); fz = AF.lerp(czs, fz, k);
       r = Math.round(r / 4) * 4;
-    }
+    } else if (AF.MOBILE) r = Math.min(r, alt < 30 ? 36 : 72);   // phones: a small near map (fewer casters, sharper texels)
     AF.shadowNear.r = r; AF.shadowNear.cx = fx; AF.shadowNear.cz = fz; AF.shadowNear.k = far ? AF.smooth(12, 60, alt) : 0;
     const fy = AF.shadowFocus.y || 0;
     if (sc.right !== r || sc.far !== 400 + r + 60) { sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.far = 400 + r + 60; sc.updateProjectionMatrix(); sun.shadow.bias = -0.36 / (sc.far - sc.near); }
@@ -204,6 +204,7 @@ try {
 {
   AF.CULL = { dist: 150, shadow: 40, radius: 3.5, list: [], inst: [], frame: 0, stats: { managed: 0, culled: 0, noShadow: 0, emptyInst: 0 } };
   const C = AF.CULL, v = new THREE.Vector3();
+  if (AF.MOBILE) { C.dist = 75; C.shadow = 25; }
   const skipNames = new Set(['world', 'sky', 'clouds', 'land-horizon']);
   const collect = () => {
     C.list.length = 0; C.inst.length = 0;
@@ -295,7 +296,7 @@ try {
     cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
-  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 0, regLod: 45, lod: 40, propCull: 160 };
+  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 0, regLod: 45, farLod: 110, lod: 40, propCull: 160 };
   if (AF.MOBILE) TIER.low = mobileTier;
   const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : G.lite && G.tier === 'high' ? TIER.lite : (TIER[G.tier] || TIER.ultra);
   const texSeen = new WeakSet();

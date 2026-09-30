@@ -73,7 +73,11 @@ try {
   @keyframes uiIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
   #ui #h-hint{position:absolute;left:50%;bottom:max(16px,env(safe-area-inset-bottom));transform:translateX(-50%);padding:5px 14px;border-radius:999px;font-size:12px;color:var(--dim);display:none;white-space:nowrap}
   #ui #h-speed{position:absolute;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));padding:10px 16px;display:none;text-align:right;min-width:120px}
-  #ui.touch #h-speed{right:auto;left:50%;transform:translateX(-50%);bottom:auto;top:max(66px,env(safe-area-inset-top));padding:6px 14px;min-width:0}
+  #ui.touch #h-speed{display:none!important}
+  #ui #h-rot{display:none;position:absolute;inset:0;z-index:30;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(6,12,18,.9);color:#ffe6a8;font-size:17px;letter-spacing:.04em}
+  #ui #h-rot svg{width:64px;height:64px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;animation:uiRot 2.4s ease-in-out infinite}
+  @keyframes uiRot{0%,20%{transform:rotate(0)}50%,80%{transform:rotate(-90deg)}100%{transform:rotate(0)}}
+  @media (orientation:portrait){#ui.touch:not(.titling):not(.portraitok) #h-rot{display:flex}}
   #ui #h-speed .v{font-size:30px;font-weight:700;line-height:1} #ui #h-speed .v small{font-size:12px;color:var(--dim);margin-left:4px;font-weight:500}
   #ui #h-speed .s{font-size:12px;color:var(--dim);margin-top:4px}
   #ui #h-speed .bar{height:4px;border-radius:4px;background:rgba(255,255,255,.12);margin-top:6px;overflow:hidden} #ui #h-speed .bar i{display:block;height:100%;background:var(--gold)}
@@ -151,7 +155,21 @@ try {
     <div class="n"></div><div class="tg"></div><div class="d"></div><div class="dots"></div>
     <button class="btn primary go"><span class="ic">&#9654;</span><span class="lb">Let's Play</span></button></div>`); title.id = 't-title';
   const clock = h('div', 'panel hud', `<div class="t"><span class="tm">4:30</span><small class="ap">PM</small></div><div class="p">Port Solace</div>`); clock.id = 'h-clock';
-  const right = h('div', 'hud', `<div id="h-mini" class="panel pe"><canvas width="220" height="220"></canvas><div class="n">N</div></div><div id="h-btns"><button class="panel round pe" data-k="map" title="Map (M)">&#x1F5FA;</button><button class="panel round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); right.id = 'h-right';
+  const right = h('div', 'hud', `<div id="h-mini" class="panel pe"><canvas width="220" height="220"></canvas><div class="n">N</div></div><div id="h-btns">${TOUCH ? '<button class="panel round pe" data-k="full" title="Fullscreen">&#x26F6;</button>' : ''}<button class="panel round pe" data-k="map" title="Map (M)">&#x1F5FA;</button><button class="panel round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); right.id = 'h-right';
+  // phones: fullscreen + landscape lock from the Play tap (a user gesture); iOS Safari has neither API, so portrait gets a rotate hint
+  const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  const goFull = (on = true) => {
+    const lock = () => { try { const o = screen.orientation; if (o && o.lock) o.lock('landscape').catch(() => {}); } catch (e) {} };
+    try {
+      if (!on) { if (isFull()) (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+      const el = document.documentElement, rq = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!rq || isFull()) { lock(); return; }
+      const p = rq.call(el, { navigationUI: 'hide' }); if (p && p.then) p.then(lock, () => {}); else lock();
+    } catch (e) { /* not allowed here */ }
+  };
+  UI.fullscreen = goFull;
+  const rot = h('div', 'pe', `<svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M4 14a8 8 0 0 0 6 6M20 10a8 8 0 0 0-6-6"/></svg><div>Turn your phone sideways</div><button class="btn">Play in portrait</button>`); rot.id = 'h-rot';
+  rot.querySelector('button').addEventListener('click', () => root.classList.add('portraitok'));
   const prompt = h('div', 'panel hud pe', ''); prompt.id = 'h-prompt';
   const toasts = h('div', '', ''); toasts.id = 'h-toasts';
   const hint = h('div', 'panel hud', ''); hint.id = 'h-hint';
@@ -336,6 +354,7 @@ try {
   const start = () => {
     if (!AF.ready || !S.pick || !S.title) return;
     S.title = false; root.classList.remove('titling'); title.classList.add('out'); setTimeout(() => { if (!S.title) title.style.display = 'none'; }, 600);
+    if (TOUCH) goFull();
     AF.input.requestLock();
     AF.friends.play(S.pick);
     const c = AF.friends.current;
@@ -424,7 +443,7 @@ try {
   menu.querySelector('[data-k=hour]').addEventListener('input', (e) => { AF.time.hours = +e.target.value; });
   menu.querySelector('[data-k=sens]').addEventListener('input', (e) => AF.setLookSens(e.target.value));
   help.addEventListener('click', (e) => { if (e.target === help || e.target.closest('[data-k=closehelp]')) toggleHelp(false); });
-  right.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
+  right.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); else if (b.dataset.k === 'full') goFull(!isFull()); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
   prompt.addEventListener('click', () => AF.input.tap('KeyE'));
 
   // map base: 1.5 px per metre over the whole world (AF.PLAN.bounds)
