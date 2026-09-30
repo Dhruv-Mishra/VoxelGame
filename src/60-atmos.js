@@ -565,14 +565,15 @@ try {
       }
     }
 
-    // ---- point-light pool (constant count so shaders never recompile)
+    // ---- point-light pool: the count only changes with the graphics tier (Low 4 · Balanced 6 · High 12), so shaders rarely recompile
     {
       A.pool = [];
-      for (let i = 0; i < 12; i++) {
-        const pl = new THREE.PointLight(0xffc67a, 0, 12, 2);
-        pl.castShadow = false; pl.position.set(0, -500, 0); pl.userData.src = null;
-        S.add(pl); A.pool.push(pl);
-      }
+      A.setLights = (n) => {
+        n = Math.max(0, Math.min(12, n | 0));
+        while (A.pool.length < n) { const pl = new THREE.PointLight(0xffc67a, 0, 12, 2); pl.castShadow = false; pl.position.set(0, -500, 0); pl.userData.src = null; S.add(pl); A.pool.push(pl); }
+        while (A.pool.length > n) { const pl = A.pool.pop(); S.remove(pl); pl.dispose && pl.dispose(); }
+      };
+      A.setLights(AF.gfx && AF.gfx.tierCfg ? AF.gfx.tierCfg().lights : 12);
     }
 
     // ---- water
@@ -968,7 +969,7 @@ try {
   });
   AF.test('atmos: point light pool <= 12', () => {
     let n = 0; AF.scene.traverse((o) => { if (o.isPointLight) n++; });
-    return { ok: n <= 12 && A.pool && A.pool.length === 12, info: 'point lights in scene ' + n + ', registered lights ' + AF.lights.length };
+    return { ok: n <= 12 && A.pool && A.pool.length === n, info: 'point lights in scene ' + n + ', registered lights ' + AF.lights.length };
   });
   AF.test('atmos: sun rises east, sets west, south at noon', () => {
     const m = A.sunAt(9), e = A.sunAt(12.25), w = A.sunAt(16.5), nn = A.sunAt(0);

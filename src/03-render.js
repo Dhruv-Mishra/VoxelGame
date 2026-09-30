@@ -4,8 +4,8 @@ try {
 {
   const cv = document.getElementById('cv');
   const R = AF.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: AF.SHOT || AF.TEST, powerPreference: 'high-performance' });
-  // base pixel ratio: 1.5 cap normally, native up to 2 in cinema; ?shot renders at 1 (or ?dpr=N for supersampled captures)
-  AF.basePR = () => AF.SHOT ? AF.clamp(+AF.Q.get('dpr') || 1, 0.5, 3) : Math.min(devicePixelRatio || 1, AF.GFX.cinema ? 2 : 1.5);   // 1.5 keeps the frame rate smooth on a MacBook; Film/cinema renders at native 2x
+  // base pixel ratio per tier (Low 1.0 · Balanced 1.25 · High 1.5); ?shot renders at 1 (or ?dpr=N)
+  AF.basePR = () => AF.SHOT ? AF.clamp(+AF.Q.get('dpr') || 1, 0.5, 3) : Math.min(devicePixelRatio || 1, AF.GFX.tier === 'low' ? 1 : AF.GFX.tier === 'high' ? 1.25 : 1.5);
   R.setPixelRatio(AF.basePR());
   R.outputColorSpace = THREE.SRGBColorSpace;
   R.toneMapping = THREE.ACESFilmicToneMapping;
@@ -91,12 +91,16 @@ try {
   let last = performance.now(), fpsAcc = 0, fpsN = 0;
   AF.fps = 60;
   AF.paused = false;
+  // near sun shadows re-render every frame on High, every 2nd on Balanced, every 3rd on Low (the map stays consistent in between)
+  R.shadowMap.autoUpdate = false;
   const frame = (dt) => {
     AF.clock.dt = dt; AF.clock.t += dt; AF.clock.frame++;
     for (const h of AF.hooks.tick) {
       try { h.fn(dt, AF.clock.t); }
       catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
     }
+    const every = AF.SHOT || AF.TEST ? 1 : AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' ? 2 : 3;
+    if (AF.clock.frame % every === 0 || AF.shadowDirty) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
     try { AF.renderFrame(); } catch (e) { AF.warnOnce('render threw', e); }
     AF.input.endFrame();
   };
@@ -184,19 +188,20 @@ try {
     try { const gl = R.getContext(); const ext = gl.getExtension('WEBGL_debug_renderer_info'); gpu = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)); } catch (e) {}
     AF.gfx.gpu = gpu;
     if (!G.forced) {
-      let t = 'ultra';
-      if (/swiftshader|llvmpipe|software|mali|adreno|powervr|intel.*(hd|uhd)/i.test(gpu) || !R.capabilities.isWebGL2 || R.capabilities.maxTextureSize < 8192) t = 'low';
-      else if (/intel/i.test(gpu)) t = 'high';
+      // Balanced ('high') is the default everywhere; phones, tablets and software renderers start on Low. High ('ultra') is opt-in.
+      let t = 'high';
+      const saved = (() => { try { return localStorage.getItem('portSolace.gfx'); } catch (e) { return null; } })();
+      if (/swiftshader|llvmpipe|software|mali|adreno|powervr|apple gpu/i.test(gpu) || !R.capabilities.isWebGL2 || R.capabilities.maxTextureSize < 8192 || matchMedia('(pointer: coarse)').matches) t = 'low';
+      if (saved && ['low', 'high', 'ultra'].includes(saved)) { t = saved; G.auto = false; }
       G.tier = t;
     }
   }
-  // per-tier settings (read by R1 code every frame)
+  // per-tier settings (read by R1 code every frame). near/far = shadow map sizes, lights = physical point lights, ao = SAO samples
   const TIER = {
-    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95 },
-    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9 },
-    low: { near: 2048, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8 },
-    // ROUND 2 capture quality (AF.GFX.set('cinema') / ?gfx=cinema): ultra + 4096 far cascade over 420 m, props at full detail to 200 m
-    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16 },
+    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 12, pools: 24, regLod: 150, lod: 110, propCull: 900 },
+    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 6, pools: 16, regLod: 95, lod: 80, propCull: 460 },
+    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 4, pools: 0, regLod: 65, lod: 60, propCull: 320 },
+    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
   const cur = AF.gfx.tierCfg = () => G.cinema ? TIER.cinema : (TIER[G.tier] || TIER.ultra);
@@ -215,6 +220,11 @@ try {
   const applyTier = () => {
     const T = cur(), sun = AF.sun;
     AF.LOD_DIST = T.lod || 110;
+    AF.REGION_LOD = T.regLod || 130;
+    AF.PROP_CULL = T.propCull || 900;
+    if (AF.gfx.pools) AF.gfx.pools.max = T.pools;
+    if (AF.atmos && AF.atmos.setLights) AF.atmos.setLights(T.lights);
+    AF.shadowDirty = true;
     if (G.cinema) G.scale = 1;
     const pr = AF.basePR() * G.scale; if (Math.abs(R.getPixelRatio() - pr) > 1e-3) { R.setPixelRatio(pr); if (AF.ready) AF.resize(); }
     if (AF.ready) { try { sharpenTextures(); } catch (e) { AF.warnOnce('aniso', e); } }
@@ -239,7 +249,7 @@ try {
       }
       // tier downgrade: > 22 ms for 3 s with resolution already at its floor
       if (G.auto && ema > 22) slowT += dt; else slowT = Math.max(0, slowT - dt);
-      if (slowT > 6) { slowT = 0; if (G.tier === 'ultra') G.set('high', 'slow frames'); }   // never auto-drop to 'low' (no MSAA → FXAA blur); low is a manual choice
+      if (slowT > 6) { slowT = 0; if (G.tier === 'ultra') G.set('high', 'slow frames'); else if (G.tier === 'high' && ema > 26) G.set('low', 'slow frames'); }
       fastT = 0;
     });
   }
@@ -290,7 +300,7 @@ try {
       if (!F.on || !AF.ready && !force) { U.uFarOn.value = 0; return; }
       const cp = cam.position; cam.getWorldDirection(fw); fw.y = 0; const l = fw.length() || 1; fw.multiplyScalar(1 / l);
       let cx = cp.x + fw.x * F.R * 0.5, cz = cp.z + fw.z * F.R * 0.5;
-      cx = AF.clamp(cx, -260, 260); cz = AF.clamp(cz, -260, 260);
+      cx = AF.clamp(cx, AF.W.X0 + 40, 260); cz = AF.clamp(cz, -260, 260);
       cx = Math.round(cx / 32) * 32; cz = Math.round(cz / 32) * 32;
       const moved = cx !== F.cx || cz !== F.cz, turned = F.dir.angleTo(AF.time.sunDir) > 0.0035;
       F.frameN++;
@@ -488,7 +498,7 @@ try {
           uAO.tDepth.value = depth; uComp.tDepth.value = depth;
           uAO.uProj.value.copy(cam.projectionMatrix); uAO.uInvProj.value.copy(cam.projectionMatrixInverse);
           uAO.uRadius.value = AO.radius; uAO.uIntensity.value = AO.intensity; uAO.uBias.value = AO.bias; uAO.uMaxDist.value = AO.maxDist;
-          uAO.uN.value = G.cinema ? 16 : G.tier === 'ultra' ? 12 : 8; uAO.uDbgAO.value = AF.gfx.aoDbg || 0;
+          uAO.uN.value = AF.gfx.tierCfg().ao || 8; uAO.uDbgAO.value = AF.gfx.aoDbg || 0;
           const ind = (AF.atmos && AF.atmos.indoor) || 0;
           uComp.uStrength.value = AO.strength * (1 - 0.25 * ind);
           draw(r, mAO, rtA);
@@ -522,7 +532,7 @@ try {
 // ================================================================ R1: night light pools — feeds the 24 nearest outdoor lights to the voxel shader
 {
   const U = AF.mat.uniforms, KINDS = new Set(['street', 'porch', 'sign', 'shop', 'lamp', 'neon']);
-  const P = AF.gfx.pools = { k: 1, max: 24, range: 1.0, n: 0 };
+  const P = AF.gfx.pools = { k: 1, max: AF.gfx.tierCfg ? AF.gfx.tierCfg().pools : 24, range: 1.0, n: 0 };
   let cand = null, fr = 0; const tc = new THREE.Color();
   const pick = () => {
     if (!cand) cand = AF.lights.filter((l) => KINDS.has(l.kind));
@@ -539,9 +549,9 @@ try {
   };
   AF.onTick('r1-pools', 893, () => {
     if (!AF.ready) return;
-    const on = (AF.time.night || 0) > 0.02 && AF.GFX.tier !== 'low';
+    const on = (AF.time.night || 0) > 0.02 && P.max > 0;
     U.uPoolK.value = on ? P.k : 0;
-    if (!on) return;
+    if (!on) { U.uLN.value = 0; return; }
     if (fr++ % 15 === 0 || AF.SHOT) pick();
   });
   AF.on('ready', () => { cand = null; });

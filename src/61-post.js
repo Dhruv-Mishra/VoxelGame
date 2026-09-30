@@ -188,7 +188,7 @@ try {
     const pr = R.getPixelRatio();
     const isGL2 = R.capabilities.isWebGL2;
     const W0 = Math.max(1, Math.round(size.x * pr)), H0 = Math.max(1, Math.round(size.y * pr));
-    const msaa = () => (isGL2 && tier() !== 'low' && P.quality !== 'low') ? 4 : 0;
+    const msaa = () => (isGL2 && tier() !== 'low' && P.quality !== 'low') ? (tier() === 'high' ? 2 : 4) : 0;
     // scene target: MSAA + depth texture (the depth is never touched by post passes)
     const mkScene = (w, h) => {
       const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: msaa() });

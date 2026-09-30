@@ -789,8 +789,14 @@ function nightCabs() {
 VV.simTraffic = (dt) => {
   VV.clockT += dt;
   if ((cabSwapT -= dt) <= 0) { cabSwapT = 3; nightCabs(); }
-  const all = VV.cars;
-  for (const c of VV.ai) if (c.ai) aiStep(c, dt, all);
+  const all = VV.cars, cam = AF.camera && AF.camera.position, fr = AF.clock.frame;
+  // cars far from the camera tick at a quarter rate with the accumulated time (nobody can see them take bigger steps)
+  for (const c of VV.ai) {
+    if (!c.ai) continue;
+    c.aiAcc = (c.aiAcc || 0) + dt;
+    if (cam && ((fr + c.id) & 3) !== 0 && (c.x - cam.x) ** 2 + (c.z - cam.z) ** 2 > 240 * 240) continue;
+    aiStep(c, Math.min(c.aiAcc, 0.25), all); c.aiAcc = 0;
+  }
 };
 const spawnTraffic = (n) => {
   const rnd = AF.rng(777);

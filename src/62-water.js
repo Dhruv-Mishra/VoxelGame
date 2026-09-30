@@ -33,7 +33,7 @@ try {
   }
 
   // ------------------------------------------------------------ shore distance (R, 0..16 m) + depth (G, 0..4 m) over the map, 0.5 m cells
-  const SB = { x0: -300, z0: -300, x1: 300, z1: 300, res: 0.5 };
+  const SB = { x0: AF.W.X0, z0: AF.W.Z0, x1: AF.W.x1, z1: AF.W.z1, res: 0.5 };
   function makeShoreTex() {
     const t0 = performance.now();
     const W = AF.W, P = AF.PLAN, L = AF.land || {};
@@ -43,6 +43,7 @@ try {
     const levelAt = (x, z) => {
       if (LK && Math.abs(x - LK.cx) < LK.rx + 8 && Math.abs(z - LK.cz) < LK.rz + 8) return lakeY;
       if (PD && Math.abs(x - PD.cx) < PD.r + 6 && Math.abs(z - PD.cz) < PD.r + 6) return pondY;
+      for (const q of P.pools || []) if (x > q.x0 - 6 && x < q.x1 + 6 && z > q.z0 - 6 && z < q.z1 + 6) return q.y;
       if (z > (P.harbour ? P.harbour.coastZ : 210) - 40) return seaY;
       return null;
     };

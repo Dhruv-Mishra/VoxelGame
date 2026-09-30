@@ -119,7 +119,7 @@ const ext = (H, S) => {
 
 const lotFaces = (lot) => {
   const [x0, z0, x1, z1] = lot.rect, dp = 17;
-  if (lot.id === 'fill-a') return [{ P: { x0, z0, x1, z1, face: 'e' }, D: x1 - x0, back: false }];
+  if (lot.id.startsWith('fill-a')) return [{ P: { x0, z0, x1, z1, face: 'e' }, D: x1 - x0, back: false }];
   if (lot.id === 'fill-h') return [{ P: { x0, z0, x1, z1, face: 'w' }, D: x1 - x0, back: false }];
   return [
     { P: { x0, z0, x1: x0 + dp, z1, face: 'w' }, D: dp },
@@ -142,7 +142,7 @@ AF.onBuild('residential-fill', 302, () => {
     for (const fc of lotFaces(lot)) {
       const F = RK.frame(fc.P);
       let u = 0;
-      const edgeLot = lot.id === 'fill-a' || lot.id === 'fill-h';
+      const edgeLot = lot.id.startsWith('fill-a') || lot.id === 'fill-h';
       let prevN = -1;
       while (u < F.W - 0.1) {
         let w = q((lux ? 14 : edgeLot ? 8 : 9) + R() * (lux ? 8 : 10)); if (F.W - u - w < 8) w = F.W - u;
@@ -182,7 +182,7 @@ AF.onBuild('residential-fill', 302, () => {
       }
     }
     // inner courtyard of the square fill blocks: a low parking garage / yard
-    if (lot.id !== 'fill-a' && lot.id !== 'fill-h') {
+    if (!lot.id.startsWith('fill-a') && lot.id !== 'fill-h') {
       const ix0 = x0 + 17, iz0 = z0 + 17, ix1 = x1 - 17, iz1 = z1 - 17;
       if (lot.id === 'fill-b1') {
         AF.W.fill(ix0, 0.25, iz0, ix1, 4.0, iz1, C.bricks[4].a); AF.W.fill(ix0 + 0.25, 3.75, iz0 + 0.25, ix1 - 0.25, 4.0, iz1 - 0.25, C.tar);

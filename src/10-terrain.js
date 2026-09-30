@@ -40,7 +40,7 @@ try {
     let edge;
     if (x < PK.x0) edge = PK.x0 - 2 - x; else if (x > PK.x1) edge = x - PK.x1 - 2; else return 0;
     const t = clamp((HT.z1 + 2 - z) / 50, 0, 1);
-    const f = smooth(0, 34, edge);   // r2: wider flank so the Heights meet the park as a wooded slope, not a cliff
+    const f = smooth(0, 34, edge) * smooth(-390, -300, x);   // r2: wider flank; the hills fade out over the new west side
     const h = (HT.height * Math.pow(t, 1.15) + (fbm(x * 0.03 + 4, z * 0.03 - 2, 3) - 0.45) * 5 * t) * f;
     return Math.max(0, h);
   };
@@ -83,9 +83,9 @@ try {
     };
 
     const H = W.H, C = W.C, S = W.S, NZ = W.NZ;
-    for (let mx = 0; mx < 600; mx++) {
+    for (let mx = 0; mx < W.NX / 4; mx++) {
       for (let mz = 0; mz < 600; mz++) {
-        const x0 = mx - 300, z0 = mz - 300, xc = x0 + 0.5, zc = z0 + 0.5;
+        const x0 = mx + W.X0, z0 = mz - 300, xc = x0 + 0.5, zc = z0 + 0.5;
         const bx0 = W.bx(x0), bz0 = W.bz(z0);
         const n1 = N2(xc * 0.022, zc * 0.022) * 0.8 + N2(xc * 0.07, zc * 0.07) * 0.2;
         // ---- sea (south of the quay)
@@ -130,7 +130,7 @@ try {
         const le = L.lakeE(xc, zc), pd = Math.hypot(xc - PD.cx, zc - PD.cz);
         let top = n1 < 0.36 ? GR.dark : n1 < 0.64 ? GR.base : GR.light;
         if (hh <= 0 && le > 1.12 && pd > PD.r + 2.5) {
-          const q = z0 >= 170 ? GRAN[1] : top;
+          const q = z0 >= 170 && x0 >= -300 ? GRAN[1] : top;
           for (let i = 0; i < 4; i++) for (let k = 0; k < 4; k++) { const ci = (bx0 + i) * NZ + bz0 + k; H[ci] = 1; C[ci] = q; S[ci] = z0 >= 205 ? GRAN[0] : 0; }
           continue;
         }
@@ -233,9 +233,9 @@ try {
     // the sea: big quads (the harbour inside the map is 8 m tiles so the shader's view vector stays precise)
     const sp = [], sn = [], si = []; let sN = 0;
     const q = (x0, z0, x1, z1) => { sp.push(x0, SEA_Y, z0, x0, SEA_Y, z1, x1, SEA_Y, z1, x1, SEA_Y, z0); sn.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0); si.push(sN, sN + 1, sN + 2, sN, sN + 2, sN + 3); sN += 4; };
-    for (let x = -300; x < 300; x += 8) for (let z = COAST; z < 300; z += 8) q(x, z, x + 8, Math.min(300, z + 8));
+    for (let x = W.X0; x < 300; x += 8) for (let z = COAST; z < 300; z += 8) q(x, z, x + 8, Math.min(300, z + 8));
     for (let x = -1500; x < 1500; x += 100) for (let z = 300; z < 1500; z += 100) q(x, z, x + 100, z + 100);
-    for (let z = 150; z < 300; z += 50) { for (let x = -1500; x < -300; x += 100) q(x, Math.max(z, 200), Math.min(x + 100, -300), z + 50); for (let x = 300; x < 1500; x += 100) q(x, Math.max(z, 200), x + 100, z + 50); }
+    for (let z = 150; z < 300; z += 50) { for (let x = -1500; x < W.X0; x += 100) q(x, Math.max(z, 200), Math.min(x + 100, W.X0), z + 50); for (let x = 300; x < 1500; x += 100) q(x, Math.max(z, 200), x + 100, z + 50); }
     const sea = fin('lake', sp, sn, si, sN, SEA_Y); sea.userData.sea = true;
     const lake = mk('lake', Math.floor(LK.cx - LK.rx - 3), Math.floor(LK.cz - LK.rz - 3), Math.ceil(LK.cx + LK.rx + 3), Math.ceil(LK.cz + LK.rz + 3), L.LAKE_Y, (x, z) => L.lakeE(x, z) <= 1.06);
     const pond = mk('pond', PD.cx - PD.r - 2, PD.cz - PD.r - 2, PD.cx + PD.r + 2, PD.cz + PD.r + 2, L.POND_Y, (x, z) => Math.hypot(x - PD.cx, z - PD.cz) < PD.r + 0.5);
@@ -253,13 +253,18 @@ try {
     const t0 = performance.now();
     const G = AF.GeoBuf; if (typeof G !== 'function') return;
     const R0 = 300, lerp = AF.lerp;
-    const sdSq = (x, z) => Math.hypot(Math.max(Math.abs(x) - R0, 0), Math.max(Math.abs(z) - R0, 0));
+    // the map is x in [XW, 300): west of the old edge the horizon is the old western horizon moved out by SH metres
+    const XW = W.X0, SH = -300 - XW, sx = (x) => x < -300 ? Math.min(-300, x + SH) : x;
+    const sdSq0 = (x, z) => Math.hypot(Math.max(Math.abs(x) - R0, 0), Math.max(Math.abs(z) - R0, 0));
+    const sdSq = (x, z) => sdSq0(sx(x), z);
     // coast: the bay mouth is the map's south edge; headlands east + west curve south to frame the harbour
-    const coastZ = (x) => { const ax = Math.abs(x); return ax < R0 ? COAST : COAST + (ax - R0) * 0.35 + 170 * smooth(330, 820, ax) + (fbm(x * 0.006, 3, 3) - 0.5) * 60; };
+    const coastZ0 = (x) => { const ax = Math.abs(x); return ax < R0 ? COAST : COAST + (ax - R0) * 0.35 + 170 * smooth(330, 820, ax) + (fbm(x * 0.006, 3, 3) - 0.5) * 60; };
+    const coastZ = (x) => coastZ0(sx(x));
     L.coastZ = coastZ;
-    const edgeGround = (x, z) => W.groundY(clamp(x, -R0 + 0.5, R0 - 0.5), clamp(z, -R0 + 0.5, COAST - 1));
-    const hgt = (x, z) => {
-      const sd = sdSq(x, z), d = Math.hypot(x, z * 1.05);
+    const edgeGround = (x, z) => W.groundY(clamp(x, XW + 0.5, R0 - 0.5), clamp(z, -R0 + 0.5, COAST - 1));
+    const hgt = (xr, z) => {
+      const x = sx(xr);
+      const sd = sdSq0(x, z), d = Math.hypot(x, z * 1.05);
       const wp = (fbm(x * 0.0021 + 3, z * 0.0021 - 5, 3) - 0.5) * 160;
       let h = 3 + fbm(x * 0.006 + 4, z * 0.006, 4) * 16 * smooth(0, 160, sd);
       const ang = Math.atan2(z, x);
@@ -268,13 +273,13 @@ try {
       }
       if (z < -R0) h += smooth(0, 140, -z - R0) * (34 + fbm(x * 0.01, 7, 3) * 22);        // the Heights keep climbing north
       const w = smooth(2, 70, sd);
-      const e0 = edgeGround(x, z);
+      const e0 = edgeGround(xr, z);
       h = lerp(e0, Math.max(e0 * 0.9, h), w);
       // r2: behind Central Park the hillside climbs straight up from the park's north edge (an amphitheatre of woods facing
       // the city, the sign on its steep face) instead of a flat brown bowl between the two in-map Heights
       if (z < -R0 + 1) { const dN = -z - R0; h = Math.max(h, (60 + (fbm(x * 0.012 + 3, 9, 3) - 0.5) * 16) * smooth(0, 115, dN) * smooth(640, 380, Math.abs(x))); }
       // shore: down to a beach and under the sea past the coastline
-      const inland = coastZ(x) - z;
+      const inland = coastZ0(x) - z;
       if (z > COAST - 90) h = Math.min(h, inland < 0 ? -4 : lerp(0.35, h, smooth(4, 90, inland)));
       return h;
     };
@@ -310,12 +315,12 @@ try {
     const buf = { quad(a, b, c, d, e, f, g, h, i, j, k) { bufAt(a[0], a[2]).quad(a, b, c, d, e, f, g, h, i, j, k); } };
     const cells = [];         // [x,z,y,hue] for clump + house placement
     const mesh = (cs, RI, R1) => {
-      const n = Math.round((R1 * 2) / cs), V = new Float32Array((n + 1) * (n + 1));
-      for (let i = 0; i <= n; i++) for (let k = 0; k <= n; k++) V[i * (n + 1) + k] = hgt(-R1 + i * cs, -R1 + k * cs);
-      const hv = (i, k) => V[i * (n + 1) + k];
-      for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) {
-        const xa = -R1 + i * cs, za = -R1 + k * cs, xb = xa + cs, zb = za + cs;
-        if (xa >= -RI && xb <= RI && za >= -RI && zb <= RI) continue;
+      const nx = Math.round((R1 * 2 + SH) / cs), nz = Math.round((R1 * 2) / cs), XA = -R1 - SH, NZ1 = nz + 1, V = new Float32Array((nx + 1) * NZ1);
+      for (let i = 0; i <= nx; i++) for (let k = 0; k <= nz; k++) V[i * NZ1 + k] = hgt(XA + i * cs, -R1 + k * cs);
+      const hv = (i, k) => V[i * NZ1 + k];
+      for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) {
+        const xa = XA + i * cs, za = -R1 + k * cs, xb = xa + cs, zb = za + cs;
+        if (xa >= -RI - SH && xb <= RI && za >= -RI && zb <= RI) continue;
         const h00 = hv(i, k), h01 = hv(i, k + 1), h11 = hv(i + 1, k + 1), h10 = hv(i + 1, k);
         if (Math.max(h00, h01, h11, h10) < -3.5) continue;
         const xc = xa + cs / 2, zc = za + cs / 2, hc = (h00 + h01 + h11 + h10) / 4;
@@ -329,12 +334,12 @@ try {
       }
       // skirt around the inner hole (hides cracks against the voxel map edge / the finer grid)
       const sk = (ax, az, bx, bz, ha, hb, nI) => { const c = pc('olive', 0, 0, 0); buf.quad([ax, -6, az], [bx, -6, bz], [bx, hb, bz], [ax, ha, az], [0, 0], [1, 0], [1, 1], [0, 1], c, nI, [2, 2, 2, 2]); buf.quad([ax, ha, az], [bx, hb, bz], [bx, -6, bz], [ax, -6, az], [0, 1], [1, 1], [1, 0], [0, 0], c, nI ^ 1, [2, 2, 2, 2]); };
-      const i0 = Math.round((R1 - RI) / cs), i1 = n - i0;
-      for (let t = i0; t < i1; t++) {
+      const i0 = Math.round((R1 - RI) / cs), i1 = nx - i0, k0 = i0, k1 = nz - k0;
+      for (let t = k0; t < k1; t++) {
         const a = -R1 + t * cs, b = a + cs;
-        if (a < COAST) { sk(-RI, a, -RI, b, hv(i0, t), hv(i0, t + 1), 1); sk(RI, b, RI, a, hv(i1, t + 1), hv(i1, t), 0); }
-        sk(b, -RI, a, -RI, hv(t + 1, i0), hv(t, i0), 5);
+        if (a < COAST) { sk(-RI - SH, a, -RI - SH, b, hv(i0, t), hv(i0, t + 1), 1); sk(RI, b, RI, a, hv(i1, t + 1), hv(i1, t), 0); }
       }
+      for (let t = i0; t < i1; t++) { const a = XA + t * cs, b = a + cs; sk(b, -RI, a, -RI, hv(t + 1, k0), hv(t, k0), 5); }
     };
     const TM = L.horizonT = {};
     mesh(6, R0, 516);
@@ -351,6 +356,10 @@ try {
       for (const id of ['maple-scarlet', 'maple-orange', 'maple-gold', 'red-oak', 'oak', 'elm', 'sweetgum', 'pin-oak']) for (const sc of [0.7, 1.05]) { const s0 = pickS(id); if (s0) mk(Object.assign({}, s0, { h: s0.h * sc, w: s0.w * sc }), sd++, 1, 'autumn'); }
       for (const id of ['pine', 'spruce']) for (const sc of [0.8, 1.2]) { const s0 = pickS(id); if (s0) mk(Object.assign({}, s0, { h: s0.h * sc, w: s0.w * sc }), sd++, 1, 'ever'); }
       const s0 = pickS('oak'); if (s0) for (const sc of [0.8, 1.1]) mk(Object.assign({}, s0, { h: s0.h * sc, w: s0.w * sc * 0.8, leaves: [0x6a5446, 0x5a4a3e, 0x4e4036, 0x7a6450] }), sd++, 1, 'bare');
+      // distant hills: 2 m voxel clumps (a quarter of the faces)
+      clumpLib.coarse = { autumn: [], ever: [], bare: [] };
+      for (const id of ['maple-scarlet', 'maple-orange', 'maple-gold', 'red-oak', 'oak']) { const s1 = pickS(id); if (s1) { const t = L.makeTree(Object.assign({}, s1, { h: s1.h * 1.2, w: s1.w * 1.2 }), sd++, 2); clumpLib.coarse.autumn.push({ g: AF.meshModel(t.m, { vs: 2, anchor: [0.5, 0, 0.5] }), vs: 2 }); } }
+      for (const id of ['pine', 'spruce']) { const s1 = pickS(id); if (s1) { const t = L.makeTree(Object.assign({}, s1, { h: s1.h * 1.2, w: s1.w * 1.2 }), sd++, 2); clumpLib.coarse.ever.push({ g: AF.meshModel(t.m, { vs: 2, anchor: [0.5, 0, 0.5] }), vs: 2 }); } }
       // r2: a finer (1/2 m) set for the first ~28 m of hillside behind the park, where eye-level cameras get close
       clumpLib.fine = []; clumpLib.fineEver = [];
       for (const id of ['maple-scarlet', 'maple-orange', 'maple-gold', 'red-oak', 'elm', 'sweetgum']) { const s1 = pickS(id); if (s1) { const t = L.makeTree(Object.assign({}, s1), sd++, 0.5); clumpLib.fine.push({ g: AF.meshModel(t.m, { vs: 0.5, anchor: [0.5, 0, 0.5] }), vs: 0.5 }); } }
@@ -382,9 +391,9 @@ try {
       if (!hasClumps || sd < 3 || sd > 520 || slope > (nn ? 1.6 : 0.7)) continue;
       const forest = hue === 'ever' || hue === 'rust' || hue === 'ochre' || hue === 'olive';
       const dens = forest ? (nn ? 1 : sd < 100 ? 0.8 : 0.45) : (nn && (hue === 'meadow' || hue === 'scrub') ? 1 : 0.05);
-      const nper = cs <= 6 ? 1 : 3;
+      const nper = cs <= 6 ? 1 : 2;
       for (let q = 0; q < nper; q++) {
-        if (RC() > dens * (cs <= 6 ? (nn ? 0.92 : 0.5) : 0.35)) continue;
+        if (RC() > dens * (cs <= 6 ? (nn ? (sd < 60 ? 0.92 : 0.5) : 0.3) : 0.22) * (sd > 220 ? 0.7 : 1)) continue;
         const px = x + (RC() - 0.5) * cs * 0.9, pz = z + (RC() - 0.5) * cs * 0.9;
         if (sdSq(px, pz) < 3 || pz > coastZ(px) - 6) continue;
         const behindSign = Math.abs(px - SGX) < 70 && pz < SGZ + 3 && pz > SGZ - 16;
@@ -397,8 +406,9 @@ try {
         const r = RC(), kind = hue === 'ever' ? (r < 0.75 ? 'ever' : 'autumn') : (r < 0.72 ? 'autumn' : r < 0.87 ? 'ever' : 'bare');
         let lib = clumpLib[kind].length ? clumpLib[kind] : clumpLib.autumn;
         if (nn && sd < 28 && clumpLib.fine && clumpLib.fine.length) lib = kind === 'ever' && clumpLib.fineEver.length ? clumpLib.fineEver : clumpLib.fine;
+        else if (sd > 40 && clumpLib.coarse && clumpLib.coarse.autumn.length) lib = kind === 'ever' && clumpLib.coarse.ever.length ? clumpLib.coarse.ever : clumpLib.coarse.autumn;
         const it = lib[(RC() * lib.length) | 0];
-        appendGeo(it.g, Math.round(px * 2) / 2, hgt(px, pz) - 0.5, Math.round(pz * 2) / 2, sd > 260 ? 1.25 : nn ? 1.1 + RC() * 0.25 : sd > 100 ? 1.2 : 1);
+        appendGeo(it.g, Math.round(px * 2) / 2, hgt(px, pz) - 0.5, Math.round(pz * 2) / 2, sd > 260 ? 1.35 : nn ? 1.1 + RC() * 0.25 : sd > 100 ? 1.3 : 1);
         clumps++;
       }
     }
@@ -517,7 +527,7 @@ try {
       }
     }
     // steeple town on the western hills
-    const ST0 = { x: -560, z: -80 };
+    const ST0 = { x: -560 - SH, z: -80 };
     for (let i = 0; i < 46; i++) { const a = RH() * Math.PI * 2, r = 10 + RH() * 60; house(ST0.x + Math.cos(a) * r, ST0.z + Math.sin(a) * r * 0.8, 1.1, RH); houses++; }
     { const y = hgt(ST0.x, ST0.z) - 0.3, x = ST0.x, z = ST0.z;
       box(x - 5, y, z - 10, x + 5, y + 12, z + 10, stoneW); roof(x - 5.5, y + 12, z - 10.5, x + 5.5, z + 10.5, ROOFS[2]);
@@ -618,7 +628,7 @@ try {
     // seabed under the open sea beyond the map (so the water never shows the void)
     { const sb = new G(), bed = AF.col(0x44564e, { jitter: 0.25 });
       const bq = (x0, z0, x1, z1) => sb.quad([x0, -4, z0], [x0, -4, z1], [x1, -4, z1], [x1, -4, z0], [0, 0], [0, 1], [1, 1], [1, 0], bed, 2, [3, 3, 3, 3]);
-      bq(-1500, 300, 1500, 1520); bq(-1500, COAST - 4, -300, 300); bq(300, COAST - 4, 1500, 300);
+      bq(-1500, 300, 1500, 1520); bq(-1500, COAST - 4, XW, 300); bq(300, COAST - 4, 1500, 300);
       const m = new THREE.Mesh(sb.geometry(), AF.mat.voxel); m.name = 'land-seabed'; m.matrixAutoUpdate = false; m.updateMatrix(); m.frustumCulled = false; AF.scene.add(m); }
     // blinking red aviation light on the mast + the far lighthouse lamp (tiny dynamic meshes, one tick)
     { const red = new THREE.Mesh(new THREE.SphereGeometry(2, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a1a, fog: false }));

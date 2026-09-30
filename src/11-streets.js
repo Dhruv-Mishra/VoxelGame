@@ -198,7 +198,7 @@ try {
   // ------------------------------------------------------------ v2 PAVING BY DISTRICT
   //   Old Town (x < -120): red brick · Harbour (z > 140): granite setts · Grand Ave theatre blocks: buff terrazzo with brass stars
   //   everywhere else (downtown): pale granite flags in 1 m slabs (pattern draws the joints; tone varies per flag)
-  ST.district = (x, z) => z > 140 ? 'harbour' : x < -120 ? 'old' : (Math.abs(x) < 12 && z > 6 && z < 150) ? 'grand' : 'down';
+  ST.district = (x, z) => z > 140 ? 'harbour' : x < -300 ? 'down' : x < -120 ? 'old' : (Math.abs(x) < 12 && z > 6 && z < 150) ? 'grand' : 'down';
   ST.paveCol = (x, z, bx, bz) => {
     const k = pal(), d = ST.district(x, z);
     if (d === 'old') { const h = hash(bx >> 1, bz); return (h > 0.985 && ((bx + bz) & 7) === 0) ? k.coal : k.brickP[Math.floor(h * 3) % 3]; }

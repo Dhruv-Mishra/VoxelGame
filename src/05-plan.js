@@ -32,6 +32,10 @@ AF.PLAN = (() => {
     { name: 'Terminal Avenue', a: [160, -240], b: [160, 160], w: 20, tram: true },       // tram, east side (Union Terminal)
     { name: 'Anchor Street', a: [240, -240], b: [240, 0] },                               // stops at Meridian: Union Terminal + rail yard fill x 173..300, z 10..72
     { name: 'Anchor Street', a: [240, 80], b: [240, 160] },
+    // THE WEST SIDE (new land x < -300): Westgate Road links Wren St to New Friends Colony, the zoo and the airfield
+    { name: 'Westgate Road', a: [-640, 0], b: [-240, 0], w: 14 },
+    { name: 'Friends Lane', a: [-372, -226], b: [-372, 0] },
+    { name: 'Airfield Road', a: [-470, 0], b: [-470, 36] },
   ];
   for (const r of P.roads) r.w = r.w || 10;
   P.depotPlaza = [-1, -1, 0, 0];   // (Acorn Falls key, unused)
@@ -152,7 +156,8 @@ AF.PLAN = (() => {
     { id: 'rs-g2', owner: 'residential', rect: [173, -147, 232, -88], faces: 'all', wants: 'Eastside brownstones, a doctor\'s office, a hardware store' },
     { id: 'rs-g3', owner: 'residential', rect: [173, -72, 232, -10], faces: 'all', wants: 'apartment houses with rooftop water tanks, a bakery, a small church' },
     // FILL — exterior-only city fabric (residential agent, 42-fill.js): procedurally varied, closed doors, lit windows at night
-    { id: 'fill-a', owner: 'residential', rect: [-292, -232, -253, 147], faces: 'east (Wren St)', fill: true, wants: 'a continuous street wall of 4–8 storey apartment buildings and warehouses (exterior only), varied colours, water tanks, lit windows' },
+    { id: 'fill-a', owner: 'residential', rect: [-292, -232, -253, -10], faces: 'east (Wren St)', fill: true, wants: 'a continuous street wall of 4–8 storey apartment buildings and warehouses (exterior only), varied colours, water tanks, lit windows' },
+    { id: 'fill-a2', owner: 'residential', rect: [-292, 10, -253, 147], faces: 'east (Wren St)', fill: true, wants: 'the same street wall south of Westgate Road' },
     { id: 'fill-b1', owner: 'residential', rect: [-232, -232, -173, -173], faces: 'all', fill: true, wants: 'apartment houses (exterior only), a small parking garage' },
     { id: 'fill-f1', owner: 'residential', rect: [88, -232, 147, -173], faces: 'all', fill: true, wants: 'luxury Park East apartments (exterior only, 20–28 m), awnings, doormen' },
     { id: 'fill-g1', owner: 'residential', rect: [173, -232, 232, -173], faces: 'all', fill: true, wants: 'apartment houses (exterior only)' },
@@ -164,7 +169,28 @@ AF.PLAN = (() => {
     { id: 'hb-docks', owner: 'land-harbour', rect: [40, 173, 292, 210], faces: 'north (Harbour Blvd), south (water)', wants: 'the CARGO DOCKS: 3 big gantry/jib cranes, brick warehouses along the back of the quay, stacks of crates and barrels, bollards, 2 CARGO SHIPS + 2 TUGBOATS in the water, the east breakwater out to the LIGHTHOUSE' },
     { id: 'hb-warehouses', owner: 'land-harbour', rect: [173, 88, 232, 147], faces: 'all', wants: 'brick warehouses with painted signs, a cannery with a chimney (smoke), loading docks' },
     { id: 'hb-yard', owner: 'land-harbour', rect: [248, 88, 292, 147], faces: 'west (Anchor St)', wants: 'a freight yard / coal + ice depot: brick warehouse, a gantry, stacked crates, a delivery-truck loading bay' },
+    // THE WEST SIDE (45-west.js)
+    { id: 'w-colony-w', owner: 'west', rect: [-432, -226, -380, -8] },
+    { id: 'w-colony-e', owner: 'west', rect: [-364, -226, -306, -8] },
+    { id: 'w-zoo', owner: 'west', rect: [-652, -292, -446, -12] },
+    { id: 'w-airfield', owner: 'west', rect: [-652, 10, -306, 206] },
   ];
+
+  // ---- THE WEST SIDE layout (x -660..-300). Plots face Friends Lane (x -372); the zoo fills the north-west corner; the airfield
+  // runs east-west along the coast so planes climb out over the sea.
+  P.bounds = { x0: -660, z0: -300, x1: 300, z1: 300 };
+  P.west = {
+    lane: -372,
+    // 12 plots, 6 each side of Friends Lane, 35 m frontage. side -1 = west side (door faces east), +1 = east side (door faces west)
+    plots: [],
+    zoo: { x0: -650, z0: -290, x1: -448, z1: -16, gate: [-548, -14] },
+    air: { x0: -650, z0: 12, x1: -308, z1: 204, runway: { x0: -640, x1: -326, z: 152, w: 24 }, taxiZ: 124, apron: [-600, 72, -330, 112], terminal: [-500, 44, -440, 68], tower: [-424, 50], hangars: [[-632, 40, -598, 96], [-590, 40, -556, 96]] },
+  };
+  for (let i = 0; i < 6; i++) for (const side of [-1, 1]) {
+    const z1 = -10 - i * 36, z0 = z1 - 34;
+    P.west.plots.push({ side, x0: side < 0 ? -430 : -364, x1: side < 0 ? -380 : -310, z0, z1, i: i * 2 + (side > 0 ? 1 : 0) });
+  }
+  P.pools = [];
 
   // ---- helpers
   P.lot = (id) => P.lots.find((l) => l.id === id);
@@ -191,6 +217,9 @@ AF.PLAN = (() => {
     { name: 'Central Park', pos: [-40, 50, -140], target: [-40, 0, -235] },
     { name: 'Union Terminal', pos: [155, 26, 95], target: [215, 10, 40] },
     { name: 'Old Town', pos: [-160, 34, 95], target: [-205, 4, 40] },
+    { name: 'New Friends Colony', pos: [-330, 40, 20], target: [-372, 2, -110] },
+    { name: 'Solace Zoo', pos: [-440, 70, 30], target: [-550, 2, -150] },
+    { name: 'Westgate Airfield', pos: [-360, 45, 230], target: [-480, 2, 130] },
   ];
   return P;
 })();

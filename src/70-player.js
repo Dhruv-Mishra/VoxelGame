@@ -335,7 +335,7 @@ try {
         if (I.key('Minus') || I.key('NumpadSubtract')) { AE.dist = AF.clamp(AE.dist * Math.exp(dt * 1.5), MIN_D, MAX_D); markInput(); }
         if (I.hit('Tab')) { AF.setMode('walk', { x: body.x, y: body.y, z: body.z, yaw: player.yaw }); return; }
       }
-      AE.focus.x = AF.clamp(AE.focus.x, -290, 290); AE.focus.z = AF.clamp(AE.focus.z, -290, 290);
+      AE.focus.x = AF.clamp(AE.focus.x, AF.W.X0 + 10, 290); AE.focus.z = AF.clamp(AE.focus.z, -290, 290);
       // idle auto-rotate
       const idleFor = AF.clock.t - AE.lastInput;
       const title = AF.ui && AF.ui.titleOpen && AF.ui.titleOpen();
@@ -378,7 +378,7 @@ try {
     let t = 0.5, step = 0.5;
     for (; t < maxD; t += step) {
       const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
-      if (x < -300 || x > 300 || z < -300 || z > 300) { if (t > 50 && y < -20) break; continue; }
+      if (x < AF.W.X0 || x > 300 || z < -300 || z > 300) { if (t > 50 && y < -20) break; continue; }
       if (solid(x, y, z)) {
         // refine
         let a = t - step, b = t;

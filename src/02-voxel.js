@@ -1,13 +1,13 @@
 // ================================================================ 02-voxel.js
 try {
 // ===== 02-voxel: world grid, heightmap, models, meshers, material, collision  (OWNER: coordinator) =====
-// Units: metres. Block (voxel) = 0.25 m. World x,z in [-300, 300), y in [-16, 160)  (v2: top raised from 64 for a real deco skyline).
-// Ground is a HEIGHTMAP of block columns (W.H, W.C); everything standing on it is VOXELS (W.set / W.fill).
+// Units: metres. Block (voxel) = 0.25 m. World x in [-660, 300), z in [-300, 300), y in [-16, 160). The strip west of x -300 is the
+// new west side (New Friends Colony, the zoo, the airfield). Ground is a HEIGHTMAP of block columns (W.H, W.C); everything standing on it is VOXELS.
 const VS = 0.25, INV = 4;
-const NX = 2400, NY = 704, NZ = 2400, CS = 16;
-const X0 = -300, Y0 = -16, Z0 = -300;
+const NX = 3840, NY = 704, NZ = 2400, CS = 16;
+const X0 = -660, Y0 = -16, Z0 = -300;
 const CX = NX / CS, CY = NY / CS, CZ = NZ / CS;
-const W = AF.W = { VS, NX, NY, NZ, X0, Y0, Z0, CS };
+const W = AF.W = { VS, NX, NY, NZ, X0, Y0, Z0, CS, x1: X0 + NX * VS, z1: Z0 + NZ * VS };
 W.chunks = new Array(CX * CY * CZ).fill(null);
 W.H = new Int16Array(NX * NZ);        // ground top in blocks above y=0 (top surface y = H*0.25)
 W.C = new Uint16Array(NX * NZ);       // top colour index
@@ -161,7 +161,7 @@ const AOK = [0, 1, 2, 3];
 const QP = new Float64Array(12), QT = new Float64Array(8);
 // pad: Uint16Array of (sx+2)*(sy+2)*(sz+2) with a 1-voxel border, index ((x+1)*(sy+2)+(y+1))*(sz+2)+(z+1).
 // 65535 in the pad = "solid, never drawn" (underground). sliceCnt (optional): [[per-x count],[per-y],[per-z]] of drawable voxels.
-function greedyPad(sx, sy, sz, pad, scale, origin, uvOff, out, flat, sliceCnt) {
+function greedyPad(sx, sy, sz, pad, scale, origin, uvOff, out, flat, sliceCnt, uvScale = 1) {
   const P = AF.PAL, OP = P.opaque, GL = P.glass, dims = [sx, sy, sz];
   const SZ = sz + 2, SX = (sy + 2) * SZ, stride = [SX, SZ, 1];
   const I0 = SX + SZ + 1;
@@ -227,7 +227,7 @@ function greedyPad(sx, sy, sz, pad, scale, origin, uvOff, out, flat, sliceCnt) {
           const ua = ou + i * scale, ub = ou + (i + w) * scale, va = ov + j * scale, vb = ov + (j + h) * scale;
           QP[d] = QP[3 + d] = QP[6 + d] = QP[9 + d] = pd;
           QP[u] = ua; QP[v] = va; QP[3 + u] = ub; QP[3 + v] = va; QP[6 + u] = ub; QP[6 + v] = vb; QP[9 + u] = ua; QP[9 + v] = vb;
-          const tu0 = i + uvOff[u], tu1 = i + w + uvOff[u], tv0 = j + uvOff[v], tv1 = j + h + uvOff[v];
+          const tu0 = (i + uvOff[u]) * uvScale, tu1 = (i + w + uvOff[u]) * uvScale, tv0 = (j + uvOff[v]) * uvScale, tv1 = (j + h + uvOff[v]) * uvScale;
           QT[0] = tu0; QT[1] = tv0; QT[2] = tu1; QT[3] = tv0; QT[4] = tu1; QT[5] = tv1; QT[6] = tu0; QT[7] = tv1;
           const buf = GL[c] ? out.glass : out.opaque;
           if (side === 0) buf.quadS(QP, QT, 0, 1, 2, 3, c, nIdx, q0, q1, q2, q3);
@@ -260,7 +260,7 @@ AF.lodOf = (g) => {
   if (g.userData.lod !== undefined) return g.userData.lod;
   const src = g.userData.src;
   if (!src || src.vs >= 0.45 || src.m.w * src.m.h * src.m.d > 4e6) { g.userData.lod = null; return null; }   // already coarse: keep as is
-  const m = src.m, F = src.vs >= 0.2 ? 2 : Math.max(2, Math.round(0.25 / src.vs)), w = Math.ceil(m.w / F), h = Math.ceil(m.h / F), d = Math.ceil(m.d / F);
+  const m = src.m, F = src.vs >= 0.2 ? 2 : Math.max(2, Math.round(0.33 / src.vs)), w = Math.ceil(m.w / F), h = Math.ceil(m.h / F), d = Math.ceil(m.d / F);
   const L = new Model(w, h, d);
   const cnt = new Map();
   for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) for (let z = 0; z < d; z++) {
@@ -779,8 +779,21 @@ AF.placeStatic = (geo, x, y, z, rot = 0, o = {}) => {
     const r = ((rot % 4) + 4) % 4;
     const R = (p) => r === 0 ? p : r === 1 ? [p[1], -p[0]] : r === 2 ? [-p[0], -p[1]] : [-p[1], p[0]];
     const pa = R(a), pb = R(b);
-    AF.addCollider(x + Math.min(pa[0], pb[0]), y + bb.min.y, z + Math.min(pa[1], pb[1]), x + Math.max(pa[0], pb[0]), y + bb.max.y, z + Math.max(pa[1], pb[1]));
+    pr.col = AF.addCollider(x + Math.min(pa[0], pb[0]), y + bb.min.y, z + Math.min(pa[1], pb[1]), x + Math.max(pa[0], pb[0]), y + bb.max.y, z + Math.max(pa[1], pb[1]));
   }
+  return pr;
+};
+// take a static prop out of the world again (e.g. a parked car the player drives off in): rebuilds that region's prop meshes
+AF.removeStatic = (pr) => {
+  const i = AF.world.props.indexOf(pr); if (i < 0) return;
+  AF.world.props.splice(i, 1);
+  if (pr.col) AF.removeCollider(pr.col);
+  const k = regionKeyOf(pr.x, pr.z), list = AF.world.propsByRegion.get(k);
+  if (list) { const j = list.indexOf(pr); if (j >= 0) list.splice(j, 1); }
+  const reg = AF.world.lod.get(k); if (!reg) return;
+  const wasNear = reg.nearBuilt; freeNear(reg); dropMesh(reg.far); reg.far = null;
+  const fg = mergeProps(reg.props, farPick); if (fg) reg.far = regMesh(fg, AF.mat.voxel, true);
+  if (wasNear) buildNear(reg);
 };
 AF.addWater = (geo, mat) => { AF.world.water.push({ geo, mat }); };
 
@@ -927,6 +940,64 @@ function meshVoxelRegion(rx, rz, out) {
   }
 }
 
+// ---- COARSE region LOD: every chunk downsampled 2x (0.5 m cells, no AO) for regions far from the camera. A coarse cell is solid when
+// >= 2 of its 8 blocks are (thin walls + lines survive, lone specks drop); it takes the most common opaque colour, else glass.
+const coarseCache = new Map();
+const coarseChunk = (key) => {
+  let c = coarseCache.get(key); if (c !== undefined) return c;
+  const ch = W.chunks[key]; if (!ch) { coarseCache.set(key, null); return null; }
+  c = new Uint16Array(512); let any = false;
+  const OP = AF.PAL.opaque, cols = new Uint16Array(8), cnts = new Uint8Array(8);
+  for (let X = 0; X < 8; X++) for (let Y = 0; Y < 8; Y++) for (let Z = 0; Z < 8; Z++) {
+    let n = 0, nOp = 0, gl = 0, nc = 0;
+    for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) for (let d = 0; d < 2; d++) {
+      const v = ch[(((X * 2 + a) * 16) + Y * 2 + b) * 16 + Z * 2 + d]; if (!v) continue;
+      n++;
+      if (OP[v] !== 1) { gl = v; continue; }
+      nOp++;
+      let j = 0; while (j < nc && cols[j] !== v) j++;
+      if (j === nc) { cols[nc] = v; cnts[nc++] = 1; } else cnts[j]++;
+    }
+    if (n < 2) continue;
+    let best = gl;
+    if (nOp >= 2 || !gl) { let bn = 0; for (let j = 0; j < nc; j++) if (cnts[j] > bn) { bn = cnts[j]; best = cols[j]; } }
+    if (best) { c[(X * 8 + Y) * 8 + Z] = best; any = true; }
+  }
+  if (!any) c = null;
+  coarseCache.set(key, c);
+  return c;
+};
+function meshVoxelRegionCoarse(rx, rz, out) {
+  const bx0 = rx * REG, bz0 = rz * REG;
+  const pad = new Uint16Array(10 * 10 * 10), hcol = new Int32Array(10 * 10);
+  for (let cx = bx0 >> 4; cx < Math.min(CX, (bx0 + REG) >> 4); cx++) for (let cz = bz0 >> 4; cz < Math.min(CZ, (bz0 + REG) >> 4); cz++) {
+    const ox = cx * 16, oz = cz * 16;
+    let colsReady = false;
+    for (let cy = 0; cy < CY; cy++) {
+      const me = coarseChunk((cx * CY + cy) * CZ + cz); if (!me) continue;
+      if (!colsReady) {   // lowest ground (fine blocks) under each coarse column, incl. the 1-cell border
+        for (let X = -1; X <= 8; X++) for (let Z = -1; Z <= 8; Z++) { let h = 1e9; for (let a = 0; a < 2; a++) for (let d = 0; d < 2; d++) h = Math.min(h, W.hB(ox + X * 2 + a, oz + Z * 2 + d)); hcol[(X + 1) * 10 + Z + 1] = h + GOFF; }
+        colsReady = true;
+      }
+      const oy = cy * 16;
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let d = -1; d <= 1; d++) {
+        const nx = cx + a, ny = cy + b, nz = cz + d;
+        const nch = (nx < 0 || ny < 0 || nz < 0 || nx >= CX || ny >= CY || nz >= CZ) ? null : (a | b | d ? coarseChunk((nx * CY + ny) * CZ + nz) : me);
+        const xs = a < 0 ? 7 : 0, xe = a < 0 ? 8 : a > 0 ? 1 : 8, ys = b < 0 ? 7 : 0, ye = b < 0 ? 8 : b > 0 ? 1 : 8, zs = d < 0 ? 7 : 0, ze = d < 0 ? 8 : d > 0 ? 1 : 8;
+        for (let x = xs; x < xe; x++) for (let y = ys; y < ye; y++) for (let z = zs; z < ze; z++) {
+          const px = a < 0 ? 0 : a > 0 ? 9 : x + 1, py = b < 0 ? 0 : b > 0 ? 9 : y + 1, pz = d < 0 ? 0 : d > 0 ? 9 : z + 1;
+          pad[(px * 10 + py) * 10 + pz] = nch ? nch[(x * 8 + y) * 8 + z] : 0;
+        }
+      }
+      for (let X = -1; X <= 8; X++) for (let Z = -1; Z <= 8; Z++) {
+        const top = hcol[(X + 1) * 10 + Z + 1] - oy;   // fine y below which everything is underground
+        for (let Y = -1; Y <= 8; Y++) { if (Y * 2 + 1 >= top) break; const i = ((X + 1) * 10 + Y + 1) * 10 + Z + 1; if (pad[i] === 0) pad[i] = 65535; }
+      }
+      greedyPad(8, 8, 8, pad, VS * 2, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox >> 1, oy >> 1, oz >> 1], out, true, null, 2);
+    }
+  }
+}
+
 // ---- static props: merged per region with typed arrays. FAR version (downsampled, flat) always exists;
 // the NEAR full-detail version is streamed in for regions within AF.LOD_DIST of the camera and freed beyond it.
 const ROTN = [[0, 1, 2, 3, 4, 5], [5, 4, 2, 3, 0, 1], [1, 0, 2, 3, 5, 4], [4, 5, 2, 3, 1, 0]];
@@ -970,7 +1041,19 @@ const regMesh = (geo, mat, cast) => {
   const m = new THREE.Mesh(geo, mat); m.castShadow = cast; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); if (mat === AF.mat.glass) m.renderOrder = 2; AF.world.group.add(m); return m; };
 const dropMesh = (m) => { if (!m) return; AF.world.group.remove(m); m.geometry.dispose(); };
 AF.world.lod = new Map();   // key -> {cx, cz, far, near, nearGlass, props}
+AF.world.coarse = new Map(); // key -> [coarse region meshes] (shown instead of the full region beyond AF.REGION_LOD)
 AF.LOD_DIST = 110;
+AF.REGION_LOD = 130;
+// far prop meshes skip what can't be seen from a distance: furniture under a roof and tiny clutter
+const roofOver = (x, y, z) => { const bx = W.bx(x), bz = W.bz(z), OP = AF.PAL.opaque; for (let by = W.by(y), e = Math.min(NY - 1, W.by(y + 14)); by <= e; by++) { const c = W.get(bx, by, bz); if (c && OP[c]) return true; } return false; };
+const farPick = (pr) => {
+  if (pr.farSkip === undefined) {
+    const g = pr.geo, bb = g.boundingBox || (g.computeBoundingBox(), g.boundingBox);
+    const big = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z);
+    pr.farSkip = big < 0.7 || (big < 9 && roofOver(pr.x, pr.y + bb.max.y + 0.3, pr.z));
+  }
+  return pr.farSkip ? null : (AF.lodOf(pr.geo) || pr.geo);
+};
 function buildNear(reg) {
   const t = performance.now();
   const g = mergeProps(reg.props, (pr) => pr.geo);
@@ -985,24 +1068,40 @@ function freeNear(reg) { dropMesh(reg.near); dropMesh(reg.nearGlass); reg.near =
 AF.meshRegion = (rx, rz) => {
   const k = rx * 64 + rz, old = AF.world.regions.get(k);
   if (old) { for (const m of old) dropMesh(m); }
+  const oldC = AF.world.coarse.get(k); if (oldC) { for (const m of oldC) dropMesh(m); }
   const oldL = AF.world.lod.get(k); if (oldL) { freeNear(oldL); dropMesh(oldL.far); }
   const out = { opaque: new GeoBuf(), glass: new GeoBuf() };
-  const T = AF.stats.meshT || (AF.stats.meshT = { terrain: 0, voxel: 0, far: 0, gpu: 0 });
+  const T = AF.stats.meshT || (AF.stats.meshT = { terrain: 0, voxel: 0, coarse: 0, far: 0, gpu: 0 });
   let tt = performance.now();
   meshTerrainRegion(rx, rz, out.opaque);
+  const terrainQ = out.opaque.n;
   T.terrain += performance.now() - tt; tt = performance.now();
+  // coarse copy first (terrain quads are shared: copy them before the fine voxels are appended)
+  const cout = { opaque: new GeoBuf(), glass: new GeoBuf() };
+  if (terrainQ) { const o = out.opaque, c = cout.opaque; c.p = o.p.slice(); c.uv = o.uv.slice(); c.pal = o.pal.slice(); c.an = o.an.slice(); c.idx = o.idx.slice(); c.n = o.n; }
   meshVoxelRegion(rx, rz, out);
   T.voxel += performance.now() - tt; tt = performance.now();
-  const meshes = [];
+  for (let cx = (rx * REG) >> 4, e = Math.min(CX, (rx * REG + REG) >> 4); cx < e; cx++) for (let cz = (rz * REG) >> 4, f = Math.min(CZ, (rz * REG + REG) >> 4); cz < f; cz++) for (let cy = 0; cy < CY; cy++) coarseCache.delete((cx * CY + cy) * CZ + cz);
+  meshVoxelRegionCoarse(rx, rz, cout);
+  T.coarse += performance.now() - tt; tt = performance.now();
+  const meshes = [], cmeshes = [];
   if (out.opaque.n) { const m = regMesh(out.opaque.geometry(), AF.mat.voxel, true); m.userData.region = k; meshes.push(m); }
   if (out.glass.n) meshes.push(regMesh(out.glass.geometry(), AF.mat.glass, false));
+  // only keep a coarse copy when it actually saves something
+  if (out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8) {
+    if (cout.opaque.n) { const m = regMesh(cout.opaque.geometry(), AF.mat.voxel, true); m.userData.region = k; m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
+    if (cout.glass.n) { const m = regMesh(cout.glass.geometry(), AF.mat.glass, false); m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
+  }
   AF.world.regions.set(k, meshes);
+  if (cmeshes.length) AF.world.coarse.set(k, cmeshes); else AF.world.coarse.delete(k);
+  const RL = AF.world.regLod || (AF.world.regLod = new Map());
+  RL.set(k, { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: meshes, coarse: cmeshes, showCoarse: false });
   const props = AF.world.propsByRegion.get(k) || [];
   let farQ = 0;
   if (props.length) {
     const reg = { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, props, far: null, near: null, nearGlass: null, nearBuilt: false };
     const tf = performance.now();
-    const fg = mergeProps(props, (pr) => AF.lodOf(pr.geo) || pr.geo);
+    const fg = mergeProps(props, farPick);
     T.far += performance.now() - tf;
     if (fg) { reg.far = regMesh(fg, AF.mat.voxel, true); farQ = fg.attributes.position.count / 4; }
     AF.world.lod.set(k, reg);
@@ -1012,6 +1111,19 @@ AF.meshRegion = (rx, rz) => {
 AF.onTick('prop-lod', 880, () => {
   if (!AF.world.group) return;
   const c = AF.camera.position, D = AF.LOD_DIST;
+  // region LOD: full voxels near the camera, the coarse copy beyond (hysteresis so nothing flickers on the boundary)
+  if (AF.world.regLod) {
+    const RD = AF.REGION_LOD;
+    for (const r of AF.world.regLod.values()) {
+      if (!r.coarse.length) continue;
+      const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
+      const want = r.showCoarse ? d > RD - 12 : d > RD + 12;
+      if (want === r.showCoarse) continue;
+      r.showCoarse = want;
+      for (const m of r.full) m.visible = !want;
+      for (const m of r.coarse) m.visible = want;
+    }
+  }
   let budget = AF.SHOT || AF.TEST ? 1e9 : 10, best = null, bestD = 1e9;
   const t0 = performance.now();
   for (const r of AF.world.lod.values()) {
@@ -1023,27 +1135,28 @@ AF.onTick('prop-lod', 880, () => {
     const showNear = r.nearBuilt && d < D + 25;
     if (r.near) r.near.visible = showNear;
     if (r.nearGlass) r.nearGlass.visible = showNear;
-    if (r.far) r.far.visible = !showNear;
+    if (r.far) r.far.visible = !showNear && d < (AF.PROP_CULL || 900);
   }
   if (best && performance.now() - t0 < budget) buildNear(best);
 });
 AF.meshWorld = async (progress) => {
   AF.stats = AF.stats || {}; AF.stats.meshT = null;
   if (!AF.world.group) { AF.world.group = new THREE.Group(); AF.world.group.name = 'world'; AF.scene.add(AF.world.group); }
-  const NR = Math.ceil(NX / REG);
+  const NRX = Math.ceil(NX / REG), NRZ = Math.ceil(NZ / REG);
   let quads = 0, done = 0;
   const t0 = performance.now();
   // ?near=x,z,r (harness only): mesh just the regions within r m of (x,z) so a local look boots in seconds.
   const nearQ = AF.Q && AF.Q.get('near'), NEAR = nearQ ? nearQ.split(',').map(Number) : null;
   if (NEAR && NEAR.length === 3 && NEAR.every(isFinite)) { AF.NEAR = { x: NEAR[0], z: NEAR[1], r: NEAR[2] }; console.log('[af] near mode', nearQ); }
   const rm = REG * VS;
-  for (let rx = 0; rx < NR; rx++) {
-    for (let rz = 0; rz < NR; rz++) {
+  for (let rx = 0; rx < NRX; rx++) {
+    for (let rz = 0; rz < NRZ; rz++) {
       if (AF.NEAR && Math.hypot(X0 + (rx + 0.5) * rm - AF.NEAR.x, Z0 + (rz + 0.5) * rm - AF.NEAR.z) > AF.NEAR.r + rm * 0.71) { done++; continue; }
       quads += AF.meshRegion(rx, rz); done++;
     }
-    if (progress) await progress(done / (NR * NR));
+    if (progress) await progress(done / (NRX * NRZ));
   }
+  coarseCache.clear();
   for (const w of AF.world.water) { const m = new THREE.Mesh(w.geo, w.mat || AF.mat.water); m.receiveShadow = true; m.renderOrder = 1; m.name = 'water'; AF.world.group.add(m); w.mesh = m; }
   W.dirty.clear(); W.tDirty = false;
   AF.stats = Object.assign(AF.stats || {}, { quads, meshMs: Math.round(performance.now() - t0) });
