@@ -1145,8 +1145,10 @@ AF.mat = {};
         vec3 pool = vec3(0.0);
         for (int i = 0; i < 24; i++) {
           if (float(i) >= uLN) break;
-          vec3 L = uLP[i].xyz - vAfWP; float dl = length(L);
-          float a = clamp(1.0 - dl / uLP[i].w, 0.0, 1.0);
+          vec3 L = uLP[i].xyz - vAfWP; float d2 = dot(L, L), rr = uLP[i].w;
+          if (d2 >= rr * rr) continue;
+          float dl = sqrt(d2);
+          float a = 1.0 - dl / rr;
           float ndl = max(dot(Nw, L / max(dl, 1e-3)), 0.0);
           pool += uLC[i].rgb * a * a * (0.15 + 0.85 * ndl);
         }
@@ -2365,7 +2367,7 @@ try {
   cv.addEventListener('webglcontextrestored', () => {
     AF.contextLost = false; AF.paused = true; graphicsNotice();
   });
-  // near sun shadows re-render every frame on High, every 2nd on Balanced, every 3rd on Low (the map stays consistent in between)
+  // near sun shadows re-render every frame on High, every 2nd on Balanced, every 3rd on Standard + Low (the map stays consistent in between)
   R.shadowMap.autoUpdate = false;
   // the shadow pass tests layers against the camera it is given: hand it a view that also sees layer 1 (shadow-only casters,
   // e.g. coarse stand-ins for full regions outside the near cascade) while the main camera sees layer 0 only
@@ -2379,7 +2381,7 @@ try {
       try { h.fn(dt, AF.clock.t); }
       catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (AF.MOBILE) AF.reportError(e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
     }
-    const every = AF.SHOT || AF.TEST ? 1 : (AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' ? 2 : 3) * (AF.shadowNear.k > 0.8 ? 2 : 1);
+    const every = AF.SHOT || AF.TEST ? 1 : (AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' && !AF.GFX.lite ? 2 : 3) * (AF.shadowNear.k > 0.8 ? 2 : 1);
     if (AF.clock.frame % every === 0 || AF.shadowDirty) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
     try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
@@ -2511,7 +2513,7 @@ try {
   const TIER = {
     ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 70, propCull: 700 },
     high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 45, propCull: 300 },
-    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 3, pools: 12, regLod: 80, farLod: 240, lod: 35, propCull: 240 },
+    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 2, pools: 8, regLod: 80, farLod: 240, lod: 35, propCull: 240 },
     low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 32, propCull: 200 },
     cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
   };
@@ -2874,11 +2876,17 @@ try {
 {
   const U = AF.mat.uniforms, KINDS = new Set(['street', 'porch', 'sign', 'shop', 'lamp', 'neon']);
   const P = AF.gfx.pools = { k: 1, max: AF.gfx.tierCfg ? AF.gfx.tierCfg().pools : 24, range: 1.0, n: 0 };
-  let cand = null, fr = 0; const tc = new THREE.Color();
+  let cand = null, fr = 0; const tc = new THREE.Color(), fru = new THREE.Frustum(), pm = new THREE.Matrix4(), sph = new THREE.Sphere();
   const pick = () => {
     if (!cand) cand = AF.lights.filter((l) => KINDS.has(l.kind));
-    const cp = AF.camera.position, arr = [];
-    for (const l of cand) { const d = (l.x - cp.x) ** 2 + (l.z - cp.z) ** 2 + (l.y - cp.y) ** 2; if (d < 160 * 160) arr.push([d, l]); }
+    const cam = AF.camera, cp = cam.position, arr = [];
+    pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); fru.setFromProjectionMatrix(pm);
+    // only pools that can reach the view frustum: the shader loop runs over fewer, all of them visible
+    for (const l of cand) {
+      const d = (l.x - cp.x) ** 2 + (l.z - cp.z) ** 2 + (l.y - cp.y) ** 2; if (d >= 160 * 160) continue;
+      sph.center.set(l.x, l.y, l.z); sph.radius = Math.max(4, Math.min(18, (l.range || 10) * 0.9)) * P.range + 2;
+      if (AF.SHOT || fru.intersectsSphere(sph)) arr.push([d, l]);
+    }
     arr.sort((a, b) => a[0] - b[0]);
     const n = Math.min(P.max, arr.length);
     for (let i = 0; i < n; i++) {
@@ -2893,7 +2901,7 @@ try {
     const on = (AF.time.night || 0) > 0.02 && P.max > 0;
     U.uPoolK.value = on ? P.k : 0;
     if (!on) { U.uLN.value = 0; return; }
-    if (fr++ % 15 === 0 || AF.SHOT) pick();
+    if (fr++ % 3 === 0 || AF.SHOT) pick();
   });
   AF.on('ready', () => { cand = null; });
 }
@@ -25374,12 +25382,15 @@ try {
 
   // nearest-K selection without allocation: keep the best (K+1) in small sorted arrays
   const KP = 13, selL = new Array(KP).fill(null), selD = new Float64Array(KP), selK = new Float32Array(KP);
+  // lights whose reach can't touch the view frustum light nothing you can see: skip them so the pool goes to lights on screen
+  const lFr = new THREE.Frustum(), lPM = new THREE.Matrix4(), lSph = new THREE.Sphere();
   function updatePool() {
     const n = T.night, ind = A.indoor;
     const nightK = smooth(0.25, 0.75, n);
     let cnt = 0;
     const L = AF.lights;
-    const cx = camP.x, cy = camP.y, cz = camP.z;
+    const cx = camP.x, cy = camP.y, cz = camP.z, cam = AF.camera;
+    lPM.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); lFr.setFromProjectionMatrix(lPM);
     for (let i = 0; i < L.length; i++) {
       const l = L[i];
       const interior = l.kind === 'interior';
@@ -25388,6 +25399,8 @@ try {
       if (k <= 0.01) continue;
       const dx = l.x - cx, dy = (l.y - cy) * 1.5, dz = l.z - cz;
       if (dx > 160 || dx < -160 || dz > 160 || dz < -160) continue;
+      lSph.center.set(l.x, l.y, l.z); lSph.radius = (l.range ?? 10) * 1.6 + 3;
+      if (!AF.SHOT && !lFr.intersectsSphere(lSph)) continue;
       let d2 = dx * dx + dy * dy + dz * dz;
       if (interior && ind > 0.5) d2 *= 0.35;      // prefer interior fixtures while indoors
       if (cnt === KP && d2 >= selD[KP - 1]) continue;

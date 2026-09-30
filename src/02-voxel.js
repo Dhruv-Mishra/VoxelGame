@@ -747,8 +747,10 @@ AF.mat = {};
         vec3 pool = vec3(0.0);
         for (int i = 0; i < 24; i++) {
           if (float(i) >= uLN) break;
-          vec3 L = uLP[i].xyz - vAfWP; float dl = length(L);
-          float a = clamp(1.0 - dl / uLP[i].w, 0.0, 1.0);
+          vec3 L = uLP[i].xyz - vAfWP; float d2 = dot(L, L), rr = uLP[i].w;
+          if (d2 >= rr * rr) continue;
+          float dl = sqrt(d2);
+          float a = 1.0 - dl / rr;
           float ndl = max(dot(Nw, L / max(dl, 1e-3)), 0.0);
           pool += uLC[i].rgb * a * a * (0.15 + 0.85 * ndl);
         }

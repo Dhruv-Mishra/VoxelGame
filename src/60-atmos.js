@@ -740,12 +740,15 @@ try {
 
   // nearest-K selection without allocation: keep the best (K+1) in small sorted arrays
   const KP = 13, selL = new Array(KP).fill(null), selD = new Float64Array(KP), selK = new Float32Array(KP);
+  // lights whose reach can't touch the view frustum light nothing you can see: skip them so the pool goes to lights on screen
+  const lFr = new THREE.Frustum(), lPM = new THREE.Matrix4(), lSph = new THREE.Sphere();
   function updatePool() {
     const n = T.night, ind = A.indoor;
     const nightK = smooth(0.25, 0.75, n);
     let cnt = 0;
     const L = AF.lights;
-    const cx = camP.x, cy = camP.y, cz = camP.z;
+    const cx = camP.x, cy = camP.y, cz = camP.z, cam = AF.camera;
+    lPM.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); lFr.setFromProjectionMatrix(lPM);
     for (let i = 0; i < L.length; i++) {
       const l = L[i];
       const interior = l.kind === 'interior';
@@ -754,6 +757,8 @@ try {
       if (k <= 0.01) continue;
       const dx = l.x - cx, dy = (l.y - cy) * 1.5, dz = l.z - cz;
       if (dx > 160 || dx < -160 || dz > 160 || dz < -160) continue;
+      lSph.center.set(l.x, l.y, l.z); lSph.radius = (l.range ?? 10) * 1.6 + 3;
+      if (!AF.SHOT && !lFr.intersectsSphere(lSph)) continue;
       let d2 = dx * dx + dy * dy + dz * dz;
       if (interior && ind > 0.5) d2 *= 0.35;      // prefer interior fixtures while indoors
       if (cnt === KP && d2 >= selD[KP - 1]) continue;
