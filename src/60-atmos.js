@@ -7,6 +7,9 @@ try {
   const T = AF.time, W = AF.W;
   const V3 = THREE.Vector3;
   const clamp = AF.clamp, lerp = AF.lerp, smooth = AF.smooth;
+  // player brightness (exposure multiplier, saved per browser); phones default brighter
+  AF.brightness = (() => { try { const v = parseFloat(localStorage.getItem('portSolace.bright')); if (v >= 0.6 && v <= 2) return v; } catch (e) { /* storage blocked */ } return AF.MOBILE ? 1.3 : 1.0; })();
+  AF.setBrightness = (v) => { AF.brightness = clamp(+v || 1, 0.6, 2); try { localStorage.setItem('portSolace.bright', String(AF.brightness)); } catch (e) { /* storage blocked */ } };
   if (AF.Q.has('hour')) T.hours = ((+AF.Q.get('hour') % 24) + 24) % 24;
   else T.hours = 20.6;   // boot at night: the lit city, neon and light pools are the best first look
   if (AF.Q.has('speed')) T.speed = +AF.Q.get('speed');
@@ -270,7 +273,7 @@ try {
       AF.mat.uniforms.uNight.value = A.cityLights;
       AF.mat.uniforms.uEmitBoost.value = lerp(1.0, 0.85, ind);
     }
-    if (AF.renderer) AF.renderer.toneMappingExposure = lerp(lerp(1.0, 1.45, n), 1.0, ind);
+    if (AF.renderer) AF.renderer.toneMappingExposure = lerp(lerp(1.0, 1.45, n), 1.0, ind) * AF.brightness;
   };
 
   // ------------------------------------------------------------ sky dome

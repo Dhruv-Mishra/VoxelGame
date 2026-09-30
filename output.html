@@ -24649,6 +24649,9 @@ try {
   const T = AF.time, W = AF.W;
   const V3 = THREE.Vector3;
   const clamp = AF.clamp, lerp = AF.lerp, smooth = AF.smooth;
+  // player brightness (exposure multiplier, saved per browser); phones default brighter
+  AF.brightness = (() => { try { const v = parseFloat(localStorage.getItem('portSolace.bright')); if (v >= 0.6 && v <= 2) return v; } catch (e) { /* storage blocked */ } return AF.MOBILE ? 1.3 : 1.0; })();
+  AF.setBrightness = (v) => { AF.brightness = clamp(+v || 1, 0.6, 2); try { localStorage.setItem('portSolace.bright', String(AF.brightness)); } catch (e) { /* storage blocked */ } };
   if (AF.Q.has('hour')) T.hours = ((+AF.Q.get('hour') % 24) + 24) % 24;
   else T.hours = 20.6;   // boot at night: the lit city, neon and light pools are the best first look
   if (AF.Q.has('speed')) T.speed = +AF.Q.get('speed');
@@ -24912,7 +24915,7 @@ try {
       AF.mat.uniforms.uNight.value = A.cityLights;
       AF.mat.uniforms.uEmitBoost.value = lerp(1.0, 0.85, ind);
     }
-    if (AF.renderer) AF.renderer.toneMappingExposure = lerp(lerp(1.0, 1.45, n), 1.0, ind);
+    if (AF.renderer) AF.renderer.toneMappingExposure = lerp(lerp(1.0, 1.45, n), 1.0, ind) * AF.brightness;
   };
 
   // ------------------------------------------------------------ sky dome
@@ -28060,7 +28063,7 @@ try {
     <div class="n"></div><div class="tg"></div><div class="d"></div><div class="dots"></div>
     <button class="btn primary go"><span class="ic">&#9654;</span><span class="lb">Let's Play</span></button></div>`); title.id = 't-title';
   const clock = h('div', 'panel hud', `<div class="t"><span class="tm">4:30</span><small class="ap">PM</small></div><div class="p">Port Solace</div>`); clock.id = 'h-clock';
-  const right = h('div', 'hud', `<div id="h-mini" class="panel pe"><canvas width="220" height="220"></canvas><div class="n">N</div></div><div id="h-btns">${TOUCH ? '<button class="panel round pe" data-k="full" title="Fullscreen">&#x26F6;</button>' : ''}<button class="panel round pe" data-k="map" title="Map (M)">&#x1F5FA;</button><button class="panel round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); right.id = 'h-right';
+  const right = h('div', 'hud', `<div id="h-mini" class="panel pe"><canvas width="220" height="220"></canvas><div class="n">N</div></div><div id="h-btns">${TOUCH ? '<button class="panel round pe" data-k="full" title="Fullscreen">&#x26F6;</button>' : '<button class="panel round pe" data-k="map" title="Map (M)">&#x1F5FA;</button>'}<button class="panel round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); right.id = 'h-right';
   // phones: fullscreen + landscape lock from the Play tap (a user gesture); iOS Safari has neither API, so portrait gets a rotate hint
   const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
   const goFull = (on = true) => {
@@ -28089,6 +28092,7 @@ try {
     <div class="row"><label>Time of day</label><input data-k="hour" type="range" min="0" max="23.95" step="0.05"></div>
     <div class="row"><label>Clock</label><div class="seg" data-k="clock"><button data-v="run">Running</button><button data-v="stop">Stopped</button></div></div>
     <div class="row"><label>Look sensitivity</label><input data-k="sens" type="range" min="0.1" max="1.5" step="0.05"></div>
+    <div class="row"><label>Brightness</label><input data-k="bright" type="range" min="0.6" max="2" step="0.05"></div>
     <div class="stack"><button class="btn primary" data-k="resume">Resume</button><button class="btn" data-k="map">Map</button><button class="btn" data-k="help">Controls</button><button class="btn" data-k="switch">Switch friend</button></div></div>`); menu.id = 'm-menu';
   const help = h('div', 'sheet pe', ''); help.id = 'm-help';
   const mapEl = h('div', 'sheet pe', `<div class="panel"><div class="hd"><b class="deco" style="color:#ffe6a8">MAP</b><span>pick a place to go there</span><button class="btn" data-k="closemap">Close</button></div><div class="wrap"><canvas></canvas><div class="labs"></div></div></div>`); mapEl.id = 'm-map';
@@ -28317,6 +28321,7 @@ try {
     menu.querySelectorAll('[data-k=clock] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'stop') === !!AF.time.paused));
     const hr = menu.querySelector('[data-k=hour]'); if (document.activeElement !== hr) hr.value = AF.time.hours.toFixed(2);
     menu.querySelector('[data-k=sens]').value = String(AF.lookSens());
+    menu.querySelector('[data-k=bright]').value = String(AF.brightness ?? 1);
   };
   const exitLock = () => AF.input.releaseLock();
   const toggleMenu = (on, resume = true) => { S.menu = on ?? !S.menu; if (S.menu) { syncMenu(); S.help = false; S.map = false; mapEl.classList.remove('open'); help.classList.remove('open'); exitLock(); } menu.classList.toggle('open', S.menu); if (!S.menu && resume) AF.input.requestLock(); };
@@ -28347,6 +28352,7 @@ try {
   });
   menu.querySelector('[data-k=hour]').addEventListener('input', (e) => { AF.time.hours = +e.target.value; });
   menu.querySelector('[data-k=sens]').addEventListener('input', (e) => AF.setLookSens(e.target.value));
+  menu.querySelector('[data-k=bright]').addEventListener('input', (e) => AF.setBrightness && AF.setBrightness(e.target.value));
   help.addEventListener('click', (e) => { if (e.target === help || e.target.closest('[data-k=closehelp]')) toggleHelp(false); });
   right.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); else if (b.dataset.k === 'full') goFull(!isFull()); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
   prompt.addEventListener('click', () => AF.input.tap('KeyE'));
