@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="icon" href="data:,">
+<title>Port Solace</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0b1822;font-family:Georgia,'Times New Roman',serif;color:#f4ead2;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  #cv{position:fixed;inset:0;width:100%;height:100%;display:block;outline:none;touch-action:none}
+  #ui{position:fixed;inset:0;pointer-events:none;z-index:5}
+  #ui .pe{pointer-events:auto}
+  #loader{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 40%,#1b3a46 0%,#0a1822 75%);transition:opacity 1s ease}
+  #loader h1{font-size:clamp(36px,8vw,64px);letter-spacing:.3em;margin:0 0 6px;color:#f3c77a;font-weight:normal;padding-left:.3em}
+  #loader .sub{font-style:italic;font-size:16px;color:#d9c7a3;margin-bottom:30px}
+  #loader .bar{width:min(360px,70vw);height:6px;border-radius:6px;overflow:hidden;background:rgba(255,255,255,.12)}
+  #loader .fill{height:100%;width:0;background:linear-gradient(90deg,#e7a64b,#f3d38a);transition:width .25s}
+  #loader .msg{margin-top:12px;font-size:13px;color:#bfa77f;min-height:18px}
+  #loader.done{opacity:0;pointer-events:none}
+</style></head>
+<body>
+<canvas id="cv" tabindex="0"></canvas>
+<div id="ui"></div>
+<div id="loader"><h1>PORT SOLACE</h1><div class="sub">a harbour city where the lights never quite go out</div><div class="bar"><div class="fill" id="ldfill"></div></div><div class="msg" id="ldmsg">loading…</div></div>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+/*@@PARTS@@*/
+</script>
+</body></html>
