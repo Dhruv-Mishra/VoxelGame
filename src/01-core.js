@@ -234,6 +234,8 @@ AF.input = { down: new Set(), pressed: new Set(), released: new Set(), mouse: { 
   I.endFrame = () => { I.pressed.clear(); I.released.clear(); I.mouse.dx = 0; I.mouse.dy = 0; I.mouse.wheel = 0; I.mouse.clicked = false; };
   I.key = (code) => I.down.has(code);
   I.hit = (code) => I.pressed.has(code);
+  I.tap = (code) => { I.pressed.add(code); };   // a one-frame press (on-screen buttons)
+  I.stick = null;                                 // touch: { x, y } in -1..1 (72-touch)
 }
 
 // ---------------------------------------------------------------- time of day
@@ -253,7 +255,8 @@ AF.viewpoints = [];  // {name, pos:[x,y,z], target:[x,y,z]}
 AF.addBuilding = (b) => { b.doors = b.doors || []; AF.buildings.push(b); if (b.name && b.label !== false) AF.labels.push({ name: b.name, x: (b.box[0] + b.box[3]) / 2, z: (b.box[2] + b.box[5]) / 2, kind: 'building' }); return b; };
 AF.addSpot = (s) => { AF.spots.push(s); return s; };
 AF.addLight = (l) => { AF.lights.push(Object.assign({ color: 0xffc67a, intensity: 1, range: 10, kind: 'interior', night: true }, l)); };
-AF.addInteract = (o) => { AF.interacts.push(Object.assign({ r: 2.2 }, o)); return o; };
+// the SAME object goes into the registry, so owners can move it (cars, NPCs) — a copy here left car prompts behind where the car used to be
+AF.addInteract = (o) => { if (o.r == null) o.r = 2.2; AF.interacts.push(o); return o; };
 AF.removeInteract = (o) => { const i = AF.interacts.indexOf(o); if (i >= 0) AF.interacts.splice(i, 1); };
 AF.addChimney = (x, y, z) => AF.chimneys.push({ x, y, z });
 AF.addLabel = (name, x, z, kind = 'place') => AF.labels.push({ name, x, z, kind });

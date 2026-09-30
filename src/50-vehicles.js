@@ -43,6 +43,8 @@ const kcols = () => {
     navy: p(0x28406a), lilac: p(0xb7a4cf), orange: p(0xe08a3a), sage: p(0x9db48a), grey: p(0x8f9398),
     maroon: p(0x5e1a22), bottle: p(0x1e4a32), jet: p(0x17181a), tanP: p(0xa88c62), greyP: p(0x62676d), olive: p(0x4a5238), dove: p(0xb9b4a6),
     cabYel: p(0xe8b820), gull: p(0x6fa3c8), beacon: p(0x6e2230), dairy: p(0xf2efe4), bread: p(0xefe2c4), deco: p(0xe8dcb8), busGreen: p(0x1f5a3a), busCream: p(0xeee0bc), coal: p(0x2a2a2c), ice: p(0x9fd0e0),
+    goldP: c(0xd4a84a, { jitter: 0.05, edge: 0.3, metal: 0.7, rough: 0.25 }), silverP: c(0xc8ccd2, { jitter: 0.05, edge: 0.3, metal: 0.8, rough: 0.2 }), pinkP: p(0xff6fb0), lilacP: p(0xb68ae0),
+    cash: p(0x2f7a4a), racer: p(0xc8221c), sunY: p(0xf2c21b), midnight: p(0x1c2440),
   };
   return K;
 };
@@ -437,6 +439,52 @@ function buildSidecar() {
   return m;
 }
 TYPES.push({ id: 'sidecar', name: 'Police Sidecar Motorcycle', kind: 'bike', paints: [['navy', 'navy']], seat: 'seatB', ai: true, build: () => buildSidecar() });
+// ---------------------------------------------------------------- the friends' garages: four high-end cars + a solo motorcycle
+// tail taper: carve the body behind z0 into a boat tail / teardrop
+const taper = (m, z0, k = 1) => { const cx = (m.w - 1) / 2; for (let z = 0; z < z0; z++) { const hw = (m.w / 2) * Math.pow(z / z0, 0.6 * k) + 0.6; for (let x = 0; x < m.w; x++) if (Math.abs(x - cx) > hw) for (let y = 0; y < m.h; y++) m.set(x, y, z, 0); } };
+const pipes = (m, k, z0, z1, y) => { for (const x of [0, m.w - 1]) for (let z = z0; z < z1; z++) { m.set(x, y, z, k.chrome); if ((z - z0) % 5 === 0) m.set(x, y + 1, z, k.chrome); } };
+TYPES.push(
+  { id: 'speedster', name: 'Boattail Speedster', kind: 'car', lux: true, vmax: 36, acc: 10, paints: [['goldP', 'jet'], ['pinkP', 'deco'], ['racer', 'deco'], ['midnight', 'goldP']], seat: 'seatT',
+    build: (p) => car30({ L: 52, W: 18, H: 15, belt: 9, axles: [11, 41], wr: 3.8, cab: { z0: 14, z1: 26, r0: 14, r1: 26, top: 12 }, open: true, benches: [16], noSpear: false }, p, (m, k) => {
+      taper(m, 13, 1.2);
+      for (let x = 3; x < 15; x++) for (let y = 9; y < 13; y++) m.set(x, y, 26, (x === 3 || x === 14 || y === 12) ? k.chrome : k.glass);
+      pipes(m, k, 31, 43, 6);
+      for (let z = 2; z < 13; z++) m.set(8, 9, z, k.chrome), m.set(9, 9, z, k.chrome);                         // chrome spine down the tail
+    }) },
+  { id: 'duesy', name: 'Duesenberg SJ', kind: 'car', lux: true, vmax: 34, acc: 9, paints: [['cash', 'jet'], ['midnight', 'silverP'], ['maroon', 'jet'], ['goldP', 'jet']], seat: 'seatR',
+    build: (p) => car30({ L: 58, W: 18, H: 18, belt: 10, axles: [10, 46], wr: 3.9, cab: { z0: 9, z1: 25, r0: 11, r1: 23, top: 17 }, twoTone: true, noSpear: true }, p, (m, k) => {
+      pipes(m, k, 30, 44, 7);
+      for (let x = 6; x < 12; x++) m.set(x, 12, 56, k.gold);                                                        // mascot bar
+    }) },
+  { id: 'arrow', name: 'Silver Arrow', kind: 'car', lux: true, vmax: 42, acc: 12, paints: [['silverP', 'silverP'], ['racer', 'deco'], ['sunY', 'jet']], seat: 'seatR',
+    build: (p) => { const k = kcols(); const m = buildCar({ L: 50, W: 16, H: 12, belt: 8, bottom: 1, axles: [9, 39], wr: 3.8, cab: { z0: 17, z1: 24, r0: 17, r1: 24, top: 10 }, open: true, benches: [18], skirts: true, noseDrop: true, noSpear: true }, p);
+      taper(m, 12, 0.8);
+      for (let z = 8; z < 17; z++) { const h = Math.round(3 * (z - 8) / 9); for (let x = 7; x < 9; x++) for (let y = 8; y < 8 + h; y++) m.set(x, y, z, p.a); }   // headrest fairing
+      for (let x = 4; x < 12; x++) for (let y = 8; y < 10; y++) m.set(x, y, 24, (y === 9) ? k.chrome : k.glass);
+      for (const s of [1, -1]) { for (let z = 26; z < 31; z++) for (let y = 3; y < 8; y++) if (Math.hypot(z - 28, y - 5.5) < 2.7) sideSet(m, y, z, k.white, s); blitText(m, '7', k.black, s, s > 0 ? 30 : 26, 2, s > 0 ? 15 : 0); }
+      return m; } },
+  { id: 'cord', name: 'Cord 810 Coupe', kind: 'car', lux: true, vmax: 33, acc: 9, paints: [['midnight', 'midnight'], ['lilacP', 'deco'], ['cash', 'cash'], ['deco', 'maroon']], seat: 'seatB',
+    build: (p) => car30({ L: 52, W: 18, H: 17, belt: 10, axles: [10, 40], wr: 3.6, cab: { z0: 12, z1: 29, r0: 16, r1: 26, top: 16 }, noseDrop: true, noSpear: true }, p, (m, k) => {
+      for (let y = 3; y < 9; y += 2) for (let x = 2; x < 16; x++) frontSet(m, x, y, k.chrome, true);                // wrap-around coffin-nose louvres
+      for (const s of [1, -1]) for (let z = 42; z < 50; z++) for (let y = 3; y < 9; y += 2) sideSet(m, y, z, k.chrome, s);
+    }) },
+);
+function buildMoto(p) {
+  const k = kcols(), L = 22, Wd = 6, m = new AF.Model(Wd, 12, L), P = p.a, bx = 3;
+  const wheel = (az, R) => { for (let y = 0; y < 8; y++) for (let z = 0; z < L; z++) { const d = Math.hypot(z + 0.5 - az, y + 0.5 - R); if (d > R) continue; for (let x = bx - 1; x < bx + 1; x++) m.set(x, y, z, d > R - 1 ? k.tyre : d < 1.2 ? k.chrome : k.dark); } };
+  wheel(3.5, 3.4); wheel(18.5, 3.4);
+  for (let z = 4; z < 18; z++) for (let y = 3; y < 5; y++) m.set(bx - 1, y, z, k.dark), m.set(bx, y, z, k.dark);   // frame
+  for (let z = 7; z < 13; z++) for (let y = 4; y < 7; y++) for (let x = bx - 2; x < bx + 2; x++) m.set(x, y, z, y === 6 ? k.chromeD : k.chrome);   // engine
+  for (let z = 10; z < 16; z++) for (let x = bx - 2; x < bx + 2; x++) { m.set(x, 7, z, P); m.set(x, 8, z, P); m.set(x, 9, z, z > 13 ? P : 0); }   // tank
+  for (let z = 4; z < 10; z++) for (let x = bx - 2; x < bx + 2; x++) m.set(x, 7, z, k.black);                        // saddle
+  for (let z = 1; z < 6; z++) for (let x = bx - 1; x < bx + 1; x++) m.set(x, 6, z, P);                              // tail
+  for (let y = 4; y < 11; y++) m.set(bx, y, 17 + (y > 8 ? 1 : 0), k.chrome);                                         // forks
+  for (let x = 0; x < Wd; x++) m.set(x, 11, 16, k.chrome);                                                            // bars
+  m.set(bx, 9, 20, k.head); m.set(bx - 1, 9, 20, k.head); m.set(bx, 10, 19, P); m.set(bx, 6, 0, k.tail);
+  for (let z = 3; z < 10; z++) m.set(bx + 2, 3, z, k.chrome);                                                         // exhaust
+  return m;
+}
+TYPES.push({ id: 'moto', name: 'Moto Racer', kind: 'bike', solo: true, vmax: 38, acc: 13, paints: [['jet', 'jet'], ['pinkP', 'pinkP'], ['goldP', 'jet'], ['lilacP', 'lilacP'], ['cash', 'jet'], ['racer', 'jet']], seat: 'seatB', build: (p) => buildMoto(p) });
 let LEG_IM = null;
 const legGeo = () => { const k = kcols(); const m = new AF.Model(3, 17, 3); m.box(0, 3, 0, 3, 17, 3, AF.col(HORSE.bay, { jitter: 0.1 })); m.box(0, 0, 0, 3, 3, 3, AF.col(HORSE.dark, { jitter: 0.1 })); m.box(0, 3, 0, 3, 4, 3, k.white); return AF.meshModel(m, { vs: 1 / 16, anchor: [0.5, 1, 0.5] }); };
 VV.TYPES = TYPES;
@@ -502,7 +550,12 @@ const WHEELS = {
   police: { axles: [10, 37], wr: 3.6, L: 48, W: 18 }, milk: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, icecream: { axles: [9, 34], wr: 3.6, L: 44, W: 19 },
   mail: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, laundry: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, bus: { axles: [16, 78], wr: 4.5, L: 96, W: 24 }, firetruck: { axles: [16, 66], wr: 4.5, L: 88, W: 22 },
   dairycart: { axles: [], wr: 5.6, L: 66, W: 16 }, sidecar: { axles: [], wr: 3.4, L: 24, W: 16 }, icecart: { axles: [], wr: 5.6, L: 66, W: 16 },
+  speedster: { axles: [11, 41], wr: 3.8, L: 52, W: 18 }, duesy: { axles: [10, 46], wr: 3.9, L: 58, W: 18 }, arrow: { axles: [9, 39], wr: 3.8, L: 50, W: 16 }, cord: { axles: [10, 40], wr: 3.6, L: 52, W: 18 },
+  moto: { axles: [], wr: 3.4, L: 22, W: 6, wb: 1.5 },
 };
+// distance from (px,pz) to a car's footprint (0 inside): you are "at" a car when you are next to its body, not its middle
+const bodyDist = (car, px, pz) => { const s = Math.sin(car.yaw), c = Math.cos(car.yaw), rx = px - car.x, rz = pz - car.z; const lx = rx * c - rz * s, lz = rx * s + rz * c; return Math.hypot(Math.max(0, Math.abs(lx) - car.halfW), Math.max(0, Math.abs(lz) - car.halfL)); };
+VV.bodyDist = bodyDist;
 function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   const T = TYPES.find((t) => t.id === typeId);
   const G = getGeo(T, paintIdx);
@@ -517,12 +570,12 @@ function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   for (const [ai, az] of Wl.axles.entries()) for (const s of [1, -1]) wheels.push({ lx: s * (halfW - 0.17), ly: wr, lz: (az + 0.5) * CVS - halfL, front: ai === 1, side: s });
   const car = {
     id: VV.cars.length, type: T, name: T.name, mesh, x, z, y: 0, yaw, pitch: 0, roll: 0, v: 0, vx: 0, vz: 0, steer: 0, spin: 0,
-    halfL, halfW, wr, ws, wheels, wheelbase: Wl.axles.length > 1 ? (Wl.axles[1] - Wl.axles[0]) * CVS : 2.4, gait: Math.random() * 6, height: G.spec.H,
+    halfL, halfW, wr, ws, wheels, wheelbase: Wl.wb || (Wl.axles.length > 1 ? (Wl.axles[1] - Wl.axles[0]) * CVS : 2.4), gait: Math.random() * 6, height: G.spec.H,
     ai: null, parked: true, player: false, driver: -1, bob: 0, bobV: 0, sway: 0, key: G.key, vPrev: 0, brake: 0,
   };
   car.y = AF.surfaceBelow(x, z, (o.y ?? 0) + 2.5, 6);
   VV.cars.push(car);
-  if (!o.noDrive && !T.horse) car.interact = AF.addInteract({ x, y: car.y + 0.6, z, r: Math.max(3.2, halfL * 0.8), label: 'Drive the ' + T.name,
+  if (!o.noDrive && !T.horse) car.interact = AF.addInteract({ x, y: car.y + 0.6, z, r: 1.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => bodyDist(car, px, pz), prio: 0.1,
     can: () => AF.mode === 'walk' && !car.player && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
   placeMesh(car);
   return car;
@@ -800,7 +853,7 @@ VV.simTraffic = (dt) => {
 };
 const spawnTraffic = (n) => {
   const rnd = AF.rng(777);
-  const aiTypes = ['taxi', 'sedan', 'bus', 'coupe', 'gullcab', 'stream', 'milk', 'sedan', 'wagon', 'police', 'taxi', 'sedan', 'beaconcab', 'icecream', 'sedan', 'mail', 'coupe', 'taxi', 'laundry', 'stream', 'pickup', 'convertible', 'sedan', 'bus', 'gullcab', 'wagon', 'sedan', 'taxi', 'coupe', 'sedan'];
+  const aiTypes = ['taxi', 'sedan', 'bus', 'coupe', 'gullcab', 'stream', 'milk', 'sedan', 'wagon', 'police', 'taxi', 'sedan', 'beaconcab', 'icecream', 'sedan', 'mail', 'coupe', 'taxi', 'laundry', 'stream', 'pickup', 'convertible', 'sedan', 'bus', 'gullcab', 'wagon', 'sedan', 'taxi', 'coupe', 'sedan', 'cord', 'duesy', 'speedster'];
   const carts = ['dairycart', 'icecart', 'dairycart'];   // v2 r2: 3 horse-drawn wagons among the fleet, on the side streets
   const lanes = G.lanes.filter((l) => l.len > 16);
   const wOf = (l) => /Grand|Meridian/.test(l.name) ? 6 : /Park Row|Harbour Boulevard/.test(l.name) ? 4 : /Terminal|Lantern|Broad|Charter|Bay/.test(l.name) ? 1.4 : 1;   // v2 r2: the main avenues carry the dense flow
@@ -862,9 +915,9 @@ function physics(car, dt, inp) {
   const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), rx = -hz, rz = hx;   // right-hand (screen) vector = -local x
   let f = car.vx * hx + car.vz * hz, lat = car.vx * rx + car.vz * rz;
   const big = car.type.big ? 0.7 : 1;
-  const maxF = 27 * (big < 1 ? 0.72 : 1), maxR = 7;
+  const maxF = (car.type.vmax || 27) * (big < 1 ? 0.72 : 1), maxR = 7, pull = car.type.acc || 7.5;
   let acc = 0;
-  if (inp.up) acc = f < 0 ? 14 : 7.5 * big * (1 - Math.max(0, f) / maxF);
+  if (inp.up) acc = f < 0 ? 14 : pull * big * (1 - Math.max(0, f) / maxF);
   else if (inp.down) acc = f > 0.3 ? -15 : -4.5 * (1 + f / maxR);
   acc -= f * 0.08 + Math.sign(f) * (inp.up || inp.down ? 0 : 1.1);
   if (inp.brake) acc -= Math.sign(f) * 9;
@@ -907,7 +960,7 @@ function physics(car, dt, inp) {
   const lean = AF.clamp(-yawRate * f * 0.004, -0.06, 0.06);
   const dive = AF.clamp(-acc * 0.0035, -0.04, 0.05);
   car.pitch += (pT + dive - car.pitch) * Math.min(1, dt * 9);
-  car.roll += (rT + lean - car.roll) * Math.min(1, dt * 9);
+  if (!car.type.solo) car.roll += (rT + lean - car.roll) * Math.min(1, dt * 9);
   car.bobV += (-car.bob * 90 - car.bobV * 9) * dt + (Math.random() - 0.5) * sp * 0.01;
   car.bob += car.bobV * dt; car.bob = AF.clamp(car.bob, -0.06, 0.06);
 }
@@ -934,25 +987,33 @@ AF.modes.drive = {
     if (car.ai) { VV.ai.splice(VV.ai.indexOf(car), 1); car.ai = null; }
     car.player = true; car.parked = false; car.driver = -1;
     car.vx = Math.sin(car.yaw) * car.v; car.vz = Math.cos(car.yaw) * car.v;
-    if (AF.player && AF.player.setVisible) AF.player.setVisible(false);
-    DR.orbit = 0; DR.dist = car.type.big ? 13 : 8.5; DR.init = false;
-    AF.emit('toast', 'You slide behind the wheel of the ' + car.name + '.');
-    AF.emit('hint', 'W/S drive · A/D steer · Space handbrake · drag to look · E to get out');
+    DR.bike = car.type.kind === 'bike' && !!car.type.solo;
+    if (AF.player && AF.player.setVisible) AF.player.setVisible(DR.bike);
+    DR.orbit = 0; DR.orbitP = 0; DR.dist = car.type.big ? 13 : DR.bike ? 5.5 : 8.5; DR.init = false;
+    AF.emit('toast', (DR.bike ? 'You swing onto the ' : 'You slide behind the wheel of the ') + car.name + '.');
+    AF.emit('hint', AF.touch ? '' : 'W/S throttle · A/D steer · Space brake · E to get out');
   },
   exit(to) {
     const car = DR.car;
-    if (car) { car.player = false; car.parked = true; car.v = 0; car.vx = car.vz = 0; car.steer *= 0.5; }
-    DR.car = null; VV.player = null;
+    if (car) { car.player = false; car.parked = true; car.v = 0; car.vx = car.vz = 0; car.steer *= 0.5; car.roll = 0; placeMesh(car); if (car.interact) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; } }
+    DR.car = null; VV.player = null; if (AF.PL) AF.PL.seat = null;
     if (AF.player && AF.player.setVisible) AF.player.setVisible(true);
     AF.emit('hud', { speed: null, mode: to });
     AF.emit('hint', '');
   },
   update(dt) {
     const car = DR.car; if (!car) return;
-    const I = AF.input;
+    const I = AF.input, S = I.stick;
     const inp = { up: I.key('KeyW') || I.key('ArrowUp'), down: I.key('KeyS') || I.key('ArrowDown'), left: (I.key('KeyA') || I.key('ArrowLeft')) ? 1 : 0, right: (I.key('KeyD') || I.key('ArrowRight')) ? 1 : 0, brake: I.key('Space') };
+    if (S && (S.x || S.y)) { if (S.y > 0.3) inp.up = true; if (S.y < -0.3) inp.down = true; if (S.x < -0.15) inp.left = Math.min(1, -S.x * 1.3); if (S.x > 0.15) inp.right = Math.min(1, S.x * 1.3); }
     if (VV.autoInput) Object.assign(inp, VV.autoInput);
     physics(car, dt, inp);
+    if (DR.bike) {
+      const lean = -car.steer * AF.clamp(Math.abs(car.v) / 9, 0, 1) * 1.1;
+      car.roll += (lean - car.roll) * Math.min(1, dt * 6);
+      const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw);
+      AF.PL.seat = { x: car.x - hx * 0.3, y: car.y + car.bob + 0.02, z: car.z - hz * 0.3, yaw: car.yaw, roll: car.roll, pitch: car.pitch, seatH: 0.7, lean: 0.35 };
+    }
     placeMesh(car);
     if (car.interact) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; }
     // chase camera
@@ -961,7 +1022,7 @@ AF.modes.drive = {
     else if ((DR.dragT = (DR.dragT || 0) - dt) < 0) { DR.orbit *= Math.exp(-dt * 1.8); DR.orbitP *= Math.exp(-dt * 1.8); }
     if (m.wheel) DR.dist = AF.clamp(DR.dist * Math.exp(m.wheel * 0.001), 4, 28);
     const a = car.yaw + DR.orbit, pitch = 0.2 + DR.orbitP + DR.dist * 0.004;
-    const tx = car.x + Math.sin(car.yaw) * 1.5, ty = car.y + 1.3 + (car.type.big ? 1.2 : 0), tz = car.z + Math.cos(car.yaw) * 1.5;
+    const tx = car.x + Math.sin(car.yaw) * 1.5, ty = car.y + (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), tz = car.z + Math.cos(car.yaw) * 1.5;
     let d = DR.dist;
     const want = new THREE.Vector3(tx - Math.sin(a) * Math.cos(pitch) * d, ty + Math.sin(pitch) * d, tz - Math.cos(a) * Math.cos(pitch) * d);
     // keep the camera out of walls
@@ -979,7 +1040,7 @@ AF.modes.drive = {
     AF.shadowFocus.set(car.x, car.y, car.z); AF.shadowRadius = 60;
     const kmh = Math.abs(car.v) * 3.6;
     AF.emit('hud', { speed: Math.round(kmh / 1.609), unit: 'mph', kmh: Math.round(kmh), mode: 'drive', car: car.name, gear: car.v < -0.3 ? 'R' : 'D' });
-    if (I.hit('KeyE') || I.hit('Escape')) VV.exitCar();
+    if (I.hit('KeyE') || I.hit('KeyF') || I.hit('Escape')) VV.exitCar();
   },
 };
 
@@ -1191,7 +1252,7 @@ AF.onBuild('vehicles-parking', 480, () => {
     }
     if (best) { VV.deliv.push(best); noPark.push({ x: best.x, z: best.z, r: 7.5 }); }
   }
-  const mix = [['sedan', 30], ['stream', 9], ['coupe', 14], ['wagon', 8], ['convertible', 6], ['taxi', 3], ['gullcab', 2], ['beaconcab', 2], ['milk', 1], ['mail', 1], ['laundry', 1]];
+  const mix = [['sedan', 30], ['stream', 9], ['coupe', 14], ['wagon', 8], ['convertible', 6], ['taxi', 3], ['gullcab', 2], ['beaconcab', 2], ['milk', 1], ['mail', 1], ['laundry', 1], ['cord', 2], ['duesy', 1], ['speedster', 1]];
   const mixT = mix.reduce((a, b) => a + b[1], 0);
   const pickType = () => { let r = rnd() * mixT; for (const [t, w] of mix) if ((r -= w) < 0) return t; return 'sedan'; };
   const probe = { halfL: 2.55, halfW: 0.92, height: 1.5, y: 0 };
@@ -1224,14 +1285,35 @@ AF.onBuild('vehicles-parking', 480, () => {
         const tid = pickType(), T = TYPES.find((q) => q.id === tid), pi = pickPaint(T, rnd);
         const rot = ((Math.round(yaw / (Math.PI / 2)) % 4) + 4) % 4;
         const gy = AF.W.groundY ? AF.W.groundY(x, z) : 0;
-        AF.placeStatic(staticGeo(tid, pi), x, gy, z, rot, { collide: true });
-        perRoad[r.name] = (perRoad[r.name] || 0) + 1; out.push({ static: true, x, z, y: gy, yaw: rot * Math.PI / 2, type: T, name: T.name, kind: T.kind, parked: true, halfL: 2.5, halfW: 0.9 });
+        const pr = AF.placeStatic(staticGeo(tid, pi), x, gy, z, rot, { collide: true });
+        perRoad[r.name] = (perRoad[r.name] || 0) + 1; out.push({ static: true, pr, pi, x, z, y: gy, yaw: rot * Math.PI / 2, type: T, name: T.name, kind: T.kind, parked: true, halfL: 2.5, halfW: 0.9 });
         t += step;
       }
     }
   }
   VV.parkMs = Math.round(performance.now() - t0);
   console.log('[af] parked (static):', out.length, 'models', Object.keys(staticGeos).length, 'in', VV.parkMs, 'ms', JSON.stringify(perRoad), JSON.stringify(rej));
+  // every kerb car is drivable: one prompt follows the nearest parked car; using it swaps the merged prop for a real car
+  const proxy = VV.parkProxy = AF.addInteract({ x: 0, y: -999, z: 0, r: 1.6, label: 'Drive', prio: 0.1, target: null,
+    dist: (px, pz) => proxy.target ? bodyDist(proxy.target, px, pz) : 99,
+    can: () => AF.mode === 'walk' && !!proxy.target,
+    act: () => {
+      const s = proxy.target; if (!s) return;
+      AF.removeStatic(s.pr);
+      const i = VV.parkedStatic.indexOf(s); if (i >= 0) VV.parkedStatic.splice(i, 1);
+      const j = VV.parked.indexOf(s); if (j >= 0) VV.parked.splice(j, 1);
+      proxy.target = null; proxy.y = -999;
+      const car = makeCar(s.type.id, s.pi, s.x, s.z, s.yaw, { y: s.y }); VV.parked.push(car);
+      AF.setMode('drive', { car });
+    } });
+  let pf = 0;
+  AF.onTick('park-proxy', 170, () => {
+    if (AF.mode !== 'walk' || (pf++ % 5)) return;
+    const p = AF.player; let best = null, bd = 36;
+    for (const s of VV.parkedStatic) { const d = (s.x - p.x) ** 2 + (s.z - p.z) ** 2; if (d < bd) { bd = d; best = s; } }
+    proxy.target = best;
+    if (best) { proxy.x = best.x; proxy.z = best.z; proxy.y = best.y + 0.6; proxy.label = 'Drive the ' + best.name; } else proxy.y = -999;
+  });
 });
 
 // ---------------------------------------------------------------- v2 r2: delivery scenes (van, rear doors open, stacked goods, a roundsman carrying loads in)
