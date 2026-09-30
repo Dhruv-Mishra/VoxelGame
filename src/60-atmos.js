@@ -8,7 +8,7 @@ try {
   const V3 = THREE.Vector3;
   const clamp = AF.clamp, lerp = AF.lerp, smooth = AF.smooth;
   if (AF.Q.has('hour')) T.hours = ((+AF.Q.get('hour') % 24) + 24) % 24;
-  else T.hours = 17.7;   // v2 CANON boot: golden hour, sun ~11 deg low in the WSW
+  else T.hours = 20.6;   // boot at night: the lit city, neon and light pools are the best first look
   if (AF.Q.has('speed')) T.speed = +AF.Q.get('speed');
   // v2 dusk pacing: minute one runs a little fast (17.7 -> ~18.05: the sunset band deepens, lamps and the first windows come on),
   // then the clock eases to a SLOWED 1 h / 5 min so the sunset and blue hour linger. Any user speed change (UI buttons) wins.
@@ -580,6 +580,8 @@ try {
         while (A.pool.length > n) { const pl = A.pool.pop(); S.remove(pl); pl.dispose && pl.dispose(); }
       };
       A.setLights(AF.gfx && AF.gfx.tierCfg ? AF.gfx.tierCfg().lights : 12);
+      // compile the other light variant (pool shown / hidden) while the loading screen is still up
+      AF.on('ready', () => { try { if (!A.pool.length) return; const v = A.pool[0].visible; for (const p of A.pool) p.visible = !v; AF.renderer.compile(S, AF.camera); for (const p of A.pool) p.visible = v; } catch (e) { AF.warnOnce('light variant compile', e); } });
     }
 
     // ---- water
@@ -587,7 +589,7 @@ try {
       for (const w of AF.world.water) {
         if (!w.mesh) continue;
         const kind = (w.geo.userData && w.geo.userData.kind) || 'basin', isSea = !!(w.geo.userData && w.geo.userData.sea);
-        const flow = kind === 'creek' ? [0, 0.55] : kind === 'creek-upper' ? [0, 0.9] : kind === 'lake' ? [0.05, 0.03] : [0.02, 0.01];
+        const flow = (w.geo.userData && w.geo.userData.flow) || (kind === 'creek' ? [0, 0.55] : kind === 'creek-upper' ? [0, 0.9] : kind === 'lake' ? [0.05, 0.03] : [0.02, 0.01]);
         const deep = kind === 'lake' ? 0x173e52 : kind === 'pond' ? 0x2c4a3a : kind === 'basin' ? 0x2d6a7a : 0x24505a;
         const shallow = kind === 'lake' ? 0x3f7f8c : kind === 'pond' ? 0x5a7a52 : kind === 'basin' ? 0x6ab0b8 : 0x4a8a88;
         const U = Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), {
@@ -761,6 +763,10 @@ try {
     }
     const NP = A.pool.length;
     const far = cnt > NP ? Math.sqrt(selD[NP]) : 200;
+    // no lit fixture nearby (daylight outdoors): hide the whole pool so the world shader skips every point light. All-or-nothing
+    // keeps it to two shader variants (both compiled at boot).
+    const anyOn = cnt > 0;
+    for (let i = 0; i < NP; i++) if (A.pool[i].visible !== anyOn) A.pool[i].visible = anyOn;
     for (let i = 0; i < NP; i++) {
       const pl = A.pool[i];
       if (i >= cnt) { pl.intensity = 0; pl.userData.src = null; continue; }

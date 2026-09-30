@@ -60,6 +60,7 @@ try {
     if (T.print != null) { m.box(cx - 1, 4, 4, cx + 1, 6, 5, C.print); if (st === 'tee' || st === 'hoodie') m.set(cx, 5, 4, C.top); }
     if (L.female) { m.box(1, 5, 4, 3, 7, 5, C.topL); m.box(w - 3, 5, 4, w - 1, 7, 5, C.topL); }
     if (L.extra === 'chain') { m.set(cx - 1, 7, 4, C.gold); m.set(cx, 6, 4, C.gold); m.set(cx + 1, 7, 4, C.gold); }
+    if (L.extra === 'guitar') { for (let k = 0; k < 7; k++) { m.set(1 + k, 8 - k, 4, C.sole); m.set(1 + k, 8 - k, 0, C.sole); } m.box(w - 4, 1, 0, w, 5, 1, C.gold); m.box(w - 3, 5, 0, w - 2, 9, 1, C.sole); }
     m.box(cx - 1, 8, 1, cx + 2, 9, 4, C.skinS);
     return m;
   };
@@ -397,7 +398,7 @@ try {
     let t = 0.5, step = 0.5;
     for (; t < maxD; t += step) {
       const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
-      if (x < AF.W.X0 || x > 300 || z < -300 || z > 300) { if (t > 50 && y < -20) break; continue; }
+      if (x < AF.W.X0 || x > AF.W.x1 || z < -300 || z > 300) { if (t > 50 && y < -20) break; continue; }
       if (solid(x, y, z)) {
         let a = t - step, b = t;
         for (let i = 0; i < 8; i++) { const mm = (a + b) / 2; if (solid(o.x + d.x * mm, o.y + d.y * mm, o.z + d.z * mm)) b = mm; else a = mm; }

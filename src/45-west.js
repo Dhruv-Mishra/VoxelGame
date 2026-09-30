@@ -48,6 +48,7 @@ try {
     diksha:  { name: "Diksha's House",  wall: 0xdcc8f0, trim: 0xfaf6ff, accent: 0x8e5ad6, roof: 0x7a4fb8, floor: 0xe8dcc8, rug: 0xc27ad6, sofa: 0xb68ae0, door: 0x7a4fb8, board: 0x7a4fb8, ink: 0xffffff, flag: 0xff8fc8 },
     kush:    { name: "Kush & Divyangana's House", wall: 0xeaf1e6, trim: 0x2f7a4a, accent: 0x3bbf6a, roof: 0x2a5a3a, floor: 0xa8773f, rug: 0x2f7a4a, sofa: 0x5a8a5a, door: 0x2f7a4a, board: 0x2f7a4a, ink: 0xffffff, flag: 0xf2c21b },
     kaybee:  { name: "Kaybee's House",  wall: 0xf3e3c3, trim: 0xb8322a, accent: 0xf2c21b, roof: 0x8a2a22, floor: 0xa06e42, rug: 0xb8322a, sofa: 0x6a4a2a, door: 0xb8322a, board: 0xb8322a, ink: 0xf2c21b, flag: 0xf2c21b },
+    niranjan: { name: "Niranjan's Music House", wall: 0x2f4a56, trim: 0xe0c078, accent: 0xff9a3c, roof: 0x1c2a32, floor: 0x8a5a36, rug: 0x7a2a36, sofa: 0x5a3424, door: 0xe0c078, inner: 0xeadfcc, board: 0x2f4a56, ink: 0xe0c078, flag: 0xff9a3c },
   };
   const FILLER = [
     { wall: 0xe9e2d0, trim: 0x5a6a7a, roof: 0x4a5058, door: 0x6a4028 }, { wall: 0xd9e6ec, trim: 0x2f4f6a, roof: 0x34414e, door: 0x2f4f6a },
@@ -55,7 +56,7 @@ try {
     { wall: 0xf4ecda, trim: 0x6a4a6a, roof: 0x5a4a5a, door: 0x6a4a6a }, { wall: 0xe2dcd2, trim: 0x3a3a3a, roof: 0x2a2a2a, door: 0x9a3a2a },
   ];
   // which plot is whose (index = row*2 + (east side ? 1 : 0)); the rest are neighbours' closed houses
-  const OWNERS = { 0: 'dhruv', 3: 'hunar', 4: 'tanishk', 5: 'diksha', 7: 'kush', 8: 'kaybee' };
+  const OWNERS = { 0: 'dhruv', 2: 'niranjan', 3: 'hunar', 4: 'tanishk', 5: 'diksha', 7: 'kush', 8: 'kaybee' };
   WS.homes = {};   // friend id -> { door:{x,y,z,yaw}, spawn:{x,y,z,yaw}, npc:[{x,y,z,yaw,pose}], garage:[{x,z,yaw}], box }
 
   // ------------------------------------------------------------ furniture kit (voxel furniture straight into the world grid)
@@ -172,10 +173,10 @@ try {
     },
   };
   const INTERIOR = {};
-  const SCREEN_THEME = { dhruv: 3, hunar: 7, tanishk: 2, diksha: 6, kush: 4, kaybee: 4 };
-  const TV_THEME = { dhruv: 1, hunar: 0, tanishk: 5, diksha: 6, kush: 4, kaybee: 7 };
+  const SCREEN_THEME = { dhruv: 3, hunar: 7, tanishk: 2, diksha: 6, kush: 4, kaybee: 4, niranjan: 6 };
+  const TV_THEME = { dhruv: 1, hunar: 0, tanishk: 5, diksha: 6, kush: 4, kaybee: 7, niranjan: 3 };
   // back-wall neon: [text, colour, opts, v centre, y bottom] placed clear of the patio window, doors and tall furniture
-  const SIGNS = { dhruv: ['console.log', 0x3affd0, { font: 'script', vs: 1 / 20 }, 20, 2.2], hunar: ['Barbie', 0xff4fa3, { font: 'script' }, 20.9, 2.3], tanishk: ['HODL', 0xf7931a, {}, 21.2, 2.4], diksha: ['Eras', 0xd6b1e8, { font: 'script' }, 17.9, 2.3], kush: ['Kush & Div', 0xff4f7a, { font: 'script', vs: 1 / 20 }, 18.3, 2.4], kaybee: ['ONE PIECE', 0xf2c21b, {}, 9, 2.4] };
+  const SIGNS = { dhruv: ['console.log', 0x3affd0, { font: 'script', vs: 1 / 20 }, 20, 2.2], hunar: ['Barbie', 0xff4fa3, { font: 'script' }, 20.9, 2.3], tanishk: ['HODL', 0xf7931a, {}, 21.2, 2.4], diksha: ['Eras', 0xd6b1e8, { font: 'script' }, 17.9, 2.3], kush: ['Kush & Div', 0xff4f7a, { font: 'script', vs: 1 / 20 }, 18.3, 2.4], kaybee: ['ONE PIECE', 0xf2c21b, {}, 9, 2.4], niranjan: ['Encore', 0xffb060, { font: 'script' }, 20.4, 2.3] };
   for (const owner of Object.keys(TH)) INTERIOR[owner] = (F, th) => {
     FU.rug(F, 9.5, 13.5, 13.75, 19, th.rug, th.accent);
     F.place(PROPS.sofa(th.sofa), 11.75, FLOOR, 17, 2);
@@ -215,6 +216,15 @@ try {
       F.place(PROPS.chair(th.sofa), 22.35, FLOOR, 17.9, F.rotBack);
       F.place(PROPS.guitar(), 23.5, FLOOR, 19.4, F.rotLane);
       FU.shelf(F, 23.2, 20.6, 23.5, 22.6, 2.5, th.trim, [smoothC(th.accent), smoothC(0xd6b1e8), smoothC(0xff8fc8)]);
+    } else if (owner === 'niranjan') {
+      // the music corner: an upright piano, three guitars on stands, a stack amp, a lamp and a shelf of records
+      F.place(PROPS.piano(), 23.4, FLOOR, 7.2, F.rotLane);
+      F.place(PROPS.chair(th.sofa), 22.35, FLOOR, 7.2, F.rotBack);
+      for (const v of [16.6, 17.6, 18.6]) F.place(PROPS.guitar(), 23.5, FLOOR, v, F.rotLane);
+      F.place(PROPS.worktable(0.75, 0.5, 1.0, 0x1a1a1c, 0x1a1a1c), 23.35, FLOOR, 20.2, F.rotLane);
+      F.place(PROPS.worktable(0.625, 0.4375, 0.625, 0x2a2a2e, 0x2a2a2e), 23.4, FLOOR + 1.0, 20.2, F.rotLane);
+      F.place(PROPS.floorlamp(0xffb060), 21.4, FLOOR, 19.4, 0);
+      FU.shelf(F, 23.2, 21.4, 23.5, 23.4, 2.5, th.trim, [smoothC(th.accent), smoothC(0x222226), smoothC(0xe0c078), smoothC(0x7a2a36)]);
     } else {
       desk(owner === 'kush' ? 8.5 : 6, 1, 4);
       F.place(PROPS.console(), 12.25, FLOOR + 0.5, 12.5, 0);
@@ -368,7 +378,7 @@ try {
       } else if (tile === 3) {
         ctx.fillStyle = '#263441'; ctx.fillRect(0, 0, 256, 26); ctx.fillStyle = '#dce8ed'; ctx.fillText('port-solace.js', 10, 5);
         ctx.fillStyle = '#c393e8'; ctx.fillText('const city = {', 28, 45);
-        ctx.fillStyle = '#93c997'; ctx.fillText('  friends: 7,', 28, 75); ctx.fillText('  homes: 6,', 28, 105);
+        ctx.fillStyle = '#93c997'; ctx.fillText('  friends: 8,', 28, 75); ctx.fillText('  homes: 7,', 28, 105);
         ctx.fillStyle = '#e4bf71'; ctx.fillText('  welcome: true', 28, 135);
         ctx.fillStyle = '#c393e8'; ctx.fillText('};', 28, 165); ctx.fillStyle = '#72b6dc'; ctx.fillText('city.render();', 28, 195);
         if (frame % 6 < 3) { ctx.fillStyle = '#f0f0e6'; ctx.fillRect(165, 195, 2, 19); }
@@ -585,6 +595,15 @@ try {
     rec.box[4] = TOP + 6;
   };
   const SHAPE = {
+    niranjan(F, th, c) {        // studio loft: a glass-fronted rooftop music room and a neon guitar climbing the facade
+      F.fill(14, TOP, 6, 23, TOP + 3, 21, c.wall); F.fill(13.75, TOP + 3, 5.75, 23.25, TOP + 3.25, 21.25, c.trim);
+      F.fill(14, TOP + 0.5, 7, 14.25, TOP + 2.5, 20, c.glass); F.fill(14, TOP + 0.25, 7, 14.25, TOP + 0.5, 20, glow(th.accent, 1.2, 'night'));
+      const neon = glow(th.accent, 2.2, 'night'), neon2 = glow(0xffe0a0, 2.0, 'night');
+      const ring = (vc, yc, r) => { for (let v = vc - r - 0.25; v < vc + r + 0.25; v += 0.25) for (let y = yc - r - 0.25; y < yc + r + 0.25; y += 0.25) if (Math.abs(Math.hypot(v + 0.125 - vc, y + 0.125 - yc) - r) < 0.16) F.fill(7.75, y, v, 8, y + 0.25, v + 0.25, neon); };
+      ring(11, CEIL + 0.95, 0.9); ring(11, CEIL + 2.1, 0.62);
+      F.fill(7.75, CEIL + 1.25, 10.75, 8, CEIL + 1.5, 11.25, neon2);
+      F.fill(7.75, CEIL + 2.75, 10.875, 8, TOP + 1.5, 11.125, neon2); F.fill(7.75, TOP + 1.5, 10.75, 8, TOP + 2.0, 11.25, neon);
+    },
     dhruv(F, th, c) {           // modern: a set-back upper floor with a glass balcony, cantilevered out over the garden, solar panels
       F.clear(7.75, CEIL + 0.25, 2.75, 12, TOP + 0.5, 24.25);
       F.fill(7.75, CEIL + 0.25, 2.75, 8, CEIL + 1.25, 24.25, c.glass); F.fill(8, CEIL + 0.25, 2.75, 12, CEIL + 1.25, 3, c.glass); F.fill(8, CEIL + 0.25, 24, 12, CEIL + 1.25, 24.25, c.glass);
@@ -656,6 +675,20 @@ try {
     },
   };
   const GARDEN = {
+    niranjan(F) {
+      // a back-garden stage under string lights, two benches for the audience
+      const deck = col(0x8a5a34, { pat: 'none', patTop: 'plank' }), post = col(0x3a2a20), bulb = glow(0xffd8a0, 2.4, 'night');
+      F.fill(37, 0.25, 5, 45, 0.75, 13, deck);
+      for (const [u, v] of [[37, 5], [44.75, 5], [37, 12.75], [44.75, 12.75]]) F.fill(u, 0.75, v, u + 0.25, 4, v + 0.25, post);
+      F.fill(37, 4, 5, 45, 4.25, 5.25, post); F.fill(37, 4, 12.75, 45, 4.25, 13, post);
+      for (let u = 37.5; u < 45; u += 1) { F.fill(u, 3.75, 5, u + 0.25, 4.0, 5.25, bulb); F.fill(u, 3.75, 12.75, u + 0.25, 4.0, 13, bulb); }
+      F.place(PROPS.guitar(), 41, 0.75, 9, F.rotBack); F.place(PROPS.floorlamp(0xffb060), 38, 0.75, 6, 0);
+      for (const u of [31, 33.5]) F.fill(u, 0.25, 6, u + 0.75, 0.75, 12, col(0x6a4a2a));
+      { const [x, z] = F.w(41, 9); AF.addLight({ x, y: 3.5, z, color: 0xffc880, intensity: 0.9, range: 9, kind: 'porch' }); }
+      flowerBed(F, 32, 20, 47, 21.5, [0xff9a3c, 0xe0c078, 0x7a2a36]);
+      for (const [u, v] of [[33, 29], [46.5, 29], [40, 26]]) bush(F, u, v, 1.0, u + v * 3);
+      tree(F, 47.5, 17, 'maple-gold', 0, 71); tree(F, 32, 26, 'oak', 0, 72);
+    },
     dhruv(F) {
       yardPool(F, 34, 4, 47, 10, 0x3a8ac8, 0xe8e8e4);
       for (const v of [11.5, 13.25]) F.place(PROPS.lounger(0x2d4a7a), 41 + (v - 11.5) * 2, 0.25, v + 0.5, (F.rotLane + 1) % 4);

@@ -21,14 +21,16 @@ try {
   #ui .deco{font-family:Limelight,'Poiret One',Georgia,serif;letter-spacing:.18em}
   #ui kbd{display:inline-block;min-width:18px;padding:1px 6px;border-radius:6px;background:rgba(255,255,255,.14);font:600 12px system-ui;text-align:center}
   #ui .hide{display:none!important}
-  #ui #t-title{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:max(90px,12vh) 16px max(20px,env(safe-area-inset-bottom));pointer-events:none;background:none;transition:opacity .6s}
+  #ui #t-title{position:absolute;inset:0;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;padding:max(24px,4vh) max(28px,5vw) max(20px,env(safe-area-inset-bottom));pointer-events:none;background:none;transition:opacity .6s}
+  #ui #t-title:before{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(5,10,16,0) 30%,rgba(5,10,16,.5) 100%),linear-gradient(0deg,rgba(5,10,16,.55),rgba(5,10,16,0) 34%),linear-gradient(180deg,rgba(5,10,16,.45),rgba(5,10,16,0) 26%)}
+  #ui #t-title .fade{position:absolute;inset:0;background:#04080d;opacity:1;transition:opacity .45s ease;pointer-events:none}
   #ui #t-title.out{opacity:0}
-  #ui #t-title .logo{position:absolute;z-index:1;top:max(4vh,14px);left:0;right:0;text-align:center}
-  #ui #t-title h1{margin:0;font:400 clamp(28px,5.4vw,56px)/1 Limelight,Georgia,serif;letter-spacing:.24em;padding-left:.24em;color:#ffe6a8;text-shadow:0 2px 0 rgba(60,36,8,.7),0 0 24px rgba(240,190,90,.35)}
+  #ui #t-title .logo{position:absolute;z-index:1;top:max(4vh,18px);left:max(28px,5vw);text-align:left}
+  #ui #t-title h1{margin:0;font:400 clamp(26px,4.4vw,52px)/1 Limelight,Georgia,serif;letter-spacing:.24em;color:#ffe6a8;text-shadow:0 2px 0 rgba(60,36,8,.7),0 0 24px rgba(240,190,90,.35)}
   #ui #t-title .sub{margin-top:8px;color:#e9dcc0;font-style:italic;text-shadow:0 1px 3px #000}
-  #ui #t-title .modal{pointer-events:auto;width:min(500px,94vw);max-height:100%;padding:16px 18px 18px;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;z-index:0;overflow:hidden;background:none;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 0 0 200vmax rgba(6,12,20,.6),0 10px 30px rgba(0,0,0,.35);animation:uiIn .35s ease}
+  #ui #t-title .modal{pointer-events:auto;width:min(420px,92vw);max-height:100%;padding:16px 18px 18px;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;z-index:0;overflow:hidden;background:rgba(10,18,28,.52);backdrop-filter:blur(16px) saturate(1.1);-webkit-backdrop-filter:blur(16px) saturate(1.1);box-shadow:0 24px 70px rgba(0,0,0,.5);animation:uiIn .35s ease}
   #ui #t-title .q{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);text-align:center}
-  #ui #t-title .stage{position:relative;z-index:-1;width:100%;height:min(44vh,360px);min-height:200px;margin:6px 0 4px;border-radius:14px;overflow:hidden;background:none;box-shadow:0 0 0 200vmax var(--bg2);cursor:grab;touch-action:none}
+  #ui #t-title .stage{position:relative;z-index:-1;width:100%;height:min(42vh,340px);min-height:190px;margin:6px 0 4px;border-radius:14px;overflow:hidden;background:none;cursor:grab;touch-action:none}
   #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;background:rgba(10,20,30,.6);border:1px solid var(--line);font-size:28px;line-height:1;display:flex;align-items:center;justify-content:center;color:#ffe6a8;transition:background .15s,transform .1s}
   #ui #t-title .arr:hover{background:rgba(240,200,112,.28)} #ui #t-title .arr:active{transform:translateY(-50%) scale(.94)}
   #ui #t-title .arr.l{left:10px} #ui #t-title .arr.r{right:10px}
@@ -41,7 +43,15 @@ try {
   #ui #t-title .dots button.on{background:var(--gold);transform:scale(1.25)}
   #ui #t-title .go{padding:13px 30px;font-size:16px;display:inline-flex;align-items:center;gap:10px;letter-spacing:.04em}
   #ui #t-title .go .ic{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1b1408;color:#f6d68a;font-size:11px;padding-left:2px}
-  @media (max-height:560px){#ui #t-title .logo{display:none} #ui #t-title{padding-top:12px} #ui #t-title .stage{height:38vh}}
+  @media (orientation:portrait) and (max-width:760px){#ui #t-title{align-items:center;justify-content:flex-end;padding-top:max(88px,12vh)} #ui #t-title .logo{left:0;right:0;text-align:center} #ui #t-title:before{background:linear-gradient(0deg,rgba(5,10,16,.7),rgba(5,10,16,0) 60%),linear-gradient(180deg,rgba(5,10,16,.5),rgba(5,10,16,0) 25%)}}
+  @media (orientation:landscape) and (max-height:560px){
+    #ui #t-title{padding:10px max(14px,env(safe-area-inset-right)) 10px max(14px,env(safe-area-inset-left));align-items:flex-end}
+    #ui #t-title .logo{top:12px;left:max(18px,env(safe-area-inset-left))} #ui #t-title h1{font-size:22px} #ui #t-title .sub{display:none}
+    #ui #t-title .modal{display:grid;grid-template-columns:minmax(150px,44%) 1fr;grid-template-rows:auto auto auto 1fr auto auto;column-gap:14px;row-gap:2px;width:min(640px,72vw);max-height:calc(100vh - 20px);padding:10px 12px;align-items:center}
+    #ui #t-title .modal>.stage{grid-column:1;grid-row:1/7;height:calc(100vh - 42px);max-height:320px;min-height:0;margin:0}
+    #ui #t-title .modal>:not(.stage){grid-column:2;justify-self:center}
+    #ui #t-title .q{grid-row:1} #ui #t-title .n{grid-row:2;font-size:22px} #ui #t-title .tg{grid-row:3} #ui #t-title .d{grid-row:4;font-size:13px;min-height:0} #ui #t-title .dots{grid-row:5;margin:4px 0} #ui #t-title .go{grid-row:6;padding:11px 22px;font-size:15px}
+  }
   #ui.titling .hud{display:none!important}
   #ui #h-clock{position:absolute;left:max(14px,env(safe-area-inset-left));top:max(14px,env(safe-area-inset-top));padding:8px 14px;display:flex;flex-direction:column;gap:1px;min-width:120px}
   #ui #h-clock .t{font-size:20px;font-weight:600}
@@ -135,7 +145,7 @@ try {
   };
 
   // ------------------------------------------------------------------ elements
-  const title = h('div', '', `<div class="logo"><h1>PORT SOLACE</h1><div class="sub">a harbour city where the lights never quite go out</div></div>
+  const title = h('div', '', `<div class="fade"></div><div class="logo"><h1>PORT SOLACE</h1><div class="sub">a harbour city where the lights never quite go out</div></div>
     <div class="modal panel pe" role="dialog" aria-modal="true" aria-label="Choose your character"><div class="q">Who are you today?</div>
     <div class="stage"><button class="arr l" aria-label="Previous character">&#8249;</button><button class="arr r" aria-label="Next character">&#8250;</button><div class="cnt"></div></div>
     <div class="n"></div><div class="tg"></div><div class="d"></div><div class="dots"></div>
@@ -337,7 +347,39 @@ try {
   title.querySelector('.arr.r').addEventListener('click', () => step(1));
   tGo.addEventListener('click', start);
   addEventListener('keydown', (event) => { if (S.title && (event.code === 'Enter' || event.code === 'Space') && !event.repeat && !(event.target && /INPUT|TEXTAREA/.test(event.target.tagName))) start(); });
-  UI.showTitle = () => { S.title = true; root.classList.add('titling'); title.style.display = ''; title.classList.remove('out'); exitLock(); toggleMenu(false); closeDlg(); if (AF.mode !== 'aerial') AF.setMode('aerial', { keep: true }); if (AF.flyTo) AF.flyTo(AF.PLAN.views[0].pos, AF.PLAN.views[0].target, 3); };
+  UI.showTitle = () => { S.title = true; root.classList.add('titling'); title.style.display = ''; title.classList.remove('out'); exitLock(); toggleMenu(false); closeDlg(); AF.setMode('cine'); };
+  // ---- title cinematic: slow dolly shots across the city behind the character card, cut through a short fade
+  {
+    const fadeEl = title.querySelector('.fade');
+    const SHOTS = [
+      [[236, 64, 46], [80, 32, -86], [178, 50, -34], [60, 30, -126], 11],        // downtown towers at night
+      [[14, 7, 214], [2, 6, 100], [9, 4.5, 150], [2, 5, 60], 10],                 // down the Great White Way
+      [[70, 26, 306], [0, 5, 200], [-70, 24, 306], [-70, 5, 200], 11],           // the harbour front
+      [[-512, 12, -170], [-546, 1, -154], [-578, 9, -132], [-546, 1, -154], 10],  // the zoo brook + Keeper's Bridge
+      [[-360, 30, 218], [-480, 2, 150], [-560, 24, 196], [-480, 2, 150], 10],     // the airfield
+      [[-372, 14, 18], [-372, 3, -70], [-376, 9, -118], [-372, 3, -210], 10],     // Friends Lane
+      [[410, 40, 230], [388, 0, 60], [352, 26, 220], [388, 0, 0], 11],            // the Solace River through Eastport
+      [[-230, 150, 330], [20, 12, -30], [120, 170, 320], [20, 12, -30], 12],     // the whole island
+    ];
+    const CV = { i: 0, t: 0, p: new THREE.Vector3(), q: new THREE.Vector3() };
+    const ease = (k) => k * k * (3 - 2 * k);
+    AF.modes.cine = {
+      enter() { CV.t = 0; },
+      exit() { fadeEl.style.opacity = 0; },
+      update(dt) {
+        let s = SHOTS[CV.i];
+        CV.t += Math.min(dt, 0.1);
+        if (CV.t > s[4]) { CV.i = (CV.i + 1) % SHOTS.length; CV.t = 0; s = SHOTS[CV.i]; }
+        fadeEl.style.opacity = CV.t < 0.35 || CV.t > s[4] - 0.45 ? 1 : 0;
+        const k = ease(Math.min(1, CV.t / s[4]));
+        CV.p.set(s[0][0] + (s[2][0] - s[0][0]) * k, s[0][1] + (s[2][1] - s[0][1]) * k, s[0][2] + (s[2][2] - s[0][2]) * k);
+        CV.q.set(s[1][0] + (s[3][0] - s[1][0]) * k, s[1][1] + (s[3][1] - s[1][1]) * k, s[1][2] + (s[3][2] - s[1][2]) * k);
+        const cam = AF.camera; cam.position.copy(CV.p); cam.lookAt(CV.q); AF.camTarget.copy(CV.q);
+        AF.shadowFocus.set(CV.q.x, 0, CV.q.z); AF.shadowRadius = 90;
+      },
+    };
+    AF.onTick('title-cine', 149, () => { if (S.title && AF.ready && !AF.TEST && !AF.SHOT && (!AF.mode || AF.mode === 'aerial') && AF.modes.cine) AF.setMode('cine'); if ((!S.title || AF.mode !== 'cine') && fadeEl.style.opacity !== '0') fadeEl.style.opacity = 0; });
+  }
   UI.go = (id) => { if (id) select(id); start(); };
   root.classList.add('titling');
 

@@ -54,11 +54,11 @@ try {
       const rStreet = AF.GFX.cinema ? 48 : AF.GFX.tier === 'ultra' ? 42 : AF.GFX.tier === 'high' && !AF.GFX.lite ? 36 : 30;
       const k = AF.smooth(12, 60, alt);                       // 0 street .. 1 aerial
       const rs = rStreet, cxs = cp.x + _fw.x * rs * 0.72, czs = cp.z + _fw.z * rs * 0.72;
-      r = AF.lerp(rs, Math.min(AF.shadowRadius, AF.GFX.lite || AF.GFX.tier === 'low' ? 130 : 200), k);   // beyond: the far cascade
+      r = AF.lerp(rs, Math.min(AF.shadowRadius, AF.GFX.lite || AF.GFX.tier === 'low' ? 80 : 110), k);   // beyond: the far cascade (similar texel size from the air)
       fx = AF.lerp(cxs, fx, k); fz = AF.lerp(czs, fz, k);
       r = Math.round(r / 4) * 4;
     }
-    AF.shadowNear.r = r; AF.shadowNear.cx = fx; AF.shadowNear.cz = fz;
+    AF.shadowNear.r = r; AF.shadowNear.cx = fx; AF.shadowNear.cz = fz; AF.shadowNear.k = far ? AF.smooth(12, 60, alt) : 0;
     const fy = AF.shadowFocus.y || 0;
     if (sc.right !== r || sc.far !== 400 + r + 60) { sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.far = 400 + r + 60; sc.updateProjectionMatrix(); sun.shadow.bias = -0.36 / (sc.far - sc.near); }
     // texel snapping in LIGHT space (no shimmer while the camera moves)
@@ -147,6 +147,11 @@ try {
   });
   // near sun shadows re-render every frame on High, every 2nd on Balanced, every 3rd on Low (the map stays consistent in between)
   R.shadowMap.autoUpdate = false;
+  // the shadow pass tests layers against the camera it is given: hand it a view that also sees layer 1 (shadow-only casters,
+  // e.g. coarse stand-ins for full regions outside the near cascade) while the main camera sees layer 0 only
+  const shadowView = AF.shadowView = new THREE.Camera(); shadowView.layers.enable(1);
+  const smRender = R.shadowMap.render.bind(R.shadowMap);
+  R.shadowMap.render = (lights, scene, camera) => { if (scene !== S) return smRender(lights, scene, camera); shadowView.layers.mask = camera.layers.mask | 2; return smRender(lights, scene, shadowView); };
   const frame = (dt) => {
     if (graphicsReset) return;
     AF.clock.dt = dt; AF.clock.t += dt; AF.clock.frame++;
@@ -154,7 +159,7 @@ try {
       try { h.fn(dt, AF.clock.t); }
       catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (AF.MOBILE) AF.reportError(e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
     }
-    const every = AF.SHOT || AF.TEST ? 1 : AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' ? 2 : 3;
+    const every = AF.SHOT || AF.TEST ? 1 : (AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' ? 2 : 3) * (AF.shadowNear.k > 0.8 ? 2 : 1);
     if (AF.clock.frame % every === 0 || AF.shadowDirty) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
     try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
@@ -197,14 +202,15 @@ try {
 // Small moving meshes (people parts, animals, car bodies, props) beyond AF.CULL.dist are moved to layer 31 (not rendered by
 // the camera or the shadow map); beyond AF.CULL.shadow they stop casting shadows. Owners' own .visible toggles still work.
 {
-  AF.CULL = { dist: 150, shadow: 55, radius: 3.5, list: [], frame: 0, stats: { managed: 0, culled: 0, noShadow: 0 } };
+  AF.CULL = { dist: 150, shadow: 40, radius: 3.5, list: [], inst: [], frame: 0, stats: { managed: 0, culled: 0, noShadow: 0, emptyInst: 0 } };
   const C = AF.CULL, v = new THREE.Vector3();
   const skipNames = new Set(['world', 'sky', 'clouds', 'land-horizon']);
   const collect = () => {
-    C.list.length = 0;
+    C.list.length = 0; C.inst.length = 0;
     for (const top of AF.scene.children) {
       if (skipNames.has(top.name) || top.isLight || top.isCamera) continue;
       top.traverse((o) => {
+        if (o.isInstancedMesh && (o.layers.mask === 1 || o.userData.afEmpty)) { C.inst.push(o); return; }
         if (!(o.isMesh) || o.isInstancedMesh || o.frustumCulled === false || !o.geometry) return;
         const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere();
         const s = o.matrixWorld.elements; const sc = Math.max(Math.hypot(s[0], s[1], s[2]), Math.hypot(s[8], s[9], s[10]));
@@ -244,6 +250,14 @@ try {
       if (!cast) ns++;
     }
     C.stats.culled = culled * part; C.stats.noShadow = ns * part;
+    // empty instanced meshes still cost a draw (and a shadow draw) each: park them on layer 31 until they hold instances
+    let empty = 0;
+    for (const o of C.inst) {
+      const e = o.count === 0;
+      if (e !== !!o.userData.afEmpty) { o.userData.afEmpty = e; if (e) o.layers.set(31); else o.layers.set(0); }
+      if (e) empty++;
+    }
+    C.stats.emptyInst = empty;
   });
 }
 
@@ -274,10 +288,10 @@ try {
   // per-tier settings (read by R1 code every frame). near/far = shadow map sizes, lights = physical point lights, ao = SAO samples,
   // regLod/farLod = metres to the 0.5 m coarse / 1 m far region copies, lod = near props, propCull = far props hidden beyond
   const TIER = {
-    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 12, pools: 24, regLod: 150, farLod: 420, lod: 110, propCull: 900 },
-    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 6, pools: 16, regLod: 95, farLod: 320, lod: 80, propCull: 380 },
-    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 4, pools: 12, regLod: 80, farLod: 240, lod: 70, propCull: 300 },
-    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 4, pools: 0, regLod: 65, farLod: 180, lod: 60, propCull: 240 },
+    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 110, propCull: 900 },
+    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 80, propCull: 380 },
+    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 3, pools: 12, regLod: 80, farLod: 240, lod: 70, propCull: 300 },
+    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 60, propCull: 240 },
     cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
@@ -349,7 +363,7 @@ try {
   {
     const F = AF.gfx.far = { on: !AF.MOBILE && !AF.Q.has('nofar'), size: 0, R: 380, rt: null, renders: 0, ms: 0, dir: new THREE.Vector3(), cx: 1e9, cz: 1e9, dirty: true, frameN: 0 };
     const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.BackSide });
-    const fcam = F.cam = new THREE.OrthographicCamera(-380, 380, 380, -380, 1, 1600);
+    const fcam = F.cam = new THREE.OrthographicCamera(-380, 380, 380, -380, 1, 1600); fcam.layers.enable(1);
     const fscene = new THREE.Scene(); fscene.overrideMaterial = depthMat; fscene.matrixWorldAutoUpdate = false;
     const bias = new THREE.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
     F.resize = (size, rad) => {
@@ -390,7 +404,7 @@ try {
       if (!F.on || !AF.ready && !force) { U.uFarOn.value = 0; return; }
       const cp = cam.position; cam.getWorldDirection(fw); fw.y = 0; const l = fw.length() || 1; fw.multiplyScalar(1 / l);
       let cx = cp.x + fw.x * F.R * 0.5, cz = cp.z + fw.z * F.R * 0.5;
-      cx = AF.clamp(cx, AF.W.X0 + 40, 260); cz = AF.clamp(cz, -260, 260);
+      cx = AF.clamp(cx, AF.W.X0 + 40, AF.W.x1 - 40); cz = AF.clamp(cz, -260, 260);
       cx = Math.round(cx / 32) * 32; cz = Math.round(cz / 32) * 32;
       const moved = cx !== F.cx || cz !== F.cz, turned = F.dir.angleTo(AF.time.sunDir) > 0.0035;
       F.frameN++;

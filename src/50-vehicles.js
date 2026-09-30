@@ -1174,7 +1174,7 @@ let WHEEL_IM = null, DRV_IM = null;
 const tmpObj = new THREE.Object3D();
 const FRUSTUM = new THREE.Frustum(), FR_M = new THREE.Matrix4(), FR_S = new THREE.Sphere();
 const IMS = VV.ims = new Map();          // model key -> { full, glass, lod, cap, n, nl }
-const LOD_D = 150, FAR_D = 720, DETAIL_D = 170;
+const LOD_D = 90, FAR_D = 300, LAMP_D = 720, DETAIL_D = 110;
 function ensureIM(key, cap) {
   let r = IMS.get(key);
   if (r && r.cap >= cap) return r;
@@ -1222,18 +1222,19 @@ function syncInstances(dt) {
     if (dt > 0) { const dv = (car.v - car.vPrev) / dt, want = (dv < -1.2 || (car.v < 0.3 && car.ai)) ? 1 : 0; car.brake = want > car.brake ? Math.min(1, car.brake + dt * 8) : Math.max(0, car.brake - dt * 3); car.vPrev = car.v; }
     const d = Math.hypot(car.x - cam.x, car.y - cam.y, car.z - cam.z);
     FR_S.center.set(car.x, car.y + 1, car.z); FR_S.radius = car.halfL + 1.5;
-    const far = d > FAR_D || !FRUSTUM.intersectsSphere(FR_S);
+    const inView = FRUSTUM.intersectsSphere(FR_S), far = d > FAR_D || !inView;
     if (!car.player && car.interact && car.ai) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; }
     if (!car.player) { const m = car.mesh; m.position.set(car.x, car.y + car.bob, car.z); m.rotation.set(car.pitch, car.yaw, car.roll, 'YXZ'); }
-    if (far) continue;
+    if (far && (!lampsOn || !inView || d > LAMP_D)) continue;
     tmpE.set(car.pitch, car.yaw, car.roll, 'YXZ'); tmpQ.setFromEuler(tmpE);
     tmpM.compose(tmpV.set(car.x, car.y + car.bob, car.z), tmpQ, tmpS.set(1, 1, 1));
     const r = IMS.get(car.key) || ensureIM(car.key, 4);
     if (!r) continue;
-    if (d < LOD_D || !r.lod) {
+    if (far) { /* lamps only */ }
+    else if (d < LOD_D || !r.lod) {
       if (r.n < r.cap) { r.full.setMatrixAt(r.n, tmpM); if (r.glass) r.glass.setMatrixAt(r.n, tmpM); r.n++; }
     } else if (r.nl < r.cap) r.lod.setMatrixAt(r.nl++, tmpM);
-    if (d < DETAIL_D) {
+    if (!far && d < DETAIL_D) {
       for (const w of car.wheels) {
         if (wi >= WHEEL_IM.userData.max) break;
         tmpObj.position.set(w.lx, w.ly - car.bob, w.lz);

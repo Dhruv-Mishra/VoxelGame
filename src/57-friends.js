@@ -6,20 +6,22 @@ try {
   const PI = Math.PI;
   // ---------------------------------------------------------------- the cast (all 25). Heights: tall 1.08 · between 1.035 · moderate 0.97 · short 0.9
   const CAST = [
-    { id: 'dhruv', name: 'Dhruv', home: 'dhruv', tag: 'Computers & the gym', blurb: 'Tall, clean-shaven, three monitors and a bench press.',
+    { id: 'dhruv', name: 'Dhruv', home: 'dhruv', tag: 'The Architect', blurb: 'Builds things that hum after midnight. Always three steps into the next idea.',
       look: { skin: 0xc68a5e, hair: 0x1c1410, hairStyle: 'fade', top: { col: 0x1f2a3a, col2: 0x3aa0ff, style: 'tee', print: 0x3aa0ff }, bottom: { col: 0x4a4e56, style: 'joggers' }, shoe: 0xf2f2f2, height: 1.08 } },
-    { id: 'hunar', name: 'Hunar', home: 'hunar', tag: 'Pink, Barbie & fashion', blurb: 'Specs, style, and a wardrobe with its own postcode.', female: true,
+    { id: 'hunar', name: 'Hunar', home: 'hunar', tag: 'The Trendsetter', blurb: 'Walks in and the room gets a colour palette. Never misses a detail.', female: true,
       look: { female: true, skin: 0xd9a07a, hair: 0x3a2418, hairStyle: 'wavy', glasses: 0xff4fa3, lips: 0xd0406a, top: { col: 0xff5fae, col2: 0xffffff, style: 'dress' }, bottom: { col: 0xff5fae, style: 'skirt' }, shoe: 0xffffff, extra: 'bow', height: 0.97 } },
-    { id: 'tanishk', name: 'Tanishk', home: 'tanishk', tag: 'Crypto & the gym', blurb: 'Tall, clean-shaven, charts always green (mostly).',
+    { id: 'tanishk', name: 'Tanishk', home: 'tanishk', tag: 'The Strategist', blurb: 'Plays the long game in everything. Calm under pressure, loud at the finish.',
       look: { skin: 0xc98d62, hair: 0x14100c, hairStyle: 'spiky', top: { col: 0x1d1d20, col2: 0xf7931a, style: 'hoodie', print: 0xf7931a }, bottom: { col: 0x1d1d20, style: 'joggers' }, shoe: 0xd4a84a, extra: 'chain', height: 1.08 } },
-    { id: 'diksha', name: 'Diksha', home: 'diksha', tag: 'Taylor Swift & Barbie', blurb: 'Specs, every era, and thirteen friendship bracelets.', female: true,
+    { id: 'diksha', name: 'Diksha', home: 'diksha', tag: 'The Storyteller', blurb: 'Lives by lyrics and late-night playlists. Has a song for every mood.', female: true,
       look: { female: true, skin: 0xd8a07c, hair: 0x2a1a12, hairStyle: 'long', bangs: true, glasses: 0x2a2a2e, lips: 0xc0303a, top: { col: 0xb68ae0, col2: 0xffffff, style: 'tee', print: 0xffd0f0 }, bottom: { col: 0xff8fc8, style: 'skirt' }, shoe: 0xf2f2f2, height: 0.97 } },
-    { id: 'kush', name: 'Kush', home: 'kush', tag: 'Video games & cash', blurb: 'Tall, beard, specs, and a safe full of cash.',
+    { id: 'kush', name: 'Kush', home: 'kush', tag: 'Player One', blurb: 'Always ready for the next level. Generous host, fearless in a boss fight.',
       look: { skin: 0xc08050, hair: 0x14100c, hairStyle: 'short', glasses: 0x141414, beard: 0x1a120c, top: { col: 0x2f7a4a, col2: 0xf2f2f2, style: 'hoodie', print: 0x8adf9a }, bottom: { col: 0x3f5f8f, style: 'jeans' }, shoe: 0x202024, extra: 'headphones', height: 1.08 } },
-    { id: 'divyangana', name: 'Divyangana', home: 'kush', tag: 'Lives with Kush', blurb: 'Short, specs, the actual gamer of the house.', female: true,
+    { id: 'divyangana', name: 'Divyangana', home: 'kush', tag: 'The Co-op Captain', blurb: 'Quiet confidence, top of the leaderboard. Keeps the whole house running.', female: true,
       look: { female: true, skin: 0xdca47e, hair: 0x2a1810, hairStyle: 'bun', glasses: 0xc8a050, lips: 0xc85a6a, top: { col: 0xf2c24a, col2: 0xffffff, style: 'tee', print: 0xff6f8a }, bottom: { col: 0x4a6a9a, style: 'jeans' }, shoe: 0xffffff, height: 0.9 } },
-    { id: 'kaybee', name: 'Kaybee', home: 'kaybee', tag: 'Games, One Piece & chess', blurb: 'Straw hat, a chessboard floor, and a treasure chest.',
+    { id: 'kaybee', name: 'Kaybee', home: 'kaybee', tag: 'The Adventurer', blurb: 'Chases horizons and checkmates. The treasure is always one island away.',
       look: { skin: 0xc88a5a, hair: 0x14100c, hairStyle: 'messy', top: { col: 0xc8322a, col2: 0xc8322a, style: 'vest' }, bottom: { col: 0x2f5a9a, style: 'shorts' }, shoe: 0x8a5a2a, hat: 'straw', hatCol: 0xe8c86a, height: 1.035 } },
+    { id: 'niranjan', name: 'Niranjan', home: 'niranjan', tag: 'The Musician', blurb: 'Strings, chords and golden-hour sessions. Turns any porch into a stage.',
+      look: { skin: 0xc4885c, hair: 0x16110d, hairStyle: 'messy', top: { col: 0x3e2c4e, col2: 0xe0c078, style: 'shirt' }, bottom: { col: 0x2a2e38, style: 'jeans' }, shoe: 0x5a3a24, extra: 'guitar', height: 0.97 } },
   ];
   const BY = Object.fromEntries(CAST.map((c) => [c.id, c]));
   // ---------------------------------------------------------------- what they say. {you} = whoever you are playing
@@ -89,6 +91,15 @@ try {
     },
   };
   // the lovebirds see each other differently
+  LINES.niranjan = {
+    greet: ['{you}! Perfect timing, I just tuned up.', 'Hey {you} — want to hear something new?', 'Sit anywhere, {you}. Mind the cables.', 'Golden hour soon, {you}. Porch session?'],
+    talk: [
+      ['{you}! I wrote a riff this morning and I can’t stop playing it.', 'It’s eight bars. I’ve played it four hundred times. It’s still good.'],
+      ['Three guitars, one piano, zero neighbours complaining.', 'Yet. The stage out back is for Friday nights. You’re on the list.'],
+      ['Every house in the colony has a sound, {you}.', 'Kush’s is button-mashing. Diksha’s is a chorus. Mine is feedback, mostly.'],
+      ['The trick to a good song is leaving space.', 'Same with rooms. That’s why the amp is in the corner. Mostly.'],
+    ],
+  };
   const SPECIAL = {
     'kush>divyangana': { greet: ['Babe! You\u2019re home!', 'Saved you a controller, Div.'], talk: [['There she is! I kept your seat warm.', 'And I only ate HALF the snacks. Growth.']] },
     'divyangana>kush': { greet: ['Hey you. Missed you.', 'Kush! Where have you been?'], talk: [['Finally! The co-op run isn\u2019t the same without you.', 'Also you owe me a rematch.']] },
@@ -151,7 +162,7 @@ try {
   // ---------------------------------------------------------------- the friends in their houses + their cars in the garages
   const GARAGE = {
     dhruv: [['arrow', 0], ['moto', 0]], hunar: [['speedster', 1], ['moto', 1]], tanishk: [['speedster', 0], ['moto', 2]],
-    diksha: [['cord', 1], ['moto', 3]], kush: [['duesy', 0], ['moto', 4]], kaybee: [['arrow', 1], ['moto', 5]],
+    diksha: [['cord', 1], ['moto', 3]], kush: [['duesy', 0], ['moto', 4]], kaybee: [['arrow', 1], ['moto', 5]], niranjan: [['coupe', 1], ['moto', 1]],
   };
   const F = AF.friends = { cast: CAST, byId: BY, current: null, npcs: {} };
   AF.onBuild('friends', 820, () => {

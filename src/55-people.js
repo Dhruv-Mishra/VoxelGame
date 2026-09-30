@@ -1232,6 +1232,21 @@ try {
       }
       CR.V.push(V);
     }
+    // far LOD: beyond 38 m everyone is drawn from 8 shared looks (3 walk frames each) that never cast shadows — at that range the
+    // outfits read as colour blobs, and this cuts the crowd from ~110 draws (+ shadow draws) to ~24 + the few people near you
+    const dayN = CR.nDay || looks.length, pickN = 8;
+    CR.FAR = []; CR.farMap = CR.V.map((V, i) => (i < dayN ? i : i % dayN) % pickN);
+    for (let i = 0; i < pickN; i++) {
+      const V = CR.V[Math.floor(i * dayN / pickN)], F = {};
+      for (const f of ['a', 'p', 'b']) {
+        const src = V.im[f] || V.im.p; if (!src) continue;
+        const im = new THREE.InstancedMesh(src.geometry, AF.mat.voxel, NW + NE);
+        im.count = 0; im.frustumCulled = false; im.castShadow = false; im.receiveShadow = true; im.visible = false; im.name = 'crowd-far-' + i + f;
+        im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); AF.scene.add(im); F[f] = im;
+      }
+      CR.FAR.push(F);
+    }
+    CR.farCnt = CR.FAR.map(() => ({ a: 0, p: 0, b: 0 }));
     CR.cnt = CR.V.map(() => ({ a: 0, p: 0, b: 0, sit: 0, work: 0, phone: 0, chat: 0, look: 0, hail: 0, runA: 0, runB: 0 }));
     CR.stats = { walkers: 0, moving: 0, extras: 0, cand: 0, draws: 0, stopped: 0 };
   }
@@ -1248,7 +1263,7 @@ try {
     const lines = [[[-288, CZ - 6], [-152, CZ - 6]], [[-286, CZ - 15], [-154, CZ - 15]], [[-148, CZ - 5], [-42, CZ - 5]], [[-38, CZ - 10], [38, CZ - 10]], [[-38, CZ - 24], [38, CZ - 24]], [[44, CZ - 6], [200, CZ - 6]]];
     for (const [id, off] of [['pleasure', 0.3], ['pleasure', 0.7], ['fish', 0.5], ['ferry', 0.3], ['ferry', 0.7]]) { const q = pier(id); if (q) { const x = q.x0 + (q.x1 - q.x0) * off; lines.push([[x, CZ + 3], [x, q.z1 - 4]]); } }
     // zoo visitors: the promenade, the cross walk, the plains divider and the side walks
-    if (PL.west && PL.west.zoo) lines.push([[-549, -26], [-549, -278]], [[-543, -26], [-543, -278]], [[-636, -153], [-458, -153]], [[-599, -144], [-599, -30]], [[-636, -85], [-566, -85]], [[-490, -144], [-490, -30]], [[-490, -162], [-490, -278]], [[-598, -162], [-598, -278]], [[-556.5, -144], [-556.5, -30]], [[-636, -25.5], [-458, -25.5]]);
+    if (PL.west && PL.west.zoo) lines.push([[-549, -26], [-549, -278]], [[-543, -26], [-543, -278]], [[-636, -162], [-458, -162]], [[-636, -145.5], [-462, -145.5]], [[-599, -144], [-599, -30]], [[-636, -85], [-566, -85]], [[-490, -144], [-490, -30]], [[-490, -162], [-490, -278]], [[-598, -162], [-598, -278]], [[-556.5, -144], [-556.5, -30]], [[-636, -25.5], [-458, -25.5]]);
     let k = 0;
     for (const [[x0, z0], [x1, z1]] of lines) {
       const L = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(L / 6)), dx = (x1 - x0) / L, dz = (z1 - z0) / L;
@@ -1271,7 +1286,7 @@ try {
   function crowdCentre() {
     const c = AF.camera.position;
     const focus = c.y > 25 && AF.shadowFocus ? AF.shadowFocus : c;
-    crowdView.x = focus.x; crowdView.z = focus.z; crowdView.R = focus === c ? 120 : 150;
+    crowdView.x = focus.x; crowdView.z = focus.z; crowdView.R = focus === c ? 100 : 130;
     return crowdView;
   }
   function refreshCand(C) {
@@ -1529,13 +1544,14 @@ try {
     for (const c of cnt) for (const frame of FRAMES) c[frame] = 0;
     let act = 0, mov = 0, stopped = 0, draws = 0;
     const eveningDistrict = Math.abs(C.x) < 35 && C.z > 4 && C.z < 165;
-    const population = Math.floor(CR.NW * (hN < 5 || hN >= 23 ? 0.45 : nightW ? eveningDistrict ? 0.8 : 0.6 : hN < 8 ? 0.75 : 1));
+    const population = Math.floor(CR.NW * 0.85 * (hN < 5 || hN >= 23 ? 0.45 : nightW ? eveningDistrict ? 0.8 : 0.6 : hN < 8 ? 0.75 : 1));
     dens.clear(); flows.clear();
     for (const w of CR.walkers) if (w.act && !w.lead && w.id < population) {
       const cell = cellK(w.x, w.z); dens.set(cell, (dens.get(cell) || 0) + 1 + (w.nf || 0));
       const key = flowKey(w.A, w.B); flows.set(key, (flows.get(key) || 0) + flowSign(w.A, w.B));
     }
-    const fr = AF.clock ? AF.clock.frame | 0 : 0, FAR2 = 65 * 65;
+    const fr = AF.clock ? AF.clock.frame | 0 : 0, FAR2 = 65 * 65, LOOK2 = 38 * 38;
+    const fc = CR.farCnt; for (const c of fc) c.a = c.p = c.b = 0;
     for (const w of CR.walkers) {
       if ((w.lead ? w.lead.id : w.id) >= population) {
         w.act = false;
@@ -1551,6 +1567,14 @@ try {
       if (!w.act) continue;
       act++; if (w.moving) mov++; else stopped++;
       const V = CR.V[w.v], near = ddx * ddx + ddz * ddz <= FAR2;
+      if (!V.chair && CR.FAR.length) {
+        const px = w.x - camera.x, pz = w.z - camera.z;
+        if (px * px + pz * pz > LOOK2) {
+          const fi = CR.farMap[w.v], ff = w.moving ? WALK_FRAMES[Math.floor(w.ph) & 3] : 'p', fim = CR.FAR[fi][ff];
+          if (fim && fc[fi][ff] < fim.instanceMatrix.count) putInst(fim, fc[fi][ff]++, w.x, w.y + (ff === 'p' && w.moving ? 0 : -0.03), w.z, w.yaw, w.s, w.width);
+          continue;
+        }
+      }
       let f = V.chair ? 'p' : w.moving ? WALK_FRAMES[Math.floor(w.ph) & 3] : 'p';
       if (near && w.moving && w.speed > 2.3 && V.im.runA) f = Math.floor(w.ph) & 1 ? 'runA' : 'runB';
       if (near && !w.moving && !V.chair) {
@@ -1584,13 +1608,15 @@ try {
       putInst(im, c[f]++, e.x, e.y, e.z, e.yaw + sway, 1);
     }
     for (let v = 0; v < CR.V.length; v++) for (const f in CR.V[v].im) { const im = CR.V[v].im[f], n = cnt[v][f]; if (im.count !== n || n) { im.count = n; im.visible = n > 0; if (n) im.instanceMatrix.needsUpdate = true; } }
+    for (let i = 0; i < CR.FAR.length; i++) for (const f in CR.FAR[i]) { const im = CR.FAR[i][f], n = fc[i][f]; if (im.count !== n || n) { im.count = n; im.visible = n > 0; if (n) im.instanceMatrix.needsUpdate = true; } }
     const stats = CR.stats; stats.walkers = act; stats.moving = mov; stats.extras = CR.extras.length; stats.cand = candEdges.length; stats.draws = draws; stats.stopped = stopped;
     // talkable passer-by: the nearest walker within 2 m of the player
     if (CR.it && pp.walk) {
       let best = null, bd = 2.2;
       for (const w of CR.walkers) { if (!w.act || w.lead) continue; const d = Math.abs(w.x - pp.x) + Math.abs(w.z - pp.z); if (d < bd) { bd = d; best = w; } }
+      for (const e of CR.extras) { if (e.pose !== 'sit' && e.pose !== 'stand') continue; const d = Math.abs(e.x - pp.x) + Math.abs(e.z - pp.z) + Math.abs(e.y - (AF.player.y || 0)) * 0.5; if (d < bd) { bd = d; best = e; } }
       CR.near = best;
-      if (best) { if (!best.name) nameWalker(best); CR.it.x = best.x; CR.it.y = best.y + 1; CR.it.z = best.z; CR.it.label = 'Talk to ' + best.first; }
+      if (best) { if (best.id == null) best.id = Math.floor(hash(best.s) * 1e6); if (!best.name) nameWalker(best); CR.it.x = best.x; CR.it.y = best.y + 1; CR.it.z = best.z; CR.it.label = (best.pose === 'sit' ? 'Chat with ' : 'Talk to ') + best.first; }
       else { CR.it.x = 1e6; CR.it.z = 1e6; }
     }
   }
@@ -1611,10 +1637,15 @@ try {
     chair: ["Lovely day for a roll along the promenade. Kerbs could use some ramps, though!", "I used to sail the Solace harbour. Now I watch the boats, and that's fine too.", "Mind the cobbles on Bay Street, they rattle my teeth!"],
     armin: ["We've been walking this street every evening for forty years.", "Arm in arm keeps us both upright, friend."],
   };
+  const BENCH_LINES = ["Pull up a seat, friend. Best view in town is from right here.", "I come here every evening to watch the lights come on. Never gets old.", "You look like you've been walking all day. Rest your feet a minute.",
+    "See that couple by the fountain? Married fifty years. Still hold hands.", "Feed the pigeons? Heavens, no. They've got a better pension than I do.", "My late husband proposed on a bench just like this one. Different bench. Same pigeons.",
+    "I'm people-watching. It's cheaper than the pictures and the plot's better.", "If you're heading to the zoo, buy the ticket at the booth first. The turnstiles are strict.", "They say there's a river out east now. Boats and everything. Progress!",
+    "Sit a while. The city's not going anywhere, and neither am I."];
   function nameWalker(w) {
     const V = CR.V[w.v], r = AF.rng(9001 + w.id * 31), f = V.L.female;
     w.first = V.kid ? pick(r, BOY) : f ? pick(r, FEMALE) : pick(r, MALE); w.last = pick(r, SURN);
-    const G = GROUP_LINES[w.grp];
+    const G = w.pose === 'sit' ? BENCH_LINES : GROUP_LINES[w.grp];
+    w.name = w.first;
     w.lines = G ? [pick(r, G), pick(r, PASSER), pick(r, G)] : [pick(r, PASSER), LORE[Math.floor(r() * LORE.length)], pick(r, PASSER)]; w.li = 0;
   }
   AF.onBuild('people-crowd', 660, () => {

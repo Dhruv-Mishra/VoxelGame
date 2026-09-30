@@ -36,6 +36,18 @@ AF.PLAN = (() => {
     { name: 'Westgate Road', a: [-640, 0], b: [-240, 0], w: 14 },
     { name: 'Friends Lane', a: [-372, -226], b: [-372, 0] },
     { name: 'Airfield Road', a: [-470, 0], b: [-470, 36] },
+    // EASTPORT (43-east.js, x 300..460): the avenues carry on east over the Solace River; two new N-S streets (the rail corridor
+    // z 0..80 is left clear for the Coastline Limited, so they stop at Meridian and start again at Bay)
+    { name: 'North Street', a: [240, -240], b: [452, -240] },
+    { name: 'Park Row', a: [240, -160], b: [452, -160], w: 14 },
+    { name: 'Charter Street', a: [240, -80], b: [452, -80] },
+    { name: 'Meridian Avenue', a: [240, 0], b: [452, 0], w: 14 },
+    { name: 'Bay Street', a: [240, 80], b: [452, 80] },
+    { name: 'Harbour Boulevard', a: [240, 160], b: [452, 160], w: 14 },
+    { name: 'Riverside Drive', a: [320, -240], b: [320, 0] },
+    { name: 'Riverside Drive', a: [320, 80], b: [320, 160] },
+    { name: 'Eastbank Avenue', a: [444, -240], b: [444, 0] },
+    { name: 'Eastbank Avenue', a: [444, 80], b: [444, 160] },
   ];
   for (const r of P.roads) r.w = r.w || 10;
   P.depotPlaza = [-1, -1, 0, 0];   // (Acorn Falls key, unused)
@@ -111,7 +123,7 @@ AF.PLAN = (() => {
       { id: 'ferry', name: 'Ferry Pier', x0: -6, x1: 6, z1: 262 },
       { id: 'cargo', name: 'Pier 9 (cargo)', x0: 110, x1: 150, z1: 270 },
     ] };
-  P.river = { width: 10, bedY: -3, waterY: -1.25, path: [[-990, -990], [-980, -990]] };   // PARKED off-map (no river). Copied code stays harmless.
+  P.river = { width: 13, bedY: -3.5, waterY: -1.25, name: 'Solace River', x: (z) => 384 + 5 * Math.sin((z + 240) * 0.011) + 2 * Math.sin((z + 240) * 0.037), z0: -252, z1: 214 };   // Eastport's river: the Heights to the harbour
   P.falls = { x: -990, z: -990, top: 0, pool: [-990, -990] };                             // PARKED off-map
   P.ridge = { z0: -999, crest: -999, height: 0, name: '', spur: { x0: 0, x1: 0, z0: -999 } }; // PARKED
   P.heights = { z1: -250, height: 40, name: 'Solace Heights' };   // v2: 12 -> 40 m so the Heights read from the air (land reshapes the slope + backdrop)   // wooded hills along the north edge OUTSIDE Central Park (z < -250, rising to the map edge)
@@ -174,11 +186,25 @@ AF.PLAN = (() => {
     { id: 'w-colony-e', owner: 'west', rect: [-364, -226, -306, -8] },
     { id: 'w-zoo', owner: 'west', rect: [-652, -292, -446, -12] },
     { id: 'w-airfield', owner: 'west', rect: [-652, 10, -306, 206] },
+    // EASTPORT (42-fill builds these strips: one street face, stepped back ranges toward the river / the alley)
+    { id: 'fill-e1', owner: 'residential', fill: true, strip: 'e', rect: [294, -232, 312, -170] },
+    { id: 'fill-e2', owner: 'residential', fill: true, strip: 'e', rect: [294, -150, 312, -88] },
+    { id: 'fill-e3', owner: 'residential', fill: true, strip: 'e', rect: [294, -72, 312, -10] },
+    { id: 'fill-e4', owner: 'residential', fill: true, strip: 'e', rect: [294, 88, 312, 147] },
+    { id: 'fill-e5', owner: 'residential', fill: true, strip: 'w', rect: [328, -232, 360, -170] },
+    { id: 'fill-e6', owner: 'residential', fill: true, strip: 'w', rect: [328, -150, 360, -88] },
+    { id: 'fill-e7', owner: 'residential', fill: true, strip: 'w', rect: [328, -72, 360, -10] },
+    { id: 'fill-e8', owner: 'residential', fill: true, strip: 'w', rect: [328, 88, 360, 147] },
+    { id: 'fill-e9', owner: 'residential', fill: true, strip: 'e', rect: [408, -232, 436, -170] },
+    { id: 'fill-e10', owner: 'residential', fill: true, strip: 'e', rect: [408, -150, 436, -88] },
+    { id: 'fill-e11', owner: 'residential', fill: true, strip: 'e', rect: [408, -72, 436, -10] },
+    { id: 'fill-e12', owner: 'residential', fill: true, strip: 'e', rect: [408, 88, 436, 147] },
+    { id: 'fill-e13', owner: 'residential', fill: true, strip: 'n', rect: [300, 170, 362, 202] },
   ];
 
   // ---- THE WEST SIDE layout (x -660..-300). Plots face Friends Lane (x -372); the zoo fills the north-west corner; the airfield
   // runs east-west along the coast so planes climb out over the sea.
-  P.bounds = { x0: -660, z0: -300, x1: 300, z1: 300 };
+  P.bounds = { x0: -660, z0: -300, x1: 460, z1: 300 };
   P.west = {
     lane: -372,
     // 12 plots, 6 each side of Friends Lane, 35 m frontage. side -1 = west side (door faces east), +1 = east side (door faces west)
@@ -220,6 +246,7 @@ AF.PLAN = (() => {
     { name: 'New Friends Colony', pos: [-330, 40, 20], target: [-372, 2, -110] },
     { name: 'Solace Zoo', pos: [-440, 70, 30], target: [-550, 2, -150] },
     { name: 'Westgate Airfield', pos: [-360, 45, 230], target: [-480, 2, 130] },
+    { name: 'Eastport \u00b7 Solace River', pos: [430, 45, 236], target: [385, 0, 60] },
   ];
   return P;
 })();

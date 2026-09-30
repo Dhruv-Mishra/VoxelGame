@@ -1,10 +1,10 @@
 // ================================================================ 02-voxel.js
 try {
 // ===== 02-voxel: world grid, heightmap, models, meshers, material, collision  (OWNER: coordinator) =====
-// Units: metres. Block (voxel) = 0.25 m. World x in [-660, 300), z in [-300, 300), y in [-16, 160). The strip west of x -300 is the
-// new west side (New Friends Colony, the zoo, the airfield). Ground is a HEIGHTMAP of block columns (W.H, W.C); everything standing on it is VOXELS.
+// Units: metres. Block (voxel) = 0.25 m. World x in [-660, 460), z in [-300, 300), y in [-16, 160). The strip west of x -300 is the
+// new west side (New Friends Colony, the zoo, the airfield); east of x 300 is Eastport (the Solace River). Ground is a HEIGHTMAP of block columns (W.H, W.C); everything standing on it is VOXELS.
 const VS = 0.25, INV = 4;
-const NX = 3840, NY = 704, NZ = 2400, CS = 16;
+const NX = 4480, NY = 704, NZ = 2400, CS = 16;
 const X0 = -660, Y0 = -16, Z0 = -300;
 const CX = NX / CS, CY = NY / CS, CZ = NZ / CS;
 const W = AF.W = { VS, NX, NY, NZ, X0, Y0, Z0, CS, x1: X0 + NX * VS, z1: Z0 + NZ * VS };
@@ -443,6 +443,8 @@ AF.mat = {};
       float kFine = 1.0 - smoothstep(0.006, 0.032, fw);    // mortar lines, grain
       float kMid = 1.0 - smoothstep(0.03, 0.09, fw);       // per-brick tint
       float lum = dot(alb, vec3(0.2126, 0.7152, 0.0722)) + 1e-4;
+      // far: every pattern without large-scale variation resolves to exactly 1 once fine + mid detail have faded \u2014 skip the maths
+      if (kMid < 0.001 && (id < 3.5 || (id > 4.5 && id < 7.5) || (id > 10.5 && id < 12.5) || (id > 13.5 && id < 14.5) || id > 16.5)) { afRough = id > 2.5 && id < 3.5 ? -0.1 : id > 10.5 && id < 11.5 ? -0.25 : id > 16.5 && id < 17.5 ? -0.3 : 0.0; return vec3(1.0); }
       if (id < 1.5) {           // brick: running bond 0.25 x 0.083 (3 courses per block), light mortar, per-brick tint
         vec4 b = afBond(uv, 0.25, 0.08333, 0.5);
         float h = afH2(b.yz);
@@ -630,28 +632,31 @@ AF.mat = {};
         float plane = floor(dot(vAfWP, N) * 2.0 + 0.5);
         float rh = afHash(vec3(rc.xy, plane + kind * 13.0));
         float rh2 = afHash(vec3(rc.yx + 3.7, plane * 1.3));
+        // night: slowly changing lit / dark / TV rooms
+        float slot = floor(uAfTime / 90.0 + rh * 7.0);
+        float litR = afHash(vec3(rc.xy + slot * 0.37, plane));
+        float lit = step(1.0 - uLitFrac, litR);
+        float tv = step(0.93, litR) * (0.6 + 0.4 * sin(uAfTime * 7.0 + rh * 40.0) * sin(uAfTime * 2.3));
+        float wsel = floor(rh * 4.0);
+        vec3 wall = wsel < 0.5 ? vec3(0.66, 0.58, 0.46) : wsel < 1.5 ? vec3(0.45, 0.52, 0.47) : wsel < 2.5 ? vec3(0.62, 0.47, 0.42) : vec3(0.5, 0.57, 0.6);
+        if (kind < 1.5) wall = mix(vec3(0.6, 0.58, 0.52), vec3(0.42, 0.46, 0.44), step(0.5, rh));
+        wall *= 0.8 + 0.3 * rh2;
+        vec3 rc0 = wall * 0.9; float lk = 1.05, depthShade = 0.62;
+        // beyond 140 m a room is a few pixels: same lit / dark / TV state and wall colour, no ray march through the furniture
+        if (dot(vAfWP - cameraPosition, vAfWP - cameraPosition) < 19600.0) {
         vec3 rdd = rd; rdd.z = max(rdd.z, 1e-3);
         float tx = ((rdd.x > 0.0 ? 1.0 : 0.0) - s0.x) / (abs(rdd.x) > 1e-5 ? rdd.x : 1e-5);
         float ty = ((rdd.y > 0.0 ? 1.0 : 0.0) - s0.y) / (abs(rdd.y) > 1e-5 ? rdd.y : 1e-5);
         float tz = 1.0 / rdd.z;
         float t = min(min(tx, ty), tz);
         vec3 hp = s0 + rdd * t;
-        // night: slowly changing lit / dark / TV rooms
-        float slot = floor(uAfTime / 90.0 + rh * 7.0);
-        float litR = afHash(vec3(rc.xy + slot * 0.37, plane));
-        float lit = step(1.0 - uLitFrac, litR);
-        float tv = step(0.93, litR) * (0.6 + 0.4 * sin(uAfTime * 7.0 + rh * 40.0) * sin(uAfTime * 2.3));
         // engine R2: richer fake rooms — wall colours, wallpaper stripes, dado panelling, pictures, bookcases, doors, rugs,
         // a ceiling fixture, a wardrobe, and midground cards (a resident who moves every ~90 s, a sofa or a desk) + lamp falloff
         vec3 hm = hp * RS;
         float rh3 = afHash(vec3(rc.xy + 11.3, plane + 2.0));
         float rh4 = afHash(vec3(rc.yx + 5.1, plane + 9.0));
-        float wsel = floor(rh * 4.0);
-        vec3 wall = wsel < 0.5 ? vec3(0.66, 0.58, 0.46) : wsel < 1.5 ? vec3(0.45, 0.52, 0.47) : wsel < 2.5 ? vec3(0.62, 0.47, 0.42) : vec3(0.5, 0.57, 0.6);
-        if (kind < 1.5) wall = mix(vec3(0.6, 0.58, 0.52), vec3(0.42, 0.46, 0.44), step(0.5, rh));
-        wall *= 0.8 + 0.3 * rh2;
         vec3 woodC = vec3(0.26, 0.16, 0.1) * (0.8 + 0.4 * rh3);
-        vec3 rc0; vec3 hitM = hm;
+        vec3 hitM = hm;
         if (t == tz) {           // back wall
           rc0 = wall * (1.0 - 0.1 * step(rh3, 0.45) * step(1.5, kind) * step(0.5, fract(hm.x * 2.2)));
           if (rh4 > 0.45 && kind > 1.5) rc0 = hm.y < 0.95 ? woodC * (0.9 + 0.1 * step(0.5, fract(hm.x * 1.6))) : hm.y < 1.02 ? woodC * 1.3 : rc0;
@@ -705,8 +710,9 @@ AF.mat = {};
         // lamp falloff: a ceiling pendant, or a table lamp low at the back (30 %)
         vec3 lp = rh4 < 0.3 ? vec3(RS.x * (0.15 + 0.7 * rh3), 1.0, RS.z * 0.8) : vec3(RS.x * 0.5, RS.y - 0.35, RS.z * 0.5);
         vec3 dL = hitM - lp;
-        float lk = 0.3 + 1.6 / (1.0 + 0.35 * dot(dL, dL));
-        float depthShade = 1.0 / (1.0 + t * rd.z * 0.9);
+        lk = 0.3 + 1.6 / (1.0 + 0.35 * dot(dL, dL));
+        depthShade = 1.0 / (1.0 + t * rd.z * 0.9);
+        }
         // blinds / curtains at the glass
         float blind = step(1.0 - (0.08 + 0.45 * afHash(vec3(rc.xy, plane + 5.0))) * step(0.45, rh2), s0.y);
         vec3 blindC = mix(vec3(0.82, 0.76, 0.62), vec3(0.6, 0.25, 0.2), step(0.8, rh)) * (0.9 + 0.1 * step(0.5, fract(s0.y * RS.y * 12.0)));
@@ -932,7 +938,10 @@ function meshTerrainRegion(rx, rz, buf) {
   side(1, 0, 0); side(-1, 0, 1); side(0, 1, 4); side(0, -1, 5);
 }
 
-function meshVoxelRegion(rx, rz, out) {
+// region meshers are generators (yield after every chunk) so regions can be streamed in a few ms per frame; runSync drives one to the end
+const runSync = (g) => { let r = g.next(); while (!r.done) r = g.next(); return r.value; };
+function meshVoxelRegion(rx, rz, out) { runSync(meshVoxelRegionG(rx, rz, out)); }
+function* meshVoxelRegionG(rx, rz, out) {
   const bx0 = rx * REG, bz0 = rz * REG;
   const fullC = new Map(), OPq = AF.PAL.opaque;
   const isFull = (cx, cy, cz) => {
@@ -992,6 +1001,7 @@ function meshVoxelRegion(rx, rz, out) {
       const tg = performance.now();
       greedyPad(16, 16, 16, pad, VS, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox, oy, oz], out, false, cnt);
       AF.stats.greedyMs = (AF.stats.greedyMs || 0) + performance.now() - tg; AF.stats.chunksMeshed = (AF.stats.chunksMeshed || 0) + 1;
+      yield;
     }
   }
 }
@@ -1050,7 +1060,8 @@ const farChunk = (key) => {
   return c;
 };
 // F = 2 (coarse, 0.5 m cells) or 4 (far, 1 m cells)
-function meshVoxelRegionCoarse(rx, rz, out, F = 2) {
+function meshVoxelRegionCoarse(rx, rz, out, F = 2) { runSync(meshVoxelRegionCoarseG(rx, rz, out, F)); }
+function* meshVoxelRegionCoarseG(rx, rz, out, F = 2) {
   const S = 16 / F, P = S + 2, get = F === 2 ? coarseChunk : farChunk;
   const bx0 = rx * REG, bz0 = rz * REG;
   const pad = new Uint16Array(P * P * P), hcol = new Int32Array(P * P);
@@ -1078,6 +1089,7 @@ function meshVoxelRegionCoarse(rx, rz, out, F = 2) {
         for (let Y = -1; Y <= S; Y++) { if (Y * F + F - 1 >= top) break; const i = ((X + 1) * P + Y + 1) * P + Z + 1; if (pad[i] === 0) pad[i] = 65535; }
       }
       greedyPad(S, S, S, pad, VS * F, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox / F, oy / F, oz / F], out, true, null, F);
+      yield;
     }
   }
 }
@@ -1201,57 +1213,71 @@ AF.world.coarse = new Map(); // key -> [coarse region meshes] (shown instead of 
 AF.LOD_DIST = 110;
 AF.REGION_LOD = 130;
 AF.FAR_LOD = 1e9;
-// FAR copies (1 m voxels + 1 m terrain) are lazy: built after the first frame, a few ms per frame, farthest regions first.
-// Only kept when they are < 70 % of the quads they replace. AF.world.farStats = { built, kept, pending, ms }.
+// FAR clusters: 4 x 4 regions (128 m) merged into ONE 1 m mesh (voxels + terrain) — ~16x fewer far draw calls,
+// shadow casters and state changes than per-region copies. Built lazily after the first frame, one member region per frame
+// (farthest clusters first), shown when the whole cluster box is beyond AF.FAR_LOD. AF.world.farStats = { built, kept, pending, ms }.
+const CL = 4;
 const farQueue = []; let farQ0 = false;
-const FS = AF.world.farStats = { built: 0, kept: 0, pending: 0, ms: 0 };
-function buildFar(k) {
-  const r = AF.world.regLod && AF.world.regLod.get(k); if (!r || r.farBuilt) return;
-  r.farBuilt = true; FS.built++;
-  const t = performance.now(), out = { opaque: new GeoBuf(), glass: new GeoBuf() };
-  meshTerrainRegionFar(k >> 6, k & 63, out.opaque, 4);
-  meshVoxelRegionCoarse(k >> 6, k & 63, out, 4);
+const FS = AF.world.farStats = { built: 0, kept: 0, pending: 0, ms: 0, clusters: 0 };
+const CLS = AF.world.clusters = new Map();
+const clusterOf = (rx, rz) => {
+  const ck = (rx >> 2) * 64 + (rz >> 2); let c = CLS.get(ck);
+  if (!c) {
+    const m = CL * REG * VS, x0 = X0 + (rx >> 2) * m, z0 = Z0 + (rz >> 2) * m;
+    c = { ck, x0, z0, x1: x0 + m, z1: z0 + m, regs: [], far: [], lvl: 0, built: false, i: 0, out: null };
+    CLS.set(ck, c); FS.clusters = CLS.size;
+  }
+  return c;
+};
+function farStep(c) {
+  if (c.built || !c.regs.length) return true;
+  const t = performance.now();
+  if (!c.out) c.out = { opaque: new GeoBuf(), glass: new GeoBuf() };
+  const k = c.regs[c.i++];
+  meshTerrainRegionFar(k >> 6, k & 63, c.out.opaque, 4);
+  meshVoxelRegionCoarse(k >> 6, k & 63, c.out, 4);
   coarseCache.clear(); farCache.clear();
-  if (out.opaque.n && out.opaque.n < r.q * 0.7) {
-    const m = regMesh(out.opaque.geometry(), AF.mat.voxel, true); m.userData.region = k; m.userData.far = true; m.visible = false; r.far.push(m);
-    if (out.glass.n) { const g = regMesh(out.glass.geometry(), AF.mat.glass, false); g.userData.far = true; g.visible = false; r.far.push(g); }
-    FS.kept++;
+  if (c.i >= c.regs.length) {
+    const o = c.out; c.out = null; c.built = true; FS.built++;
+    if (o.opaque.n) { const m = regMesh(o.opaque.geometry(), AF.mat.voxel, true); m.userData.far = true; m.userData.cluster = c.ck; m.visible = false; c.far.push(m); FS.kept++; }
+    if (o.glass.n) { const g = regMesh(o.glass.geometry(), AF.mat.glass, false); g.userData.far = true; g.visible = false; c.far.push(g); }
   }
   FS.ms += performance.now() - t;
+  return c.built;
 }
+const buildFar = (c) => { while (!farStep(c)); };
 AF.world.buildFarAll = () => { while (farQueue.length) buildFar(farQueue.pop()); FS.pending = 0; };
-AF.test('voxel: far region LOD (1 m) replaces the coarse copy', () => {
-  let r = null;
-  // mobile has no coarse copies: the far copy replaces the full region directly
-  const base = (x) => x.coarse.length || AF.MOBILE;
-  for (const x of AF.world.regLod.values()) if (base(x) && x.far.length) { r = x; break; }
-  if (!r) for (const [k, x] of AF.world.regLod) if (base(x) && !x.farBuilt) { buildFar(k); if (x.far.length) { r = x; break; } }
-  const f = r && r.far[0];
-  const ok = !!f && f.material === AF.mat.voxel && f.userData.far && AF.FAR_LOD > AF.REGION_LOD && f.geometry.index.count / 6 < 0.7 * r.q / 4;
-  return { ok, info: 'far ' + (f ? f.geometry.index.count / 6 + ' quads vs ' + r.q / 4 : 'none') + ', FAR_LOD ' + AF.FAR_LOD + ', built ' + FS.built + ' kept ' + FS.kept };
+AF.test('voxel: far clusters (1 m, 4x4 regions) replace their regions', () => {
+  let c = null;
+  for (const x of CLS.values()) if (x.far.length) { c = x; break; }
+  if (!c) for (const x of CLS.values()) if (!x.built) { buildFar(x); if (x.far.length) { c = x; break; } }
+  const f = c && c.far[0];
+  const fullQ = c ? c.regs.reduce((s, k) => { const r = AF.world.regLod.get(k); return s + (r ? r.q / 4 : 0); }, 0) : 0;
+  const ok = !!f && f.material === AF.mat.voxel && f.userData.far && AF.FAR_LOD > AF.REGION_LOD && f.geometry.index.count / 6 < fullQ;
+  return { ok, info: 'cluster ' + (f ? f.geometry.index.count / 6 + ' quads vs ' + Math.round(fullQ) + ' for ' + c.regs.length + ' regions' : 'none') + ', FAR_LOD ' + AF.FAR_LOD + ', clusters ' + CLS.size + ' built ' + FS.built };
 });
 AF.onTick('far-lod-build', 879, () => {
   if (!AF.ready || !AF.world.regLod) return;
   if (!farQ0) {
-    farQ0 = true; const c = AF.camera.position, dist = (k) => { const r = AF.world.regLod.get(k); return r ? Math.hypot(r.cx - c.x, r.cz - c.z) : 0; };
-    farQueue.push(...[...AF.world.regLod.keys()].sort((a, b) => dist(a) - dist(b)));
+    farQ0 = true; const c = AF.camera.position, dist = (x) => Math.hypot((x.x0 + x.x1) / 2 - c.x, (x.z0 + x.z1) / 2 - c.z);
+    farQueue.push(...[...CLS.values()].sort((a, b) => dist(a) - dist(b)));
   }
   if (!farQueue.length) return;
   if (AF.SHOT) { AF.world.buildFarAll(); return; }
   const t0 = performance.now();
-  while (farQueue.length && performance.now() - t0 < 3) buildFar(farQueue.pop());
+  while (farQueue.length && performance.now() - t0 < 3) { if (farStep(farQueue[farQueue.length - 1])) farQueue.pop(); }
   FS.pending = farQueue.length;
 });
 // far prop meshes skip what can't be seen from a distance: furniture under a roof and tiny clutter
 const roofOver = (x, y, z) => { const bx = W.bx(x), bz = W.bz(z), OP = AF.PAL.opaque; for (let by = W.by(y), e = Math.min(NY - 1, W.by(y + 14)); by <= e; by++) { const c = W.get(bx, by, bz); if (c && OP[c]) return true; } return false; };
-const farPick = (pr) => {
+function farPick(pr) {
   if (pr.farSkip === undefined) {
     const g = pr.geo, bb = g.boundingBox || (g.computeBoundingBox(), g.boundingBox);
     const big = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z);
     pr.farSkip = big < 0.7 || (big < 9 && roofOver(pr.x, pr.y + bb.max.y + 0.3, pr.z));
   }
   return pr.farSkip ? null : (AF.lodOf(pr.geo) || pr.geo);
-};
+}
 function buildNear(reg) {
   const t = performance.now();
   const g = mergeProps(reg.props, (pr) => pr.geo);
@@ -1263,42 +1289,57 @@ function buildNear(reg) {
 }
 function freeNear(reg) { dropMesh(reg.near); dropMesh(reg.nearGlass); reg.near = reg.nearGlass = null; reg.nearBuilt = false; }
 
-AF.meshRegion = (rx, rz) => {
-  const k = rx * 64 + rz, old = AF.world.regions.get(k);
-  if (old) { for (const m of old) dropMesh(m); }
-  const oldC = AF.world.coarse.get(k); if (oldC) { for (const m of oldC) dropMesh(m); }
-  const oldL = AF.world.lod.get(k); if (oldL) { freeNear(oldL); dropMesh(oldL.far); }
+const dropRegion = (k) => {
+  const old = AF.world.regions.get(k); if (old) for (const m of old) dropMesh(m); AF.world.regions.delete(k);
+  const oldC = AF.world.coarse.get(k); if (oldC) for (const m of oldC) dropMesh(m); AF.world.coarse.delete(k);
+  const oldL = AF.world.lod.get(k); if (oldL) { freeNear(oldL); dropMesh(oldL.far); } AF.world.lod.delete(k);
+  if (AF.world.regLod) AF.world.regLod.delete(k);
+};
+AF.meshRegion = (rx, rz) => runSync(meshRegionG(rx, rz));
+function* meshRegionG(rx, rz) {
+  const k = rx * 64 + rz;
+  dropRegion(k);
   const out = { opaque: new GeoBuf(), glass: new GeoBuf() };
   const T = AF.stats.meshT || (AF.stats.meshT = { terrain: 0, voxel: 0, coarse: 0, far: 0, gpu: 0 });
   let tt = performance.now();
   meshTerrainRegion(rx, rz, out.opaque);
   const terrainQ = out.opaque.n;
-  T.terrain += performance.now() - tt; tt = performance.now();
+  T.terrain += performance.now() - tt;
+  yield;
+  tt = performance.now();
   // coarse copy first (terrain quads are shared: copy them before the fine voxels are appended)
   const cout = { opaque: new GeoBuf(), glass: new GeoBuf() };
   if (!AF.MOBILE && terrainQ) { const o = out.opaque, c = cout.opaque; c.p = o.p.slice(); c.uv = o.uv.slice(); c.pal = o.pal.slice(); c.an = o.an.slice(); c.idx = o.idx.slice(); c.n = o.n; }
-  meshVoxelRegion(rx, rz, out);
+  yield* meshVoxelRegionG(rx, rz, out);
   T.voxel += performance.now() - tt; tt = performance.now();
   for (let cx = (rx * REG) >> 4, e = Math.min(CX, (rx * REG + REG) >> 4); cx < e; cx++) for (let cz = (rz * REG) >> 4, f = Math.min(CZ, (rz * REG + REG) >> 4); cz < f; cz++) for (let cy = 0; cy < CY; cy++) coarseCache.delete((cx * CY + cy) * CZ + cz);
-  if (!AF.MOBILE) meshVoxelRegionCoarse(rx, rz, cout);
-  T.coarse += performance.now() - tt; tt = performance.now();
+  if (!AF.MOBILE) yield* meshVoxelRegionCoarseG(rx, rz, cout);
+  T.coarse += performance.now() - tt;
+  yield;
   const meshes = [], cmeshes = [];
-  if (out.opaque.n) { const m = regMesh(out.opaque.geometry(), AF.mat.voxel, true); m.userData.region = k; meshes.push(m); }
-  if (out.glass.n) meshes.push(regMesh(out.glass.geometry(), AF.mat.glass, false));
+  const keepC = !AF.MOBILE && out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8;
+  // typed-array conversion happens here: one geometry per step so a dense block never costs a streamed frame much
+  const nO = out.opaque.n, nC = cout.opaque.n;
+  const gO = nO ? out.opaque.geometry() : null; out.opaque = null; yield;
+  const gG = out.glass.n ? out.glass.geometry() : null; yield;
+  const gCO = keepC && cout.opaque.n ? cout.opaque.geometry() : null; yield;
+  const gCG = keepC && cout.glass.n ? cout.glass.geometry() : null;
+  if (gO) { const m = regMesh(gO, AF.mat.voxel, true); m.userData.region = k; meshes.push(m); }
+  if (gG) meshes.push(regMesh(gG, AF.mat.glass, false));
   // only keep a coarse copy when it actually saves something
-  if (!AF.MOBILE && out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8) {
-    if (cout.opaque.n) { const m = regMesh(cout.opaque.geometry(), AF.mat.voxel, true); m.userData.region = k; m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
-    if (cout.glass.n) { const m = regMesh(cout.glass.geometry(), AF.mat.glass, false); m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
-  }
+  if (gCO) { const m = regMesh(gCO, AF.mat.voxel, true); m.userData.region = k; m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
+  if (gCG) { const m = regMesh(gCG, AF.mat.glass, false); m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
   AF.world.regions.set(k, meshes);
   if (cmeshes.length) AF.world.coarse.set(k, cmeshes); else AF.world.coarse.delete(k);
   const RL = AF.world.regLod || (AF.world.regLod = new Map());
-  const oldR = RL.get(k); if (oldR) for (const m of oldR.far) dropMesh(m);
-  RL.set(k, { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: meshes, coarse: cmeshes, far: [], lvl: 0, q: cmeshes.length ? cout.opaque.n : out.opaque.n, farBuilt: false });
-  if (farQ0) farQueue.push(k);
+  const cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
+  RL.set(k, { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: meshes, coarse: cmeshes, lvl: -1, hid: cl.lvl === 1, q: cmeshes.length ? nC : nO });
   const props = AF.world.propsByRegion.get(k) || [];
   let farQ = 0;
   if (props.length) {
+    // warm the per-model far LODs a few ms at a time (AF.lodOf builds them lazily) so the merge below is just copying
+    let tw = performance.now();
+    for (const pr of props) { farPick(pr); if (performance.now() - tw > 3) { yield; tw = performance.now(); } }
     const reg = { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, props, far: null, near: null, nearGlass: null, nearBuilt: false };
     const tf = performance.now();
     const fg = mergeProps(props, farPick);
@@ -1306,29 +1347,89 @@ AF.meshRegion = (rx, rz) => {
     if (fg) { reg.far = regMesh(fg, AF.mat.voxel, true); farQ = fg.attributes.position.count / 4; }
     AF.world.lod.set(k, reg);
   } else AF.world.lod.delete(k);
-  return out.opaque.n / 4 + farQ;
-};
+  return nO / 4 + farQ;
+}
+// REGION STREAMING (not in ?test / ?shot / ?near / ?nostream): boot meshes only the regions around AF.PLAN.bootFocus plus the 1 m
+// clusters for the whole island; full regions stream in nearest-cluster-first a few ms per frame (a cluster swaps from its 1 m copy
+// only once all 16 of its regions are ready, so nothing overlaps or flickers) and whole clusters far behind the camera are unloaded.
+const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, done: 0, unloaded: 0, t: 0, maxStep: 0 };
+const regionCluster = (k) => CLS.get(((k >> 6) >> 2) * 64 + ((k & 63) >> 2));
+const clDist = (cl, c, vy) => Math.hypot(Math.max(cl.x0 - c.x, 0, c.x - cl.x1), Math.max(cl.z0 - c.z, 0, c.z - cl.z1), vy);
+AF.onTick('region-stream', 878, (dt) => {
+  if (!STR.on || !AF.ready) return;
+  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, FD = AF.FAR_LOD || 1e9;
+  const t0 = performance.now(), budget = AF.MOBILE ? 3 : AF.mode === 'cine' ? 9 : 5;
+  while (performance.now() - t0 < budget) {
+    if (!STR.gen) {
+      let best = null, bd = FD + 48;
+      for (const cl of CLS.values()) if (cl.pending > 0) { const d = clDist(cl, c, vy); if (d < bd) { bd = d; best = cl; } }
+      if (!best) break;
+      let bk = -1, bkd = 1e18;
+      for (const k of best.regs) if (STR.pending.has(k)) { const x = X0 + ((k >> 6) + 0.5) * REG * VS, z = Z0 + ((k & 63) + 0.5) * REG * VS, d = (x - c.x) ** 2 + (z - c.z) ** 2; if (d < bkd) { bkd = d; bk = k; } }
+      if (bk < 0) { best.pending = 0; continue; }
+      STR.key = bk; STR.gen = meshRegionG(bk >> 6, bk & 63);
+    }
+    const ts = performance.now(), fin = STR.gen.next().done, st = performance.now() - ts;
+    if (st > STR.maxStep) STR.maxStep = st;
+    if (fin) { STR.gen = null; STR.pending.delete(STR.key); const cl = regionCluster(STR.key); if (cl) cl.pending = Math.max(0, cl.pending - 1); STR.done++; coarseCache.clear(); }
+  }
+  if ((STR.t += dt) > 2) {
+    STR.t = 0;
+    const cur = STR.gen ? regionCluster(STR.key) : null;
+    for (const cl of CLS.values()) {
+      if (cl.pending > 0 || !cl.built || cl === cur || clDist(cl, c, vy) < FD + 220) continue;
+      for (const k of cl.regs) { dropRegion(k); STR.pending.add(k); }
+      cl.pending = cl.regs.length; STR.unloaded++;
+    }
+  }
+});
 AF.onTick('prop-lod', 880, () => {
   if (!AF.world.group) return;
   const c = AF.camera.position, D = AF.LOD_DIST;
-  // region LOD: full voxels near the camera, the 0.5 m coarse copy beyond AF.REGION_LOD, the 1 m far copy beyond AF.FAR_LOD
-  // (hysteresis so nothing flickers on a boundary)
-  if (AF.world.regLod) {
-    const RD = AF.REGION_LOD, FD = AF.FAR_LOD || 1e9;
-    for (const r of AF.world.regLod.values()) {
-      if (!r.coarse.length && !r.far.length) continue;
-      const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
-      const want = r.far.length && d > FD + (r.lvl === 2 ? -16 : 16) ? 2 : r.coarse.length && d > RD + (r.lvl >= 1 ? -12 : 12) ? 1 : 0;
-      if (want === r.lvl) continue;
-      r.lvl = want;
-      for (const m of r.full) m.visible = want === 0;
-      for (const m of r.coarse) m.visible = want === 1;
-      for (const m of r.far) m.visible = want === 2;
+  // region LOD: full voxels near the camera, the 0.5 m coarse copy beyond AF.REGION_LOD; whole 128 m clusters swap to their merged
+  // 1 m copy once the nearest point of the cluster is beyond AF.FAR_LOD (hysteresis so nothing flickers on a boundary)
+  const RL = AF.world.regLod;
+  if (RL) {
+    const RD = AF.REGION_LOD, FD = AF.FAR_LOD || 1e9, vy = Math.max(0, c.y - 12) * 0.7;
+    for (const cl of CLS.values()) {
+      if (!cl.built) continue;
+      const dx = Math.max(cl.x0 - c.x, 0, c.x - cl.x1), dz = Math.max(cl.z0 - c.z, 0, c.z - cl.z1);
+      const want = cl.pending > 0 || Math.hypot(dx, dz, vy) > FD + (cl.lvl ? -16 : 16) ? 1 : 0;
+      if (want === cl.lvl) continue;
+      cl.lvl = want;
+      for (const m of cl.far) m.visible = !!want;
+      for (const k of cl.regs) { const r = RL.get(k); if (r) { r.hid = !!want; r.lvl = -1; } }
+    }
+    for (const r of RL.values()) {
+      let want = 3;
+      if (!r.hid) { const d = Math.hypot(r.cx - c.x, r.cz - c.z, vy); want = r.coarse.length && d > RD + (r.lvl === 1 ? -12 : 12) ? 1 : 0; }
+      if (want !== r.lvl) {
+        r.lvl = want; r.sh = false;
+        for (const m of r.full) { m.visible = want === 0; if (m.material === AF.mat.voxel) m.castShadow = true; }
+        for (const m of r.coarse) { m.visible = want === 1; m.layers.set(0); }
+      }
+      // full-detail regions away from the near shadow cascade cast through their 0.5 m copy (layer 1 = shadow pass only):
+      // a tower 60 m up the sun line still shadows the street, at a fraction of the depth-pass triangles
+      if (want === 0 && r.coarse.length) {
+        const SN = AF.shadowNear, dx = Math.max(Math.abs(r.cx - SN.cx) - 16, 0), dz = Math.max(Math.abs(r.cz - SN.cz) - 16, 0);
+        const sh = dx * dx + dz * dz > (SN.r + 6) * (SN.r + 6);
+        if (sh !== r.sh) {
+          r.sh = sh;
+          for (const m of r.full) if (m.material === AF.mat.voxel) m.castShadow = !sh;
+          for (const m of r.coarse) { m.visible = sh && m.castShadow; m.layers.set(sh ? 1 : 0); }
+        }
+      }
     }
   }
   let budget = AF.SHOT || AF.TEST ? 1e9 : 10, best = null, bestD = 1e9;
   const t0 = performance.now();
-  for (const r of AF.world.lod.values()) {
+  for (const [k, r] of AF.world.lod) {
+    const rl = RL && RL.get(k);
+    if (rl && rl.hid) {
+      if (r.nearBuilt) freeNear(r);
+      if (r.far) r.far.visible = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7) < (AF.PROP_CULL || 900);
+      continue;
+    }
     const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
     if (!r.nearBuilt && d < D) {
       if (budget > 1e8) buildNear(r);
@@ -1351,13 +1452,19 @@ AF.meshWorld = async (progress) => {
   const nearQ = AF.Q && AF.Q.get('near'), NEAR = nearQ ? nearQ.split(',').map(Number) : null;
   if (NEAR && NEAR.length === 3 && NEAR.every(isFinite)) { AF.NEAR = { x: NEAR[0], z: NEAR[1], r: NEAR[2] }; console.log('[af] near mode', nearQ); }
   const rm = REG * VS;
+  STR.on = !AF.TEST && !AF.SHOT && !AF.NEAR && !(AF.Q && AF.Q.has('nostream'));
+  const BF = AF.PLAN.bootFocus || { x: 100, z: -60, r: 110 };
   for (let rx = 0; rx < NRX; rx++) {
     for (let rz = 0; rz < NRZ; rz++) {
       if (AF.NEAR && Math.hypot(X0 + (rx + 0.5) * rm - AF.NEAR.x, Z0 + (rz + 0.5) * rm - AF.NEAR.z) > AF.NEAR.r + rm * 0.71) { done++; continue; }
+      const k = rx * 64 + rz, cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
+      if (STR.on && Math.hypot(X0 + (rx + 0.5) * rm - BF.x, Z0 + (rz + 0.5) * rm - BF.z) > BF.r) { STR.pending.add(k); cl.pending = (cl.pending || 0) + 1; done++; continue; }
       quads += AF.meshRegion(rx, rz); done++;
     }
     if (progress) await progress(done / (NRX * NRZ));
   }
+  // streaming: every cluster's 1 m copy now (the whole island is visible from the first frame), full detail follows the camera
+  if (STR.on) { farQ0 = true; for (const cl of CLS.values()) buildFar(cl); coarseCache.clear(); farCache.clear(); }
   coarseCache.clear();
   W.compactChunks();
   for (const w of AF.world.water) { AF.releaseStaticGeometry(w.geo); const m = new THREE.Mesh(w.geo, w.mat || AF.mat.water); m.receiveShadow = true; m.renderOrder = 1; m.name = 'water'; AF.world.group.add(m); w.mesh = m; }

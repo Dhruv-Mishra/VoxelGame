@@ -321,7 +321,7 @@ try {
     // the sea: big quads (the harbour inside the map is 8 m tiles so the shader's view vector stays precise)
     const sp = [], sn = [], si = []; let sN = 0;
     const q = (x0, z0, x1, z1) => { sp.push(x0, SEA_Y, z0, x0, SEA_Y, z1, x1, SEA_Y, z1, x1, SEA_Y, z0); sn.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0); si.push(sN, sN + 1, sN + 2, sN, sN + 2, sN + 3); sN += 4; };
-    for (let x = W.X0; x < 300; x += 8) for (let z = COAST; z < 300; z += 8) q(x, z, x + 8, Math.min(300, z + 8));
+    for (let x = W.X0; x < XE; x += 8) for (let z = COAST; z < 300; z += 8) q(x, z, Math.min(XE, x + 8), Math.min(300, z + 8));
     // coastal water inside the map edges: 4 m tiles where the island shore dips under the sea, always along the edge ring
     for (let x = W.X0; x < XE; x += 4) for (let z = ZN; z < COAST; z += 4) {
       if (x > W.X0 && x + 4 < XE && z > ZN) {

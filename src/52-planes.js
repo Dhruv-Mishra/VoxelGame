@@ -93,7 +93,7 @@ try {
     },
     exit() {
       const pl = PL.cur; PL.cur = null;
-      if (pl) { pl.engine = false; pl.throttle = 0; place(pl); }
+      if (pl) { if (!pl.ghost) { pl.engine = false; pl.throttle = 0; } place(pl); }
       if (AF.player) AF.player.setVisible(true);
       AF.emit('hud', { speed: null }); AF.emit('hint', '');
     },
@@ -120,11 +120,14 @@ try {
       pl.throttle = AF.clamp(pl.throttle + thrIn * dt * 0.7, 0, 1);
       if ((pl.throttle > 0) !== pl.engine) { pl.engine = pl.throttle > 0; AF.emit('toast', pl.engine ? 'Engine running.' : 'Throttle closed \u2014 engine off.'); }
       // ---- dynamics
-      const vs = T.stall, drag = T.thrust / (T.vmax * T.vmax);
+      // landing flaps deploy automatically low + slow with the throttle back: stall speed -22 %, a steeper, slower approach
+      const hAGL = pl.onGround ? 0 : pl.y - ground(pl.x, pl.z);
+      pl.flaps = (pl.flaps || 0) + ((!pl.onGround && hAGL < 70 && pl.throttle < 0.45 ? 1 : 0) - (pl.flaps || 0)) * Math.min(1, dt * 1.5);
+      const vs = T.stall * (1 - 0.22 * (pl.flaps || 0)), drag = T.thrust / (T.vmax * T.vmax) * (1 + 0.6 * (pl.flaps || 0));
       if (pl.onGround) {
         const rotate = pitchIn > 0.2 && pl.v > vs, back = !rotate && rawP < -0.1;
         pl.v += (pl.throttle * T.thrust * T.gk - drag * pl.v * Math.abs(pl.v)) * dt;
-        const fr = brake || (back && pl.v > 0) ? 8 : 0.5;
+        const fr = brake || (back && pl.v > 0) ? 8 : pl.throttle < 0.02 && pl.v > 2 ? 2.2 : 0.5;
         pl.v = Math.sign(pl.v) * Math.max(0, Math.abs(pl.v) - fr * dt);
         if (back && !brake && pl.throttle < 0.01 && pl.v <= 0) pl.v = Math.max(-3, pl.v - 2.5 * dt);
         pl.v = AF.clamp(pl.v, -3, T.vmax * 1.25);
@@ -145,10 +148,10 @@ try {
         pl.roll = AF.clamp(pl.roll + pl.rr * dt, -BANK, BANK);
         pl.gam += (pl.pitch - pl.gam) * Math.min(1, dt * T.follow * lift);
         if (lift < 1) { if (pl.pitch > -0.5) pl.pitch -= (1 - lift) * 0.8 * dt; pl.gam += (-0.7 - pl.gam) * (1 - lift) * Math.min(1, dt * 1.5); }
-        // auto-flare: unless pushing, a low approach is rounded out to a gentle sink
-        const h = pl.y - ground(pl.x, pl.z);
-        if (h < 10 && pitchIn >= 0) {
-          const gMin = -Math.min(0.5, (1.2 + h * 0.5) / Math.max(pl.v, 1)), k = Math.min(1, dt * 3);
+        // auto-flare: unless pushing, a low approach is rounded out to a gentle sink (earlier and softer with flaps out)
+        const h = pl.y - ground(pl.x, pl.z), fH = 10 + 6 * (pl.flaps || 0);
+        if (h < fH && pitchIn >= 0) {
+          const gMin = -Math.min(0.5, (0.9 + h * 0.45) / Math.max(pl.v, 1)), k = Math.min(1, dt * 3.5);
           if (pl.gam < gMin) pl.gam += (gMin - pl.gam) * k;
           if (pl.pitch < gMin + 0.04) pl.pitch += (gMin + 0.04 - pl.pitch) * k;
         }
@@ -166,9 +169,9 @@ try {
       // the first seconds after liftoff forgive a bounce and low clutter (edge lights, kerbs, fences)
       const early = pl.air < 4;
       if (!pl.onGround && ny <= gy) {
-        const soft = vy > (early ? -8 : -6) && Math.abs(pl.roll) < (early ? 0.6 : 0.45) && pl.pitch > (early ? -0.4 : -0.25) && ground(nx, nz) > -0.5;
+        const soft = vy > (early ? -8 : -7.5) && Math.abs(pl.roll) < (early ? 0.6 : 0.55) && pl.pitch > (early ? -0.4 : -0.35) && ground(nx, nz) > -0.5;
         if (!soft) { crash(pl, ground(nx, nz) < -0.5 ? 'Splash!' : 'Crunch!'); return; }
-        pl.onGround = true; pl.pitch = pl.roll = pl.gam = pl.pr = pl.rr = 0; AF.emit('toast', 'Touchdown!');
+        pl.onGround = true; pl.pitch = pl.roll = pl.gam = pl.pr = pl.rr = 0; pl.flaps = 0; AF.emit('toast', vy > -2.2 ? 'Butter! A perfect landing.' : vy > -4.5 ? 'Touchdown!' : 'Firm landing — but you’re down.');
       }
       // hitting a building / hill face
       if (!pl.onGround && AF.solidAt(nx + fwd.x * pl.G.halfL, ny + (early ? 2.5 : 1), nz + fwd.z * pl.G.halfL)) { crash(pl, 'Crunch!'); return; }
@@ -187,14 +190,100 @@ try {
       const cp = Math.cos(FL.pit); look.set(pl.x + Math.sin(FL.yaw) * cp * 5, cy + Math.sin(FL.pit) * 5, pl.z + Math.cos(FL.yaw) * cp * 5);
       const cam = AF.camera; cam.position.copy(tmp); cam.up.copy(UP); cam.lookAt(look); cam.rotateZ(-FL.roll * 0.3);
       AF.camTarget.copy(look); AF.shadowFocus.set(pl.x, 0, pl.z); AF.shadowRadius = 90;
-      AF.emit('hud', { mode: 'fly', speed: Math.abs(pl.v) * 2.237, alt: Math.max(0, pl.y - Math.max(0, ground(pl.x, pl.z))), throttle: pl.throttle, engine: pl.engine, car: pl.name + ' \u00b7 Throttle ' + Math.round(pl.throttle * 100) + '%' + (PL.invertPitch ? ' \u00b7 Inverted' : '') });
-      // ---- getting out (on the ground, nearly stopped)
+      // approach guidance to the Westgate runway (3-degree glideslope from the nearer threshold)
+      let guide = '';
+      if (!pl.onGround && hAGL < 180) {
+        const RW = A.runway, thx = Math.abs(pl.x - RW.x0) < Math.abs(pl.x - RW.x1) ? RW.x0 + 30 : RW.x1 - 30, dx2 = thx - pl.x, dz2 = RW.z - pl.z, dist = Math.hypot(dx2, dz2);
+        const toward = Math.cos(AF.angDiff(pl.yaw, Math.atan2(dx2, dz2))) > 0.85;
+        if (toward && dist < 1800 && Math.abs(dz2) < Math.max(40, dist * 0.25)) {
+          const want = dist * 0.0524, dh = hAGL - want;
+          guide = 'Runway ' + Math.round(dist) + ' m · ' + (dh > 12 ? 'high — throttle back, nose down' : dh < -10 ? 'low — add power' : 'on glideslope') + (Math.abs(dz2) > 10 ? (dz2 > 0 ? ' · steer right' : ' · steer left') : '') + (pl.flaps > 0.5 ? ' · flaps' : '');
+        }
+      }
+      AF.emit('hud', { mode: 'fly', speed: Math.abs(pl.v) * 2.237, alt: Math.max(0, pl.y - Math.max(0, ground(pl.x, pl.z))), throttle: pl.throttle, engine: pl.engine, car: pl.name + ' · Throttle ' + Math.round(pl.throttle * 100) + '%' + (PL.invertPitch ? ' · Inverted' : '') + (guide ? ' · ' + guide : !pl.onGround ? ' · F bail out' : '') });
+      // ---- getting out: on the ground (nearly stopped), or bail out with a parachute from high enough
       if (I.hit('KeyF')) {
         if (pl.onGround && Math.abs(pl.v) < 4) { pl.v = 0; const sx = Math.cos(pl.yaw), sz = -Math.sin(pl.yaw), off = Math.min(pl.G.halfW, 3) + 1.2; AF.setMode('walk', { x: pl.x + sx * off, z: pl.z + sz * off, yaw: pl.yaw + PI / 2 }); }
-        else AF.emit('toast', 'Land and slow down first!');
+        else if (!pl.onGround && hAGL > 35) { const sx = Math.cos(pl.yaw), sz = -Math.sin(pl.yaw); pl.ghost = true; AF.setMode('skydive', { x: pl.x + sx * (pl.G.halfW + 1.5), y: pl.y - 1, z: pl.z + sz * (pl.G.halfW + 1.5), yaw: pl.yaw, vx: dir.x * pl.v * 0.6, vz: dir.z * pl.v * 0.6, vy: Math.min(0, vy) }); }
+        else AF.emit('toast', pl.onGround ? 'Slow down first!' : 'Too low to jump — climb above 35 m or land.');
       }
     },
   };
+
+  // ---------------------------------------------------------------- bail out: freefall, then a striped canopy (Space / tap CHUTE, or
+  // automatically at 70 m). W/S dive + flare, A/D turn. The empty plane glides down on its own and the ground crew recovers it.
+  const SK = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, yaw: 0, chute: false, open: 0, st: { phase: 0, speed: 0, air: 1, t: 0, land: 0 }, rig: null, cam: new THREE.Vector3(), camInit: false };
+  const buildRig = () => {
+    const g = new THREE.Group(), cv = document.createElement('canvas'); cv.width = 128; cv.height = 8;
+    const c2 = cv.getContext('2d'); for (let i = 0; i < 8; i++) { c2.fillStyle = ['#d8402a', '#f4ecd8', '#2f6aa8', '#f4ecd8'][i % 4]; c2.fillRect(i * 16, 0, 16, 8); }
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(3.6, 24, 6, 0, PI * 2, 0, PI / 2.6), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, side: THREE.DoubleSide }));
+    dome.scale.set(1, 0.5, 0.62); dome.position.y = 4.6; dome.castShadow = true; g.add(dome);
+    const pts = []; for (let i = 0; i < 10; i++) { const a = i / 10 * PI * 2; pts.push(Math.cos(a) * 3.36, 5.25, Math.sin(a) * 2.08, 0, 1.35, 0); }
+    const lines = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)), new THREE.LineBasicMaterial({ color: 0x2a2a2a }));
+    g.add(lines); g.visible = false; g.name = 'parachute'; AF.scene.add(g); return g;
+  };
+  AF.modes.skydive = {
+    enter(o = {}) {
+      Object.assign(SK, { x: o.x, y: o.y, z: o.z, vx: o.vx || 0, vy: o.vy || 0, vz: o.vz || 0, yaw: o.yaw || 0, chute: false, open: 0, camInit: false });
+      if (!SK.rig) SK.rig = buildRig();
+      SK.rig.visible = false; SK.rig.scale.setScalar(0.05);
+      if (AF.player) AF.player.setVisible(true);
+      AF.emit('toast', AF.touch ? 'Freefall! Tap CHUTE to open the parachute.' : 'Freefall! Space opens the parachute \u2014 W/S dive or flare, A/D turn.');
+    },
+    exit() { if (SK.rig) SK.rig.visible = false; AF.emit('hud', { speed: null }); },
+    update(dt) {
+      dt = Math.min(dt, 0.05);
+      const I = AF.input, S = I.stick, P = AF.player;
+      const fwdIn = AF.clamp((I.key('KeyW') || I.key('ArrowUp') ? 1 : 0) - (I.key('KeyS') || I.key('ArrowDown') ? 1 : 0) + (S ? S.y : 0), -1, 1);
+      const turnIn = AF.clamp((I.key('KeyD') || I.key('ArrowRight') ? 1 : 0) - (I.key('KeyA') || I.key('ArrowLeft') ? 1 : 0) + (S ? S.x : 0), -1, 1);
+      const gy = Math.max(AF.W.groundY(SK.x, SK.z), SK.z > 206 ? -1.25 : -99), h = SK.y - gy;
+      if (!SK.chute && (I.hit('Space') || h < 70)) { SK.chute = true; AF.emit('toast', 'Canopy open! Steer with A/D, hold S to flare before touchdown.'); }
+      SK.yaw -= turnIn * (SK.chute ? 0.9 : 1.6) * dt;
+      const hx = Math.sin(SK.yaw), hz = Math.cos(SK.yaw);
+      if (SK.chute) {
+        SK.open = Math.min(1, SK.open + dt * 1.6);
+        const sink = -(fwdIn < 0 ? 2.2 : 4.6 + fwdIn * 1.5), fs = 6.5 + fwdIn * 2.5 - (fwdIn < 0 ? 3 : 0);
+        SK.vy += (sink - SK.vy) * Math.min(1, dt * (1.2 + SK.open * 2));
+        SK.vx += (hx * fs - SK.vx) * Math.min(1, dt * 1.2); SK.vz += (hz * fs - SK.vz) * Math.min(1, dt * 1.2);
+      } else {
+        SK.vy = Math.max(-52, SK.vy - 9.8 * dt - SK.vy * Math.abs(SK.vy) * 0.0036 * dt);
+        const fs = 10 + fwdIn * 14;
+        SK.vx += (hx * fs - SK.vx) * Math.min(1, dt * 0.6); SK.vz += (hz * fs - SK.vz) * Math.min(1, dt * 0.6);
+      }
+      SK.x += SK.vx * dt; SK.y += SK.vy * dt; SK.z += SK.vz * dt;
+      const floor = AF.surfaceBelow(SK.x, SK.z, SK.y + 1.5, 40), land = Number.isFinite(floor) && floor > -50 ? Math.max(floor, gy) : gy;
+      if (SK.y <= land + 0.02) {
+        const hard = SK.vy < -9;
+        AF.emit('toast', hard ? 'Oof \u2014 a rough landing, but you walk it off.' : SK.z > 206 && land < -1 ? 'Splashdown! Swim for the shore.' : 'Touchdown under canopy. Nice jump!');
+        AF.setMode('walk', { x: SK.x, y: land, z: SK.z, yaw: SK.yaw }); return;
+      }
+      // the avatar hangs under the canopy (or spreads out in freefall)
+      if (P && P.mesh) {
+        P.mesh.position.set(SK.x, SK.y, SK.z); P.mesh.rotation.set(SK.chute ? 0 : 1.2, SK.yaw, -turnIn * 0.25, 'YXZ');
+        SK.st.air = 1; if (P.parts) AF.avatar.animate(P.parts, SK.st, dt, 0, false);
+      }
+      const R = SK.rig; R.visible = SK.chute; R.scale.setScalar(0.1 + 0.9 * SK.open); R.position.set(SK.x, SK.y, SK.z); R.rotation.set(-fwdIn * 0.12, SK.yaw, -turnIn * 0.3, 'YXZ');
+      // chase camera behind and above
+      const back = SK.chute ? 11 : 8, up = SK.chute ? 4.5 : 3.2;
+      tmp.set(SK.x - hx * back, SK.y + up, SK.z - hz * back); tmp.y = Math.max(tmp.y, ground(tmp.x, tmp.z) + 1);
+      if (!SK.camInit) { SK.cam.copy(tmp); SK.camInit = true; } else SK.cam.lerp(tmp, 1 - Math.exp(-dt * 4));
+      const cam = AF.camera; cam.position.copy(SK.cam); cam.up.copy(UP); look.set(SK.x, SK.y + (SK.chute ? 1.5 : 0), SK.z); cam.lookAt(look);
+      AF.camTarget.copy(look); AF.shadowFocus.set(SK.x, 0, SK.z); AF.shadowRadius = 60;
+      AF.emit('hud', { mode: 'fly', speed: Math.hypot(SK.vx, SK.vy, SK.vz) * 2.237, alt: Math.max(0, h), car: SK.chute ? 'Parachute \u00b7 A/D steer \u00b7 S flare' : 'Freefall \u00b7 ' + (AF.touch ? 'tap CHUTE' : 'Space') + ' to open' });
+    },
+  };
+  // an abandoned plane glides on, sinking, until the ground crew 'recovers' it at the apron
+  AF.onTick('plane-ghosts', 441, (dt) => {
+    for (const pl of PL.list) {
+      if (!pl.ghost || PL.cur === pl) continue;
+      pl.gam += (-0.18 - pl.gam) * Math.min(1, dt); pl.pitch = pl.gam; pl.roll *= Math.exp(-dt);
+      const cg = Math.cos(pl.gam); pl.x += Math.sin(pl.yaw) * cg * pl.v * dt; pl.z += Math.cos(pl.yaw) * cg * pl.v * dt; pl.y += Math.sin(pl.gam) * pl.v * dt;
+      if (pl.engine) { pl.spin += dt * 30; for (const p of pl.props) p.rotation.z = pl.spin; }
+      if (pl.y <= ground(pl.x, pl.z) + 0.5 || Math.abs(pl.x) > 2200 || Math.abs(pl.z) > 2200) { pl.ghost = false; PL.reset(pl); }
+      else place(pl);
+    }
+  });
 
   // ---------------------------------------------------------------- the apron line-up + a sightseeing Cub circling the city
   AF.onBuild('planes', 640, () => {

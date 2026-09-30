@@ -636,7 +636,7 @@ try {
   // Scattered once over every green ground cell (lawns, park, colony yards, the heights), bucketed in 16 m cells. Only a
   // radius around the camera is drawn (one InstancedMesh per kind, refreshed as the camera moves); instances shrink to
   // nothing toward the edge of that radius so there is no pop-in line. Hidden from high above (you could not see it anyway).
-  const GC = AF.groundCover = { kinds: [], cells: new Map(), n: 0, at: { x: 1e9, z: 1e9 }, t: 0, shown: 0 };
+  const GC = AF.groundCover = { kinds: [], cells: new Map(), n: 0, at: { x: 1e9, z: 1e9 }, t: 0, shown: 0, uC: { value: new THREE.Vector4(0, 0, 40, 60) }, mat: null };
   const coverModels = () => {
     const R = AF.rng(8080), K = [];
     const plant = (S, H, fn) => { const m = new AF.Model(S, H, S); fn(m); return m; };
@@ -672,9 +672,17 @@ try {
       a.push(jx, gy, jz, R() * 6.2832, 0.75 + R() * 0.55, k); GC.n++;
     }
     for (const [key, a] of cells) cells.set(key, new Float32Array(a));
-    const tier = (AF.GFX && AF.GFX.tier) || 'high', cap = AF.MOBILE ? 1200 : tier === 'low' ? 3400 : tier === 'high' ? 7500 : 12000;
+    const tier = (AF.GFX && AF.GFX.tier) || 'high', cap = AF.MOBILE ? 1400 : tier === 'low' ? 3800 : tier === 'high' ? 8500 : 13000;
+    // plants grow in / out in the vertex shader from the live viewer position every frame (uCoverC = x, z, fade start, radius),
+    // so the 6 m instance refreshes never show as a stepped ring of popping tufts
+    const mat = GC.mat = AF.mat.patchVoxel(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'cover');
+    const base = mat.onBeforeCompile;
+    mat.onBeforeCompile = (sh) => {
+      base(sh); sh.uniforms.uCoverC = GC.uC;
+      sh.vertexShader = 'uniform vec4 uCoverC;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n#ifdef USE_INSTANCING\n{ vec2 ip = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz; float ff = 1.0 - smoothstep(uCoverC.z, uCoverC.w, distance(ip, uCoverC.xy)); transformed *= ff * ff * (3.0 - 2.0 * ff); }\n#endif');
+    };
     for (const k of K) {
-      const im = new THREE.InstancedMesh(k.geo, AF.mat.voxel, Math.ceil(cap * (k.id === 'tuft' ? 0.45 : 0.25)));
+      const im = new THREE.InstancedMesh(k.geo, mat, Math.ceil(cap * (k.id === 'tuft' ? 0.45 : 0.25)));
       im.count = 0; im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; im.name = 'cover-' + k.id; im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       AF.scene.add(im); k.im = im;
     }
@@ -691,7 +699,7 @@ try {
     o.sort((p, q) => p[2] - q[2]); ringR = Rr; return (ring = o.filter((p) => p[2] <= Rr));
   };
   const refreshCover = (cx, cz, cy) => {
-    const K = GC.kinds, Rr = coverRadius(), R2 = Rr * Rr, fade0 = Rr * 0.72;
+    const K = GC.kinds, Rr = coverRadius() + 8, R2 = Rr * Rr;
     for (const k of K) k.n = 0;
     const high = cy - Math.max(0, W.groundY(cx, cz)) > 45;
     if (!high) {
@@ -701,7 +709,7 @@ try {
         for (let i = 0; i < a.length; i += 6) {
           const dx = a[i] - cx, dz = a[i + 2] - cz, d2 = dx * dx + dz * dz; if (d2 > R2) continue;
           const k = K[a[i + 5]], im = k.im; if (k.n >= im.instanceMatrix.count) continue;
-          const d = Math.sqrt(d2), f = d < fade0 ? 1 : 1 - (d - fade0) / (Rr - fade0), s = a[i + 4] * f * f * (3 - 2 * f);
+          const s = a[i + 4];
           const c = Math.cos(a[i + 3]) * s, sn = Math.sin(a[i + 3]) * s, arr = im.instanceMatrix.array, o = k.n * 16;
           arr[o] = c; arr[o + 1] = 0; arr[o + 2] = -sn; arr[o + 3] = 0; arr[o + 4] = 0; arr[o + 5] = s; arr[o + 6] = 0; arr[o + 7] = 0;
           arr[o + 8] = sn; arr[o + 9] = 0; arr[o + 10] = c; arr[o + 11] = 0; arr[o + 12] = a[i]; arr[o + 13] = a[i + 1]; arr[o + 14] = a[i + 2]; arr[o + 15] = 1;
@@ -716,12 +724,13 @@ try {
   AF.onTick('ground-cover', 445, (dt) => {
     if (!GC.kinds.length || !GC.kinds[0].im) return;
     const c = AF.camera.position, f = AF.player && AF.mode === 'walk' ? AF.player : c;
-    // centre the drawn disc ahead of the view so plants are already grown where you look
-    const e = AF.camera.matrixWorld.elements, fl = Math.hypot(e[8], e[10]) || 1, lead = coverRadius() * 0.3;
-    const fx = f.x - e[8] / fl * lead, fz = f.z - e[10] / fl * lead;
+    const Rr = coverRadius(); GC.uC.value.set(f.x, f.z, Rr * 0.62, Rr);
+    const V = AF.mat.voxel, M = GC.mat;
+    if (M.envMap !== V.envMap) { M.envMap = V.envMap; M.needsUpdate = true; }
+    M.envMapIntensity = V.envMapIntensity;
     GC.t -= dt;
-    const moved = Math.abs(fx - GC.at.x) + Math.abs(fz - GC.at.z) > 5 || Math.abs(c.y - GC.at.y) > 12;
-    if (moved || GC.t <= 0) { GC.t = 1.5; refreshCover(fx, fz, c.y); }
+    const moved = Math.abs(f.x - GC.at.x) + Math.abs(f.z - GC.at.z) > 6 || Math.abs(c.y - GC.at.y) > 12;
+    if (moved || GC.t <= 0) { GC.t = 3; refreshCover(f.x, f.z, c.y); }
   });
   AF.test('land: ground cover scattered + drawn near the camera', () => {
     if (!GC.kinds.length) return { ok: false, info: 'no ground cover' };

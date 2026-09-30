@@ -36,16 +36,54 @@ try {
   AF.onBuild('west-zoo', 312, () => {
     const t0 = performance.now(), col = K().col, glow = K().glow;
     const stoneW = col(0xb8ad98, { pat: 'stone', jitter: 0.4 }), cap = col(0x8a8272, { jitter: 0.3 }), iron = AF.MAT.iron;
-    const pave = col(0xd8cdb4, { pat: 'none', patTop: 'slab', jitter: 0.3 }), paveD = col(0xc2b69c, { pat: 'none', patTop: 'slab', jitter: 0.3 });
     const [x0, z0, x1, z1] = [ZOO.x0, ZOO.z0, ZOO.x1, ZOO.z1];
     // lawn everywhere, then paths
     W.eachCol(x0, z0, x1, z1, (bx, bz, i, x, z) => { W.C[i] = col(AF.noise2(x * 0.08, z * 0.08) < 0.5 ? 0x6f9a3e : 0x7da646, { jitter: 0.9 }); });
-    const path = (a, b, c, d) => W.eachCol(a, b, c, d, (bx, bz, i, x, z) => { W.C[i] = ((Math.floor(x) + Math.floor(z)) & 1) ? pave : paveD; });
+    // ADVENTURE WALKS: irregular flagstones (jittered Voronoi cells, dark grout, the odd pebble) whose stone set, size and moss change by
+    // zone \u2014 sun-baked sandstone by the savanna, ember clay at the big cats, river-grey by the wetlands, mossy slate in the woods
+    const SETS = {
+      sand: [0xd2bc94, 0xc4aa80, 0xdac8a2, 0xbca07a, 0xcab28a, 0xe0d0ac], ember: [0xc8a07c, 0xd0aa86, 0xb89070, 0xd8b690, 0xbe9676, 0xdcc09c],
+      river: [0xa8aca6, 0x9ca2a0, 0xb4b8b0, 0x94999a, 0xaeb0a6, 0xc0c2b8], moss: [0x9c9a84, 0xa8a48e, 0x90947c, 0xb0ac94, 0x8a927a, 0xb8b29a],
+    };
+    const SP = {}; for (const k in SETS) SP[k] = SETS[k].map((h) => col(h, { pat: 'none', jitter: 0.35, edge: 0.2 }));
+    const groutC = { sand: col(0x9a8664, { jitter: 0.5 }), ember: col(0x8e6e52, { jitter: 0.5 }), river: col(0x747a76, { jitter: 0.5 }), moss: col(0x6a7a52, { jitter: 0.6 }) };
+    const pebW = col(0xe6dfcc, { jitter: 0.2 }), pebD = col(0x6a6254, { jitter: 0.2 }), mossC = col(0x6f8a48, { jitter: 0.7 });
+    const zoneAt = (x, z) => z < -150 ? (x < -560 ? 'river' : 'moss') : x < -560 ? 'sand' : x < -515 ? 'ember' : x < -490 ? 'moss' : 'river';
+    const h2 = AF.hash2;
+    const pave = SP.sand[0], paveD = SP.sand[1];
+    const isPave = new Set(Object.values(SP).flat().concat(Object.values(groutC), [pebW, pebD, mossC]));
+    const path = (a, b, c, d) => W.eachCol(a, b, c, d, (bx, bz, i, x, z) => {
+      const zone = zoneAt(x, z), P2 = SP[zone], cs = zone === 'ember' ? 1.35 : zone === 'river' ? 0.95 : zone === 'moss' ? 1.2 : 1.1;
+      const gx = x / cs, gz = z / cs, ix = Math.floor(gx), iz = Math.floor(gz);
+      let d1 = 9, d2 = 9, id = 0;
+      for (let u = -1; u <= 1; u++) for (let v = -1; v <= 1; v++) {
+        const cx = ix + u, cz = iz + v, px = cx + 0.15 + h2(cx, cz) * 0.7, pz = cz + 0.15 + h2(cz + 91, cx - 37) * 0.7;
+        const dd = (gx - px) * (gx - px) + (gz - pz) * (gz - pz);
+        if (dd < d1) { d2 = d1; d1 = dd; id = cx * 7919 + cz; } else if (dd < d2) d2 = dd;
+      }
+      const edge = Math.sqrt(d2) - Math.sqrt(d1), q = h2(bx, bz);
+      if (edge < 0.11 * (1.1 / cs)) { W.C[i] = zone === 'moss' && q < 0.45 ? mossC : groutC[zone]; return; }
+      W.C[i] = q < 0.006 ? pebW : q < 0.012 ? pebD : P2[Math.floor(h2(id, 5) * P2.length) % P2.length];
+    });
+    // paw-print trails in darker stone: [x, z0, z1, kind] along the walks beside the animals that made them
+    const prints = (x, zA, zB, kind, step) => {
+      const dark = pebD;
+      for (let z = zA, k = 0; z > zB; z -= step, k++) {
+        const px = x + (k & 1 ? 0.35 : -0.35);
+        const dot = (ox, oz, r) => W.eachCol(px + ox - r, z + oz - r, px + ox + r, z + oz + r, (bx, bz, i, xx, zz) => { if (Math.hypot(xx - px - ox, zz - z - oz) < r) W.C[i] = dark; });
+        if (kind === 'cat') { dot(0, 0, 0.22); for (const [ox, oz] of [[-0.2, -0.3], [-0.07, -0.38], [0.07, -0.38], [0.2, -0.3]]) dot(ox, oz, 0.09); }
+        else if (kind === 'elephant') dot(0, 0, 0.45);
+        else if (kind === 'bird') { for (const [ox, oz] of [[0, -0.25], [-0.18, -0.2], [0.18, -0.2], [0, 0]]) dot(ox, oz, 0.07); }
+        else { dot(-0.1, 0, 0.12); dot(0.1, 0, 0.12); }
+      }
+    };
     path(-553, -282, -539, -8);   // the promenade, from the gate to the north wall
-    path(-640, -160, -454, -146); // the cross walk
+    path(-640, -165, -454, -158.5); path(-640, -148, -454, -141.5);   // the two riverside walks (the Solace Brook runs between them)
     path(-560, -148, -553, -26); path(-494, -150, -486, -26); path(-494, -282, -486, -160); path(-602, -282, -594, -160); path(-560, -282, -553, -160);
     path(-553, -30, -454, -22);   // along the south habitats
     path(-603.5, -146, -594.5, -26); path(-640, -88.5, -562, -81.5); path(-640, -29, -553, -22);   // between the four plains enclosures + the south walk
+    prints(-541.5, -96, -136, 'cat', 1.4); prints(-599, -40, -136, 'elephant', 1.9); prints(-490, -36, -86, 'bird', 0.9);
+    prints(-556.5, -172, -216, 'bird', 0.8); prints(-490, -172, -272, 'hoof', 1.1); prints(-546, -250, -276, 'cat', 1.4);
     // perimeter wall with the gate on the promenade
     const wall = (a, b, c, d) => { W.fill(a, 0.25, b, c, 2.75, d, stoneW); W.fill(Math.max(x0, a - 0.25), 2.75, Math.max(z0, b - 0.25), Math.min(x1, c + 0.25), 3.0, Math.min(z1, d + 0.25), cap); };
     wall(x0, z0, x1, z0 + 0.5); wall(x0, z0, x0 + 0.5, z1); wall(x1 - 0.5, z0, x1, z1);
@@ -57,20 +95,35 @@ try {
     AF.placeStatic(g, -546, 6.55, z1 - 0.95, 0, { collide: false }); AF.placeStatic(g, -546, 6.55, z1 - 2.05, 2, { collide: false });
     W.fill(-535, 0.25, z1 - 6, -531, 3, z1 - 2, col(0xe8dcc0, { pat: 'stucco' })); W.fill(-535.25, 3, z1 - 6.25, -530.75, 3.5, z1 - 1.75, col(0xc0392b)); W.fill(-535.1, 1.25, z1 - 5, -535, 2.25, z1 - 3, col(0xa9c9d6, { glass: true }));
     for (const gx of [-556, -536]) AF.addLight({ x: gx, y: 9, z: z1, color: 0xffe0a0, intensity: 1, range: 12, kind: 'street' });
+    // turnstile posts across the gate (the arms are a live mesh that swings open with a ticket, see zoo-gate below)
+    for (const tx of [-555, -551, -547, -543, -539]) { W.fill(tx, 0.25, z1 - 2.25, tx + 0.5, 1.25, z1 - 1.75, col(0x2f6a4a)); W.fill(tx - 0.125, 1.25, z1 - 2.375, tx + 0.625, 1.5, z1 - 1.625, col(0xd8b84a, { metal: 0.8, rough: 0.3 })); }
+    W.fill(-534.75, 2.25, z1 - 5.5, -534.5, 2.75, z1 - 2.5, col(0xf2ead0));
+    const fitTextG = (str, hex, maxW) => { const w = AF.textModel(str, 1, { font: 'deco', depth: 1, pad: 0 }).w || 1; return K().text(str, hex, { lit: false, font: 'deco', pad: 0, vs: Math.min(1 / 16, maxW / w) }); };
+    AF.placeStatic(fitTextG('TICKETS 25\u00a2', 0xc0392b, 2.8), -534.45, 2.3, z1 - 4, 3, { collide: false });
     AF.addBuilding({ id: 'zoo', name: 'Solace Zoo', kind: 'zoo', box: [x0, 0, z0, x1, 3, z1], doors: [{ x: -546, y: 0.25, z: z1 - 2, yaw: PI }], interior: false, owner: 'west', label: true });
     // lamp posts along the promenade
     for (let z = -40; z > -280; z -= 24) for (const x of [-554, -538]) { W.fill(x, 0.25, z, x + 0.25, 4, z + 0.25, iron); W.fill(x - 0.25, 4, z - 0.25, x + 0.5, 4.5, z + 0.5, glow(0xfff0c8, 2.6, 'night')); AF.addLight({ x: x + 0.1, y: 4.3, z: z + 0.1, color: 0xffe0b0, intensity: 0.8, range: 10, kind: 'street' }); }
     // ---- enclosures: ground, a knee-high stone wall + open railing (you look OVER it), a name board on the path side
     const rail = col(0x2f4a3a, { metal: 0.6, rough: 0.45 }), boardC = col(0x2f6a4a), paper = col(0xf2ead0, { jitter: 0.05 });
+    const glassV = col(0xbcd6dc, { glass: true, jitter: 0.03, edge: 0, rough: 0.08 }), post = col(0x33403a, { metal: 0.7, rough: 0.35, jitter: 0.1 });
+    const kerb = [col(0x8a8272, { jitter: 0.6 }), col(0x9c9282, { jitter: 0.6 }), col(0x7a7264, { jitter: 0.6 })];
     const fitText = (str, hex, maxW, font) => { const o = { font, depth: 1, pad: 0 }; const w = AF.textModel(str, 1, o).w || 1; return K().text(str, hex, { lit: false, font, pad: 0, vs: Math.min(1 / 16, maxW / w) }); };
     const spot = (x, z, yaw, kind) => AF.addSpot && AF.addSpot({ building: 'zoo', x, y: 0.25, z, yaw, kind });
     for (const H of HAB) {
       const [a, b, c, d] = H.rect, gc = H.ground.map((h) => col(h, { jitter: 0.9 }));
       W.eachCol(a, b, c, d, (bx, bz, i, x, z) => { const n = AF.noise2(x * 0.12, z * 0.12); W.C[i] = gc[n < 0.4 ? 0 : n < 0.7 ? 1 : 2]; });
-      const fence = (p, q, r, s) => { W.fill(p, 0.25, q, r, 0.75, s, stoneW); W.fill(p, 0.75, q, r, 1.0, s, cap); };
-      fence(a - 0.5, b - 0.5, c + 0.5, b); fence(a - 0.5, d, c + 0.5, d + 0.5); fence(a - 0.5, b, a, d); fence(c, b, c + 0.5, d);
-      for (const [p, q, r, s] of [[a - 0.5, b - 0.5, c + 0.5, b], [a - 0.5, d, c + 0.5, d + 0.5]]) { for (let x = p; x < r; x += 2) W.fill(x, 1.0, q + 0.125, x + 0.25, 1.75, s - 0.125, rail); W.fill(p, 1.5, q + 0.125, r, 1.75, s - 0.125, rail); }
-      for (const [p, r] of [[a - 0.5, a], [c, c + 0.5]]) { for (let z = b; z < d; z += 2) W.fill(p + 0.125, 1.0, z, r - 0.125, 1.75, z + 0.25, rail); W.fill(p + 0.125, 1.5, b, r - 0.125, 1.75, d, rail); }
+      // viewing glass all round: a low natural rock kerb, clear panels to 2.75 m, slim posts every 4 m \u2014 nothing at eye level
+      const pane = (p, q, r, s, alongX) => {
+        W.fill(p, 0.5, q, r, 2.75, s, glassV);
+        if (alongX) for (let x = p; x <= r - 0.25; x += 4) W.fill(x, 0.25, q, x + 0.25, 3.0, s, post);
+        else for (let z = q; z <= s - 0.25; z += 4) W.fill(p, 0.25, z, r, 3.0, z + 0.25, post);
+      };
+      for (const [p, q, r, s] of [[a - 0.5, b - 0.5, c + 0.5, b], [a - 0.5, d, c + 0.5, d + 0.5], [a - 0.5, b, a, d], [c, b, c + 0.5, d]])
+        W.eachCol(p, q, r, s, (bx, bz, i, x, z) => { const hq = AF.hash2(bx >> 1, bz >> 1); W.fill(x - 0.125, 0.25, z - 0.125, x + 0.125, hq < 0.35 ? 0.75 : 0.5, z + 0.125, kerb[(hq * 7 | 0) % 3]); });
+      pane(a - 0.5, b - 0.25, c + 0.5, b, true); pane(a - 0.5, d, c + 0.5, d + 0.25, true); pane(a - 0.25, b, a, d, false); pane(c, b, c + 0.25, d, false);
+      for (const [px, pz] of [[a - 0.25, b - 0.25], [c, b - 0.25], [a - 0.25, d], [c, d]]) W.fill(px, 0.25, pz, px + 0.25, 3.0, pz + 0.25, post);
+      // gentle mounds inside (never within 2.5 m of the glass): animals walk the contours
+      W.eachCol(a + 2.5, b + 2.5, c - 2.5, d - 2.5, (bx, bz, i, x, z) => { const m = AF.fbm2(x * 0.055 + 3, z * 0.055 - 7, 3), e = Math.min(x - a - 2.5, c - 2.5 - x, z - b - 2.5, d - 2.5 - z); W.H[i] = 1 + Math.max(0, Math.min(3, Math.round((m - 0.47) * 10 * Math.min(1, e / 4)))); });
       // the board: a slanted lectern on the path side, name in raised letters, facts on interact
       const east = H.side === 'e', bx0 = east ? c + 1.4 : a - 1.4, bz0 = (b + d) / 2, face = east ? 1 : 3, fx = east ? 1 : -1;
       W.fill(bx0 - 0.125, 0.25, bz0 - 0.125, bx0 + 0.125, 1.25, bz0 + 0.125, boardC);
@@ -86,7 +139,7 @@ try {
       // planting along the outside of the wall (kept off the paths)
       const hed = [col(0x4f8a3a, { jitter: 0.7, solid: false }), col(0x6aa84a, { jitter: 0.7, solid: false }), col(0xd8502a, { jitter: 0.4, solid: false }), col(0xf0d040, { jitter: 0.4, solid: false })];
       const ox = east ? a - 1.25 : c + 0.75;
-      for (let z = b + 1; z < d - 1; z += 0.5) { const q = AF.hash2((z * 4) | 0, (ox * 4) | 0), ci = W.col(ox + 0.25, z + 0.25); if (ci < 0 || W.C[ci] === pave || W.C[ci] === paveD) continue; if (q < 0.55) W.fill(ox, 0.25, z, ox + 0.5, 0.5 + (q < 0.2 ? 0.25 : 0), z + 0.5, hed[q < 0.12 ? 2 : q < 0.2 ? 3 : q < 0.4 ? 0 : 1]); }
+      for (let z = b + 1; z < d - 1; z += 0.5) { const q = AF.hash2((z * 4) | 0, (ox * 4) | 0), ci = W.col(ox + 0.25, z + 0.25); if (ci < 0 || isPave.has(W.C[ci])) continue; if (q < 0.55) W.fill(ox, 0.25, z, ox + 0.5, 0.5 + (q < 0.2 ? 0.25 : 0), z + 0.5, hed[q < 0.12 ? 2 : q < 0.2 ? 3 : q < 0.4 ? 0 : 1]); }
     }
     // ---- water: ponds per habitat
     const pool = (cx, cz, rx, rz, deep, wy, hab) => {
@@ -132,25 +185,6 @@ try {
       H.browse = [a + 7, b + 11]; H.rest = H.id === 'lions' ? [-526, -111] : [c - 8, d - 9];
       H.entry = H.id === 'lions' ? [-526, -104] : H.rest;
       H.frames = [[a + 9, b + 15, 3.25], [c - 10, b + 27, 4.5], [a + 11, d - 13, 3.75]];
-      const viewingX = H.side === 'e' ? c : a - 0.25;
-      if (['lions', 'tigers', 'bears', 'crocs', 'penguins', 'primates'].includes(H.id)) {
-        const glass = col(0xaccfd8, { glass: true, rough: 0.15 });
-        W.fill(viewingX, 1, b + 1, viewingX + 0.25, 3.5, d - 1, glass);
-        for (let z = b + 1; z < d; z += 4) W.fill(viewingX, 0.75, z, viewingX + 0.5, 3.75, z + 0.25, rail);
-        for (const edgeZ of [b, d]) {
-          for (let x = a; x < c; x += 3) W.fill(x, 1, edgeZ, x + 0.25, 3.75, edgeZ + 0.25, rail);
-          for (let y = 2; y < 3.75; y += 0.5) W.fill(a, y, edgeZ, c, y + 0.25, edgeZ + 0.25, rail);
-        }
-        const backX = H.side === 'e' ? a : c;
-        for (let z = b; z < d; z += 3) W.fill(backX, 1, z, backX + 0.25, 3.75, z + 0.25, rail);
-        for (let y = 2; y < 3.75; y += 0.5) W.fill(backX, y, b, backX + 0.25, y + 0.25, d, rail);
-      }
-      if (['elephants', 'rhinos', 'giraffes'].includes(H.id)) {
-        for (const edge of [a + 1, c - 2]) {
-          W.eachCol(edge, b + 1, edge + 1, d - 1, (bx, bz, i) => { W.H[i] = -4; W.C[i] = cap; });
-          W.fill(edge, -1, b + 1, edge + 1, -0.75, d - 1, cap);
-        }
-      }
     }
     const timber = col(0x886944), rope = col(0xc7b287), ice = col(0xdcebf0), mud = col(0x665043);
     W.eachCol(-636, -111, -628, -100, (bx, bz, i) => { W.C[i] = mud; });
@@ -204,7 +238,7 @@ try {
     for (let k = 0; k < 200; k++) {
       const x = -592 + AF.hash2(k, 411) * 28, z = -138 + AF.hash2(k, 712) * 47;
       if (POOLS.some((p) => p.hab === 'giraffes' && Math.hypot((x - p.cx) / (p.rx + 1), (z - p.cz) / (p.rz + 1)) < 1)) continue;
-      const h = 0.5 + (k % 4) * 0.25;
+      const h = 0.25 + (k % 3) * 0.25;
       W.fill(x, 0.25, z, x + 0.25, h, z + 0.25, grass); W.fill(x, h, z, x + 0.25, h + 0.25, z + 0.25, seedHead);
     }
     const mound = col(0xa8784a, { jitter: 0.6 });
@@ -227,9 +261,90 @@ try {
       const plant = (rect, n, sp, seed) => { const [a, b, c, d] = rect; for (let k = 0; k < n; k++) { const x = a + 3 + R() * (c - a - 6), z = b + 3 + R() * (d - b - 6); if (POOLS.some((q) => Math.hypot((x - q.cx) / (q.rx + 3), (z - q.cz) / (q.rz + 3)) < 1)) continue; TK.place(x, z, sp, (k % 3), seed + k); } };
       const byId = (id) => HAB.find((h) => h.id === id).rect;
       plant(byId('tigers'), 14, 'autumn', 100); plant(byId('deer'), 18, 'autumn', 200); plant(byId('bears'), 12, 'evergreen', 300); plant(byId('lions'), 2, 'oak', 400);
-      for (let z = -40; z > -280; z -= 30) { TK.place(-547, z, 'street', 1, z); }
-      // shade trees in the lawn strips beside the cross walk + the south walk
-      for (const [x, z] of [[-630, -163], [-575, -163], [-520, -163], [-470, -163], [-625, -143], [-505, -143], [-620, -19], [-580, -19], [-500, -19], [-460, -19]]) TK.place(x, z, 'any', 0, (x * 7 + z) | 0);
+      for (let z = -40; z > -280; z -= 30) { if (Math.abs(z + 153) > 9) TK.place(-547, z, 'street', 1, z); }
+      // shade trees on the brook banks + along the south walk
+      for (const [x, z] of [[-630, -159.8], [-575, -147.2], [-520, -159.8], [-470, -147.2], [-620, -19], [-580, -19], [-500, -19], [-460, -19]]) TK.place(x, z, 'any', 0, (x * 7 + z) | 0);
+    }
+    // ---- wilder habitats: grass clumps, bushes, rocks and fallen logs themed per habitat (kept off pools, climbing frames, dens)
+    {
+      const dR = AF.rng(4242);
+      const dryG = [col(0xb8a860, { solid: false, jitter: 0.6 }), col(0xc8b870, { solid: false, jitter: 0.6 }), col(0x9a9a50, { solid: false, jitter: 0.6 })];
+      const lushG = [col(0x4f8a3a, { solid: false, jitter: 0.7 }), col(0x3f7a30, { solid: false, jitter: 0.7 }), col(0x6a9a44, { solid: false, jitter: 0.7 })];
+      const bushC = [col(0x3f6a2e, { jitter: 0.8 }), col(0x4f7a34, { jitter: 0.8 }), col(0x5a8a3a, { jitter: 0.8 }), col(0x6a7a30, { jitter: 0.8 })];
+      const THEME = { elephants: 'dry', giraffes: 'dry', rhinos: 'dry', lions: 'dry', primates: 'lush', tigers: 'lush', flamingos: 'wet', hippos: 'wet', crocs: 'wet', penguins: 'ice', deer: 'lush', bears: 'lush' };
+      const clearOf = (H, x, z, r) => !POOLS.some((p) => p.hab === H.id && Math.hypot((x - p.cx) / (p.rx + r), (z - p.cz) / (p.rz + r)) < 1)
+        && !(H.id === 'primates' && H.frames.some((f) => Math.hypot(x - f[0], z - f[1]) < 4.5)) && !AF.solidAt(x, W.groundY(x, z) + 0.6, z);
+      for (const H of HAB) {
+        const [a, b, c, d] = H.rect, t = THEME[H.id], area = (c - a) * (d - b), G = t === 'dry' ? dryG : lushG;
+        const rx = () => a + 3 + dR() * (c - a - 6), rz = () => b + 3 + dR() * (d - b - 6);
+        if (t !== 'ice') for (let k = 0; k < area * 0.1; k++) {
+          const x = rx(), z = rz(); if (!clearOf(H, x, z, 0.5)) continue;
+          const y = W.groundY(x, z), hh = 0.25 + (dR() < 0.35 ? 0.25 : 0);
+          for (let n = 0; n < 5; n++) { const ox = (dR() - 0.5) * 1.1, oz = (dR() - 0.5) * 1.1; W.fill(x + ox, y, z + oz, x + ox + 0.25, y + hh + (dR() < 0.2 ? 0.25 : 0), z + oz + 0.25, G[(dR() * 3) | 0]); }
+        }
+        const nb = t === 'lush' ? area / 70 : t === 'dry' ? area / 260 : t === 'wet' ? area / 160 : 0;
+        for (let k = 0; k < nb; k++) {
+          const x = rx(), z = rz(); if (!clearOf(H, x, z, 2)) continue;
+          const y = W.groundY(x, z), r = 0.8 + dR() * 0.9, ry = r * (0.6 + dR() * 0.3);
+          W.eachCol(x - r, z - r, x + r, z + r, (bx, bz, i, px, pz) => {
+            const e = 1 - ((px - x) ** 2 + (pz - z) ** 2) / (r * r); if (e <= 0) return;
+            const top = Math.round((ry * Math.sqrt(e) + (AF.hash2(bx, bz) - 0.5) * 0.3) * 4) / 4; if (top < 0.25) return;
+            W.fill(px - 0.125, y, pz - 0.125, px + 0.125, y + top, pz + 0.125, bushC[(bx + bz) & 3]);
+          });
+        }
+        if (t !== 'ice') for (let k = 0; k < 2 + area / 350; k++) { const x = rx(), z = rz(); if (clearOf(H, x, z, 2)) boulder(x, z, 0.9 + dR() * 1.3, 0.75 + dR() * 1.0); }
+        if (t === 'lush') for (let k = 0; k < 2; k++) { const x = rx(), z = rz(); if (!clearOf(H, x, z, 3)) continue; const y = W.groundY(x, z), L2 = 3 + dR() * 3; if (dR() < 0.5) W.fill(x, y, z, x + L2, y + 0.75, z + 0.75, logC); else W.fill(x, y, z, x + 0.75, y + 0.75, z + L2, logC); }
+      }
+    }
+    // ---- THE SOLACE BROOK: a spring grotto by the east wall, a rocky brook west between the walks, under the wall to the sea
+    const brookZ = ZOO.brookZ = (x) => -153 + Math.sin((x + 640) * 0.045) * 1.0 + Math.sin((x + 600) * 0.13) * 0.35;
+    {
+      const RW = 2.9, bedC = col(0x5a5040, { jitter: 0.7 }), bedD = col(0x3e463a, { jitter: 0.7 }), gravel = col(0x9a927e, { jitter: 0.9 });
+      W.eachCol(-660, -160, -455, -146, (bx, bz, i, x, z) => {
+        const dz = Math.abs(z - brookZ(x)), rw = RW + (AF.noise2(x * 0.2, 4.1) - 0.5) * 0.8;
+        if (dz < rw) { const k = dz / rw; W.H[i] = Math.min(W.H[i], Math.round(-1 - 4 * (1 - k * k))); W.C[i] = k < 0.5 ? bedD : AF.hash2(bx, bz) < 0.3 ? gravel : bedC; W.S[i] = bedC; }
+        else if (dz < rw + 0.75 && x > -650) { W.H[i] = 1; W.C[i] = kerb[(AF.hash2(bx >> 1, bz >> 1) * 7 | 0) % 3]; W.S[i] = kerb[1]; if (AF.hash2(bx, bz + 3) < 0.25) W.fill(x - 0.125, 0.25, z - 0.125, x + 0.125, 0.5, z + 0.125, kerb[2]); }
+      });
+      W.tDirty = true;
+      // under the west wall: an arched culvert with iron bars
+      const zc = brookZ(-650);
+      W.clear(-650, 0.25, zc - 3.25, -649.5, 2.5, zc + 3.25);
+      for (let z = zc - 3; z < zc + 3; z += 0.75) W.fill(-649.75, -1.25, z, -649.5, 2.5, z + 0.25, iron);
+      W.fill(-650, 2.5, zc - 3.5, -649.5, 3.0, zc + 3.5, cap);
+      // the spring grotto: a rock pile with a little fall into the head pool
+      boulder(-458, -153, 4.2, 3.5); boulder(-461, -156.5, 2.2, 2); boulder(-461, -149.5, 2.2, 2.2);
+      W.clear(-462, 0.25, -154, -455, 3.0, -152);
+      const fallC = col(0xbfe2ea, { glass: true, jitter: 0.1, edge: 0, solid: false }), foam = col(0xf2f6f4, { solid: false, jitter: 0.1 });
+      W.fill(-459.5, 0.0, -154, -459.25, 3.25, -152, fallC); W.fill(-460.5, -0.25, -154.25, -459.25, 0.25, -151.75, foam);
+      const pos = [], idx = []; let n = 0, y = 0.0;
+      for (let x = -660; x < -456; x++) for (let z = -160; z < -146; z++) {
+        let low = false; for (let i = 0; i < 4 && !low; i++) for (let k = 0; k < 4; k++) if (W.groundY(x + i * 0.25 + 0.1, z + k * 0.25 + 0.1) < y - 0.01) { low = true; break; }
+        if (!low) continue;
+        pos.push(x, y, z, x, y, z + 1, x + 1, y, z + 1, x + 1, y, z); idx.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((v, i) => (i % 3 === 1 ? 1 : 0)), 3));
+      geo.setIndex(idx); geo.computeBoundingSphere(); geo.userData.kind = 'creek'; geo.userData.flow = [-0.5, 0]; geo.userData.waterY = y;
+      AF.addWater(geo);
+      P.pools.push({ x0: -660, z0: -157.5, x1: -456, z1: -148.5, y });
+      // THE KEEPER'S BRIDGE on the promenade: a humped stone arch in the walk's own stone, parapets, four lamps
+      const bz0 = brookZ(-546) - 4.75, bz1 = brookZ(-546) + 4.75, bzc = (bz0 + bz1) / 2, bstone = col(0xa89a80, { pat: 'stone', jitter: 0.5 }), bcap = col(0xc8bca0, { jitter: 0.3 });
+      for (let x = -553; x < -539; x += 0.25) for (let z = bz0; z < bz1; z += 0.25) {
+        const t = (z + 0.125 - bzc) / ((bz1 - bz0) / 2), top = 0.25 + Math.round(Math.cos(t * PI / 2) * 0.5 * 4) / 4, gy = W.groundY(x + 0.125, z + 0.125);
+        const edge = x < -552.5 || x >= -539.5, P2 = SP.moss;
+        W.fill(x, Math.max(gy, top - 0.5), z, x + 0.25, top, z + 0.25, edge ? bstone : P2[Math.floor(AF.hash2(Math.floor(x * 0.9), Math.floor(z * 0.9)) * P2.length)]);
+        if (edge) { W.fill(x, top, z, x + 0.25, top + 0.75, z + 0.25, bstone); W.fill(x, top + 0.75, z, x + 0.25, top + 1.0, z + 0.25, bcap); }
+      }
+      for (const [lx, lz] of [[-553, bz0], [-539.25, bz0], [-553, bz1 - 0.25], [-539.25, bz1 - 0.25]]) { W.fill(lx, 0.25, lz, lx + 0.25, 3.25, lz + 0.25, iron); W.fill(lx - 0.25, 3.25, lz - 0.25, lx + 0.5, 3.75, lz + 0.5, glow(0xfff0c8, 2.6, 'night')); AF.addLight({ x: lx + 0.1, y: 3.5, z: lz + 0.1, color: 0xffe0b0, intensity: 0.8, range: 10, kind: 'street' }); }
+      AF.placeStatic(fitText('KEEPER\u2019S BRIDGE', 0x3a3024, 3.0, 'deco'), -553.1, 1.25, bzc, 3, { collide: false });
+      // plank footbridges on the side walks (rope rails)
+      const plank = [col(0x8a6a44, { jitter: 0.5 }), col(0x7a5a38, { jitter: 0.5 })];
+      for (const fx of [-600, -490]) {
+        const fz0 = brookZ(fx) - 4.25, fz1 = brookZ(fx) + 4.25;
+        for (let z = fz0; z < fz1; z += 0.5) W.fill(fx - 1.5, 0.25, z, fx + 1.5, 0.5, z + 0.5, plank[Math.round(z * 2) & 1]);
+        for (const sx of [fx - 1.75, fx + 1.5]) { for (let z = fz0; z < fz1; z += 2) W.fill(sx, 0.25, z, sx + 0.25, 1.5, z + 0.25, timber); W.fill(sx, 1.25, fz0, sx + 0.25, 1.5, fz1, rope); }
+      }
+      AF.addLabel('Solace Brook', -620, brookZ(-620), 'place');
     }
     // ---- kiosks along the cross walk: ice cream, snacks, gifts (counter faces the walk), with café tables + benches
     const kiosk = (x, z, name, stripe, body) => {
@@ -250,15 +365,42 @@ try {
       for (const dx of [-2, 2]) { W.fill(x + dx - 0.5, 0.25, z - 0.5, x + dx + 0.5, 1.0, z + 0.5, table); W.clear(x + dx - 0.25, 0.25, z - 0.5, x + dx + 0.25, 0.75, z + 0.5); for (const s of [-1, 1]) { W.fill(x + dx - 0.25, 0.25, z + s * 0.9 - 0.25, x + dx + 0.25, 0.75, z + s * 0.9 + 0.25, chairC); AF.addSpot && AF.addSpot({ building: 'zoo', x: x + dx, y: 0.75, z: z + s * 0.9, yaw: s > 0 ? PI : 0, kind: 'sit' }); } }
     }
     for (let z = -52; z > -280; z -= 24) for (const [x, yaw] of [[-552.25, PI / 2], [-539.75, -PI / 2]]) {
+      if (Math.abs(z - brookZ(-546)) < 7.5) continue;
       W.fill(x - 0.25, 0.25, z - 1, x + 0.25, 0.5, z + 1, ironB); W.fill(x - 0.25, 0.5, z - 1, x + 0.25, 0.75, z + 1, bench);
       const bk = x < -546 ? x - 0.25 : x + 0.25; W.fill(Math.min(bk, bk + (x < -546 ? -0.25 : 0.25)), 0.75, z - 1, Math.max(bk, bk + (x < -546 ? -0.25 : 0.25)), 1.25, z + 1, bench);
       if (AF.addSpot) for (const dz of [-0.5, 0.5]) AF.addSpot({ building: 'zoo', x, y: 0.75, z: z + dz, yaw, kind: 'bench' });
     }
     // flower beds + planters dotted along the promenade edges
     const flw = [0xd8502a, 0xf0d040, 0xe86a9a, 0xf6f2ea, 0x8a6ac8].map((h) => col(h, { jitter: 0.4, solid: false })), lf = col(0x4f8a3a, { jitter: 0.7, solid: false });
-    for (let z = -58; z > -280; z -= 24) for (const x of [-554, -538.5]) { W.fill(x - 0.25, 0.25, z - 1.5, x + 0.5, 0.5, z + 1.5, col(0x8a7a6a, { pat: 'stone' })); for (let k = 0; k < 12; k++) { const zz = z - 1.5 + k * 0.25; W.fill(x - 0.25, 0.5, zz, x + 0.5, 0.75 + (k % 3 === 0 ? 0.25 : 0), zz + 0.25, k % 3 ? lf : flw[(k + ((z / 24) | 0)) % flw.length]); } }
+    for (let z = -58; z > -280; z -= 24) for (const x of [-554, -538.5]) { if (Math.abs(z - brookZ(-546)) < 7.5) continue; W.fill(x - 0.25, 0.25, z - 1.5, x + 0.5, 0.5, z + 1.5, col(0x8a7a6a, { pat: 'stone' })); for (let k = 0; k < 12; k++) { const zz = z - 1.5 + k * 0.25; W.fill(x - 0.25, 0.5, zz, x + 0.5, 0.75 + (k % 3 === 0 ? 0.25 : 0), zz + 0.25, k % 3 ? lf : flw[(k + ((z / 24) | 0)) % flw.length]); } }
     ZOO.buildMs = Math.round(performance.now() - t0);
   });
+
+  // ---------------------------------------------------------------- the gate: turnstile arms + a ticket booth. No ticket, no zoo
+  // (you can always walk OUT: the arms swing for anyone leaving). Colliders go in after 'ready' so the crowd graph is unaffected.
+  {
+    const G = AF.zooGate = { ticket: false, open: 0, arms: [], coll: null };
+    AF.on('ready', () => {
+      const z1 = ZOO.z1, zg = z1 - 2;
+      const mat = new THREE.MeshStandardMaterial({ color: 0xd8b84a, metalness: 0.85, roughness: 0.3 });
+      const geo = new THREE.BoxGeometry(3.25, 0.12, 0.12); geo.translate(1.625, 0, 0);
+      for (const px of [-554.5, -550.5, -546.5, -542.5]) {
+        const arm = new THREE.Mesh(geo, mat); arm.position.set(px, 1.0, zg); arm.castShadow = true; arm.name = 'zoo-turnstile'; AF.scene.add(arm); G.arms.push(arm);
+      }
+      G.coll = AF.addCollider(-555, 0, zg - 0.3, -537, 2.5, zg + 0.3, 'zoo-gate');
+      AF.addInteract({ x: -533.5, y: 1.3, z: z1 - 4, r: 2.6, label: 'Buy a zoo ticket \u00b7 25\u00a2', prio: 2, can: () => AF.mode === 'walk' && !G.ticket,
+        act: () => { G.ticket = true; AF.emit('toast', 'Admit one \u2014 Solace Zoo. Enjoy your visit!'); AF.emit('dialogue', { name: 'Ticket booth', role: 'Solace Zoo', line: 'Here you go, one adult. The turnstile\u2019s all yours \u2014 and the brook bridge is lovely at sunset.' }); } });
+      AF.addInteract({ x: -546, y: 1.2, z: z1 - 0.5, r: 3.2, label: 'Tickets at the booth \u2192', prio: 0.5, can: () => AF.mode === 'walk' && !G.ticket && AF.player && AF.player.z > zg,
+        act: () => AF.emit('toast', 'You need a ticket \u2014 the booth is just to the right of the gate.') });
+      AF.onTick('zoo-gate', 432, (dt) => {
+        const p = AF.player, leaving = p && p.z < zg - 0.2 && p.z > zg - 9 && Math.abs(p.x + 546) < 11;
+        const want = G.ticket || leaving ? 1 : 0;
+        G.open += (want - G.open) * Math.min(1, dt * 4);
+        for (const arm of G.arms) arm.rotation.y = -G.open * PI / 2;
+        const shut = G.open < 0.5; G.coll.y0 = shut ? 0 : -50; G.coll.y1 = shut ? 2.5 : -49;
+      });
+    });
+  }
 
   // ---------------------------------------------------------------- animals: species builders (1/8 m voxels)
   const VS = 1 / 8;
@@ -279,52 +421,102 @@ try {
     return o;
   };
   // spec: body [w,h,l], legH, legW, leg offsets (x, z from body centre, in voxels), head [w,h,l], neck [w,h,l, forward], cols, pattern, extras(m, dims)
+  // torso: hip / waist / chest girth (1 = full box), hump (withers or shoulder hump), sag (belly), head: skull type
   const SPEC = {
-    elephant: { body: [18, 14, 30], legH: 10, legW: 5, head: [12, 6, 10], neck: [10, 1, 3, 0], col: 0x8a8a90, belly: 0x7a7a82, speed: 0.85, legs: 4 },
-    giraffe: { body: [8, 8, 17], legH: 16, legW: 2, head: [4, 5, 8], neck: [3, 15, 4, 3], col: 0xd8a860, belly: 0xe8d0a0, pattern: 'spots', patCol: 0x8a5a2a, speed: 1.0, legs: 4 },
-    rhino: { body: [13, 11, 25], legH: 5, legW: 4, head: [8, 7, 10], neck: [7, 1, 4, 0], col: 0x92928a, belly: 0x777a73, speed: 0.7, legs: 4 },
-    penguin: { body: [4, 6, 4], legH: 1, legW: 1, head: [3, 3, 3], neck: [2, 1, 2, 0], col: 0x222b34, belly: 0xf4f0dd, speed: 0.55, legs: 2, beak: 0xe9af38 },
-    gorilla: { body: [9, 9, 8], legH: 5, legW: 3, head: [5, 5, 5], neck: [4, 1, 2, 0], col: 0x343633, belly: 0x8b8e8a, speed: 0.7, legs: 4, snout: 0x64615c },
-    monkey: { body: [3, 4, 5], legH: 4, legW: 1, head: [3, 3, 3], neck: [2, 1, 2, 0], col: 0x96734f, belly: 0xd7c6a4, speed: 1.5, legs: 4, tailL: 10, snout: 0xc99e7b },
-    zebra: { body: [7, 6, 16], legH: 7, legW: 2, head: [4, 4, 7], neck: [4, 4, 4, 2], col: 0xf2f2ee, belly: 0xf2f2ee, pattern: 'stripes', patCol: 0x1a1a1a, speed: 1.4, legs: 4, mane: 0x1a1a1a },
-    antelope: { body: [6, 7, 12], legH: 9, legW: 2, head: [3, 4, 6], neck: [3, 6, 3, 2], col: 0xb87a3a, belly: 0xf2ead8, speed: 1.6, legs: 4, horns: 0x2a2018 },
-    deer: { body: [6, 7, 12], legH: 9, legW: 2, head: [3, 4, 6], neck: [3, 6, 3, 2], col: 0x9a6a3a, belly: 0xe8dcc4, pattern: 'dots', patCol: 0xe8dcc4, speed: 1.3, legs: 4 },
-    stag: { body: [7, 8, 13], legH: 10, legW: 2, head: [3, 4, 6], neck: [3, 7, 3, 2], col: 0x8a5a30, belly: 0xe8dcc4, speed: 1.2, legs: 4, antlers: 0x6a5238 },
-    lion: { body: [8, 6, 17], legH: 5, legW: 3, head: [6, 5, 7], neck: [5, 2, 3, 1], col: 0xd0a050, belly: 0xe0c080, speed: 0.8, legs: 4, maneCol: 0x7a4a1a, tail: 0x7a4a1a },
-    lioness: { body: [7, 5, 15], legH: 5, legW: 2, head: [5, 5, 7], neck: [4, 2, 3, 1], col: 0xd6aa5c, belly: 0xe8cc90, speed: 0.9, legs: 4, tail: 0x8a5a2a },
-    tiger: { body: [8, 6, 18], legH: 5, legW: 3, head: [6, 5, 7], neck: [5, 2, 3, 1], col: 0xe07a22, belly: 0xf2ead8, pattern: 'stripes', patCol: 0x1a1a1a, speed: 1.0, legs: 4, tail: 0xe07a22 },
-    bear: { body: [11, 9, 18], legH: 4, legW: 4, head: [8, 7, 7], neck: [6, 1, 2, 1], col: 0x5a3a22, belly: 0x6a4a2a, speed: 0.8, legs: 4, ears: true, snout: 0x8a6a4a },
-    hippo: { body: [14, 11, 22], legH: 4, legW: 4, head: [11, 7, 10], neck: [10, 1, 2, 0], col: 0x7a6a78, belly: 0xc89a9a, speed: 0.6, legs: 4, ears: true, snout: 0x9a7a88 },
-    croc: { body: [7, 4, 24], legH: 2, legW: 2, head: [5, 3, 12], neck: [5, 1, 1, 0], col: 0x4a5a2a, belly: 0x9a9a6a, pattern: 'scutes', patCol: 0x35401c, speed: 0.5, legs: 4, tailL: 20 },
-    flamingo: { body: [4, 3, 6], legH: 7, legW: 1, head: [2, 2, 4], neck: [1, 5, 1, 1], col: 0xf28aa8, belly: 0xf6a8c0, speed: 0.5, legs: 2, beak: 0x1a1a1a },
+    elephant: { body: [18, 15, 30], legH: 11, legW: 5, head: [12, 11, 11], neck: [10, 2, 4, 1], col: 0x8a8a90, belly: 0x7a7a82, speed: 0.85, legs: 4, torso: { hip: 0.92, waist: 0.95, chest: 1, hump: 0.4, sag: 0.1 }, headT: 'elephant' },
+    giraffe: { body: [8, 9, 17], legH: 17, legW: 1, head: [4, 5, 9], neck: [4, 15, 4, 3], col: 0xd8a860, belly: 0xf0dcb0, pattern: 'patches', patCol: 0xb0703a, speed: 1.0, legs: 4, torso: { hip: 0.8, waist: 0.85, chest: 1, hump: 0.6 }, headT: 'long', mane: 0x6a3e1a },
+    rhino: { body: [13, 12, 26], legH: 6, legW: 4, head: [8, 7, 12], neck: [8, 2, 4, 0], col: 0x92928a, belly: 0x80827b, speed: 0.7, legs: 4, torso: { hip: 0.92, waist: 0.9, chest: 1, hump: 0.5, sag: 0.08 }, headT: 'box' },
+    penguin: { body: [5, 7, 5], legH: 1, legW: 1, head: [4, 4, 4], neck: [3, 1, 3, 0], col: 0x222b34, belly: 0xf4f0dd, speed: 0.55, legs: 2, beak: 0xe9af38, torso: { hip: 1, waist: 1, chest: 0.9 }, headT: 'bird', upright: true },
+    gorilla: { body: [10, 10, 9], legH: 5, legW: 3, head: [5, 6, 5], neck: [4, 1, 2, 0], col: 0x2e302d, belly: 0x5b5e5a, speed: 0.7, legs: 4, snout: 0x3e3b38, torso: { hip: 0.85, waist: 0.9, chest: 1, hump: 0.7 }, headT: 'ape' },
+    monkey: { body: [3, 4, 5], legH: 4, legW: 1, head: [3, 3, 3], neck: [2, 1, 2, 0], col: 0x96734f, belly: 0xd7c6a4, speed: 1.5, legs: 4, tailL: 10, snout: 0xc99e7b, headT: 'ape' },
+    zebra: { body: [7, 7, 16], legH: 8, legW: 1, head: [4, 5, 8], neck: [4, 6, 4, 2], col: 0xf4f2ea, belly: 0xf4f2ea, pattern: 'stripes', patCol: 0x16161a, speed: 1.4, legs: 4, mane: 0x16161a, torso: { hip: 0.95, waist: 0.88, chest: 1 }, headT: 'long' },
+    antelope: { body: [6, 7, 12], legH: 10, legW: 1, head: [3, 4, 6], neck: [3, 6, 3, 2], col: 0xb87a3a, belly: 0xf2ead8, speed: 1.6, legs: 4, horns: 0x2a2018, torso: { hip: 0.95, waist: 0.8, chest: 1 }, headT: 'long', flank: 0x3a2618 },
+    deer: { body: [6, 7, 12], legH: 10, legW: 1, head: [3, 4, 6], neck: [3, 6, 3, 2], col: 0x9a6a3a, belly: 0xe8dcc4, pattern: 'dots', patCol: 0xe8dcc4, speed: 1.3, legs: 4, torso: { hip: 0.95, waist: 0.82, chest: 1 }, headT: 'long' },
+    stag: { body: [7, 8, 13], legH: 10, legW: 1, head: [3, 4, 6], neck: [4, 7, 4, 2], col: 0x8a5a30, belly: 0xe8dcc4, speed: 1.2, legs: 4, antlers: 0x6a5238, torso: { hip: 0.92, waist: 0.84, chest: 1, hump: 0.2 }, headT: 'long', mane: 0x5a3a20 },
+    lion: { body: [8, 7, 17], legH: 6, legW: 3, head: [6, 6, 7], neck: [5, 2, 3, 1], col: 0xd0a050, belly: 0xe6c888, speed: 0.8, legs: 4, maneCol: 0x6a3a14, tail: 0x3a2412, torso: { hip: 0.85, waist: 0.78, chest: 1 }, headT: 'cat' },
+    lioness: { body: [7, 6, 15], legH: 6, legW: 2, head: [5, 5, 7], neck: [4, 2, 3, 1], col: 0xd6aa5c, belly: 0xecd09a, speed: 0.9, legs: 4, tail: 0x4a2c16, torso: { hip: 0.85, waist: 0.75, chest: 1 }, headT: 'cat' },
+    tiger: { body: [8, 7, 18], legH: 6, legW: 3, head: [6, 6, 7], neck: [5, 2, 3, 1], col: 0xe07a22, belly: 0xf4eee0, pattern: 'tiger', patCol: 0x161210, speed: 1.0, legs: 4, tail: 0xe07a22, torso: { hip: 0.88, waist: 0.8, chest: 1 }, headT: 'cat' },
+    bear: { body: [11, 10, 18], legH: 5, legW: 4, head: [8, 7, 8], neck: [7, 2, 3, 1], col: 0x5a3a22, belly: 0x4e321e, speed: 0.8, legs: 4, ears: true, snout: 0x8a6a4a, torso: { hip: 0.95, waist: 0.95, chest: 1, hump: 0.8 }, headT: 'bear' },
+    hippo: { body: [14, 11, 22], legH: 4, legW: 4, head: [11, 8, 11], neck: [11, 2, 2, 0], col: 0x7a6a78, belly: 0xc89a9a, speed: 0.6, legs: 4, ears: true, snout: 0xa88494, torso: { hip: 0.98, waist: 1, chest: 1, sag: 0.12 }, headT: 'hippo' },
+    croc: { body: [7, 4, 24], legH: 2, legW: 2, head: [5, 3, 13], neck: [5, 1, 1, 0], col: 0x4a5a2a, belly: 0xb8b88a, pattern: 'scutes', patCol: 0x35401c, speed: 0.5, legs: 4, tailL: 20, torso: { hip: 0.9, waist: 1, chest: 0.95 }, headT: 'croc' },
+    flamingo: { body: [4, 4, 7], legH: 8, legW: 1, head: [2, 2, 4], neck: [1, 6, 1, 1], col: 0xf28aa8, belly: 0xf6a8c0, speed: 0.5, legs: 2, beak: 0x1a1a1a, torso: { hip: 0.8, waist: 1, chest: 0.95 }, headT: 'bird', wingCol: 0xd05070 },
+  };
+  const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
+  // silhouette tests in the part's unit box (u, v, t in 0..1; t = 1 at the front / top). Rounded, tapered, species-aware.
+  const insideBody = (S, u, v, t) => {
+    const T = S.torso || {}, hip = T.hip ?? 0.92, waist = T.waist ?? 0.86, chest = T.chest ?? 1, hump = T.hump ?? 0, sag = T.sag ?? 0.04;
+    if (S.upright) { const r = 0.5 * (0.8 + 0.2 * Math.sin(v * Math.PI)); return ((u - 0.5) / r) ** 2 + ((t - 0.5) / r) ** 2 <= 1; }
+    const endT = Math.min(t, 1 - t), cap = Math.sqrt(Math.max(0, 1 - (1 - Math.min(1, endT / 0.22)) ** 2));
+    const prof = t < 0.45 ? hip + (waist - hip) * clamp01((t - 0.12) / 0.33) : waist + (chest - waist) * clamp01((t - 0.45) / 0.3);
+    const rw = 0.5 * prof * Math.max(0.35, cap), rh = 0.5 * (0.35 + 0.65 * prof) * Math.max(0.4, cap);
+    const cy = 0.5 + hump * 0.1 * Math.exp(-((t - 0.74) ** 2) / 0.015) - sag * 0.12 * Math.exp(-((t - 0.45) ** 2) / 0.05);
+    const dy = v - cy, lowK = dy < 0 ? 1 + sag * 0.6 : 1;
+    return ((u - 0.5) / rw) ** 2 + (dy / (rh * lowK)) ** 2 <= 1;
+  };
+  const insideHead = (S, u, v, t) => {
+    const k = S.headT || 'long', du = u - 0.5;
+    const ell = (cu, cv, ct, ru, rv, rt) => ((u - cu) / ru) ** 2 + ((v - cv) / rv) ** 2 + ((t - ct) / rt) ** 2 <= 1;
+    const box = (u0, u1, v0, v1, t0, t1, r) => { const qu = Math.max(u0 - u, 0, u - u1), qv = Math.max(v0 - v, 0, v - v1), qt = Math.max(t0 - t, 0, t - t1); return qu * qu + qv * qv + qt * qt <= r * r; };
+    if (k === 'long') { const tw = 0.5 - 0.18 * clamp01((t - 0.35) / 0.65); return ell(0.5, 0.62, 0.25, 0.5, 0.4, 0.3) || (t > 0.2 && Math.abs(du) < tw * 0.8 && v < 0.8 - 0.35 * clamp01((t - 0.3) / 0.7) && v > 0.08 && box(0.5 - tw * 0.8, 0.5 + tw * 0.8, 0.08, 0.8, 0.2, 0.96, 0.05)); }
+    if (k === 'cat') return ell(0.5, 0.58, 0.4, 0.5, 0.42, 0.42) || box(0.24, 0.76, 0.12, 0.5, 0.55, 0.95, 0.06);
+    if (k === 'bear') return ell(0.5, 0.58, 0.35, 0.5, 0.44, 0.38) || box(0.3, 0.7, 0.14, 0.52, 0.5, 0.97, 0.06);
+    if (k === 'box') return box(0.12, 0.88, 0.06, 0.82 - 0.3 * t, 0.06, 0.94, 0.1);
+    if (k === 'hippo') return box(0.1, 0.9, 0.1, 0.9, 0.05, 0.5, 0.1) || box(0.02, 0.98, 0.05, 0.62, 0.45, 0.95, 0.06) || ell(0.3, 0.85, 0.3, 0.14, 0.14, 0.14) || ell(0.7, 0.85, 0.3, 0.14, 0.14, 0.14);
+    if (k === 'croc') { const h = 0.95 - 0.55 * t, w = 0.5 - 0.22 * t; return Math.abs(du) < w && v < h && v > 0.02 && (t > 0.06 || Math.abs(du) < w * 0.8); }
+    if (k === 'ape') return ell(0.5, 0.52, 0.45, 0.5, 0.48, 0.44) || box(0.26, 0.74, 0.15, 0.48, 0.6, 0.92, 0.07) || box(0.12, 0.88, 0.62, 0.72, 0.55, 0.9, 0.04);
+    if (k === 'elephant') return ell(0.5, 0.58, 0.42, 0.5, 0.44, 0.44) || ell(0.5, 0.78, 0.62, 0.36, 0.2, 0.3);
+    return ell(0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
   };
   const makeGeo = (id) => {
     const S = SPEC[id], c = { body: C(S.col), bodyL: C(shadeH(S.col, 1.08)), bodyD: C(shadeH(S.col, 0.86)), belly: C(S.belly),
       pat: C(S.patCol ?? S.col), eye: C(0x141414, { jitter: 0 }), white: C(0xfff8e9), dark: C(0x302822), ivory: C(0xf0ead8),
-      mane: C(S.maneCol ?? S.mane ?? S.col), snout: C(S.snout ?? S.belly) };
+      mane: C(S.maneCol ?? S.mane ?? S.col), snout: C(S.snout ?? S.belly), hoof: C(shadeH(S.col, 0.45)), lower: C(shadeH(S.col, 0.72)), flank: C(S.flank ?? shadeH(S.col, 0.7)), pink: C(0xd8a0a8), line: C(0xf2e2c0) };
     const parts = [], bw = S.body[0] * VS, bh = S.body[1] * VS, bl = S.body[2] * VS;
     const nh = S.neck[1] * VS, hh = S.head[1] * VS, hw = S.head[0] * VS, hl = S.head[2] * VS, lift = S.legH * VS;
+    const hoofed = ['giraffe', 'zebra', 'antelope', 'deer', 'stag', 'rhino'].includes(id);
     const shape = (dims, kind, color, anchor) => {
       const width = Math.max(1, Math.round(dims[0] * 8)), height = Math.max(1, Math.round(dims[1] * 8)), depth = Math.max(1, Math.round(dims[2] * 8));
       const m = new AF.Model(width, height, depth);
       for (let x = 0; x < width; x++) for (let y = 0; y < height; y++) for (let z = 0; z < depth; z++) {
+        const u = (x + 0.5) / width, v = (y + 0.5) / height, t = (z + 0.5) / depth;
         const ex = (x + 0.5 - width / 2) / (width / 2), ey = (y + 0.5 - height / 2) / (height / 2), ez = (z + 0.5 - depth / 2) / (depth / 2);
-        if (kind !== 'leg' && kind !== 'horn' && ex * ex + ey * ey + ez * ez > 1.12) continue;
+        if (kind === 'body' && !insideBody(S, u, v, t)) continue;
+        if (kind === 'head' && !insideHead(S, u, v, t)) continue;
+        if (kind === 'leg') { const r = 0.5 * (1 - 0.28 * (1 - v)); if (width > 1 && ((u - 0.5) / r) ** 2 + ((t - 0.5) / r) ** 2 > 1.05) continue; }
+        if (kind === 'neck') { const r = 0.5 * (1 - 0.3 * v); if (width > 1 && ((u - 0.5) / r) ** 2 + ((t - 0.5) / r) ** 2 > 1.05) continue; }
+        if (kind !== 'leg' && kind !== 'horn' && kind !== 'body' && kind !== 'head' && kind !== 'neck' && ex * ex + ey * ey + ez * ez > 1.12) continue;
+        if (kind === 'mane' && ex * ex + ey * ey + ez * ez > 0.6 && AF.hash3(x, y * 3, z) < 0.4) continue;
         if (kind === 'horn' && height > width && (Math.abs(ex) > Math.max(0.25, 1 - y / height * 0.7) || Math.abs(ez) > Math.max(0.25, 1 - y / height * 0.7))) continue;
         let material = color;
-        if (kind === 'body' && (y < height * 0.22 || id === 'penguin' && z > depth * 0.55 || id === 'gorilla' && z < depth * 0.35)) material = c.belly;
-        if (kind === 'head' && z > depth * 0.65 && y < height * 0.55) material = c.snout;
+        if (kind === 'body' && (v < 0.24 && !S.upright || id === 'penguin' && t > 0.55 || id === 'gorilla' && t > 0.7 && v < 0.6)) material = c.belly;
+        if (kind === 'body' && S.flank && v > 0.3 && v < 0.4) material = c.flank;
+        if (kind === 'head' && t > 0.62 && v < 0.55 && S.headT !== 'croc') material = c.snout;
+        if (kind === 'head' && S.headT === 'long' && t > 0.88) material = c.dark;
+        if (kind === 'head' && id === 'penguin' && (t > 0.6 && v < 0.55)) material = c.belly;
         if (kind === 'body' || kind === 'neck' || kind === 'head' || kind === 'leg') {
-          if (S.pattern === 'stripes' && (z + Math.floor(y * 0.6) + Math.floor(x / 3)) % 4 < 1) material = c.pat;
-          if (S.pattern === 'spots' && x % 3 !== 0 && y % 4 !== 0 && z % 4 !== 0 && AF.hash3(x >> 2, y >> 2, z >> 2) < 0.78) material = c.pat;
-          if (S.pattern === 'dots' && y > height * 0.6 && AF.hash3(x, y, z) < 0.12) material = c.pat;
+          if (S.pattern === 'stripes') {
+            const s = kind === 'body' ? z + Math.floor(y * 0.34) : kind === 'leg' ? y * 1.5 : kind === 'neck' ? y * 1.5 : y * 1.5;
+            if (((s % 3) + 3) % 3 < 1 && !(kind === 'body' && v < 0.12)) material = c.pat;
+          }
+          if (S.pattern === 'tiger' && material !== c.belly) {
+            const s = kind === 'body' ? z * 0.9 + Math.sin(y * 0.8 + x * 0.4) * 1.3 : kind === 'leg' ? y * 1.2 + 0.5 : kind === 'head' ? y * 1.5 + Math.abs(x - width / 2) * 0.6 : y;
+            if (((s % 5) + 5) % 5 < 1.1 && AF.hash3(x >> 1, y, z >> 1) > 0.18) material = c.pat;
+          }
+          if (S.pattern === 'patches' && material !== c.belly) {
+            // giraffe: polygon patches with cream lines (Voronoi over the coat)
+            const gx = (kind === 'body' ? z : y) / 2.5, gy = (kind === 'body' ? y : x + z) / 2.5; let d1 = 9, d2 = 9;
+            for (let a2 = -1; a2 <= 1; a2++) for (let b2 = -1; b2 <= 1; b2++) { const cx = Math.floor(gx) + a2, cy = Math.floor(gy) + b2, px = cx + AF.hash2(cx, cy + 7) * 0.8 + 0.1, py = cy + AF.hash2(cy, cx + 3) * 0.8 + 0.1, dd = Math.hypot(gx - px, gy - py); if (dd < d1) { d2 = d1; d1 = dd; } else if (dd < d2) d2 = dd; }
+            material = d2 - d1 < 0.18 ? c.line : c.pat;
+            if (kind === 'leg' && v < 0.45) material = c.line;
+          }
+          if (S.pattern === 'dots' && v > 0.6 && AF.hash3(x, y, z) < 0.12) material = c.pat;
           if (S.pattern === 'scutes' && y === height - 1 && z % 2 === 0) material = c.pat;
         }
-        if (kind === 'leg' && y === 0) material = c.dark;
+        if (kind === 'leg' && v < 0.35 && (hoofed || id === 'tiger' || id === 'zebra') && material === color) material = id === 'giraffe' ? c.line : c.lower;
         m.set(x, y, z, material);
       }
-      const eyes = kind === 'head' ? [[0, Math.max(0, height - 2), Math.floor(depth * 0.6), -1], [width - 1, Math.max(0, height - 2), Math.floor(depth * 0.6), 1]] : null;
-      if (eyes) for (const eye of eyes) m.set(eye[0], eye[1], eye[2], c.eye);
+      const eyes = kind === 'head' ? [[0, Math.max(0, Math.floor(height * 0.62)), Math.floor(depth * (S.headT === 'long' ? 0.35 : 0.58)), -1], [width - 1, Math.max(0, Math.floor(height * 0.62)), Math.floor(depth * (S.headT === 'long' ? 0.35 : 0.58)), 1]] : null;
+      if (eyes) for (const eye of eyes) { let ex2 = eye[0]; while (ex2 >= 0 && ex2 < width && !m.get(ex2, eye[1], eye[2])) ex2 += eye[3] < 0 ? 1 : -1; eye[0] = Math.max(0, Math.min(width - 1, ex2)); m.set(eye[0], eye[1], eye[2], c.eye); }
       const refined = refine(m, c, eyes);
       if (kind === 'head') {
         const noseZ = refined.d - 1, noseY = Math.max(0, Math.floor(refined.h * 0.4));
@@ -332,12 +524,7 @@ try {
         if (id === 'hippo' || id === 'rhino' || id === 'elephant') {
           refined.set(Math.floor(refined.w * 0.3), noseY + 2, noseZ, c.dark); refined.set(Math.floor(refined.w * 0.7), noseY + 2, noseZ, c.dark);
         }
-        if (id === 'lion' || id === 'lioness' || id === 'tiger') for (const side of [0, refined.w - 1]) for (let stripe = 0; stripe < 3; stripe++) refined.set(side, Math.max(0, noseY - stripe), Math.max(0, noseZ - 2), c.white);
-      }
-      if (kind === 'body' && (id === 'elephant' || id === 'rhino' || id === 'hippo')) {
-        for (let x = 0; x < refined.w; x++) for (let y = 4; y < refined.h - 2; y += 7) for (let z = 0; z < refined.d; z++) {
-          if (refined.get(x, y, z) && (!refined.get(x - 1, y, z) || !refined.get(x + 1, y, z))) refined.set(x, y, z, c.bodyD);
-        }
+        if (id === 'lion' || id === 'lioness' || id === 'tiger') refined.box(Math.floor(refined.w * 0.38), noseY + 1, noseZ, Math.ceil(refined.w * 0.62), noseY + 3, noseZ + 1, c.dark);
       }
       return AF.meshModel(refined, { vs: 1 / 16, anchor });
     };
@@ -356,13 +543,15 @@ try {
       const length = id === 'gorilla' && index < 2 ? lift + 0.375 : lift;
       const leg = add('leg', [S.legW * VS, length * 0.55, S.legW * VS], [legPos[index][0], id === 'gorilla' && index < 2 ? 0.375 : 0, legPos[index][1]], body, [0.5, 1, 0.5], c.body, 'leg', 0, index);
       const shin = add('shin', [S.legW * VS * 0.8, length * 0.45, S.legW * VS * 0.8], [0, -length * 0.55, 0], leg, [0.5, 1, 0.5], c.body, 'leg', 0, index);
-      add('foot', [S.legW * VS * 1.1, 0.125, S.legW * VS * 1.35], [0, -length * 0.45, 0.0625], shin, [0.5, 0, 0.5], id === 'flamingo' ? C(0xde8292) : c.dark, 'foot');
+      add('foot', [S.legW * VS * 1.1, 0.125, S.legW * VS * 1.35], [0, -length * 0.45, 0.0625], shin, [0.5, 0, 0.5], id === 'flamingo' ? C(0xde8292) : hoofed ? c.hoof : id === 'lion' || id === 'lioness' || id === 'tiger' ? c.bodyL : c.dark, 'foot');
     }
-    const tailLength = id === 'croc' ? 2.5 : id === 'monkey' ? 1.3 : id === 'giraffe' ? 0.85 : 0.65;
-    const tail = add('tail', [id === 'croc' ? 0.5 : 0.125, 0.125, tailLength * 0.55], [0, bh * 0.55, -bl * 0.45], body, [0.5, 0.5, 1], c.body, 'tail');
-    add('tailTip', [id === 'croc' ? 0.25 : 0.125, 0.125, tailLength * 0.45], [0, 0, -tailLength * 0.55], tail, [0.5, 0.5, 1], S.tail ? C(S.tail) : c.body, 'tail');
+    const tailLength = id === 'croc' ? 2.5 : id === 'monkey' ? 1.3 : id === 'giraffe' ? 0.95 : id === 'lion' || id === 'lioness' || id === 'tiger' ? 0.9 : id === 'zebra' ? 0.75 : 0.5;
+    const tailTipC = S.tail ? C(S.tail) : id === 'zebra' ? c.pat : id === 'giraffe' ? c.mane : id === 'deer' ? c.white : id === 'antelope' ? c.dark : c.body;
+    const tail = add('tail', [id === 'croc' ? 0.5 : 0.125, 0.125, tailLength * 0.55], [0, bh * 0.62, -bl * 0.46], body, [0.5, 0.5, 1], c.body, 'tail');
+    add('tailTip', [id === 'croc' ? 0.25 : id === 'lion' || id === 'zebra' || id === 'giraffe' ? 0.1875 : 0.125, id === 'lion' || id === 'zebra' || id === 'giraffe' ? 0.1875 : 0.125, tailLength * 0.45], [0, 0, -tailLength * 0.55], tail, [0.5, 0.5, 1], tailTipC, 'tail');
+    const catLike = id === 'lion' || id === 'lioness' || id === 'tiger' || id === 'bear' || id === 'gorilla' || id === 'monkey';
     for (const side of [-1, 1]) {
-      if (id !== 'penguin' && id !== 'flamingo' && id !== 'croc') add('ear', [id === 'elephant' ? 0.25 : 0.1875, id === 'elephant' ? 1.25 : 0.25, id === 'elephant' ? 0.9 : 0.25], [side * hw * 0.48, hh * 0.65, 0.0625], head, [side > 0 ? 0 : 1, 0.75, 0.5], c.body, 'ear', 0, side);
+      if (id !== 'penguin' && id !== 'flamingo' && id !== 'croc') add('ear', [id === 'elephant' ? 0.25 : 0.1875, id === 'elephant' ? 1.25 : catLike ? 0.1875 : 0.3125, id === 'elephant' ? 0.9 : catLike ? 0.1875 : 0.125], id === 'elephant' ? [side * hw * 0.48, hh * 0.65, 0.0625] : catLike ? [side * hw * 0.34, hh * 0.86, 0] : [side * hw * 0.42, hh * 0.82, -hl * 0.05], head, id === 'elephant' ? [side > 0 ? 0 : 1, 0.75, 0.5] : [0.5, 0, 0.5], id === 'zebra' ? c.pat : c.body, 'ear', id === 'elephant' || catLike ? 0 : -0.35, side);
       if (id === 'giraffe' || S.horns || S.antlers) {
         const height = id === 'giraffe' ? 0.25 : S.antlers ? 0.75 : 0.625;
         const horn = add('horn', [0.125, height, 0.125], [side * hw * 0.32, hh - 0.0625, 0.125], head, [0.5, 0, 0.5], c.dark, 'horn');
@@ -383,8 +572,8 @@ try {
       add('horn', [0.1875, 0.3125, 0.1875], [0, hh * 0.6, hl * 0.45], head, [0.5, 0, 0.5], c.ivory, 'horn');
       for (const z of [-bl * 0.25, bl * 0.25]) add('fold', [bw * 1.02, bh * 0.9, 0.125], [0, 0.0625, z], body, [0.5, 0, 0.5], c.bodyD);
     }
-    if (S.maneCol) add('mane', [hw * 1.6, hh * 1.5, 0.5], [0, -hh * 0.2, 0], head, [0.5, 0, 0.5], c.mane);
-    if (S.mane || id === 'giraffe') add('crest', [0.125, nh, 0.125], [0, 0, -S.neck[2] * VS * 0.4], neck, [0.5, 0, 0.5], c.dark, 'leg');
+    if (S.maneCol) { add('mane', [hw * 1.7, hh * 1.55, 0.625], [0, -hh * 0.25, -0.0625], head, [0.5, 0, 0.5], c.mane, 'mane'); add('mane', [bw * 0.95, bh * 0.85, bl * 0.28], [0, bh * 0.3, bl * 0.34], body, [0.5, 0, 0.5], c.mane, 'mane'); }
+    if (S.mane || id === 'giraffe') add('crest', [0.125, nh, 0.1875], [0, 0, -S.neck[2] * VS * 0.42], neck, [0.5, 0, 0.5], c.mane, 'leg');
     if (S.beak) add('beak', [0.125, 0.125, 0.375], [0, hh * 0.4, hl * 0.8], head, [0.5, 0.5, 0], C(S.beak), 'horn');
     if (id === 'croc') for (let index = 0; index < 9; index++) add('scute', [0.25, 0.125, 0.25], [0, bh - 0.0625, -bl * 0.4 + index * 0.3125], body, [0.5, 0, 0.5], c.pat);
     let height = 0;
@@ -441,6 +630,7 @@ try {
     if (an.leader && roll < 0.7) {
       target(an, an.leader.x + an.fl, an.leader.z + an.fb, 'follow', 'graze', 15); return;
     }
+    if ((id === 'zebra' || id === 'antelope' || id === 'deer' || id === 'giraffe') && roll > 0.9) { dryTarget(an); an.state = 'run'; an.next = 'graze'; an.timer = 12; return; }
     dryTarget(an); an.state = id === 'penguin' ? 'waddle' : 'wander';
     an.next = id === 'giraffe' || id === 'zebra' || id === 'antelope' || id === 'deer' || id === 'stag' || id === 'rhino' || id === 'hippo' || id === 'elephant' || id === 'flamingo' ? 'graze' : 'rest'; an.timer = 25;
   };
@@ -507,7 +697,7 @@ try {
       else decide(an, hours);
     }
     if (an.state === 'follow') { an.tx = boundX(an, an.leader.x + an.fl); an.tz = boundZ(an, an.leader.z + an.fb); }
-    const moving = an.state === 'wander' || an.state === 'follow' || an.state === 'approach' || an.state === 'waddle' || an.state === 'swim';
+    const moving = an.state === 'wander' || an.state === 'follow' || an.state === 'approach' || an.state === 'waddle' || an.state === 'swim' || an.state === 'run';
     if (an.state === 'swim') {
       const pool = H.pool, angle = an.clock * (id === 'penguin' ? 0.5 : 0.12) + an.phase * 0.01;
       an.tx = boundX(an, pool.cx + Math.sin(angle) * pool.rx * 0.65); an.tz = boundZ(an, pool.cz + Math.cos(angle) * pool.rz * 0.65);
@@ -518,7 +708,7 @@ try {
         an.state = an.next || 'rest'; an.timer = an.state === 'rest' && (id === 'lion' || id === 'lioness') ? 28 : an.state === 'climb' ? 6 : an.state === 'dive' ? 1.5 : 6 + random(an) * 8;
         an.elapsed = 0; an.v = 0;
       } else {
-        const speed = an.state === 'swim' && id === 'penguin' ? 2.2 : S.speed;
+        const speed = an.state === 'swim' && id === 'penguin' ? 2.2 : an.state === 'run' ? S.speed * 2.6 : S.speed;
         an.v = Math.min(speed, an.v + dt * 1.5);
         const heading = Math.atan2(dx, dz);
         an.yaw += AF.angDiff(an.yaw, heading) * Math.min(1, dt * 3);
@@ -552,28 +742,61 @@ try {
     an.pose += (lower - an.pose) * Math.min(1, dt * 2);
     if (an.state === 'watch') an.attention = player ? Math.atan2(player.x - an.x, player.z - an.z) : an.yaw;
   };
+  const CATS = new Set(['lion', 'lioness', 'tiger']), LIERS = new Set(['lion', 'lioness', 'tiger', 'zebra', 'antelope', 'deer', 'stag', 'giraffe', 'rhino', 'hippo', 'bear', 'croc']);
   const renderAnimal = (an, detail) => {
     const G = an.sp.G, id = an.sp.id, state = an.state, resting = state === 'rest' || state === 'sleep';
-    const swimming = state === 'swim' || state === 'dive', gait = Math.sin(an.phase) * 0.55 * Math.min(1, an.v / G.S.speed);
-    const rootY = an.y + an.elevation + (G.lift + an.pose - (resting ? G.lift * 0.72 : 0)) * an.scale;
-    tmpE.set(swimming && id === 'penguin' ? PI / 2 : 0, an.yaw, id === 'penguin' && !swimming ? Math.sin(an.phase) * 0.08 * an.v : 0);
+    const swimming = state === 'swim' || state === 'dive', spK = Math.min(1.6, an.v / G.S.speed), run = state === 'run' && an.v > G.S.speed * 1.3;
+    // walk: diagonal pairs with a lifted knee on the swing; run: a bounding gallop (front pair, then hind pair)
+    const gAmp = run ? 0.75 : 0.5, gait = Math.sin(an.phase) * gAmp * Math.min(1, spK);
+    const lie = resting && LIERS.has(id) && !an.wet, cat = CATS.has(id), onOne = resting && id === 'flamingo';
+    const bob = Math.abs(Math.sin(an.phase)) * (run ? 0.09 : 0.035) * Math.min(1, spK) * G.lift;
+    const breathe = Math.sin(an.clock * (resting ? 1.1 : 1.7) + an.phase * 0.1) * (resting ? 0.018 : 0.01);
+    const rootY = an.y + an.elevation + (G.lift + an.pose - (lie ? G.lift * (cat ? 0.82 : 0.86) : resting && id !== 'elephant' && id !== 'penguin' ? G.lift * 0.2 : 0)) * an.scale + bob * an.scale;
+    const pitch = run ? Math.sin(an.phase * 2) * 0.04 : 0;
+    tmpE.set(swimming && id === 'penguin' ? PI / 2 : pitch, an.yaw, id === 'penguin' && !swimming ? Math.sin(an.phase) * 0.1 * an.v : Math.sin(an.phase) * 0.02 * spK);
     tmpQ.setFromEuler(tmpE); tmpM.compose(tmpV.set(an.x, rootY, an.z), tmpQ, one.set(an.scale, an.scale, an.scale));
+    const idleLook = !resting && an.v < 0.1 && state !== 'graze' && state !== 'drink' && state !== 'browse' ? Math.sin(an.clock * 0.37 + an.seed % 7) * 0.45 * Math.max(0, Math.sin(an.clock * 0.11 + an.phase)) : 0;
+    const twitch = Math.max(0, Math.sin(an.clock * 0.9 + an.phase * 3) - 0.94) * 8;
     for (const part of G.parts) {
-      let rx = part.rotation, ry = 0, rz = 0;
-      const name = part.name;
-      if (name === 'leg') { rx += (part.side === 0 || part.side === 3 ? 1 : -1) * gait; if (resting) rx += 1.3; if (state === 'climb' || state === 'jump') rx += part.side < 2 ? -1.5 : 0.8; }
-      if (name === 'shin') rx += Math.max(0, Math.sin(an.phase + (part.side % 2 ? PI : 0))) * 0.3 * Math.min(1, an.v);
-      if (name === 'neck') rx += state === 'browse' ? -0.22 : state === 'graze' ? id === 'giraffe' ? 1.8 : 0.9 : state === 'drink' ? id === 'giraffe' ? 2.5 : 1.15 : resting ? 0.3 : Math.sin(an.clock * 0.9) * 0.035;
-      if (name === 'head') { rx += Math.sin(an.clock * 1.8) * 0.05; if (state === 'watch' || state === 'approach') ry = Math.max(-0.8, Math.min(0.8, AF.angDiff(an.yaw, an.attention))); }
-      if (name === 'jaw') rx = resting && id.startsWith('lion') ? Math.max(0, Math.sin(an.clock * 0.28)) * 0.7 : state === 'graze' || state === 'browse' ? (0.5 + Math.sin(an.clock * 5) * 0.5) * 0.18 : 0;
-      if (name === 'tail' || name === 'tailTip') { ry = Math.sin(an.clock * 1.7 + (name === 'tailTip' ? 0.7 : 0)) * 0.3; rx = id === 'monkey' ? -0.9 : id === 'giraffe' ? -0.6 : -0.12; }
-      if (name === 'ear') rz = part.side * (id === 'elephant' ? Math.sin(an.clock * 2.5) * 0.4 : Math.sin(an.clock * 1.4) * 0.09);
-      if (name === 'trunk') rx = state === 'spray' ? -1.5 : state === 'drink' ? 0.15 : Math.sin(an.clock * 1.2) * 0.18;
+      let rx = part.rotation, ry = 0, rz = 0, sy = 1;
+      const name = part.name, front = part.side < 2;
+      if (name === 'leg') {
+        const ph = run ? an.phase + (front ? 0 : 1.9) : an.phase + (part.side === 0 || part.side === 3 ? 0 : PI);
+        rx += Math.sin(ph) * gAmp * Math.min(1, spK);
+        if (lie) rx += cat ? (front ? -1.45 : 1.25) : (front ? -0.55 : 1.15);
+        else if (resting && id !== 'elephant' && id !== 'penguin' && id !== 'flamingo') rx += front ? 0.12 : -0.1;
+        if (onOne && part.side === 1) rx += 0.35;
+        if (state === 'climb' || state === 'jump') rx += front ? -1.5 : 0.8;
+      }
+      if (name === 'shin') {
+        const ph = run ? an.phase + (front ? 0 : 1.9) : an.phase + (part.side === 0 || part.side === 3 ? 0 : PI);
+        rx += Math.max(0, -Math.cos(ph)) * (run ? 1.1 : 0.55) * Math.min(1, spK);
+        if (lie) rx += cat ? (front ? 0 : -2.4) : (front ? 2.4 : -2.3);
+        if (onOne && part.side === 1) rx -= 2.4;
+      }
+      if (name === 'neck') rx += state === 'browse' ? -0.22 : state === 'graze' ? id === 'giraffe' ? 1.8 : 0.9 : state === 'drink' ? id === 'giraffe' ? 2.5 : 1.15 : lie ? (cat ? 0.1 : 0.55) : onOne ? 1.9 : resting ? 0.3 : Math.sin(an.clock * 0.9) * 0.035 + Math.sin(an.phase * 2) * 0.05 * Math.min(1, spK) - (run ? 0.25 : 0);
+      if (name === 'head') {
+        rx += Math.sin(an.clock * 1.8) * 0.05 - Math.sin(an.phase * 2) * 0.04 * Math.min(1, spK);
+        ry = idleLook;
+        if (state === 'watch' || state === 'approach') ry = Math.max(-0.8, Math.min(0.8, AF.angDiff(an.yaw, an.attention)));
+        if (lie && cat) ry = Math.sin(an.clock * 0.2 + an.phase) * 0.5;
+        if (state === 'sleep') rx += cat ? 0.35 : 0.5;
+      }
+      if (name === 'jaw') rx = resting && id.startsWith('lion') ? Math.max(0, Math.sin(an.clock * 0.28) - 0.6) * 1.6 : state === 'graze' || state === 'browse' ? (0.5 + Math.sin(an.clock * 5) * 0.5) * 0.18 : id === 'hippo' && an.wet ? Math.max(0, Math.sin(an.clock * 0.21) - 0.8) * 5 : 0;
+      if (name === 'tail' || name === 'tailTip') {
+        const tip = name === 'tailTip';
+        if (cat) { ry = Math.sin(an.clock * 0.9 + (tip ? 1.1 : 0)) * (tip ? 0.55 : 0.25); rx = tip ? 0.7 : lie ? -0.25 : -0.95; }
+        else { ry = Math.sin(an.clock * (2.6 + twitch) + (tip ? 0.7 : 0)) * (0.25 + twitch * 0.2); rx = id === 'monkey' ? -0.9 : id === 'croc' ? 0.02 : run ? (tip ? -0.2 : -0.45) : tip ? -0.15 : -1.25; }
+        if (id === 'croc') ry = Math.sin(an.phase * 0.8 + (tip ? 1 : 0)) * 0.25 * Math.min(1, spK) + Math.sin(an.clock * 0.3) * 0.05;
+      }
+      if (name === 'ear') rz = part.side * (id === 'elephant' ? Math.sin(an.clock * 2.5) * 0.4 : Math.sin(an.clock * 1.4) * 0.09 + twitch * 0.35);
+      if (name === 'trunk') rx = state === 'spray' ? -1.5 : state === 'drink' ? 0.15 : Math.sin(an.clock * 1.2) * 0.18 + Math.sin(an.phase) * 0.12 * spK;
       if (name === 'trunkTip') rx = state === 'spray' ? -0.8 : Math.sin(an.clock * 1.2 + 0.6) * 0.3;
-      if (name === 'wing') rz = part.side * (swimming ? 0.6 + Math.sin(an.clock * 8) * 0.6 : 0.08);
+      if (name === 'wing') rz = part.side * (swimming ? 0.6 + Math.sin(an.clock * 8) * 0.6 : id === 'penguin' ? 0.12 + Math.abs(Math.sin(an.phase)) * 0.25 * an.v : 0.08);
+      if (name === 'body') sy = 1 + breathe;
       tmpE.set(rx, ry, rz); tmpQ.setFromEuler(tmpE);
       const dropY = name === 'droplet' ? ((an.clock * 1.6 + part.side * 0.19) % 1) * 0.35 : 0;
-      part.matrix.compose(tmpV.set(part.x, part.y - dropY, part.z), tmpQ, one.set(1, 1, name === 'spray' ? 0.75 + Math.sin(an.clock * 8) * 0.25 : 1));
+      part.matrix.compose(tmpV.set(part.x, part.y - dropY, part.z), tmpQ, one.set(1, sy, name === 'spray' ? 0.75 + Math.sin(an.clock * 8) * 0.25 : 1));
       part.matrix.premultiply(part.parent < 0 ? tmpM : G.parts[part.parent].matrix);
       if ((name === 'spray' || name === 'droplet') && state !== 'spray') continue;
       if (!detail && (name === 'jaw' || name === 'ear' || name === 'antler' || name === 'droplet' || name === 'finger' || name === 'scute' || name === 'fold')) continue;

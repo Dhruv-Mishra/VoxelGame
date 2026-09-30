@@ -530,11 +530,12 @@ try {
     if (AF.scene) {
       const mesh = AF.modelMesh(tg); mesh.position.set(TRAINX + 40, 0.5, TRK[1]); mesh.rotation.y = Math.PI; mesh.frustumCulled = false; AF.scene.add(mesh);
       const coll = AF.addCollider(TRAINX, 0.5, TRK[1] - 1.6, TRAINX + 40, 4.75, TRK[1] + 1.6);
-      const CYC = 240; CIV.trainX = TRAINX;
+      // the Coastline Limited: stands at platform 2, then pulls out east over the Solace River bridge into the Eastport tunnel and back
+      const CYC = 200, OUT = 200; CIV.trainX = TRAINX;
       AF.onTick('civic-train', 255, (dt, t) => {
         const c = (AF.clock.t || t) % CYC; let off = 0;
-        if (c < 90) off = 0; else if (c < 140) off = 110 * AF.smooth(90, 140, c); else if (c < 170) off = 110; else if (c < 230) off = 110 * (1 - AF.smooth(170, 230, c)); else off = 0;
-        mesh.position.x = TRAINX + 40 + off; mesh.visible = TRAINX + off < 305; CIV.trainX = TRAINX + off;
+        if (c < 60) off = 0; else if (c < 100) off = OUT * AF.smooth(60, 100, c); else if (c < 140) off = OUT; else if (c < 180) off = OUT * (1 - AF.smooth(140, 180, c)); else off = 0;
+        mesh.position.x = TRAINX + 40 + off; mesh.visible = TRAINX + off < 434; CIV.trainX = TRAINX + off;
         coll.x0 = TRAINX + off; coll.x1 = TRAINX + off + 40; if (off > 60) { coll.y0 = -50; coll.y1 = -49; } else { coll.y0 = 0.5; coll.y1 = 4.75; }
       });
     }

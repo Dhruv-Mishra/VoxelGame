@@ -119,6 +119,7 @@ const ext = (H, S) => {
 
 const lotFaces = (lot) => {
   const [x0, z0, x1, z1] = lot.rect, dp = 17;
+  if (lot.strip) return [{ P: { x0, z0, x1, z1, face: lot.strip }, D: lot.strip === 'w' || lot.strip === 'e' ? x1 - x0 : z1 - z0, back: false }];
   if (lot.id.startsWith('fill-a')) return [{ P: { x0, z0, x1, z1, face: 'e' }, D: x1 - x0, back: false }];
   if (lot.id === 'fill-h') return [{ P: { x0, z0, x1, z1, face: 'w' }, D: x1 - x0, back: false }];
   return [
@@ -142,7 +143,7 @@ AF.onBuild('residential-fill', 302, () => {
     for (const fc of lotFaces(lot)) {
       const F = RK.frame(fc.P);
       let u = 0;
-      const edgeLot = lot.id.startsWith('fill-a') || lot.id === 'fill-h';
+      const edgeLot = lot.id.startsWith('fill-a') || lot.id === 'fill-h' || !!lot.strip;
       let prevN = -1;
       while (u < F.W - 0.1) {
         let w = q((lux ? 14 : edgeLot ? 8 : 9) + R() * (lux ? 8 : 10)); if (F.W - u - w < 8) w = F.W - u;
@@ -163,7 +164,7 @@ AF.onBuild('residential-fill', 302, () => {
           shop: !lux && (R() < 0.55), tank: R() < (lux ? 0.5 : 0.45), fe: !lux && n <= 7 && R() < 0.35, back: fc.back !== false && R() < 0.5, billboard: !lux && R() < 0.22,
           sides: [first ? 'L' : null, last ? 'R' : null].filter(Boolean),
         };
-        if (edgeLot) {   // deep strips: front range 12-16 m, a lower back range or a courtyard, and a 2-3 storey edge range
+        if (edgeLot && fc.D >= 26) {   // deep strips: front range 12-16 m, a lower back range or a courtyard, and a 2-3 storey edge range
           S.fd = q(12 + R() * 4);
           const court = R() < 0.4, v1 = q(S.fd + 9 + R() * 8);
           S.back2 = { court, n: Math.max(2, Math.min(n - 2, 3 + Math.floor(R() * 3))), v1: Math.min(v1, fc.D - 5), edge: 2 + Math.floor(R() * 2) };
@@ -182,7 +183,7 @@ AF.onBuild('residential-fill', 302, () => {
       }
     }
     // inner courtyard of the square fill blocks: a low parking garage / yard
-    if (!lot.id.startsWith('fill-a') && lot.id !== 'fill-h') {
+    if (!lot.id.startsWith('fill-a') && lot.id !== 'fill-h' && !lot.strip) {
       const ix0 = x0 + 17, iz0 = z0 + 17, ix1 = x1 - 17, iz1 = z1 - 17;
       if (lot.id === 'fill-b1') {
         AF.W.fill(ix0, 0.25, iz0, ix1, 4.0, iz1, C.bricks[4].a); AF.W.fill(ix0 + 0.25, 3.75, iz0 + 0.25, ix1 - 0.25, 4.0, iz1 - 0.25, C.tar);
