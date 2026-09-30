@@ -760,9 +760,9 @@ try {
     for (const o of [wire, bob]) { o.castShadow = false; o.frustumCulled = false; }
     const w = Math.sqrt(9.81 / L);
     CIV.pendulum = { plane, arm, frames: 0 };
-    AF.onTick('civic-pendulum', 337, (dt, t) => { const cam = AF.camera; if (cam && Math.hypot(cam.position.x - X, cam.position.z - Z) > 90) return; arm.rotation.x = 0.2 * Math.sin(t * w); plane.rotation.y = 0.35 + t * 0.012; CIV.pendulum.frames++; });
+    AF.onTick('civic-pendulum', 337, (dt, t) => { const cam = AF.camera; if (cam && !CIV.pendulum.force && Math.hypot(cam.position.x - X, cam.position.z - Z) > 90) return; arm.rotation.x = 0.2 * Math.sin(t * w); plane.rotation.y = 0.35 + t * 0.012; CIV.pendulum.frames++; });
   });
-  AF.test('civic: Foucault pendulum swings', () => { const p = CIV.pendulum; if (!p) return { ok: false, info: 'none' }; const a = p.arm.rotation.x; AF.step(20); return { ok: p.frames > 0 || p.arm.rotation.x !== a, info: 'frames ' + p.frames }; });
+  AF.test('civic: Foucault pendulum swings', () => { const p = CIV.pendulum; if (!p) return { ok: false, info: 'none' }; const a = p.arm.rotation.x; p.force = true; AF.step(20); p.force = false; return { ok: p.frames > 0 || p.arm.rotation.x !== a, info: 'frames ' + p.frames }; });
 }
 
 } catch (e) { AF.partError('31-civic-2.js', e); }

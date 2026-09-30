@@ -842,7 +842,7 @@ function nightCabs() {
 VV.simTraffic = (dt) => {
   VV.clockT += dt;
   if ((cabSwapT -= dt) <= 0) { cabSwapT = 3; nightCabs(); }
-  const all = VV.cars, cam = AF.camera && AF.camera.position, fr = AF.clock.frame;
+  const all = VV.cars, cam = AF.camera && AF.camera.position, fr = VV.simN = (VV.simN || 0) + 1;
   // cars far from the camera tick at a quarter rate with the accumulated time (nobody can see them take bigger steps)
   for (const c of VV.ai) {
     if (!c.ai) continue;

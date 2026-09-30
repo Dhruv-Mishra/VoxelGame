@@ -27,12 +27,12 @@ AF.test('engine: smooth colours have no block grid', () => {
 });
 AF.test('engine: contact shadows under indoor props', () => ({ ok: AF.Q.has('nocontact') || (AF.contact && AF.contact.count > 50), info: AF.contact && (AF.contact.count + ' blobs, ' + AF.contact.ms + ' ms') }));
 // engine round 2
-AF.test('engine: cinema quality switches on and back (LOD 200, 4096 far shadow, no dyn-res)', () => {
-  const G = AF.GFX, was = G.name, wasAuto = G.auto;
-  G.set('cinema'); const on = G.cinema && G.tier === 'ultra' && AF.LOD_DIST >= 200 && AF.gfx.far.size === 4096 && G.scale === 1;
-  G.set(was === 'cinema' ? 'cinema' : was); G.auto = wasAuto;
-  const back = G.name === was && (was === 'cinema' || AF.LOD_DIST === 110);
-  return { ok: on && back, info: 'on ' + on + ' back ' + back + ' (' + was + ') ' + JSON.stringify(AF.gfx.stats()).slice(0, 160) };
+AF.test('engine: graphics tier switches to low and back', () => {
+  const G = AF.GFX, was = G.name, wasAuto = G.auto, T = AF.gfx.TIER;
+  G.set('low'); const low = AF.LOD_DIST === T.low.lod && AF.REGION_LOD === T.low.regLod;
+  G.set(was); G.auto = wasAuto;
+  const back = G.name === was && AF.LOD_DIST === AF.gfx.tierCfg().lod;
+  return { ok: low && back, info: 'low ' + low + ' back ' + back + ' (' + was + ')' };
 });
 AF.test('engine: neon mode + lit-window fraction uniforms', () => {
   const i = AF.col(0xff6a9a, { emit: 0xff4f8a, emitK: 3, mode: 'neon', edge: 0, jitter: 0 }), U = AF.mat.uniforms;

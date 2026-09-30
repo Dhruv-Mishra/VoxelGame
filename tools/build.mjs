@@ -1,4 +1,4 @@
-// Assemble shell.html + src/*.js into "Port Solace.html" (one self-contained page). `node tools/build.mjs [--check]`
+// Assemble shell.html + src/*.js into output.html (one self-contained page). `node tools/build.mjs [--check]`
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -14,8 +14,9 @@ if (process.argv.includes('--check')) {
   }
   if (bad) process.exit(1);
 }
-const code = parts.map((f) => fs.readFileSync(path.join(dir, f), 'utf8').replace(/<\/script/gi, '<\\/script')).join('\n');
-const html = fs.readFileSync(path.join(root, 'shell.html'), 'utf8').replace('/*@@PARTS@@*/', () => code);
-const out = path.join(root, 'Port Solace.html');
+const toc = '// Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.\n// Parts: ' + parts.map((f) => f.replace(/\.js$/, '')).join(', ') + '\n';
+const code = toc + parts.map((f) => fs.readFileSync(path.join(dir, f), 'utf8').replace(/\r\n/g, '\n').trimEnd().replace(/<\/script/gi, '<\\/script')).join('\n\n');
+const html = fs.readFileSync(path.join(root, 'shell.html'), 'utf8').replace(/\r\n/g, '\n').replace('/*@@PARTS@@*/', () => code);
+const out = path.join(root, 'output.html');
 fs.writeFileSync(out, html);
 console.log('built', out, (html.length / 1024).toFixed(0) + ' KB from', parts.length, 'parts');
