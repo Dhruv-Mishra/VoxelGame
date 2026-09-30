@@ -39,7 +39,7 @@ try {
         const tm = AF.textModel('7', K, { pad: 0 }); for (let i = 0; i < tm.w; i++) for (let j = 0; j < tm.h; j++) if (tm.get(i, j, 0)) { m.set(cx + 7, cy - 2 + j, 26 + i, K); m.set(cx - 7, cy - 2 + j, 30 - i, K); }
         return { m, prop: [cx, cy, 40.5], blade: 9, pc: K }; } },
     airliner: { name: 'Clipper Airliner', vs: 1 / 4, stall: 26, vmax: 75, thrust: 10, roll: 1.1, pitch: 0.7, gear: 0.0, twin: true,
-      build() { const m = new AF.Model(118, 30, 82), S = C(0xd8dce2, { metal: 0.85, rough: 0.25 }), Bl = C(0x2d4a8a), K = C(0x1a1a1a), G = C(0x2a3440, { rough: 0.1 }), cx = 59, cy = 10;
+      build() { const m = new AF.Model(118, 30, 82), S = C(0xe4e8ee, { metal: 0.35, rough: 0.35 }), Bl = C(0x2d4a8a), K = C(0x1a1a1a), G = C(0x2a3440, { rough: 0.1 }), cx = 59, cy = 10;
         fuselage(m, cx, cy, 2, 72, 2, 6, S, (x, y, z) => (y === 2 && z % 3 === 0 && z > 14 && z < 64 && Math.abs(x) > 4) ? G : (y === -1 && Math.abs(x) >= 5) ? Bl : null); fuselage(m, cx, cy, 72, 80, 6, 3, S, (x, y) => (y > 2 ? G : null));
         wing(m, 0, 118, cy - 3, 48, 62, S, Bl); wing(m, cx - 20, cx + 21, cy + 1, 2, 10, S); for (let y = 0; y < 12; y++) for (let z = 1; z < 10 - (y >> 1); z++) m.set(cx, cy + 1 + y, z, Bl);
         for (const s of [-22, 22]) { fuselage(m, cx + s, cy - 2, 50, 66, 2.5, 3, S); for (let y = 0; y < cy - 4; y++) m.set(cx + s, y, 60, K); for (let z = 58; z < 63; z++) for (let y = 0; y < 3; y++) m.set(cx + s, y, z, K); }

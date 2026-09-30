@@ -22,7 +22,7 @@ try {
       for (let k = -4; k < 4; k++) { const zz = RW.z + k * 2.6 + 0.4; paint(Math.min(ex, ex + dir * 12), zz, Math.max(ex, ex + dir * 12), zz + 1.6, () => white); }
       const txt = dir > 0 ? '09' : '27', tm = AF.textModel(txt, 1, { pad: 0, font: 'deco' });
       for (let i = 0; i < tm.w; i++) for (let j = 0; j < tm.h; j++) if (tm.get(i, j, 0)) {
-        const u = ex + dir * (16 + (tm.h - 1 - j) * 1.0), v = RW.z + (dir > 0 ? (i - tm.w / 2) : (tm.w / 2 - i)) * 1.0;
+        const u = ex + dir * (16 + j * 1.0), v = RW.z + (dir > 0 ? (i - tm.w / 2) : (tm.w / 2 - i)) * 1.0;
         paint(u - 0.5, v - 0.5, u + 0.5, v + 0.5, () => white);
       }
     }

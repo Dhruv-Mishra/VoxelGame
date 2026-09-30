@@ -56,6 +56,7 @@ try {
   #ui #h-prompt b{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;border-radius:8px;background:var(--gold);color:#1b1408;font-weight:700}
   #ui.touch #h-prompt{bottom:auto;top:60%;padding:12px 20px 12px 12px;font-size:16px}
   #ui #h-toasts{position:absolute;left:50%;top:max(14px,env(safe-area-inset-top));transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;width:min(520px,62vw);pointer-events:none}
+  @media (max-width:900px){#ui #h-toasts{width:min(420px,46vw)}}
   #ui #h-toasts .panel{padding:8px 16px;font-size:14px;text-align:center;animation:uiIn .3s ease;transition:opacity .5s}
   @keyframes uiIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
   #ui #h-hint{position:absolute;left:50%;bottom:max(16px,env(safe-area-inset-bottom));transform:translateX(-50%);padding:5px 14px;border-radius:999px;font-size:12px;color:var(--dim);display:none;white-space:nowrap}
