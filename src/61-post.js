@@ -198,7 +198,7 @@ try {
     const sampleCounts = isGL2 ? gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES) : [];
     const depthSamples = isGL2 ? gl.getInternalformatParameter(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, gl.SAMPLES) : [];
     const msaa = () => {
-      const want = isGL2 && tier() !== 'low' && P.quality !== 'low' ? (tier() === 'high' ? 2 : 4) : 0;
+      const want = isGL2 && tier() !== 'low' && !AF.GFX.lite && P.quality !== 'low' ? (tier() === 'high' ? 2 : 4) : 0;
       for (const count of sampleCounts) if (count <= want && depthSamples.includes(count)) return count;
       return 0;
     };
@@ -217,7 +217,7 @@ try {
     comp.setPixelRatio(pr);
     comp.setSize(size.x, size.y);
     // copy quad (scene RT -> chain)
-    const copy = new X.ShaderPass({ uniforms: { tDiffuse: { value: null } }, vertexShader: VS, fragmentShader: 'uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ gl_FragColor = clamp(texture2D(tDiffuse, vUv), 0.0, 60000.0); }' });   // clamp also scrubs NaN/Inf (never let one pixel poison the bloom chain)
+    const copy = new X.ShaderPass({ uniforms: { tDiffuse: { value: null } }, vertexShader: VS, fragmentShader: 'uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ gl_FragColor = clamp(texture2D(tDiffuse, vUv), 0.0, 64.0); }' });   // above the sun disc (~26); also scrubs NaN/Inf so one pixel can't poison the bloom chain
     noDepth(copy);
     // P.renderPass keeps the RenderPass API (scene/camera) for anyone who pokes at it
     P.renderPass = new X.RenderPass(S, C);
@@ -353,7 +353,7 @@ try {
       const skyU = AF.atmos && AF.atmos.skyU;
       if (skyU) tc.copy(skyU.uSunCol.value); else tc.setRGB(1, 0.8, 0.55);
       U.uSunCol.value.copy(tc);
-      const raysOn = P.raysEnabled && T !== 'low';
+      const raysOn = P.raysEnabled && T !== 'low' && !AF.GFX.lite;
       P.rays.k = raysOn ? onScreen * (0.35 + 0.65 * golden) * (1 - n) : 0;
       U.uRaysK.value = P.rays.k * AF.lerp(0.9, 1.4, ind) * 1.05;
       U.tRays.value = P.rays.k > 0.004 && P.rays.out ? P.rays.out.texture : null;
@@ -391,6 +391,7 @@ try {
         u.uDof.value = P.dof; u.uFocusZ.value = Math.max(0.5, P.focusZ); u.uNF.value.set(cam.near, cam.far);
       }
       P.fxaa.enabled = msaa() === 0;
+      if (P.aoPass) P.aoPass.enabled = T !== 'low' && !AF.GFX.lite && !AF.Q.has('noao');   // off: skip its full-screen composite too
     };
     P.adapt = () => {};   // the GFX tier (R1) handles adaptive quality now
     AF.renderFrame = () => {

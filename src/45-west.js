@@ -9,6 +9,8 @@ try {
   const col = K.col = (hex, o) => { const k = hex + JSON.stringify(o || {}); let c = cache.get(k); if (!c) { c = AF.col(hex, Object.assign({ jitter: 0.15, edge: 0.25 }, o || {})); cache.set(k, c); } return c; };
   const glow = K.glow = (hex, k = 2.2, mode = 'always') => col(hex, { emit: hex, emitK: k, mode, jitter: 0, edge: 0.1 });
   const smoothC = K.smooth = (hex, o) => col(hex, Object.assign({ smooth: true }, o || {}));
+  // white ceilings carry a faint self-light: indoor fill is cut and nothing lights them from above
+  const ceilC = () => glow(0xf2ede4, 0.3, 'always');
 
   // ---- a local frame on a plot: u = metres back from the lane, v = metres along the lane (from the plot's z0)
   K.frame = (pl) => {
@@ -20,6 +22,7 @@ try {
       rotBack: s < 0 ? 3 : 1,
       inYaw: s < 0 ? -PI / 2 : PI / 2,     // from the front door into the house
       w: (u, v) => [X(u), Z(v)],
+      u: (x) => (x - fx) * dir,
       box: (u0, v0, u1, v1) => [Math.min(X(u0), X(u1)), Math.min(Z(v0), Z(v1)), Math.max(X(u0), X(u1)), Math.max(Z(v0), Z(v1))],
       fill(u0, y0, v0, u1, y1, v1, c) { const b = F.box(u0, v0, u1, v1); W.fill(b[0], y0, b[1], b[2], y1, b[3], c); },
       clear(u0, y0, v0, u1, y1, v1) { F.fill(u0, y0, v0, u1, y1, v1, 0); },
@@ -39,12 +42,12 @@ try {
 
   // ---- themes (walls, trims, floors, accents) per friend; the rest of the colony picks from the pastel set
   const TH = K.themes = {
-    dhruv:   { name: "Dhruv's House",   wall: 0xf1f3f6, trim: 0x2d3e57, accent: 0x3aa0ff, roof: 0x3b4658, floor: 0x9a6a3e, rug: 0x2d4a7a, sofa: 0x3d4f78, door: 0x2d3e57 },
-    hunar:   { name: "Hunar's Dreamhouse", wall: 0xf7b6cf, trim: 0xffffff, accent: 0xff4fa3, roof: 0xe86aa6, floor: 0xf6d9e6, rug: 0xff7fbf, sofa: 0xff5fae, door: 0xffffff },
-    tanishk: { name: "Tanishk's House", wall: 0x2e2e33, trim: 0xd4a84a, accent: 0xf7931a, roof: 0x1d1d20, floor: 0x3a3a40, rug: 0x7a5a1a, sofa: 0x202024, door: 0xd4a84a },
-    diksha:  { name: "Diksha's House",  wall: 0xdcc8f0, trim: 0xfaf6ff, accent: 0x8e5ad6, roof: 0x7a4fb8, floor: 0xe8dcc8, rug: 0xc27ad6, sofa: 0xb68ae0, door: 0x7a4fb8 },
-    kush:    { name: "Kush & Divyangana's House", wall: 0xeaf1e6, trim: 0x2f7a4a, accent: 0x3bbf6a, roof: 0x2a5a3a, floor: 0xa8773f, rug: 0x2f7a4a, sofa: 0x5a8a5a, door: 0x2f7a4a },
-    kaybee:  { name: "Kaybee's House",  wall: 0xf3e3c3, trim: 0xb8322a, accent: 0xf2c21b, roof: 0x8a2a22, floor: 0x8a5a34, rug: 0xb8322a, sofa: 0x6a4a2a, door: 0xb8322a },
+    dhruv:   { name: "Dhruv's House",   wall: 0xf1f3f6, trim: 0x2d3e57, accent: 0x3aa0ff, roof: 0x3b4658, floor: 0x9a6a3e, rug: 0x2d4a7a, sofa: 0x3d4f78, door: 0x2d3e57, board: 0x2d3e57, ink: 0xffffff, flag: 0xe8402a },
+    hunar:   { name: "Hunar's Dreamhouse", wall: 0xf7b6cf, trim: 0xffffff, accent: 0xff4fa3, roof: 0xe86aa6, floor: 0xf6d9e6, rug: 0xff7fbf, sofa: 0xff5fae, door: 0xffffff, board: 0xff4fa3, ink: 0xffffff, flag: 0xffffff },
+    tanishk: { name: "Tanishk's House", wall: 0x2e2e33, trim: 0xd4a84a, accent: 0xf7931a, roof: 0x1d1d20, floor: 0x9a7a5e, rug: 0x7a5a1a, sofa: 0x202024, door: 0xd4a84a, inner: 0xe6e0d4, board: 0x1d1d20, ink: 0xd4a84a, flag: 0xf7931a },
+    diksha:  { name: "Diksha's House",  wall: 0xdcc8f0, trim: 0xfaf6ff, accent: 0x8e5ad6, roof: 0x7a4fb8, floor: 0xe8dcc8, rug: 0xc27ad6, sofa: 0xb68ae0, door: 0x7a4fb8, board: 0x7a4fb8, ink: 0xffffff, flag: 0xff8fc8 },
+    kush:    { name: "Kush & Divyangana's House", wall: 0xeaf1e6, trim: 0x2f7a4a, accent: 0x3bbf6a, roof: 0x2a5a3a, floor: 0xa8773f, rug: 0x2f7a4a, sofa: 0x5a8a5a, door: 0x2f7a4a, board: 0x2f7a4a, ink: 0xffffff, flag: 0xf2c21b },
+    kaybee:  { name: "Kaybee's House",  wall: 0xf3e3c3, trim: 0xb8322a, accent: 0xf2c21b, roof: 0x8a2a22, floor: 0xa06e42, rug: 0xb8322a, sofa: 0x6a4a2a, door: 0xb8322a, board: 0xb8322a, ink: 0xf2c21b, flag: 0xf2c21b },
   };
   const FILLER = [
     { wall: 0xe9e2d0, trim: 0x5a6a7a, roof: 0x4a5058, door: 0x6a4028 }, { wall: 0xd9e6ec, trim: 0x2f4f6a, roof: 0x34414e, door: 0x2f4f6a },
@@ -81,6 +84,7 @@ try {
 
   // ------------------------------------------------------------ one house: shell, garage, yard; interior only for the friends
   const FLOOR = 0.5, CEIL = 3.75, UPPER = 4, TOP = 7.25;
+  const WIN_F = [[4, 8.75], [13.25, 22.75]];   // front windows, both storeys
   const house = (pl, th, owner) => {
     const F = K.frame(pl);
     const wall = col(th.wall, { pat: 'stucco', rough: 0.9, jitter: 0.12 }), trim = col(th.trim, { rough: 0.5 }), roof = col(th.roof, { pat: 'none', patTop: 'tar' });
@@ -91,8 +95,8 @@ try {
     F.paint(0, 9.5, 8, 12.5, path); F.paint(0, 24.5, 8.25, 33, drive);
     const hedge = col(0x3f6a2e, { jitter: 0.7 });
     F.fill(8, 0.25, 0, 50, 1.25, 0.5, hedge); F.fill(8, 0.25, 33.5, 50, 1.25, 34, hedge); F.fill(49.5, 0.25, 0, 50, 1.25, 34, hedge);
-    // mailbox + porch lamp post
-    F.fill(1.0, 0.25, 8.0, 1.25, 1.25, 8.25, col(0x2a2a2a)); F.fill(0.75, 1.25, 7.75, 1.5, 1.75, 8.5, trim);
+    // neighbours' voxel mailbox (friends get a name board + mailbox prop)
+    if (!owner) { F.fill(1.0, 0.25, 8.0, 1.25, 1.25, 8.25, col(0x2a2a2a)); F.fill(0.75, 1.25, 7.75, 1.5, 1.75, 8.5, trim); }
     // ---- house body: 16 x 21 m, two storeys, flat roof with parapet
     F.fill(8, 0.25, 3, 24, FLOOR, 24, trim);                                    // plinth / floor slab
     F.fill(8, FLOOR, 3, 24, TOP, 24, wall);                                     // solid, carved below
@@ -100,7 +104,10 @@ try {
     F.fill(7.75, TOP - 0.25, 2.75, 24.25, TOP + 0.5, 24.25, trim); F.clear(8.25, TOP, 3.25, 23.75, TOP + 0.5, 23.75);   // parapet
     F.fill(8.25, TOP - 0.25, 3.25, 23.75, TOP, 23.75, roof);
     // upper storey windows: facade-only rooms (lit at night by the shader)
-    for (const [v0, v1] of [[4.5, 9], [12, 16], [18.5, 22.5]]) F.fill(8, CEIL + 1, v0, 8.25, CEIL + 2.75, v1, owner ? glass : AF.MAT.winApartment);
+    for (const [v0, v1] of owner ? WIN_F : [[4.5, 8.5], [13.5, 22.5]]) {
+      F.fill(8, CEIL + 1, v0, 8.25, CEIL + 2.75, v1, owner ? glass : AF.MAT.winApartment);
+      if (owner) F.fill(8, CEIL + 0.75, v0 - 0.25, 8.25, CEIL + 1, v1 + 0.25, frameC);
+    }
     for (const [u0, u1] of [[10, 14], [17, 22]]) { F.fill(u0, CEIL + 1, 3, u1, CEIL + 2.75, 3.25, owner ? glass : AF.MAT.winApartment); F.fill(u0, CEIL + 1, 23.75, u1, CEIL + 2.75, 24, owner ? glass : AF.MAT.winApartment); }
     // front door
     const doorV0 = 10, doorV1 = 11.75;
@@ -131,24 +138,23 @@ try {
     }
     // ---- a friend's house: open door, carved ground floor, big windows
     F.clear(8.25, FLOOR, 3.25, 23.75, CEIL, 23.75);                           // the room
-    F.fill(8.25, CEIL - 0.25, 3.25, 23.75, CEIL, 23.75, smoothC(0xf6f2ea));   // ceiling
+    F.fill(8.25, CEIL - 0.25, 3.25, 23.75, CEIL, 23.75, ceilC());   // ceiling
     F.fill(8.25, 0.25, 3.25, 23.75, FLOOR, 23.75, col(th.floor, { pat: 'none', patTop: 'parquet', rough: 0.45 }));
     F.clear(7.75, FLOOR, doorV0, 8.5, 2.75, doorV1);
     F.fill(7.75, 2.75, doorV0, 8.25, 3.0, doorV1, trim);
     F.place(PROPS.lintel(1.75, th.trim), 8.125, FLOOR + 2.125, (doorV0 + doorV1) / 2, F.rotLane);
     F.fill(8, FLOOR - 0.05, doorV0, 8.25, FLOOR, doorV1, trim);
-    for (const [v0, v1] of [[4, 8.75], [13.25, 22.75]]) { F.fill(8, 1.25, v0, 8.25, 3.0, v1, glass); F.fill(8, 1.0, v0 - 0.25, 8.25, 1.25, v1 + 0.25, frameC); }
+    for (const [v0, v1] of WIN_F) { F.fill(8, 1.25, v0, 8.25, 3.0, v1, glass); F.fill(8, 1.0, v0 - 0.25, 8.25, 1.25, v1 + 0.25, frameC); }
     for (const [u0, u1] of [[10, 14], [17, 22]]) { F.fill(u0, 1.25, 3, u1, 3.0, 3.25, glass); F.fill(u0, 1.25, 23.75, u1, 3.0, 24, glass); }
     F.fill(23.75, 1.25, 12, 24, 3.0, 16, glass);
     // ceiling lights (emissive) + two interior light sources
-    for (const [u, v] of [[12, 8], [12, 18], [20, 8], [20, 18]]) F.fill(u - 0.5, CEIL - 0.5, v - 0.5, u + 0.5, CEIL - 0.25, v + 0.5, glow(0xfff4dc, 1.8, 'night'));
+    for (const [u, v] of [[12, 8], [12, 18], [20, 8], [20, 18]]) F.fill(u - 0.5, CEIL - 0.5, v - 0.5, u + 0.5, CEIL - 0.25, v + 0.5, glow(0xfff4dc, 1.5, 'always'));
     for (const [u, v] of [[12, 13], [20, 13]]) { const [x, z] = F.w(u, v); AF.addLight({ x, y: CEIL - 0.6, z, color: 0xffe6c0, intensity: 1.1, range: 11, kind: 'interior' }); }
     AF.addLight({ x: dx - F.dir * 0.8, y: 3.2, z: dz, color: 0xffd9a0, intensity: 0.7, range: 7, kind: 'porch' });
-    // common furniture: kitchen corner (front-left), a bed at the back-left
-    FU.counter(F, 8.25, 3.25, 13, 4.25, shade(th.trim, 1), 0xeeeae0); FU.counter(F, 8.25, 3.25, 9.25, 7, shade(th.trim, 1));
-    F.fill(10.5, 1.5, 3.25, 12, 2.25, 3.5, col(0xd8dde2, { metal: 0.9, rough: 0.25 }));
-    FU.table(F, 10, 5.5, 12, 7.5, 0xf2eee6);
-    FU.plant(F, 8.75, 22.75, true); FU.plant(F, 22.75, 12.5, false);
+    // common furniture: a kitchen run along the side wall under its window, a dining table by the front window
+    FU.counter(F, 8.25, 3.25, 14, 4.25, th.trim, 0xeeeae0);
+    FU.table(F, 9.75, 6, 11.75, 7, 0xf2eee6);
+    FU.plant(F, 8.75, 22.75, true);
     rec.F = F; rec.th = th;
     return rec;
   };
@@ -168,7 +174,8 @@ try {
   const INTERIOR = {};
   const SCREEN_THEME = { dhruv: 3, hunar: 7, tanishk: 2, diksha: 6, kush: 4, kaybee: 4 };
   const TV_THEME = { dhruv: 1, hunar: 0, tanishk: 5, diksha: 6, kush: 4, kaybee: 7 };
-  const SIGNS = { dhruv: ['console.log', 0x3affd0], hunar: ['Barbie', 0xff4fa3, { font: 'script' }], tanishk: ['HODL', 0xf7931a], diksha: ['Eras', 0xd6b1e8, { font: 'script' }], kush: ['Kush & Div', 0xff4f7a, { font: 'script' }], kaybee: ['ONE PIECE', 0xf2c21b] };
+  // back-wall neon: [text, colour, opts, v centre, y bottom] placed clear of the patio window, doors and tall furniture
+  const SIGNS = { dhruv: ['console.log', 0x3affd0, { font: 'script', vs: 1 / 20 }, 20, 2.2], hunar: ['Barbie', 0xff4fa3, { font: 'script' }, 20.9, 2.3], tanishk: ['HODL', 0xf7931a, {}, 21.2, 2.4], diksha: ['Eras', 0xd6b1e8, { font: 'script' }, 17.9, 2.3], kush: ['Kush & Div', 0xff4f7a, { font: 'script', vs: 1 / 20 }, 18.3, 2.4], kaybee: ['ONE PIECE', 0xf2c21b, {}, 9, 2.4] };
   for (const owner of Object.keys(TH)) INTERIOR[owner] = (F, th) => {
     FU.rug(F, 9.5, 13.5, 13.75, 19, th.rug, th.accent);
     F.place(PROPS.sofa(th.sofa), 11.75, FLOOR, 17, 2);
@@ -176,53 +183,52 @@ try {
     F.place(PROPS.tvStand(th.trim), 11.75, FLOOR, 12.5, 0);
     F.place(PROPS.monitorStand(), 11.75, FLOOR + 0.5, 12.5, 0);
     FU.screen(F, 11.0625, 1.125, 12.6, 12.4375, 1.875, 12.6, TV_THEME[owner]);
-    for (const v of [6, 7.5]) F.place(PROPS.chair(th.trim), 12.75, FLOOR, v, F.rotLane);
+    for (const [u, v, r] of [[10.25, 5.35, 0], [11.25, 5.35, 0], [10.25, 7.65, 2], [11.25, 7.65, 2]]) F.place(PROPS.chair(th.trim), u, FLOOR, v, r);
+    F.place(PROPS.plant(false), 23.1, FLOOR, 16.6, 0);
     const desk = (v, count, tile) => {
-      F.place(PROPS.worktable(1.875, 0.75, 0.75, th.trim, th.trim), 22.25, FLOOR, v, F.rotLane);
-      F.place(PROPS.chair(th.sofa), 21.25, FLOOR, v, F.rotBack);
+      F.place(PROPS.worktable(1.875, 0.75, 0.75, th.trim, th.trim), 23.3, FLOOR, v, F.rotLane);
+      F.place(PROPS.chair(th.sofa), 22.2, FLOOR, v, F.rotBack);
       for (let screen = 0; screen < count; screen++) {
         const sv = v + (screen - (count - 1) / 2) * 0.625;
-        F.place(PROPS.monitorStand(), 22.4, 1.25, sv, F.rotLane);
-        FU.screen(F, 22.32, 1.4375, sv - 0.28125, 22.32, 1.75, sv + 0.28125, tile);
-        if (owner === 'tanishk') FU.screen(F, 22.32, 1.875, sv - 0.28125, 22.32, 2.1875, sv + 0.28125, tile);
+        F.place(PROPS.monitorStand(), 23.45, 1.25, sv, F.rotLane);
+        FU.screen(F, 23.37, 1.4375, sv - 0.28125, 23.37, 1.75, sv + 0.28125, tile);
+        if (owner === 'tanishk') FU.screen(F, 23.37, 1.875, sv - 0.28125, 23.37, 2.1875, sv + 0.28125, tile);
       }
-      F.place(PROPS.desklamp(th.accent), 22.25, 1.25, v + 0.8, 0);
-      F.place(PROPS.tower(th.accent), 22.25, FLOOR, v + 1.1, F.rotLane);
+      F.place(PROPS.desklamp(th.accent), 23.3, 1.25, v + 0.8, 0);
+      F.place(PROPS.tower(th.accent), 23.3, FLOOR, v + 1.15, F.rotLane);
     };
     if (owner === 'dhruv' || owner === 'tanishk') {
       desk(18, 3, SCREEN_THEME[owner]);
-      F.place(PROPS.bench(th.trim), 16, FLOOR, 5.75, 0);
-      F.place(PROPS.treadmill(), 20, FLOOR, 6, F.rotLane);
-      F.place(PROPS.weights(), 16, FLOOR, 9, 0);
-      F.place(PROPS.safe(), 23, FLOOR, 9.5, F.rotLane);
+      F.place(PROPS.bench(th.trim), 17, FLOOR, 6, 0);
+      F.place(PROPS.treadmill(), 20.5, FLOOR, 8.5, F.rotLane);
+      F.place(PROPS.weights(), 17, FLOOR, 9.5, 0);
+      F.place(PROPS.safe(), 23.3, FLOOR, 10.5, F.rotLane);
     } else if (owner === 'hunar') {
-      F.place(PROPS.worktable(1.25, 0.5, 0.75, th.trim, th.trim), 20, FLOOR, 5, 0);
-      F.place(PROPS.mirror(), 20, 1.375, 4.9, 0);
-      F.place(PROPS.desklamp(th.accent), 20.5, 1.25, 5, 0);
-      F.place(PROPS.chair(th.sofa), 20, FLOOR, 6, 0);
-      F.place(PROPS.wardrobe(th.accent), 23, FLOOR, 18, F.rotLane);
-      FU.shelf(F, 22.75, 8, 23.5, 10, 2.5, th.trim, [smoothC(th.accent), smoothC(0xffffff), smoothC(0xe8c23a)]);
+      F.place(PROPS.worktable(1.25, 0.5, 0.75, th.trim, th.trim), 23.45, FLOOR, 8, F.rotLane);
+      F.place(PROPS.mirror(), 23.65, 1.4, 8, F.rotLane);
+      F.place(PROPS.desklamp(th.accent), 23.45, 1.25, 8.45, 0);
+      F.place(PROPS.chair(th.sofa), 22.65, FLOOR, 8, F.rotBack);
+      F.place(PROPS.wardrobe(th.accent), 23.3, FLOOR, 18, F.rotLane);
+      FU.shelf(F, 23.2, 9.5, 23.5, 11.5, 2.5, th.trim, [smoothC(th.accent), smoothC(0xffffff), smoothC(0xe8c23a)]);
     } else if (owner === 'diksha') {
-      F.place(PROPS.piano(), 22.75, FLOOR, 15, F.rotLane);
-      F.place(PROPS.chair(th.sofa), 21.75, FLOOR, 15, F.rotBack);
-      F.place(PROPS.guitar(), 22.5, FLOOR, 18, F.rotLane);
-      FU.shelf(F, 22.75, 19.5, 23.5, 21.5, 2.5, th.trim, [smoothC(th.accent), smoothC(0xd6b1e8), smoothC(0xff8fc8)]);
+      F.place(PROPS.piano(), 23.4, FLOOR, 17.9, F.rotLane);
+      F.place(PROPS.chair(th.sofa), 22.35, FLOOR, 17.9, F.rotBack);
+      F.place(PROPS.guitar(), 23.5, FLOOR, 19.4, F.rotLane);
+      FU.shelf(F, 23.2, 20.6, 23.5, 22.6, 2.5, th.trim, [smoothC(th.accent), smoothC(0xd6b1e8), smoothC(0xff8fc8)]);
     } else {
-      desk(6, 1, 4);
+      desk(owner === 'kush' ? 8.5 : 6, 1, 4);
       F.place(PROPS.console(), 12.25, FLOOR + 0.5, 12.5, 0);
-      F.place(PROPS.arcade(th.trim), 22.8, FLOOR, 20, F.rotLane);
-      FU.screen(F, 22.28, 1.625, 19.71875, 22.28, 2.125, 20.28125, 4);
-      F.place(PROPS.safe(), 22.8, FLOOR, 10, F.rotLane);
+      F.place(PROPS.arcade(th.trim), 23.3, FLOOR, 20, F.rotLane);
+      FU.screen(F, 22.78, 1.625, 19.71875, 22.78, 2.125, 20.28125, 4);
+      F.place(PROPS.safe(), 23.3, FLOOR, owner === 'kush' ? 10.6 : 10.5, F.rotLane);
       if (owner === 'kaybee') {
-        F.place(PROPS.chest(), 22, FLOOR, 22.5, 0);
+        F.place(PROPS.chest(), 22, FLOOR, 23.2, 2);
         F.place(PROPS.worktable(1, 1, 0.75, th.floor, th.trim), 19, FLOOR, 16, 0);
         F.place(PROPS.chess(), 19, 1.25, 16, 0);
-        F.place(PROPS.hat(), 22.25, 1.25, 6.6, 0);
-      } else {
-        F.place(PROPS.chair(0xff6fae), 20.5, FLOOR, 7, F.rotBack);
+        F.place(PROPS.hat(), 23.3, 1.25, 5.4, 0);
       }
     }
-    return { sign: SIGNS[owner], sign2: owner === 'tanishk' ? ['BTC', th.accent] : owner === 'diksha' ? ['13', th.accent] : null, npc: owner === 'dhruv' || owner === 'tanishk' ? [21.25, 18, 'sit', 'back'] : owner === 'kaybee' ? [21.25, 6, 'sit', 'back'] : [11.25, 17, 'sit', 'v-'], npc2: owner === 'kush' ? [12.3, 17, 'sit', 'v-'] : null, flag: owner === 'kaybee' };
+    return { sign: SIGNS[owner], sign2: owner === 'tanishk' ? ['BTC', th.accent, 5.5] : owner === 'diksha' ? ['13', th.accent, 9] : null, npc: owner === 'dhruv' || owner === 'tanishk' ? [22.2, 18, 'sit', 'back'] : owner === 'kaybee' ? [22.2, 6, 'sit', 'back'] : [11.25, 17, 'sit', 'v-'], npc2: owner === 'kush' ? [12.3, 17, 'sit', 'v-'] : null, flag: owner === 'kaybee' };
   };
 
   // ------------------------------------------------------------ friend homes v2: a distinct silhouette per friend, a bathroom annex, a kitchen
@@ -277,6 +283,40 @@ try {
     chair: (hex) => pm('pchair' + hex, () => M16(8, 14, 8, (m) => { const c = smoothC(hex); for (const [x, z] of [[0, 0], [7, 0], [0, 7], [7, 7]]) m.box(x, 0, z, x + 1, 6, z + 1, c); m.box(0, 6, 0, 8, 7, 8, c); m.box(0, 7, 0, 8, 14, 1, c); })),
     float: () => pm('float', () => M16(14, 8, 14, (m) => { const p = smoothC(0xff7fbf); for (let x = 0; x < 14; x++) for (let z = 0; z < 14; z++) { const d = Math.hypot(x - 6.5, z - 6.5); if (d < 7 && d > 3.5) m.box(x, 0, z, x + 1, 2, z + 1, p); } m.box(9, 2, 5, 11, 7, 7, p); m.box(9, 7, 5, 13, 8, 7, p); m.set(12, 6, 6, smoothC(0x1a1a1a)); })),
     hottub: () => pm('hottub', () => M16(36, 12, 36, (m) => { const w = smoothC(0x2a2a2e), g = col(0xd4a84a, { metal: 1, rough: 0.25 }); m.box(0, 0, 0, 36, 12, 36, w); m.box(0, 11, 0, 36, 12, 36, g); m.box(2, 3, 2, 34, 12, 34, 0); m.box(2, 3, 2, 34, 9, 34, col(0x6ad8e8, { glass: true, jitter: 0.02, edge: 0 })); })),
+    // square spindles every 0.25 m under a voxel handrail (length along z)
+    balusters: (len, hex) => pm('balusters' + [len, hex], () => M16(1, 12, Math.round(len * 16), (m) => { const c = smoothC(hex); for (let z = 2; z < m.d; z += 4) m.box(0, 0, z, 1, 12, z + 1, c); })),
+    // the open-side balustrade of the 14-step stair: spindles on each tread under a raking 2-voxel handrail
+    stairRail: (hex) => pm('stairRail' + hex, () => M16(1, 74, 112, (m) => {
+      const c = smoothC(hex), top = (z) => Math.round(z / 2 + 14);
+      for (let z = 0; z < 112; z++) m.box(0, top(z), z, 1, top(z) + 2, z + 1, c);
+      for (let s = 0; s < 14; s++) { const z = s * 8 + 4; m.box(0, (s + 1) * 4, z, 1, top(z), z + 1, c); }
+      m.box(0, 4, 0, 1, top(0) + 3, 2, c);
+    })),
+    // painted name board on two posts (1/64 m, ~0.9 m wide, top 1.2 m): letters proud of the board, a darker rim.
+    // One name: deco caps at 2 voxels per pixel; two lines: the plainer 5x7 caps (deco blurs at 1 voxel strokes).
+    nameBoard: (lines, board, ink) => pm('board' + [lines, board, ink], () => {
+      const one = lines.length === 1, S = one ? 2 : 1, gap = 3, bc = smoothC(board), rim = smoothC(shade(board, 0.65)), ic = smoothC(ink), post = smoothC(0x5a4030);
+      const glyph = one ? (ch) => { const g = AF.fontDeco[ch] || AF.fontDeco['?']; return { w: g.w, h: 9, on: (c, r) => g.rows[r][c] === '#' }; }
+        : (ch) => { const g = AF.font5x7[ch] || AF.font5x7['?']; return { w: 5, h: 7, on: (c, r) => !!(g[r] & (1 << (4 - c))) }; };
+      const L = lines.map((str) => { const gl = [...str].map(glyph); return { gl, w: gl.reduce((a, g) => a + g.w * S, 0) + (gl.length - 1) * S }; });
+      const W = Math.max(58, Math.max(...L.map((l) => l.w)) + 8), lineH = L[0].gl[0].h * S, total = L.length * lineH + (L.length - 1) * gap;
+      return K.model(W, 77, 5, (m) => {
+        for (const x of [5, W - 8]) m.box(x, 0, 1, x + 3, 51, 4, post);
+        m.box(0, 51, 0, W, 77, 3, bc); m.box(0, 51, 3, W, 53, 4, rim); m.box(0, 75, 3, W, 77, 4, rim); m.box(0, 53, 3, 2, 75, 4, rim); m.box(W - 2, 53, 3, W, 75, 4, rim);
+        L.forEach(({ gl, w }, li) => {
+          let x = Math.round((W - w) / 2);
+          const y0 = 51 + Math.round((26 + total) / 2) - (li + 1) * lineH - li * gap;
+          for (const g of gl) { for (let r = 0; r < g.h; r++) for (let cc = 0; cc < g.w; cc++) if (g.on(cc, r)) m.box(x + cc * S, y0 + (g.h - 1 - r) * S, 3, x + (cc + 1) * S, y0 + (g.h - r) * S, 4, ic); x += (g.w + 1) * S; }
+        });
+      }, 1 / 64);
+    }),
+    // kerbside mailbox on a post (top ~1.1 m), door to +z, flag raised on the +x side
+    mailbox: (body, flag) => pm('mailbox' + [body, flag], () => M16(8, 20, 10, (m) => {
+      const b = smoothC(body), d = smoothC(shade(body, 0.75)), post = smoothC(0x5a4030), f = smoothC(flag);
+      m.box(2, 0, 4, 4, 13, 6, post);
+      m.box(0, 13, 0, 6, 17, 10, b); m.box(1, 17, 0, 5, 18, 10, b); m.box(1, 14, 9, 5, 17, 10, d); m.set(3, 15, 10 - 1, smoothC(0xd8d4c8));
+      m.box(6, 14, 3, 7, 20, 4, smoothC(0x3a3a3e)); m.box(6, 17, 4, 7, 20, 7, f);
+    })),
   };
   const screenPositions = [], screenUVs = [], screenIndices = [];
   const screens = K.screens = { mesh: null, quads: 0, redraws: 0 };
@@ -412,36 +452,71 @@ try {
       F.clear(12, UPPER, 23.5, 13.25, UPPER + 2.25, 24.5);
       F.place(PROPS.lintel(1.25, th.trim), 12.625, UPPER + 2.125, 24, 0);
     }
-    F.fill(u0, UPPER, 10.5, u1, TOP - 0.25, 10.75, c.wall);
+    F.fill(u0, UPPER, 10.5, u1, TOP - 0.25, 10.75, c.inner);
     F.clear(13, UPPER, 10.25, 14.25, UPPER + 2.25, 11);
     F.place(PROPS.lintel(1.25, th.trim), 13.625, UPPER + 2.125, 10.625, 0);
+    // light ceilings under the roofs
+    const ceil = ceilC();
+    F.fill(u0, TOP - 0.5, 3.25, u1, TOP - 0.25, 23.75, ceil);
+    if (owner === 'kush') F.fill(8.25, TOP - 0.5, 24.25, 21.75, TOP - 0.25, 32.75, ceil);
+    if (owner === 'dhruv') F.fill(24, TOP - 0.5, 3.25, 29.75, TOP - 0.25, 11.75, ceil);
+    // stairs: a plastered stringer with wooden treads, balustrades both sides, a slim rail round the well upstairs
     F.clear(14.25, CEIL - 0.25, 11.25, 16, UPPER + 0.25, 19);
-    for (let step = 0; step < 14; step++) F.fill(14.5, FLOOR, 12 + step * 0.5, 15.75, FLOOR + (step + 1) * 0.25, 12.5 + step * 0.5, c.trim);
-    for (const edge of [14, 16]) F.fill(edge, UPPER, 11.25, edge + 0.25, UPPER + 1, 19, c.trim);
-    F.fill(14.25, UPPER, 11, 16, UPPER + 1, 11.25, c.trim);
-    F.level = UPPER;
-    FU.rug(F, 12.75, 4.5, 16.75, 9, th.rug, th.accent);
-    F.place(PROPS.bed(th.accent, th.trim), 14.75, UPPER, 6.75, 0);
-    for (const u of [13.5, 16]) {
-      F.place(PROPS.worktable(0.5, 0.5, 0.5, th.trim, th.trim), u, UPPER, 6, 0);
-      F.place(PROPS.desklamp(th.accent), u, UPPER + 0.5, 6, 0);
+    const tread = col(shade(th.floor, 0.9), { pat: 'none', rough: 0.5 }), rail = col(th.trim, { rough: 0.4 });
+    for (let step = 0; step < 14; step++) {
+      const v = 12 + step * 0.5, top = FLOOR + (step + 1) * 0.25;
+      if (step) F.fill(14.5, FLOOR, v, 15.75, top - 0.25, v + 0.5, c.inner);
+      F.fill(14.5, top - 0.25, v, 15.75, top, v + 0.5, tread);
     }
-    F.place(PROPS.wardrobe(th.trim), u1 - 0.65, UPPER, 8.5, F.rotLane);
+    for (const u of [14.5 + 1 / 32, 15.75 - 1 / 32]) F.place(PROPS.stairRail(th.trim), u, FLOOR, 15.5, 0);
+    for (const edge of [14, 16]) { F.fill(edge, UPPER + 0.75, 11.25, edge + 0.25, UPPER + 1, 19, rail); F.place(PROPS.balusters(7.75, th.trim), edge + 0.125, UPPER, 15.125, 0); }
+    F.fill(14, UPPER + 0.75, 11, 16.25, UPPER + 1, 11.25, rail); F.place(PROPS.balusters(1.75, th.trim), 15.125, UPPER, 11.125, 1);
+    F.level = UPPER;
+    // bedroom (v 3.25..10.5): bed against the partition, nightstands, wardrobe between the side windows
+    const ub = Math.min(17.5, u1 - 1.6);
+    FU.rug(F, ub - 1.6, 7, Math.min(ub + 1.6, u1 - 0.3), 10.25, th.rug, th.accent);
+    F.place(PROPS.bed(th.accent, th.trim), ub, UPPER, 10.5 - 17 / 16, 2);
+    for (const u of [ub - 1.11, ub + 1.11]) {
+      F.place(PROPS.worktable(0.5, 0.5, 0.5, th.trim, th.trim), u, UPPER, 10.2, 0);
+      F.place(PROPS.desklamp(th.accent), u, UPPER + 0.5, 10.2, 0);
+    }
+    F.place(PROPS.wardrobe(th.trim), 15.5, UPPER, 3.25 + 11 / 32, 0);
+    FU.plant(F, u0 + 0.6, 3.85, true);
+    // study (v 10.75..23.75): shelves on the partition, a desk between the side windows, a reading chair by the front window
     const books = [smoothC(th.accent), smoothC(0x588eac), smoothC(0xb84b48), smoothC(0xe7c25e), smoothC(0x579b72), smoothC(0xe9ddd1)];
-    for (const v of [13.5, 16.5, 22]) F.place(PROPS.books(1.5, 3, th.trim, books), u0 + 0.35, UPPER, v, F.rotBack);
-    F.place(PROPS.worktable(1.5, 0.75, 0.75, th.floor, th.trim), 14, UPPER, 22.75, 0);
-    F.place(PROPS.chair(th.sofa), 14, UPPER, 21.65, 0);
-    F.place(PROPS.monitorStand(), 14, UPPER + 0.75, 22.75, 2);
-    FU.screen(F, 13.71875, UPPER + 0.9375, 22.68, 14.28125, UPPER + 1.25, 22.68, SCREEN_THEME[owner]);
-    F.place(PROPS.desklamp(th.accent), 14.55, UPPER + 0.75, 22.75, 0);
+    const shelves = [];
+    for (let u = u0 + 1; u + 0.75 <= 13; u += 1.6) shelves.push(u);
+    if (u1 >= 19.75) shelves.push(17.25, 18.85);
+    for (const u of shelves) F.place(PROPS.books(1.5, 2.25, th.trim, books), u, UPPER, 10.75 + 0.1875, 0);
+    F.place(PROPS.worktable(1.5, 0.75, 0.75, th.floor, th.trim), 15.5, UPPER, 23.35, 0);
+    F.place(PROPS.chair(th.sofa), 15.5, UPPER, 22.4, 0);
+    F.place(PROPS.monitorStand(), 15.5, UPPER + 0.75, 23.4, 2);
+    FU.screen(F, 15.21875, UPPER + 0.9375, 23.33, 15.78125, UPPER + 1.25, 23.33, SCREEN_THEME[owner]);
+    F.place(PROPS.desklamp(th.accent), 16.05, UPPER + 0.75, 23.4, 0);
+    FU.rug(F, u0 + 0.5, 17.5, Math.min(u0 + 3.5, 13.75), 22.5, th.rug, th.accent);
     F.place(PROPS.sofa(th.sofa, 0.875), u0 + 1.25, UPPER, 20, F.rotBack);
-    FU.lamp(F, u0 + 0.5, 19.75);
-    if (owner === 'kaybee') F.place(PROPS.hat(), 16, UPPER + 0.5, 6, 0);
-    if (owner === 'diksha') F.place(PROPS.guitar(), u1 - 1, UPPER, 20, F.rotLane);
-    if (owner === 'hunar') F.place(PROPS.mirror(), u1 - 0.25, UPPER + 1.1, 8.5, F.rotLane);
+    FU.lamp(F, u0 + 0.45, 21.1);
+    FU.plant(F, u1 - 0.6, 23.1, true);
+    if (owner === 'kaybee') F.place(PROPS.hat(), ub, UPPER + 0.5625, 8.7, 0);
+    if (owner === 'diksha') F.place(PROPS.guitar(), u1 - 0.3, UPPER, 20, F.rotLane);
+    if (owner === 'hunar') F.place(PROPS.mirror(), u1 - 0.05, UPPER + 1.1, 5.5, F.rotLane);
     F.level = FLOOR;
     rec.upper = { y: UPPER, slab: F.w(14.75, 9.5), stair: F.w(15.125, 12), steps: 14, rise: 0.25, tread: 0.5 };
-    const light = F.w(14, 6.5); AF.addLight({ x: light[0], y: TOP - 0.7, z: light[1], color: th.accent, intensity: 0.5, range: 8, kind: 'interior' });
+    const lampC = glow(0xfff4dc, 1.5, 'always');
+    for (const [u, v] of [[ub, 6.5], [(u0 + u1) / 2, 17]]) {
+      F.fill(u - 0.5, TOP - 0.75, v - 0.5, u + 0.5, TOP - 0.5, v + 0.5, lampC);
+      const [x, z] = F.w(u, v); AF.addLight({ x, y: TOP - 1.1, z, color: 0xffe6c0, intensity: 0.8, range: 9, kind: 'interior' });
+    }
+  };
+  // an inner plaster skin over walls of material `wallM` (dark facades get light rooms); skips glass, trim and openings
+  const lineWalls = (F, u0, v0, u1, v1, y0, y1, wallM, liner) => {
+    const q = 0.25, h = q / 2;
+    const skin = (ou, ov, iu, iv) => {
+      const [ox, oz] = F.w(ou + h, ov + h), [ix, iz] = F.w(iu + h, iv + h);
+      for (let y = y0; y < y1; y += q) if (W.getM(ox, y + h, oz) === wallM && !W.getM(ix, y + h, iz)) W.setM(ix, y + h, iz, liner);
+    };
+    for (let v = v0; v < v1; v += q) { skin(u0 - q, v, u0, v); skin(u1, v, u1 - q, v); }
+    for (let u = u0; u < u1; u += q) { skin(u, v0 - q, u, v0); skin(u, v1, u, v1 - q); }
   };
   // sunken pool (heightmap basin + stepped entry + a water plane), in plot coordinates
   const yardPool = (F, u0, v0, u1, v1, tileHex, copingHex) => {
@@ -473,22 +548,22 @@ try {
     const wall = col(th.wall, { pat: 'stucco', rough: 0.9, jitter: 0.12 }), trim = col(th.trim, { rough: 0.5 }), roof = col(th.roof, { pat: 'none', patTop: 'tar' });
     const glass = col(0xa9c9d6, { glass: true, jitter: 0.05, edge: 0 }), win = AF.MAT.winApartment;
     // ---- kitchen: fridge, a cooktop, a sink with a tap
-    F.place(PROPS.fridge(), 8.75, FLOOR, 7.5, F.rotBack);
-    F.place(PROPS.cooktop(), 11.5, FLOOR + 0.875, 3.75, 0);
-    F.place(PROPS.kitchenSink(), 8.75, FLOOR + 0.875, 5.5, F.rotBack);
+    F.place(PROPS.fridge(), 14.55, FLOOR, 3.66, 0);
+    F.place(PROPS.cooktop(), 9.5, FLOOR + 0.875, 3.75, 0);
+    F.place(PROPS.kitchenSink(), 12, FLOOR + 0.875, 3.6, 0);
     // ---- the bathroom annex behind the house
     const dv = BATH_V[owner] ?? (owner === 'tanishk' ? 6.75 : 5), a = dv - 1.25, b = a + 5.5;
     F.fill(24, 0.25, a, 29.5, CEIL, b, wall); F.fill(23.75, CEIL - 0.25, a - 0.25, 29.75, CEIL, b + 0.25, trim);
     F.clear(24, FLOOR, a + 0.25, 29.25, CEIL - 0.25, b - 0.25);
     F.fill(24, 0.25, a + 0.25, 29.25, FLOOR, b - 0.25, col(0xe8eef2, { pat: 'none', patTop: 'slab', rough: 0.3 }));
-    F.fill(24, CEIL - 0.5, a + 0.25, 29.25, CEIL - 0.25, b - 0.25, smoothC(0xf6f2ea));
+    F.fill(24, CEIL - 0.5, a + 0.25, 29.25, CEIL - 0.25, b - 0.25, ceilC());
     F.clear(23.5, FLOOR, dv, 24.5, 2.75, dv + 1.25);
     F.place(PROPS.lintel(1.25, th.trim), 24, FLOOR + 2.125, dv + 0.625, F.rotLane);
     F.fill(29.25, 1.75, a + 2, 29.5, 2.75, a + 3.5, glass);
     F.place(PROPS.toilet(), 28.75, FLOOR, a + 1, F.rotLane);
-    F.place(PROPS.sink(), 28.9, FLOOR, a + 2.75, F.rotLane); F.place(PROPS.mirror(), 29.2, 1.75, a + 2.75, F.rotLane);
+    F.place(PROPS.sink(), 27.75, FLOOR, b - 0.55, 2);
     F.place(PROPS.tub(), 25.4, FLOOR, a + 4.1, (F.rotLane + 1) % 4);
-    F.fill(26.5, CEIL - 0.75, a + 2.25, 27.25, CEIL - 0.5, a + 3, glow(0xfff4dc, 1.8, 'night'));
+    F.fill(26.5, CEIL - 0.75, a + 2.25, 27.25, CEIL - 0.5, a + 3, glow(0xfff4dc, 1.5, 'always'));
     F.place(PROPS.mirror(), 27.75, 1.5, b - 0.3, 2);
     { const [x, z] = F.w(26.75, a + 2.75); AF.addLight({ x, y: CEIL - 0.9, z, color: 0xfff0dc, intensity: 0.6, range: 6, kind: 'interior' }); }
     // ---- patio door onto the garden + a patio
@@ -498,8 +573,13 @@ try {
     stones(F, 31, 13, 38);
     F.place(PROPS.lamp(), 30.75, 0.25, 11.25, 0); F.place(PROPS.lamp(), 30.75, 0.25, 16.5, 0);
     // ---- the silhouette
-    SHAPE[owner](F, th, { wall, trim, roof, glass, win });
-    upperHome(owner, F, th, rec, { wall, trim, roof, glass, win });
+    const inner = th.inner ? smoothC(th.inner, { rough: 0.9 }) : wall;
+    SHAPE[owner](F, th, { wall, trim, roof, glass, win, inner });
+    upperHome(owner, F, th, rec, { wall, trim, roof, glass, win, inner });
+    if (th.inner) {
+      lineWalls(F, 8.25, 3.25, 23.75, 23.75, FLOOR, CEIL - 0.25, wall, inner);
+      lineWalls(F, 8.25, 3.25, owner === 'tanishk' ? 17.75 : 23.75, 23.75, UPPER, TOP - 0.5, wall, inner);
+    }
     // ---- the garden
     GARDEN[owner](F, th);
     rec.box[4] = TOP + 6;
@@ -526,7 +606,7 @@ try {
       const [tx, tz] = F.w(6, 2.5), tw = col(0xffffff, { pat: 'stucco' }), cone = col(th.roof, { pat: 'none' });
       for (let y = 0.25; y < TOP + 1; y += 0.25) W.eachCol(tx - 2.5, tz - 2.5, tx + 2.5, tz + 2.5, (bx, bz, i, x, z) => { const d = Math.hypot(x - tx, z - tz); if (d < 2.3 && d > 1.8) W.setM(x, y + 0.01, z, (y > 4.5 && y < 6 && ((bx + bz) & 3) === 0) ? glow(0xffd0e8, 1.5, 'night') : tw); });
       for (let k = 0; k < 14; k++) { const r = 2.6 - k * 0.2, y = TOP + 1 + k * 0.25; W.eachCol(tx - r, tz - r, tx + r, tz + r, (bx, bz, i, x, z) => { if (Math.hypot(x - tx, z - tz) < r) W.setM(x, y + 0.01, z, cone); }); }
-      for (const [v0, v1] of [[4.5, 9], [12, 16], [18.5, 22.5]]) { F.fill(7.75, CEIL + 1, v0 - 0.5, 8, CEIL + 2.75, v0, smoothC(th.accent)); F.fill(7.75, CEIL + 1, v1, 8, CEIL + 2.75, v1 + 0.5, smoothC(th.accent)); }
+      for (const [v0, v1] of WIN_F) { F.fill(7.75, CEIL + 1, v0 - 0.5, 8, CEIL + 2.75, v0, smoothC(th.accent)); F.fill(7.75, CEIL + 1, v1, 8, CEIL + 2.75, v1 + 0.5, smoothC(th.accent)); }
     },
     tanishk(F, th, c) {         // penthouse: a gold-railed roof terrace over the back half, gold crown line
       F.clear(18, CEIL + 0.25, 2.75, 24.25, TOP + 0.5, 24.25);
@@ -655,10 +735,14 @@ try {
       if (!owner) continue;
       const S = INTERIOR[owner](F, th);
       upgradeHome(owner, F, th, rec);
-      // the name plate over the door + an indoor neon sign on the back wall
-      F.place(K.text(owner === 'kush' ? 'KUSH & DIV' : owner.toUpperCase(), th.trim === 0xffffff ? 0x2a2a2e : th.trim, { lit: false, font: 'deco', vs: 1 / 12 }), 7.9, 3.55, 10.9, F.rotLane);
-      F.place(K.text(S.sign[0], S.sign[1], S.sign[2] || {}), 23.6, 2.35, 13, F.rotLane);
-      if (S.sign2) F.place(K.text(S.sign2[0], S.sign2[1], { font: 'deco', vs: 1 / 10 }), 23.6, 2.3, 5.5, F.rotLane);
+      // a painted name board beside the front path + a mailbox across it (on gravel beds, the path edged); neon signs on the back wall
+      const gravel = col(0xb8ad98, { pat: 'none', patTop: 'slab', jitter: 0.35 }), edge = col(0x9a9284, { pat: 'none' });
+      F.paint(0.5, 7.75, 2.5, 9.25, gravel); F.paint(0.5, 12.75, 2, 13.75, gravel);
+      F.paint(0, 9.25, 7.25, 9.5, edge); F.paint(0, 12.5, 7.25, 12.75, edge);
+      const board = F.place(PROPS.nameBoard(owner === 'kush' ? ['KUSH &', 'DIVYANGANA'] : [owner.toUpperCase()], th.board, th.ink), 1.5, 0.25, 8.4, F.rotLane);
+      const mailbox = F.place(PROPS.mailbox(th.board, th.flag), 1.2, 0.25, 13.3, F.rotLane);
+      F.place(K.text(S.sign[0], S.sign[1], S.sign[2]), 23.6, S.sign[4], S.sign[3], F.rotLane);
+      if (S.sign2) F.place(K.text(S.sign2[0], S.sign2[1], { font: 'deco', vs: 1 / 10 }), 23.6, 2.3, S.sign2[2], F.rotLane);
       if (S.flag && AF.makeFlag) {
         const [x, z] = F.w(20, 20); F.fill(19.75, TOP, 19.75, 20.25, TOP + 5, 20.25, col(0x6a4a2a));
         AF.makeFlag({ x, y: TOP + 5, z, w: 2.4, h: 1.6, design: 'custom', key: 'jolly', draw: flagDraw.jollyRoger });
@@ -668,7 +752,7 @@ try {
       const npc = [];
       for (const q of [S.npc, S.npc2]) if (q) npc.push({ ...at(q[0], q[1]), y: FLOOR, yaw: face(q[3]), pose: q[2] });
       const sp = at(10, 11); sp.y = FLOOR; sp.yaw = F.inYaw;
-      WS.homes[owner] = { door: rec.door, spawn: sp, npc, garage: rec.garage, box: rec.box, frame: F, theme: th, upper: rec.upper };
+      WS.homes[owner] = { door: rec.door, spawn: sp, npc, garage: rec.garage, box: rec.box, frame: F, theme: th, upper: rec.upper, board, mailbox };
     }
     buildScreens();
     // ---- the colony gateway over Friends Lane (clear 6 m for the buses)
@@ -702,6 +786,22 @@ try {
     }
     if (!screens.mesh || screens.quads <= 0 || screens.mesh.geometry.getAttribute('position').count !== screens.quads * 4 || screens.mesh.geometry.groups.length) failures.push('screen mesh');
     return { ok: failures.length === 0, info: failures.join(', ') || Object.keys(WS.homes).length + ' homes; ' + screens.quads + ' screen quads' };
+  });
+  AF.test('colony: each home has a name board + mailbox at the path and no name text on the facade', () => {
+    const failures = [], texts = new Set(textGeo.values());
+    const top = (pr) => pr.y + (pr.geo.boundingBox || (pr.geo.computeBoundingBox(), pr.geo.boundingBox)).max.y;
+    for (const owner of Object.keys(TH)) {
+      const h = WS.homes[owner], F = h && h.frame;
+      if (!F) { failures.push(owner + ': no home'); continue; }
+      for (const [k, pr, lo, hi] of [['board', h.board, 1.35, 1.55], ['mailbox', h.mailbox, 1.25, 1.55]]) {
+        if (!pr || !AF.world.props.includes(pr)) { failures.push(owner + ': no ' + k); continue; }
+        const u = F.u(pr.x), t = top(pr);
+        if (u < 0 || u > 3 || t < lo || t > hi) failures.push(owner + ': ' + k + ' at u ' + u.toFixed(2) + ' top ' + t.toFixed(2));
+      }
+      const b = h.box;
+      for (const pr of AF.world.props) if (texts.has(pr.geo) && pr.x >= b[0] && pr.x <= b[3] && pr.z >= b[2] && pr.z <= b[5] && F.u(pr.x) < 9 && pr.y > 2) failures.push(owner + ': facade text');
+    }
+    return { ok: failures.length === 0, info: failures.join(', ') || Object.keys(WS.homes).length + ' boards + mailboxes' };
   });
 }
 

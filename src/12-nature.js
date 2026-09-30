@@ -510,14 +510,14 @@ try {
 
   AF.onBuild('land-nature', 400, () => {
     const t0 = performance.now();
-    const stats = { hero: 0, forest: 0, far: 0, bushes: 0, boulders: 0, flowers: 0, grass: 0, logs: 0, stumps: 0, mush: 0, geoQuads: 0, placedQuads: 0, pq: {} };
+    const stats = { hero: 0, forest: 0, bushes: 0, boulders: 0, flowers: 0, grass: 0, logs: 0, stumps: 0, mush: 0, geoQuads: 0, placedQuads: 0, pq: {} };
     const quadsOf = (g) => (g.index ? g.index.count / 6 : 0) + (g.userData.glass ? g.userData.glass.index.count / 6 : 0);
     let curTag = 'tree';
     const mesh = (m, vs) => { const g = AF.meshModel(m, { vs, anchor: [0.5, 0, 0.5] }); g.userData.tag = curTag; stats.geoQuads += quadsOf(g); return g; };
     const place = (g, x, y, z, rot, collide = false) => { AF.placeStatic(g, x, y, z, rot, { collide }); const q = quadsOf(g); stats.placedQuads += q; const tg = g.userData.tag || 'tree'; stats.pq[tg] = Math.round((stats.pq[tg] || 0) + q); };
 
     // ---- tree geometry library
-    const hero = {}, forest = {}, far = {};
+    const hero = {}, forest = {};
     for (let si = 0; si < SPECS.length; si++) {
       const s = SPECS[si];
       if (['willow', 'aspen'].includes(s.id)) continue;
@@ -526,7 +526,6 @@ try {
     for (const id of ['pine', 'spruce', 'maple-scarlet', 'maple-orange', 'maple-gold', 'oak', 'birch', 'red-oak', 'maple-turning', 'plane']) {
       const si = SPECS.findIndex((s) => s.id === id); if (si < 0) continue;
       forest[id] = [0, 1].map((k) => { const t = makeTree(SPECS[si], si * 10 + 50 + k, 0.5); t.geo = mesh(t.m, 0.5); t.m = null; return t; });
-      far[id] = [0].map((k) => { const t = makeTree(SPECS[si], si * 10 + 80 + k, 1.0); t.geo = mesh(t.m, 1.0); t.m = null; return t; });
     }
     const litterCols = {
       red: [AF.col(0x9e3a2a, { jitter: 1 }), AF.col(0xb4583a, { jitter: 1 })], orange: [AF.col(0xb8662e, { jitter: 1 }), AF.col(0xc88a3e, { jitter: 1 })],
@@ -545,19 +544,20 @@ try {
     const trees = L.trees = L.trees || [];
     const plantTree = (id, x, z, tier) => {
       const big = tier === 'hero';
-      const lib = big ? hero[id] : tier === 'far' ? far[id] : forest[id]; if (!lib) return false;
+      const lib = big ? hero[id] : forest[id]; if (!lib) return false;
+      if (L.coastS && L.coastS(x, z) < 5) return false;
       const t = lib[(hash(Math.floor(x * 3), Math.floor(z * 3)) * lib.length) | 0];
       if (!allowed(x, z, t.crownR * 0.5, 'tree')) return false;
       const f = footprint(x, z, Math.max(0.6, t.trunkR));
       if (f.hi - f.lo > (big ? 1.3 : 2.3)) return false;
       if (f.lo < 0) return false;
       if (occupied(x, f.lo, z, t.crownR * 0.6, Math.min(t.h, 10))) return false;
-      const y = f.lo - (big ? 0.25 : tier === 'far' ? 0.9 : 0.5);
+      const y = f.lo - (big ? 0.25 : 0.5);
       place(t.geo, x, y, z, (hash(Math.floor(x * 7), Math.floor(z * 5)) * 4) | 0, false);
       AF.addCollider(x - t.trunkR, y, z - t.trunkR, x + t.trunkR, y + Math.max(2.5, t.trunkH), z + t.trunkR, 'tree');
       trees.push({ id, x, z, r: t.crownR, big });
-      if (tier !== 'far') AF.canopies.push({ x, y: y + t.h * 0.66, z, r: t.crownR, col: (SPECS.find((s) => s.id === id) || SPECS[0]).leaves[0], id });
-      if (big) { litter(x, z, t.crownR * 0.9, (SPECS.find((s) => s.id === id) || {}).litter); stats.hero++; } else if (tier === 'far') stats.far++; else stats.forest++;
+      AF.canopies.push({ x, y: y + t.h * 0.66, z, r: t.crownR, col: (SPECS.find((s) => s.id === id) || SPECS[0]).leaves[0], id });
+      if (big) { litter(x, z, t.crownR * 0.9, (SPECS.find((s) => s.id === id) || {}).litter); stats.hero++; } else stats.forest++;
       return true;
     };
     const pick = (R, table) => { let s = 0; for (const [, w] of table) s += w; let v = R() * s; for (const [id, w] of table) { v -= w; if (v <= 0) return id; } return table[0][0]; };
@@ -565,16 +565,17 @@ try {
     const T_HILL = [['maple-scarlet', 3], ['maple-orange', 3], ['maple-gold', 3], ['oak', 2.5], ['red-oak', 2], ['birch', 1.5], ['pine', 1.5], ['spruce', 1], ['maple-turning', 1.5], ['plane', 1.5]];
     const T_YARD = [['maple-scarlet', 2], ['maple-orange', 2], ['maple-gold', 2], ['plane', 3], ['elm-green', 1], ['oak', 1.5], ['maple-turning', 1], ['red-oak', 1]];
 
-    // ---- 1. Solace Heights forest: hero row along the foot + the lanes, forest LOD behind, far LOD on the crest
+    // ---- 1. Solace Heights forest: hero row along the foot + the lanes, mid LOD behind, a sparse crest above the sea cliffs
     for (let x = -298; x < 298; x += 5.5) for (let z = -298; z < -244; z += 5.5) {
       const jx = x + (hash(x * 3 | 0, z | 0) - 0.5) * 5, jz = z + (hash(x | 0, z * 3 | 0) - 0.5) * 5;
       if (jx > park.x0 - 4 && jx < park.x1 + 4) continue;
       if (N2(jx * 0.03 + 40, jz * 0.03) > 0.82 || R() < 0.06) continue;
-      const tier = (jz > -254 && R() < 0.6) ? 'hero' : jz > -280 ? 'mid' : 'far';
+      if (jz <= -280 && R() > 0.35) continue;
+      const tier = (jz > -254 && R() < 0.6) ? 'hero' : 'mid';
       plantTree(pick(R, T_HILL), jx, jz, tier);
     }
-    // ---- 2. map-edge strips west + east of the city grid (outside every lot)
-    for (let z = -244; z < 200; z += 7) for (const x0 of [-299, 293]) {
+    // ---- 2. the strip between the old town and the west side (outside every lot)
+    for (let z = -244; z < 200; z += 7) for (const x0 of [-299]) {
       for (let x = x0; x < x0 + 6; x += 5) { const jx = x + R() * 2, jz = z + (R() - 0.5) * 4; if (R() < 0.25) continue; plantTree(pick(R, T_HILL), jx, jz, 'mid'); }
     }
     // ---- 3. back yards of the fill blocks (only where nothing is built)
@@ -598,6 +599,7 @@ try {
     const mushes = []; for (let i = 0; i < 2; i++) mushes.push(mesh(makeMushrooms(i), 1 / 16));
     const rot4 = () => (R() * 4) | 0;
     const smallAt = (g, x, z, collide, maxSlope = 0.6) => {
+      if (L.coastS && L.coastS(x, z) < 4) return false;
       if (!allowed(x, z, 0.5, 'small')) return false;
       const f = footprint(x, z, 0.6); if (f.hi - f.lo > maxSlope || f.lo < 0) return false;
       if (occupied(x, f.lo, z, 0.5, 1.5)) return false;
@@ -627,7 +629,7 @@ try {
 
   AF.test('land: trees planted (autumn designs) + AF.nature.tree exposed', () => {
     const s = L.natureStats || {}; const ids = new Set((L.trees || []).map((t) => t.id));
-    return { ok: (s.hero + s.forest + (s.far || 0)) > 150 && ids.size >= 8 && typeof AF.nature.tree === 'function', info: `hero ${s.hero} forest ${s.forest} far ${s.far} designs ${ids.size} placedQuads ${Math.round(s.placedQuads)} ms ${s.ms}` };
+    return { ok: (s.hero + s.forest) > 150 && ids.size >= 8 && typeof AF.nature.tree === 'function', info: `hero ${s.hero} forest ${s.forest} designs ${ids.size} placedQuads ${Math.round(s.placedQuads)} ms ${s.ms}` };
   });
 
   // ============================================================ GROUND COVER: instanced grass tufts, low plants, wildflowers, ferns + small shrubs

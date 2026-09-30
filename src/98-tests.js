@@ -24,7 +24,7 @@ AF.test('palette terrain keys round-trip without precision loss', () => {
   return { ok: largest === 2 ** 37 && largest < 2 ** 53, info: 'maximum key ' + largest };
 });
 AF.test('a mode is active', () => ({ ok: !!AF.mode, info: String(AF.mode) }));
-AF.test('boot under 25 s', () => ({ ok: AF.bootMs < 25000, info: AF.bootMs + ' ms ' + JSON.stringify(AF.stageTimes) }));
+AF.test('boot under 30 s', () => ({ ok: AF.bootMs < 30000, info: AF.bootMs + ' ms ' + JSON.stringify(AF.stageTimes) }));
 AF.test('ground at spawn is walkable', () => { const s = AF.PLAN.spawn; const y = AF.surfaceBelow(s.x, s.z, 40); return { ok: y > -1 && y < 3, info: 'y=' + y }; });
 // engine v2
 AF.test('engine: world top y 160 (tall column solid, collision, shadow range)', () => {

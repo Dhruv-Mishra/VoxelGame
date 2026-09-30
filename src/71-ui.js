@@ -21,15 +21,14 @@ try {
   #ui .deco{font-family:Limelight,'Poiret One',Georgia,serif;letter-spacing:.18em}
   #ui kbd{display:inline-block;min-width:18px;padding:1px 6px;border-radius:6px;background:rgba(255,255,255,.14);font:600 12px system-ui;text-align:center}
   #ui .hide{display:none!important}
-  #ui #t-title{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:max(90px,12vh) 16px max(20px,env(safe-area-inset-bottom));pointer-events:none;background:radial-gradient(ellipse at 50% 55%,rgba(6,12,20,.35) 0,rgba(6,12,20,.78) 75%);transition:opacity .6s}
+  #ui #t-title{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:max(90px,12vh) 16px max(20px,env(safe-area-inset-bottom));pointer-events:none;background:none;transition:opacity .6s}
   #ui #t-title.out{opacity:0}
-  #ui #t-title .logo{position:absolute;top:max(4vh,14px);left:0;right:0;text-align:center}
+  #ui #t-title .logo{position:absolute;z-index:1;top:max(4vh,14px);left:0;right:0;text-align:center}
   #ui #t-title h1{margin:0;font:400 clamp(28px,5.4vw,56px)/1 Limelight,Georgia,serif;letter-spacing:.24em;padding-left:.24em;color:#ffe6a8;text-shadow:0 2px 0 rgba(60,36,8,.7),0 0 24px rgba(240,190,90,.35)}
   #ui #t-title .sub{margin-top:8px;color:#e9dcc0;font-style:italic;text-shadow:0 1px 3px #000}
-  #ui #t-title .modal{pointer-events:auto;width:min(500px,94vw);max-height:100%;padding:16px 18px 18px;display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--bg2);animation:uiIn .35s ease}
+  #ui #t-title .modal{pointer-events:auto;width:min(500px,94vw);max-height:100%;padding:16px 18px 18px;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;z-index:0;overflow:hidden;background:none;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 0 0 200vmax rgba(6,12,20,.6),0 10px 30px rgba(0,0,0,.35);animation:uiIn .35s ease}
   #ui #t-title .q{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);text-align:center}
-  #ui #t-title .stage{position:relative;width:100%;height:min(44vh,360px);min-height:200px;margin:6px 0 4px;border-radius:14px;overflow:hidden;background:radial-gradient(ellipse at 50% 70%,rgba(240,200,112,.22) 0,rgba(240,200,112,0) 60%),linear-gradient(180deg,rgba(40,60,90,.55),rgba(12,20,32,.9))}
-  #ui #t-title .stage canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+  #ui #t-title .stage{position:relative;z-index:-1;width:100%;height:min(44vh,360px);min-height:200px;margin:6px 0 4px;border-radius:14px;overflow:hidden;background:none;box-shadow:0 0 0 200vmax var(--bg2);cursor:grab;touch-action:none}
   #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;background:rgba(10,20,30,.6);border:1px solid var(--line);font-size:28px;line-height:1;display:flex;align-items:center;justify-content:center;color:#ffe6a8;transition:background .15s,transform .1s}
   #ui #t-title .arr:hover{background:rgba(240,200,112,.28)} #ui #t-title .arr:active{transform:translateY(-50%) scale(.94)}
   #ui #t-title .arr.l{left:10px} #ui #t-title .arr.r{right:10px}
@@ -138,7 +137,7 @@ try {
   // ------------------------------------------------------------------ elements
   const title = h('div', '', `<div class="logo"><h1>PORT SOLACE</h1><div class="sub">a harbour city where the lights never quite go out</div></div>
     <div class="modal panel pe" role="dialog" aria-modal="true" aria-label="Choose your character"><div class="q">Who are you today?</div>
-    <div class="stage"><canvas aria-hidden="true"></canvas><button class="arr l" aria-label="Previous character">&#8249;</button><button class="arr r" aria-label="Next character">&#8250;</button><div class="cnt"></div></div>
+    <div class="stage"><button class="arr l" aria-label="Previous character">&#8249;</button><button class="arr r" aria-label="Next character">&#8250;</button><div class="cnt"></div></div>
     <div class="n"></div><div class="tg"></div><div class="d"></div><div class="dots"></div>
     <button class="btn primary go"><span class="ic">&#9654;</span><span class="lb">Let's Play</span></button></div>`); title.id = 't-title';
   const clock = h('div', 'panel hud', `<div class="t"><span class="tm">4:30</span><small class="ap">PM</small></div><div class="p">Port Solace</div>`); clock.id = 'h-clock';
@@ -151,7 +150,9 @@ try {
   const dlg = h('div', 'panel pe', `<div class="face"></div><div><span class="nm"></span><span class="rl"></span></div><div class="ln"></div><div class="more">${TOUCH ? 'tap' : 'E / click'} to continue</div>`); dlg.id = 'h-dlg';
   const bubbleEl = h('div', 'bubble', ''); bubbleEl.style.display = 'none';
   const menu = h('div', 'sheet pe', `<div class="panel"><h2>PAUSED</h2>
-    <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
+    <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="lite" title="Balanced without AO, god rays and MSAA (laptop GPUs)">Laptop</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
+    <div class="row"><label>Resolution</label><div class="seg" data-k="res"><button data-v="0">Auto</button><button data-v="0.75">75%</button><button data-v="0.9">90%</button><button data-v="1">100%</button></div></div>
+    <div class="row"><label></label><small class="rr" style="opacity:.75"></small></div>
     <div class="row"><label>Time of day</label><input data-k="hour" type="range" min="0" max="23.95" step="0.05"></div>
     <div class="row"><label>Clock</label><div class="seg" data-k="clock"><button data-v="run">Running</button><button data-v="stop">Stopped</button></div></div>
     <div class="row"><label>Look sensitivity</label><input data-k="sens" type="range" min="0.1" max="1.5" step="0.05"></div>
@@ -162,7 +163,7 @@ try {
   help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>RUN button</span></div></div>
     <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Jump \u00b7 brake</span><span>round button</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
     : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('V', 'First person')}${K('Tab', 'Aerial view')}</div>
-    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space', 'Start engine')}${K('Shift', 'Stop engine')}${K('W+S', 'Nose up / down; taxi / brake / reverse')}${K('A+D', 'Bank / ground steer (arrows also work)')}${K('Mouse', 'Free look')}${K('Wheel', 'Camera zoom')}${K('F+X', 'Get out (on the ground)')}</div>
+    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('S', 'Reverse (ground, throttle closed)')}${K('Mouse', 'Free look')}${K('Wheel', 'Camera zoom')}${K('F', 'Get out (on the ground)')}</div>
     <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}</div>
     <div><h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}</div></div>`}
     <div class="stack"><button class="btn primary" data-k="closehelp">Got it</button></div></div>`;
@@ -241,80 +242,71 @@ try {
   const tName = title.querySelector('.n'), tTag = title.querySelector('.tg'), tDesc = title.querySelector('.d'), tGo = title.querySelector('.go'), tDots = title.querySelector('.dots'), tCnt = title.querySelector('.cnt');
   const roster = () => ((AF.friends && AF.friends.cast) || []).slice().sort((a, b) => a.name.localeCompare(b.name));
   UI.roster = roster;
-  const PV = { r: null, scene: null, cam: null, P: null, st: { phase: 0, speed: 0, air: 0, t: 0, land: 0 }, yaw: 0.4, spin: 0, drag: null, pop: 1 };
-  const pvDispose = () => {
-    if (!PV.r) return;
-    const renderer = PV.r, canvas = PV.cv;
-    PV.r = null;
-    if (PV.owned) for (const mesh of PV.owned) { mesh.geometry.dispose(); mesh.material.dispose(); }
-    renderer.dispose(); renderer.forceContextLoss();
-    if (canvas.parentNode) canvas.replaceWith(canvas.cloneNode(false));
-    Object.assign(PV, { scene: null, cam: null, cv: null, P: null, owned: null, drag: null, w: 0, h: 0 });
-  };
-  const pvPlaceholder = () => {
-    const canvas = title.querySelector('.stage canvas');
-    if (!canvas || PV.placeholder === canvas) return;
-    PV.placeholder = canvas; canvas.width = canvas.height = 160;
-    const ctx = canvas.getContext('2d'); if (!ctx) return;
-    ctx.clearRect(0, 0, 160, 160);
-    ctx.fillStyle = '#375c66'; ctx.fillRect(48, 66, 64, 48);
-    ctx.fillStyle = '#e8b68c'; ctx.fillRect(60, 26, 40, 40); ctx.fillRect(36, 70, 12, 40); ctx.fillRect(112, 70, 12, 40);
-    ctx.fillStyle = '#453934'; ctx.fillRect(56, 22, 48, 12); ctx.fillRect(56, 34, 8, 16);
-    ctx.fillStyle = '#293b4b'; ctx.fillRect(52, 114, 24, 32); ctx.fillRect(84, 114, 24, 32);
-    ctx.fillStyle = '#20252a'; ctx.fillRect(48, 142, 28, 8); ctx.fillRect(84, 142, 28, 8);
-    canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', 'Character');
-  };
+  // drawn by the main renderer into the stage's screen rect after each frame (no second WebGL context)
+  const stage = title.querySelector('.stage');
+  const PV = { scene: null, cam: null, P: null, st: { phase: 0, speed: 0, air: 0, t: 0, land: 0 }, yaw: 0.4, drag: null, pop: 1, aspect: 0, size: new THREE.Vector2(), vp: new THREE.Vector4(), sc: new THREE.Vector4() };
   const pvInit = () => {
-    if (AF.MOBILE || PV.failed) { pvPlaceholder(); return false; }
-    if (PV.r) return true;
-    try {
-      const cv = title.querySelector('.stage canvas');
-      const r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true, powerPreference: 'low-power' });
-      Object.assign(PV, { r, cv, owned: [] });
-      cv.addEventListener('webglcontextlost', (event) => { if (PV.r !== r) return; event.preventDefault(); PV.failed = true; pvDispose(); pvPlaceholder(); });
-      r.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.05;
-      const sc = new THREE.Scene();
-      sc.add(new THREE.HemisphereLight(0xfff2dc, 0x34465a, 1.9));
-      const key = new THREE.DirectionalLight(0xfff0d8, 2.6); key.position.set(2.5, 4, 3.5); sc.add(key);
-      const rim = new THREE.DirectionalLight(0x8ec0ff, 1.4); rim.position.set(-3, 2.5, -3); sc.add(rim);
-      const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.78, 0.08, 40), new THREE.MeshStandardMaterial({ color: 0x3a2c1e, roughness: 0.55, metalness: 0.25 }));
-      PV.owned.push(disc);
-      disc.position.y = -0.04; sc.add(disc);
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.018, 8, 48), new THREE.MeshStandardMaterial({ color: 0xf0c870, emissive: 0x6a4a10, roughness: 0.3, metalness: 0.8 }));
-      PV.owned.push(ring);
-      ring.rotation.x = Math.PI / 2; sc.add(ring);
-      const cam = new THREE.PerspectiveCamera(28, 1, 0.1, 50); cam.position.set(0, 1.2, 5.2); cam.lookAt(0, 0.98, 0);
-      Object.assign(PV, { r, scene: sc, cam, cv });
-      cv.addEventListener('pointerdown', (e) => { PV.drag = { x: e.clientX, yaw: PV.yaw }; try { cv.setPointerCapture(e.pointerId); } catch (er) {} cv.style.cursor = 'grabbing'; });
-      cv.addEventListener('pointermove', (e) => { if (PV.drag) PV.yaw = PV.drag.yaw + (e.clientX - PV.drag.x) * 0.012; });
-      const up = () => { PV.drag = null; cv.style.cursor = ''; };
-      cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
-      return true;
-    } catch (e) { PV.failed = true; pvDispose(); pvPlaceholder(); console.warn('[af] character preview unavailable', e); return false; }
+    if (PV.scene) return;
+    const sc = new THREE.Scene();
+    const bg = document.createElement('canvas'); bg.width = bg.height = 64;
+    const g = bg.getContext('2d'), lin = g.createLinearGradient(0, 0, 0, 64); lin.addColorStop(0, '#1d2b3e'); lin.addColorStop(1, '#0b131d');
+    g.fillStyle = lin; g.fillRect(0, 0, 64, 64);
+    const rad = g.createRadialGradient(32, 45, 0, 32, 45, 38); rad.addColorStop(0, 'rgba(240,200,112,.22)'); rad.addColorStop(1, 'rgba(240,200,112,0)');
+    g.fillStyle = rad; g.fillRect(0, 0, 64, 64);
+    sc.background = new THREE.CanvasTexture(bg); sc.background.colorSpace = THREE.SRGBColorSpace;
+    sc.add(new THREE.HemisphereLight(0xfff2dc, 0x34465a, 1.9));
+    const key = new THREE.DirectionalLight(0xfff0d8, 2.6); key.position.set(2.5, 4, 3.5); sc.add(key);
+    const rim = new THREE.DirectionalLight(0x8ec0ff, 1.4); rim.position.set(-3, 2.5, -3); sc.add(rim);
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.78, 0.08, 40), new THREE.MeshStandardMaterial({ color: 0x3a2c1e, roughness: 0.55, metalness: 0.25 }));
+    disc.position.y = -0.04; sc.add(disc);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.018, 8, 48), new THREE.MeshStandardMaterial({ color: 0xf0c870, emissive: 0x6a4a10, roughness: 0.3, metalness: 0.8 }));
+    ring.rotation.x = Math.PI / 2; sc.add(ring);
+    const cam = new THREE.PerspectiveCamera(28, 1, 0.1, 50); cam.position.set(0, 1.2, 5.2); cam.lookAt(0, 0.98, 0);
+    Object.assign(PV, { scene: sc, cam });
   };
+  stage.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) return; PV.drag = { x: e.clientX, yaw: PV.yaw }; try { stage.setPointerCapture(e.pointerId); } catch (er) {} stage.style.cursor = 'grabbing'; });
+  stage.addEventListener('pointermove', (e) => { if (PV.drag) PV.yaw = PV.drag.yaw + (e.clientX - PV.drag.x) * 0.012; });
+  const pvUp = () => { PV.drag = null; stage.style.cursor = ''; };
+  stage.addEventListener('pointerup', pvUp); stage.addEventListener('pointercancel', pvUp);
   const pvShow = (look) => {
     PV.look = look;
-    if (!S.title) { pvDispose(); return; }
-    if (!pvInit() || !AF.avatar) return;
+    if (!AF.avatar) return;
+    pvInit();
     if (PV.P) PV.scene.remove(PV.P.root);
     PV.P = AF.avatar.build(look); PV.scene.add(PV.P.root); PV.pop = 0;
   };
-  new MutationObserver(() => { if (!S.title) pvDispose(); }).observe(title, { attributes: true, attributeFilter: ['class', 'style'] });
   AF.onTick('ui-preview', 946, (dt) => {
-    if (!S.title) { pvDispose(); return; }
-    if (AF.MOBILE || PV.failed) return;
-    if (!PV.r && PV.look) pvShow(PV.look);
-    if (!PV.r || !PV.P) return;
-    const cv = PV.cv, w = cv.clientWidth | 0, hh = cv.clientHeight | 0; if (!w || !hh) return;
-    if (PV.w !== w || PV.h !== hh) { PV.w = w; PV.h = hh; PV.r.setSize(w, hh, false); PV.cam.aspect = w / hh; PV.cam.updateProjectionMatrix(); }
+    if (!S.title) return;
+    if (!PV.P && PV.look) pvShow(PV.look);
+    if (!PV.P) return;
     if (!PV.drag) PV.yaw += dt * 0.55;
     PV.pop = Math.min(1, PV.pop + dt * 4);
     const e = 1 - Math.pow(1 - PV.pop, 3), s = (PV.P.root.userData.h0 || (PV.P.root.userData.h0 = PV.P.root.scale.x)) * (0.85 + 0.15 * e);
     PV.P.root.scale.setScalar(s); PV.P.root.rotation.y = PV.yaw;
     AF.avatar.animate(PV.P, PV.st, Math.min(dt, 0.05), 0, true);
-    PV.r.render(PV.scene, PV.cam);
   });
-  AF.test('ui: mobile title uses no WebGL preview', () => ({ ok: !AF.MOBILE || !PV.r && !!PV.placeholder, info: AF.MOBILE ? 'static character placeholder' : 'desktop turntable' }));
+  AF.afterFrame = () => {
+    if (!S.title || !PV.P) return;
+    const R = AF.renderer, cr = R.domElement.getBoundingClientRect(), r = stage.getBoundingClientRect();
+    R.getSize(PV.size);
+    const k = PV.size.x / (cr.width || 1), w = r.width * k, hh = r.height * k;
+    if (w < 2 || hh < 2) return;
+    const x = (r.left - cr.left) * k, y = PV.size.y - (r.bottom - cr.top) * k;
+    if (PV.aspect !== w / hh) { PV.aspect = w / hh; PV.cam.aspect = PV.aspect; PV.cam.updateProjectionMatrix(); }
+    R.getViewport(PV.vp); R.getScissor(PV.sc);
+    const rt = R.getRenderTarget(), sct = R.getScissorTest(), ac = R.autoClear, tm = R.toneMapping, ex = R.toneMappingExposure;
+    try {
+      R.setRenderTarget(null); R.autoClear = false; R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 1.05;
+      R.setViewport(x, y, w, hh); R.setScissor(x, y, w, hh); R.setScissorTest(true);
+      R.clearDepth(); R.render(PV.scene, PV.cam);
+    } finally {
+      R.setViewport(PV.vp); R.setScissor(PV.sc); R.setScissorTest(sct); R.autoClear = ac; R.toneMapping = tm; R.toneMappingExposure = ex; R.setRenderTarget(rt);
+    }
+  };
+  AF.test('ui: title preview uses the main renderer', () => {
+    const extra = title.querySelectorAll('canvas').length, has = !!(PV.P && PV.P.root.parent === PV.scene);
+    return { ok: extra === 0 && !('r' in PV) && (!S.title || has), info: 'stage canvases ' + extra + ', title ' + (S.title ? 'open, avatar ' + has : 'closed') };
+  });
   const select = (id) => {
     const c = AF.friends && AF.friends.byId[id]; if (!c) return;
     const R = roster(), i = R.findIndex((q) => q.id === id);
@@ -352,7 +344,10 @@ try {
   // ------------------------------------------------------------------ menu / help / map
   const G = AF.GFX;
   const syncMenu = () => {
-    menu.querySelectorAll('[data-k=gfx] button').forEach((b) => b.classList.toggle('on', b.dataset.v === G.tier));
+    menu.querySelectorAll('[data-k=gfx] button').forEach((b) => b.classList.toggle('on', b.dataset.v === G.name));
+    menu.querySelectorAll('[data-k=res] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === G.res));
+    const cv = AF.renderer.domElement, pr = AF.renderer.getPixelRatio();
+    menu.querySelector('.rr').textContent = `Render ${cv.width}\u00d7${cv.height} (${pr.toFixed(2)}\u00d7 CSS px${devicePixelRatio > pr + 0.01 ? ', ' + Math.round(pr / devicePixelRatio * 100) + '% of display' : ''})${G.auto ? ' \u00b7 auto ' + G.name : ''}`;
     menu.querySelectorAll('[data-k=clock] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'stop') === !!AF.time.paused));
     const hr = menu.querySelector('[data-k=hour]'); if (document.activeElement !== hr) hr.value = AF.time.hours.toFixed(2);
     menu.querySelector('[data-k=sens]').value = String(AF.lookSens());
@@ -373,6 +368,10 @@ try {
     const b = e.target.closest('button'); if (!b) return;
     const seg = b.parentElement && b.parentElement.dataset.k;
     if (seg === 'gfx') { G.auto = false; G.set(b.dataset.v, 'menu'); try { localStorage.setItem('portSolace.gfx', b.dataset.v); } catch (er) {} }
+    else if (seg === 'res') {
+      G.res = +b.dataset.v; try { localStorage.setItem('portSolace.res', b.dataset.v); } catch (er) {}
+      AF.renderer.setPixelRatio(AF.basePR() * G.scale); AF.resize();
+    }
     else if (seg === 'clock') AF.time.paused = b.dataset.v === 'stop';
     else if (b.dataset.k === 'resume') toggleMenu(false);
     else if (b.dataset.k === 'map') { toggleMenu(false, false); toggleMap(true); }

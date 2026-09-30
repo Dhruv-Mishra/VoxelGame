@@ -45,6 +45,7 @@ try {
       if (PD && Math.abs(x - PD.cx) < PD.r + 6 && Math.abs(z - PD.cz) < PD.r + 6) return pondY;
       for (const q of P.pools || []) if (x > q.x0 - 6 && x < q.x1 + 6 && z > q.z0 - 6 && z < q.z1 + 6) return q.y;
       if (z > (P.harbour ? P.harbour.coastZ : 210) - 40) return seaY;
+      if (L.coastS && L.coastS(x, z) < 16) return seaY;
       return null;
     };
     const INF = 1e9, dist = new Float32Array(nx * nz), depth = new Uint8Array(nx * nz);
@@ -128,8 +129,11 @@ try {
       // --- shore data
       float shoreD = 16.0, depthM = uDepthMax;
       if (uHasShore > 0.5) {
-        vec2 suv = (p - uShoreBox.xy) / (uShoreBox.zw - uShoreBox.xy);
-        if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0) { vec4 s = texture2D(tShore, suv); shoreD = s.r * 16.0; depthM = s.g * 4.0 + (s.g > 0.99 ? uDepthMax : 0.0); }
+        vec2 suv = (p - uShoreBox.xy) / (uShoreBox.zw - uShoreBox.xy), cuv = clamp(suv, 0.0, 1.0);
+        vec4 s = texture2D(tShore, cuv);
+        float od = length((suv - cuv) * (uShoreBox.zw - uShoreBox.xy));   // metres past the map edge: the island shallows fade into open ocean
+        shoreD = mix(s.r * 16.0, 16.0, smoothstep(0.0, 8.0, od));
+        depthM = mix(s.g * 4.0 + (s.g > 0.99 ? uDepthMax : 0.0), uDepthMax, smoothstep(0.0, 90.0, od));
       }
       float calm = mix(0.55, 1.0, smoothstep(0.0, 6.0, shoreD));   // flatter in sheltered water along walls
       float str = uChop * calm * mix(0.10, 0.16, uSea);
@@ -144,8 +148,12 @@ try {
       float sss = pow(max(dot(V, -uSunDir) * 0.5 + 0.5, 0.0), 3.0) * max(g.x * uSunDir.x + g.y * uSunDir.z, 0.0);
       body = body * uLight + uShallow * sss * 0.35 * uSunK * uLight;
       // --- sun: sharp highlight + broad golden-hour glitter path broken into voxel-size sparkles
-      float sd = max(dot(R, uSunDir), 0.0);
-      vec3 spec = uSunCol * (pow(sd, 1200.0) * 90.0 + pow(sd, 160.0) * 3.0) * uSunK;
+      // energy-limited: roughness (rk) widens and dims the lobe with distance / grazing view, Fresnel-weighted, faded far out
+      vec3 Rn = normalize(R);
+      float sd = max(dot(Rn, uSunDir), 0.0);
+      float rk = 1.0 + 5.0 * smoothstep(40.0, 600.0, camD) + 3.0 * (1.0 - smoothstep(0.04, 0.3, V.y));
+      float fw = (0.3 + 0.7 * clamp(fres, 0.0, 1.0)) * (1.0 - 0.75 * smoothstep(250.0, 1500.0, camD));
+      vec3 spec = uSunCol * (pow(sd, 1200.0 / rk) * 90.0 + pow(sd, 160.0 / rk) * 3.0) * (fw / rk) * uSunK;
       vec2 cell = floor(p * 4.0);
       float tw = h12(cell + floor(uT * 7.0 + h12(cell) * 7.0));
       float spark = step(0.9, tw) * smoothstep(0.35, 0.9, g.x * 0.5 + g.y * 0.5 + 0.5);
@@ -153,8 +161,9 @@ try {
       float low = 1.0 - smoothstep(0.15, 0.6, uSunDir.y);
       spec += uSunCol * lobe * (0.25 + spark * 7.0 * (0.4 + 0.6 * low)) * uSunK * (0.35 + 0.65 * uSea) * fd;
       // moon path
-      float md = max(dot(R, uMoonDir), 0.0);
-      spec += vec3(0.62, 0.72, 1.0) * (pow(md, 900.0) * 10.0 + pow(md, 16.0) * (0.12 + spark * 1.8)) * uMoonK;
+      float md = max(dot(Rn, uMoonDir), 0.0);
+      spec += vec3(0.62, 0.72, 1.0) * (pow(md, 900.0 / rk) * 4.0 / rk + pow(md, 16.0) * (0.05 + spark * 0.7 * fd)) * fw * uMoonK;
+      spec *= min(1.0, 6.0 / max(max(spec.r, max(spec.g, spec.b)), 1e-4));
       // --- night: long shimmering reflection streaks of lamps near the water
       vec3 streaks = vec3(0.0);
       if (uNL > 0) {
@@ -215,7 +224,7 @@ try {
       // --- compose
       vec3 col = mix(body, sky, clamp(fres, 0.0, 1.0)) + spec + streaks * (0.4 + 0.6 * uNight);
       vec3 fc = uFoamCol * (uLight * 1.1 + 0.05) + uSunCol * uSunK * 0.25;
-      col = mix(col, fc, foam * 0.9);
+      col = min(mix(col, fc, foam * 0.9), vec3(8.0));
       float a = clamp(mix(uAlpha, 1.0, max(fres, dk * 0.85)) + foam + length(spec) * 0.1, 0.0, 1.0);
       gl_FragColor = vec4(col, a);
       #include <tonemapping_fragment>

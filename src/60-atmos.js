@@ -73,10 +73,11 @@ try {
         float afD = length( vAfFogOff );
         vec3 afDir = vAfFogOff / max( afD, 1e-3 );
         float afK = afFogA.y;
-        float afY0 = cameraPosition.y - afFogA.z;
-        float afKdy = clamp( afK * vAfFogOff.y, -30.0, 30.0 );
-        float afInt = abs( afKdy ) > 1e-4 ? ( 1.0 - exp( - afKdy ) ) / afKdy : 1.0;
-        float afOd = afFogA.x * exp( - afK * clamp( afY0, -10.0, 400.0 ) ) * max( afD - afFogC.x, 0.0 ) * afInt;
+        float afY0 = max( cameraPosition.y - afFogA.z, -10.0 ), afY1 = max( cameraPosition.y + vAfFogOff.y - afFogA.z, -10.0 );
+        float afKdy = afK * ( afY1 - afY0 ), afE0 = exp( - afK * afY0 );
+        // mean density along the ray, in a form that cannot overflow however high the camera is
+        float afInt = abs( afKdy ) > 1e-4 ? ( afE0 - exp( - afK * afY1 ) ) / afKdy : afE0;
+        float afOd = afFogA.x * max( afD - afFogC.x, 0.0 ) * afInt;
         float afF = ( 1.0 - exp( - afOd ) );
         afF = max( afF, smoothstep( afFogC.w, afFogC.w * 1.55, afD ) );
         afF = min( afF, afFogC.y );
@@ -258,6 +259,11 @@ try {
       { const cp = AF.camera && AF.camera.position; if (cp) { let gy = 0; try { gy = W ? Math.max(0, W.groundY(cp.x, cp.z) || 0) : 0; } catch (e) { gy = 0; } alt = cp.y - gy; } }
       const hi = smooth(25, 120, alt) * (1 - ind);
       S.fog.near = lerp(lerp(220, 160, n), lerp(520, 300, n), hi); S.fog.far = lerp(lerp(1750, 1000, n), lerp(2250, 1500, n), hi);
+      // high aerial / flight views: the horizon melt moves out with altitude so the whole island stays in view; the far plane follows it
+      const hz = SK.fog.horizon + Math.min(1800, Math.max(0, alt - 80) * 1.2) * (1 - ind);
+      FU.afFogC.value.w = hz;
+      const cam = AF.camera, cf = Math.max(2500, Math.ceil((hz * 1.55 + 150) / 100) * 100);
+      if (cam && cam.far !== cf) { cam.far = cf; cam.updateProjectionMatrix(); }
     }
     if (S && S.background && S.background.isColor) S.background.copy(SU.uHor.value);
     if (AF.mat && AF.mat.uniforms) {

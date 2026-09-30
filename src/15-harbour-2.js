@@ -748,7 +748,7 @@ try {
     L.liner = liner;
   });
   // ------------------------------------------------------------ ROUND 2: a navy-grey cruiser, the HARBOUR DAYS guardship, dressed overall
-  //   for HARBOUR DAYS at anchor south of the liner (-215, 348, bow west): raked bow, 2 twin turrets fore + 1 aft, a stepped
+  //   for HARBOUR DAYS at anchor south-west of the liner (-305, 366, bow west): raked bow, 2 twin turrets fore + 1 aft, a stepped
   //   bridge tower, tripod mast, 2 funnels, a rainbow of signal flags stem -> mast -> funnels -> stern.
   AF.onBuild('harbour-navy', 308, () => {
     const c = (hex, o = {}) => AF.col(hex, Object.assign({ jitter: 0.25, edge: 0.6 }, o));
@@ -770,12 +770,12 @@ try {
     for (const fz of [56, 44]) m.box(cx - 3, HH, fz, cx + 3, HH + 16, fz + 7, greyD);
     m.box(cx - 4, HH, 36, cx + 4, HH + 6, 62, grey); m.box(cx - 1, HH, 6, cx + 1, HH + 22, 8, greyD);
     const ship = AF.modelMesh(m, { vs: 0.5, anchor: [0.5, 0, 0.5] });
-    ship.position.set(-215, SEA_Y - 2.2, 348); ship.rotation.y = -Math.PI / 2; ship.castShadow = true; AF.scene.add(ship);
+    ship.position.set(-305, SEA_Y - 2.2, 366); ship.rotation.y = -Math.PI / 2; ship.castShadow = true; AF.scene.add(ship);
     if (AF.makeBunting) { const P3 = [[0, 11, 44.8], [0, 37.5, -4], [0, 16.4, -15.3], [0, 16.4, -21.3], [0, 19.3, -41.5], [0, 8.6, -44.8]]; for (let i = 0; i < P3.length - 1; i++) AF.makeBunting(P3[i], P3[i + 1], { shape: 'signal', parent: ship, spacing: 0.9, size: 0.75 }); }
     if (AF.makeFlag) AF.makeFlag({ parent: ship, x: 0, y: 11.2, z: -44.6, w: 2.4, h: 1.5, design: 'harbour', vane: false, yaw: -Math.PI / 2 });
-    dyn.push({ x: -215, z: 348, r: 700, update(dt, t) { ship.position.y = SEA_Y - 2.2 + Math.sin(t * 0.42 + 1) * 0.07; ship.rotation.z = Math.sin(t * 0.31) * 0.006; } });
-    HR.ships.push({ name: 'Guardship', mesh: ship, x: -215, z: 348, len: 90 });
-    AF.addLabel('Guardship (Harbour Days)', -215, 348, 'place');
+    dyn.push({ x: -305, z: 366, r: 700, update(dt, t) { ship.position.y = SEA_Y - 2.2 + Math.sin(t * 0.42 + 1) * 0.07; ship.rotation.z = Math.sin(t * 0.31) * 0.006; } });
+    HR.ships.push({ name: 'Guardship', mesh: ship, x: -305, z: 366, len: 90 });
+    AF.addLabel('Guardship (Harbour Days)', -305, 366, 'place');
     L.navy = ship;
   });
   AF.test('harbour: liner at anchor', () => ({ ok: !!L.liner && !!L.navy, info: (L.liner ? 'SS Solace Queen at ' + L.liner.position.x.toFixed(0) + ',' + L.liner.position.z.toFixed(0) : 'no liner') + (L.navy ? ' + guardship' : ' no guardship') }));

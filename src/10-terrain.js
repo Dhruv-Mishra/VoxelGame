@@ -2,7 +2,8 @@
 try {
 // ===== 10-terrain: Port Solace ground — flat city (h=1), THE SEA south of the quay (z 210), granite quay wall,
 //       east breakwater (rubble heightmap) out to the lighthouse rock, Solace Heights (wooded hills + winding lane + villas),
-//       Swan Lake + the skating pond, water meshes, horizon ring (N/E/W hills; the south is open sea)  (OWNER: land-harbour) =====
+//       Swan Lake + the skating pond; THE ISLAND COAST (noisy shoreline inside every map edge: beaches, NW-bay dunes + mole,
+//       rocky shelves, the Heights as sea cliffs, the SW headland) and the ocean water + sea bed out to the horizon  (OWNER: land-harbour) =====
 {
   const P = AF.PLAN, W = AF.W;
   const L = AF.land = AF.land || {};
@@ -48,15 +49,31 @@ try {
   // winding lane up the east + west heights (gravel, 1-block steps), villas on pads
   const LANES = L.LANES = [
     [[110, -246], [118, -262], [138, -270], [160, -262], [184, -270], [206, -284], [232, -290], [258, -284]],
-    [[-196, -246], [-204, -262], [-226, -268], [-248, -262], [-266, -276], [-282, -290]],
+    [[-196, -246], [-204, -262], [-226, -268], [-248, -262], [-266, -276]],
   ];
   const VILLAS = L.VILLAS = [
     { x: 150, z: -284, w: 14, d: 10, name: 'Belvedere', wall: 0xf1e4c6, roof: 0x4f8a78 },
     { x: 206, z: -296, w: 16, d: 8, name: 'Harrow House', wall: 0xe9d2b0, roof: 0xa8483a },
     { x: 262, z: -270, w: 12, d: 12, name: 'Castellane', wall: 0xf4ecda, roof: 0x3f6f8a },
-    { x: -230, z: -284, w: 14, d: 10, name: 'Solace Manor', wall: 0xeadcc0, roof: 0x9a3e32 },
+    { x: -180, z: -270, w: 14, d: 10, name: 'Solace Manor', wall: 0xeadcc0, roof: 0x9a3e32 },
     { x: -280, z: -262, w: 10, d: 12, name: 'The Gables', wall: 0xf0e2c4, roof: 0x4c7a6a },
   ];
+
+  // ---- THE ISLAND COAST: the shoreline runs a noisy ~2-3 m inside each map edge (the north-west bay bites ~40 m in); south of
+  //   the city it is the quay / the Solace Sands shore. L.coastS(x, z) = metres inland from the shoreline (< 0 = sea).
+  const VSB = W.VS, XE = W.x1, ZN = W.Z0;
+  const bayK = L.bayK = (x) => smooth(-452, -414, x) * smooth(-316, -362, x);
+  const beachShore = (x) => 221.5 + Math.sin((x + 300) * 0.085) * 3.2 + (N2(x * 0.15, 3.7) - 0.5) * 2 + smooth(-310, -380, x) * fbm(x * 0.012, 5, 3) * 14;
+  const INS_N = new Float32Array(W.NX), SHORE_S = new Float32Array(W.NX), INS_W = new Float32Array(W.NZ), INS_E = new Float32Array(W.NZ);
+  for (let i = 0; i < W.NX; i++) { const x = W.X0 + (i + 0.5) * VSB; INS_N[i] = 1.5 + 2 * fbm(x * 0.021 + 7, 3.1, 3) + bayK(x) * (36 + (fbm(x * 0.03, 9, 3) - 0.5) * 16); SHORE_S[i] = x < -239 ? beachShore(x) : COAST; }
+  for (let k = 0; k < W.NZ; k++) { const z = ZN + (k + 0.5) * VSB; INS_W[k] = 1.5 + 2 * fbm(z * 0.021 - 3, 5.3, 3); INS_E[k] = 1.5 + 2 * fbm(z * 0.021 + 11, 1.7, 3); }
+  L.coastS = (x, z) => {
+    const i = clamp(Math.floor((x - W.X0) / VSB), 0, W.NX - 1), k = clamp(Math.floor((z - ZN) / VSB), 0, W.NZ - 1);
+    return Math.min(x - W.X0 - INS_W[k], XE - x - INS_E[k], z - ZN - INS_N[i], SHORE_S[i] - z);
+  };
+  const HEADLAND = L.HEADLAND = { x: -634, z: 238, r: 19, r0: 7, top: 8 };   // south-west headland (Cape Solace Light, 48-sea)
+  const protectedAt = (x, z) => (z > 166 && x > -300) || (x > PK.x0 - 1 && x < PK.x1 + 1 && z > PK.z0 - 1 && z < PK.z1 + 1) || !!L.inLot(x, z, 1.5)
+    || P.nearestRoad(x, z).edge < 2 || VILLAS.some((v) => Math.abs(x - v.x) < v.w / 2 + 5 && Math.abs(z - v.z) < v.d / 2 + 5);
 
   AF.onBuild('land-terrain', 100, () => {
     const t0 = performance.now();
@@ -78,7 +95,7 @@ try {
     const FP = []; { let x = -258, z = 211.2, k = 0; while (z < 222) { const sgn = k++ & 1 ? 1 : -1; FP.push([x + sgn * 0.18, z]); x -= 0.28; z += 0.62; } }
     const BEACH = L.BEACH = {
       dry: c(0xe6d6b0, { jitter: 0.6 }), dry2: c(0xdccaa0, { jitter: 0.6 }), wet: c(0xb8a888, { jitter: 0.5 }), wrack: c(0x6a6440, { jitter: 0.8 }), print: c(0xc8b48a, { jitter: 0.3 }),
-      shore: (x) => 221.5 + Math.sin((x + 300) * 0.085) * 3.2 + (N2(x * 0.15, 3.7) - 0.5) * 2,
+      shore: beachShore,
       foot: (x, z) => { if (x > -256 || x < -266 || z > 222.5) return false; for (const [fx, fz] of FP) if (Math.abs(x - fx) < 0.13 && Math.abs(z - fz) < 0.2) return true; return false; },
     };
 
@@ -110,6 +127,12 @@ try {
                   side = BEACH.wet;
                 }
               }
+            }
+            const hl = Math.hypot(x - HEADLAND.x, (z - HEADLAND.z) * 0.85) + (N2(x * 0.11 + 3, z * 0.11 - 8) - 0.5) * 6;
+            if (hl < HEADLAND.r) {
+              const rr = hash(Math.floor(x * 1.2), Math.floor(z * 1.2));
+              const hh = hl < HEADLAND.r0 ? HEADLAND.top : Math.floor(HEADLAND.top - (hl - HEADLAND.r0) * 1.5 - rr * 3);
+              if (hh > hB) { hB = Math.max(-16, hh); top = hl < HEADLAND.r0 ? (hp < 0.6 ? GR.dry : GR.base) : RUB[(rr * 4) | 0]; side = RUB[(rr * 7 | 0) & 3]; }
             }
             // breakwater: capped walkway (y 0.5) on a rubble mound
             const bd = L.bwDist(x, z).d + (N2(x * 0.4, z * 0.4) - 0.5) * 1.2;
@@ -192,6 +215,69 @@ try {
       const hb = Math.max(1, Math.round(heightsH(v.x, v.z) * 4) + 1); v.y = hb * 0.25;
       W.eachCol(v.x - v.w / 2 - 4, v.z - v.d / 2 - 4, v.x + v.w / 2 + 4, v.z + v.d / 2 + 4, (bx, bz, i) => { H[i] = hb; S[i] = ST.grey; });
     }
+    // ---- THE ISLAND COAST (edge strips only): sea shelf + tide-line rocks, beaches (low dunes in the north-west bay), rocky shelves,
+    //      the Heights dropping into the sea as cliffs, a rubble mole in the bay; lots/roads/park/villa pads are never cut
+    const CLF = L.CLIFF = [c(0x8a8276, { jitter: 0.7, edge: 1 }), c(0x9c9184, { jitter: 0.7, edge: 1 }), c(0x6f685e, { jitter: 0.7, edge: 1 })];
+    const MARRAM = c(0x9aa45a, { jitter: 0.9 }), TIDE = Math.floor(SEA_Y * 4);
+    const MOLE = L.MOLE = [[-404, -254], [-401, -276], [-394, -295]];
+    const moleD = (x, z) => { let b = 1e9; for (let i = 0; i < MOLE.length - 1; i++) { const [ax, az] = MOLE[i], [bx, bz] = MOLE[i + 1], dx = bx - ax, dz = bz - az, u = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz), 0, 1); b = Math.min(b, Math.hypot(x - ax - dx * u, z - az - dz * u)); } return b; };
+    const CT = L.coastT = { beach: 0, dune: 0, rock: 0, cliff: 0, sea: 0, wall: 0 };
+    // west of the park the Heights meet the sea as a graded rocky slope (shelf at the tide line, then ~1.6 m rise per metre)
+    const nwSlope = (x, z) => x < PK.x0 - 1 && z < -236;
+    const coastCol = (i, x, z) => {
+      const s = L.coastS(x, z), g = H[i];
+      if (s >= 9 && !(s < 44 && g > 6 && nwSlope(x, z))) return;
+      if (protectedAt(x, z)) { if (s < 2) { S[i] = g > 6 ? CLF[0] : GRAN[0]; CT.wall++; } return; }
+      const hp = hash(Math.floor(x * 2), Math.floor(z * 2)), cliff = g > 6, rocky = g > 2 || N2(x * 0.045 + 17, z * 0.045 - 5) > 0.62;
+      let h = g, top = C[i], side = S[i];
+      if (s < 0) {
+        h = Math.min(g, clamp(Math.floor((SEA_Y - 0.35 + s * 0.3) * 4), -16, TIDE - 1));
+        top = s > -2.5 ? (hp < 0.5 ? SEA.sand : SEA.sandD) : N2(x * 0.1, z * 0.1) < 0.45 ? SEA.weed : SEA.mud; side = SEA.sandD; CT.sea++;
+        if (rocky && s > -7) {
+          const rh = hash(Math.floor(x * 1.4) + 3, Math.floor(z * 1.4) - 5);
+          if (rh > 0.52) { h = Math.max(h, TIDE - 3 + Math.floor((rh - 0.52) * 12 * (1 + s / 7)) + (cliff ? 2 : 0)); top = RUB[(rh * 37 | 0) & 3]; side = top; CT.rock++; }
+        }
+      } else if (cliff && nwSlope(x, z)) {
+        const r2 = hash(Math.floor(x * 1.5), Math.floor(z * 1.5)), wn = (N2(x * 0.09 + 31, z * 0.09 - 12) - 0.5) * 2.4;
+        const gh = Math.max(TIDE + 1, Math.floor((SEA_Y + 0.3 + (s < 4 ? s * 0.35 : 1.4 + (s - 4) * 1.6) + wn + r2 * 0.5) * 4));
+        if (gh < g) {
+          h = gh; side = RUB[(r2 * 7 | 0) & 3]; CT.rock++;
+          if (s < 3) top = hp < 0.35 ? SEA.pebble : RUB[(r2 * 4) | 0];
+          else if (g - gh > 10 || r2 < 0.35) top = r2 < 0.08 ? RUB[4] : r2 < 0.5 ? CLF[(r2 * 5) % 3 | 0] : RUB[(r2 * 4) | 0];
+          else top = hp < 0.5 ? GR.dry : GR.olive;
+        }
+      } else if (cliff) {
+        if (s < 2.5) { side = CLF[(hp * 3) | 0]; CT.cliff++; }
+      } else if (rocky) {
+        const r2 = hash(Math.floor(x * 1.5), Math.floor(z * 1.5)), sh = TIDE + 1 + Math.floor(s * 1.6 + r2 * 3);
+        if (sh < g) { h = sh; top = r2 < 0.12 ? RUB[4] : RUB[(r2 * 4) | 0]; side = RUB[(r2 * 7 | 0) & 3]; CT.rock++; }
+      } else {
+        const bh = Math.floor((SEA_Y + 0.2 + s * 0.33) * 4), dk = z < -236 ? bayK(x) : 0;
+        const dune = dk > 0.05 && s > 3.9 ? Math.floor(3.4 * dk * Math.sin(Math.PI * Math.min(1, (s - 3.9) / 5.1)) * (0.55 + 0.45 * N2(x * 0.08 + 2, z * 0.08))) : 0;
+        if (bh < g) { h = bh; top = s < 0.9 ? BEACH.wet : hp < 0.5 ? BEACH.dry : BEACH.dry2; side = BEACH.wet; CT.beach++; }
+        else if (dune > 0) { h = Math.max(g, 1 + dune); top = dune >= 2 && hp < 0.55 ? MARRAM : hp < 0.5 ? BEACH.dry : BEACH.dry2; side = BEACH.dry2; CT.dune++; }
+        else if (hp < (9 - s) * 0.06) top = hp < 0.2 ? MARRAM : BEACH.dry2;
+      }
+      if (z < -250 && x > -412 && x < -386) {
+        const md = moleD(x, z) + (N2(x * 0.4, z * 0.4) - 0.5) * 1.1;
+        if (md < 1.5) { h = Math.max(h, 2); top = hp < 0.5 ? CAP : CAPD; side = RUB[(hp * 4) | 0]; }
+        else if (md < 6) { const hr = Math.max(-16, 1 - Math.floor((md - 1.5) * 2.2) - Math.floor(hash(Math.floor(x * 1.3), Math.floor(z * 1.3)) * 3)); if (hr > h) { h = hr; top = RUB[(hp * 4) | 0]; side = top; } }
+      }
+      H[i] = h; C[i] = top; S[i] = side;
+    };
+    // the Solace Sands slope carried up the airfield's south strip
+    const sands = (i, x, z) => {
+      if (protectedAt(x, z)) return;
+      const h = Math.floor((SEA_Y + (SHORE_S[clamp(Math.floor((x - W.X0) / VSB), 0, W.NX - 1)] - z) * 0.11) * 4); if (h >= H[i]) return;
+      H[i] = h; C[i] = hash(Math.floor(x * 2), Math.floor(z * 2)) < 0.5 ? BEACH.dry : BEACH.dry2; S[i] = BEACH.wet; CT.beach++;
+    };
+    W.eachCol(W.X0, ZN, XE, -236, (bx, bz, i, x, z) => coastCol(i, x, z));
+    W.eachCol(W.X0, -236, W.X0 + 14, 300, (bx, bz, i, x, z) => coastCol(i, x, z));
+    W.eachCol(XE - 14, -236, XE, COAST, (bx, bz, i, x, z) => coastCol(i, x, z));
+    W.eachCol(W.X0 + 14, 204, -300, COAST, (bx, bz, i, x, z) => sands(i, x, z));
+    // the outermost block ring is always sea bed (the mesher draws no faces against the world edge)
+    L.closeEdges = () => { const E = (i) => { H[i] = -16; C[i] = SEA.deep; S[i] = WETG; }; for (let bx = 0; bx < W.NX; bx++) { E(bx * NZ); E(bx * NZ + NZ - 1); } for (let bz = 0; bz < NZ; bz++) { E(bz); E((W.NX - 1) * NZ + bz); } };
+    L.closeEdges();
     // ---- side colouring: granite courses on the quay wall, rubble on the breakwater, strata on the heights
     W.sideFn = (bx, bz, by, top) => {
       if (bz >= 1990) {        // z >= 197.5: quay wall / breakwater
@@ -200,6 +286,8 @@ try {
         const course = (by + 16) >> 1, jt = ((bx + (course & 1) * 3) >> 3) & 3;
         return by >= 0 ? GRAN[jt % 3] : (by === -5 ? WEED : GRAN[(jt + 1) % 3]);
       }
+      const sc = S[bx * NZ + bz];
+      if (sc === CLF[0] || sc === CLF[1] || sc === CLF[2]) return CLF[((by >> 3) + 9 + ((bx >> 5) & 1)) % 3];   // sea-cliff strata
       return 0;
     };
     W.tDirty = true;
@@ -234,418 +322,32 @@ try {
     const sp = [], sn = [], si = []; let sN = 0;
     const q = (x0, z0, x1, z1) => { sp.push(x0, SEA_Y, z0, x0, SEA_Y, z1, x1, SEA_Y, z1, x1, SEA_Y, z0); sn.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0); si.push(sN, sN + 1, sN + 2, sN, sN + 2, sN + 3); sN += 4; };
     for (let x = W.X0; x < 300; x += 8) for (let z = COAST; z < 300; z += 8) q(x, z, x + 8, Math.min(300, z + 8));
-    for (let x = -1500; x < 1500; x += 100) for (let z = 300; z < 1500; z += 100) q(x, z, x + 100, z + 100);
-    for (let z = 150; z < 300; z += 50) { for (let x = -1500; x < W.X0; x += 100) q(x, Math.max(z, 200), Math.min(x + 100, W.X0), z + 50); for (let x = 300; x < 1500; x += 100) q(x, Math.max(z, 200), x + 100, z + 50); }
+    // coastal water inside the map edges: 4 m tiles where the island shore dips under the sea, always along the edge ring
+    for (let x = W.X0; x < XE; x += 4) for (let z = ZN; z < COAST; z += 4) {
+      if (x > W.X0 && x + 4 < XE && z > ZN) {
+        if (L.coastS(x + 2, z + 2) > 14) continue;
+        let wet = false;
+        for (let i = 0; i < 4 && !wet; i++) for (let k = 0; k < 4; k++) { const px = x + i + 0.5, pz = z + k + 0.5; if (L.coastS(px, pz) < 2 && W.groundY(px, pz) < SEA_Y - 0.01) { wet = true; break; } }
+        if (!wet) continue;
+      }
+      q(x, z, x + 4, Math.min(COAST, z + 4));
+    }
+    // the open ocean all around the island, out past the camera's far plane (50 m tiles near the coast, 300 m beyond)
+    const band = (x0, z0, x1, z1, st) => { for (let x = x0; x < x1; x += st) for (let z = z0; z < z1; z += st) q(x, z, Math.min(x1, x + st), Math.min(z1, z + st)); };
+    const ring = (h, o, st) => { band(o[0], o[1], o[2], h[1], st); band(o[0], h[3], o[2], o[3], st); band(o[0], h[1], h[0], h[3], st); band(h[2], h[1], o[2], h[3], st); };
+    const MAPR = [W.X0, ZN, XE, W.z1], NEAR = [W.X0 - 300, ZN - 300, XE + 300, W.z1 + 300], FAR = [W.X0 - 2640, ZN - 2640, XE + 2640, W.z1 + 2640];
+    ring(MAPR, NEAR, 50); ring(NEAR, FAR, 300);
     const sea = fin('lake', sp, sn, si, sN, SEA_Y); sea.userData.sea = true;
+    // sea bed under the ocean (y -4, the in-map bed level), so the translucent water never shows the void
+    { const sb = new AF.GeoBuf(), bed = AF.col(0x44564e, { jitter: 0.25 });
+      const bq = (x0, z0, x1, z1) => sb.quad([x0, -4, z0], [x0, -4, z1], [x1, -4, z1], [x1, -4, z0], [0, 0], [0, 1], [1, 1], [1, 0], bed, 2, [3, 3, 3, 3]);
+      bq(FAR[0], FAR[1], FAR[2], ZN); bq(FAR[0], W.z1, FAR[2], FAR[3]); bq(FAR[0], ZN, W.X0, W.z1); bq(XE, ZN, FAR[2], W.z1);
+      const m = new THREE.Mesh(sb.geometry(), AF.mat.voxel); m.name = 'land-seabed'; m.matrixAutoUpdate = false; m.updateMatrix(); m.frustumCulled = false; AF.scene.add(m); }
     const lake = mk('lake', Math.floor(LK.cx - LK.rx - 3), Math.floor(LK.cz - LK.rz - 3), Math.ceil(LK.cx + LK.rx + 3), Math.ceil(LK.cz + LK.rz + 3), L.LAKE_Y, (x, z) => L.lakeE(x, z) <= 1.06);
     const pond = mk('pond', PD.cx - PD.r - 2, PD.cz - PD.r - 2, PD.cx + PD.r + 2, PD.cz + PD.r + 2, L.POND_Y, (x, z) => Math.hypot(x - PD.cx, z - PD.cz) < PD.r + 0.5);
     L.water = { sea, lake, pond };
     for (const g of [sea, lake, pond]) if (g.userData.quads) AF.addWater(g);
     L.waterMs = Math.round(performance.now() - t0);
-  });
-
-  // ------------------------------------------------------------ horizon v2: a WORLD around the city — rolling autumn hills (Euclidean, noise-warped,
-  //   smooth sloped quads with baked slope light + aerial-perspective tint), ridges at ~600/900/1300 m, curving headlands framing the bay,
-  //   far canopy clumps (autumn / evergreen / bare), farm fields + farmhouses, hill villages, a steeple town (W), a lattice radio mast with a
-  //   blinking red light + a railway viaduct (E), the Heights continuing north with a SOLACE HEIGHTS sign, an observatory and a water tower,
-  //   and the open sea south with islands, a far lighthouse and steamers on the horizon.
-  AF.onBuild('land-horizon', 125, () => {
-    const t0 = performance.now();
-    const G = AF.GeoBuf; if (typeof G !== 'function') return;
-    const R0 = 300, lerp = AF.lerp;
-    // the map is x in [XW, 300): west of the old edge the horizon is the old western horizon moved out by SH metres
-    const XW = W.X0, SH = -300 - XW, sx = (x) => x < -300 ? Math.min(-300, x + SH) : x;
-    const sdSq0 = (x, z) => Math.hypot(Math.max(Math.abs(x) - R0, 0), Math.max(Math.abs(z) - R0, 0));
-    const sdSq = (x, z) => sdSq0(sx(x), z);
-    // coast: the bay mouth is the map's south edge; headlands east + west curve south to frame the harbour
-    const coastZ0 = (x) => { const ax = Math.abs(x); return ax < R0 ? COAST : COAST + (ax - R0) * 0.35 + 170 * smooth(330, 820, ax) + (fbm(x * 0.006, 3, 3) - 0.5) * 60; };
-    const coastZ = (x) => coastZ0(sx(x));
-    L.coastZ = coastZ;
-    const edgeGround = (x, z) => W.groundY(clamp(x, XW + 0.5, R0 - 0.5), clamp(z, -R0 + 0.5, COAST - 1));
-    const hgt = (xr, z) => {
-      const x = sx(xr);
-      const sd = sdSq0(x, z), d = Math.hypot(x, z * 1.05);
-      const wp = (fbm(x * 0.0021 + 3, z * 0.0021 - 5, 3) - 0.5) * 160;
-      let h = 3 + fbm(x * 0.006 + 4, z * 0.006, 4) * 16 * smooth(0, 160, sd);
-      const ang = Math.atan2(z, x);
-      for (const [Rr, A, Wd] of [[620, 26, 110], [900, 52, 150], [1300, 120, 230]]) {
-        const tt = (d - Rr - wp) / Wd; h += A * Math.exp(-tt * tt * 2) * (0.45 + fbm(ang * 2.2 + Rr, Rr * 0.01, 3) * 1.1);
-      }
-      if (z < -R0) h += smooth(0, 140, -z - R0) * (34 + fbm(x * 0.01, 7, 3) * 22);        // the Heights keep climbing north
-      const w = smooth(2, 70, sd);
-      const e0 = edgeGround(xr, z);
-      h = lerp(e0, Math.max(e0 * 0.9, h), w);
-      // r2: behind Central Park the hillside climbs straight up from the park's north edge (an amphitheatre of woods facing
-      // the city, the sign on its steep face) instead of a flat brown bowl between the two in-map Heights
-      if (z < -R0 + 1) { const dN = -z - R0; h = Math.max(h, (60 + (fbm(x * 0.012 + 3, 9, 3) - 0.5) * 16) * smooth(0, 115, dN) * smooth(640, 380, Math.abs(x))); }
-      // shore: down to a beach and under the sea past the coastline
-      const inland = coastZ0(x) - z;
-      if (z > COAST - 90) h = Math.min(h, inland < 0 ? -4 : lerp(0.35, h, smooth(4, 90, inland)));
-      return h;
-    };
-    // ---- palette: autumn ramp × slope light × aerial perspective (warm toward the western sun, cool away)
-    const HUES = { rust: 0x8a4a2a, ochre: 0xb08a3a, olive: 0x5a6a3a, ever: 0x2e4a34, field: 0xc8a860, beach: 0xd8c8a0, rock: 0x8a847c, meadow: 0x7a8a42, plough: 0x7a5a3e, scrub: 0xa08a4a };
-    const HZW = 0xc9a98f, HZC = 0x9aa4c0;
-    const mixHex = (a, b, t) => { const f = (s) => Math.round(((a >> s) & 255) * (1 - t) + ((b >> s) & 255) * t); return (f(16) << 16) | (f(8) << 8) | f(0); };
-    const scaleHex = (a, k) => { const f = (s) => Math.min(255, Math.round(((a >> s) & 255) * k)); return (f(16) << 16) | (f(8) << 8) | f(0); };
-    const pcache = new Map();
-    const pc = (hue, lit, hz, warm) => {
-      const key = hue + '|' + lit + '|' + hz + '|' + warm; let c = pcache.get(key);
-      if (c == null) { const base = scaleHex(HUES[hue], [0.72, 0.9, 1.08][lit]); c = AF.col(mixHex(base, warm ? HZW : HZC, hz * 0.065), { jitter: 0.35 }); pcache.set(key, c); }   // r2 clarity: half the baked haze
-      return c;
-    };
-    const Ld = [-0.62, 0.62, 0.3]; { const l = Math.hypot(...Ld); Ld[0] /= l; Ld[1] /= l; Ld[2] /= l; }
-    const SGX = 0, SGZ = -372;
-    const nearN = (x, z) => z < -R0 + 1 && z > -R0 - 170 && Math.abs(x) < 420;
-    const inClearing = (x, z) => { const ex = (x - SGX) / (74 + (N2(z * 0.08, 3) - 0.5) * 14), ez = (z - SGZ - 7) / (15 + (N2(x * 0.06, 7) - 0.5) * 8); return ex * ex + ez * ez < 1; };
-    L.nearN = nearN;
-    const hueAt = (x, z, h, slope) => {
-      if (h < 1.6 && z > coastZ(x) - 45) return 'beach';
-      const nn = nearN(x, z);
-      if (nn && inClearing(x, z)) return N2(x * 0.09 + 4, z * 0.09) < 0.5 ? 'scrub' : 'meadow';
-      if (slope > (nn ? 1.7 : 0.9)) return 'rock';
-      const f = fbm(x * 0.0045 + 11, z * 0.0045 - 3, 3), g = N2(x * 0.02 + 5, z * 0.02 + 1);
-      if (!nn && h < 30 && slope < 0.25 && f > 0.56) return g < 0.5 ? 'field' : g < 0.75 ? 'plough' : 'meadow';
-      const a = fbm(x * 0.008 - 2, z * 0.008 + 6, 3);
-      return a < 0.38 ? 'ever' : a < 0.5 ? 'olive' : a < 0.62 ? 'rust' : 'ochre';
-    };
-    // r2: the horizon is split into ~500 m chunks so the camera frustum culls what is behind it (was one 1M-quad mesh)
-    const CHS = 508, NCH = 6, chunks = new Map();
-    const bufAt = (x, z) => { const i = clamp(Math.floor((x + 1524) / CHS), 0, NCH - 1), k = clamp(Math.floor((z + 1524) / CHS), 0, NCH - 1), key = i * NCH + k; let b = chunks.get(key); if (!b) { b = new G(); chunks.set(key, b); } return b; };
-    const buf = { quad(a, b, c, d, e, f, g, h, i, j, k) { bufAt(a[0], a[2]).quad(a, b, c, d, e, f, g, h, i, j, k); } };
-    const cells = [];         // [x,z,y,hue] for clump + house placement
-    const mesh = (cs, RI, R1) => {
-      const nx = Math.round((R1 * 2 + SH) / cs), nz = Math.round((R1 * 2) / cs), XA = -R1 - SH, NZ1 = nz + 1, V = new Float32Array((nx + 1) * NZ1);
-      for (let i = 0; i <= nx; i++) for (let k = 0; k <= nz; k++) V[i * NZ1 + k] = hgt(XA + i * cs, -R1 + k * cs);
-      const hv = (i, k) => V[i * NZ1 + k];
-      for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) {
-        const xa = XA + i * cs, za = -R1 + k * cs, xb = xa + cs, zb = za + cs;
-        if (xa >= -RI - SH && xb <= RI && za >= -RI && zb <= RI) continue;
-        const h00 = hv(i, k), h01 = hv(i, k + 1), h11 = hv(i + 1, k + 1), h10 = hv(i + 1, k);
-        if (Math.max(h00, h01, h11, h10) < -3.5) continue;
-        const xc = xa + cs / 2, zc = za + cs / 2, hc = (h00 + h01 + h11 + h10) / 4;
-        const gx = ((h10 + h11) - (h00 + h01)) / (2 * cs), gz = ((h01 + h11) - (h00 + h10)) / (2 * cs);
-        const nl = Math.hypot(gx, 1, gz), dot = (-gx * Ld[0] + Ld[1] - gz * Ld[2]) / nl, slope = Math.hypot(gx, gz);
-        const lit = dot > 0.78 ? 2 : dot > 0.5 ? 1 : 0;
-        const dd = Math.hypot(xc, zc), hz = Math.min(5, Math.floor(smooth(350, 1500, dd) * 6)), warm = xc < -100 ? 1 : 0;
-        const hue = hueAt(xc, zc, hc, slope);
-        buf.quad([xa, h00, za], [xa, h01, zb], [xb, h11, zb], [xb, h10, za], [xa / 2, za / 2], [xa / 2, zb / 2], [xb / 2, zb / 2], [xb / 2, za / 2], pc(hue, lit, hz, warm), 2, [3, 3, 3, 3]);
-        if (hc > 2 && hue !== 'beach' && hue !== 'rock') cells.push([xc, zc, hc, hue, cs, sdSq(xc, zc), slope]);
-      }
-      // skirt around the inner hole (hides cracks against the voxel map edge / the finer grid)
-      const sk = (ax, az, bx, bz, ha, hb, nI) => { const c = pc('olive', 0, 0, 0); buf.quad([ax, -6, az], [bx, -6, bz], [bx, hb, bz], [ax, ha, az], [0, 0], [1, 0], [1, 1], [0, 1], c, nI, [2, 2, 2, 2]); buf.quad([ax, ha, az], [bx, hb, bz], [bx, -6, bz], [ax, -6, az], [0, 1], [1, 1], [1, 0], [0, 0], c, nI ^ 1, [2, 2, 2, 2]); };
-      const i0 = Math.round((R1 - RI) / cs), i1 = nx - i0, k0 = i0, k1 = nz - k0;
-      for (let t = k0; t < k1; t++) {
-        const a = -R1 + t * cs, b = a + cs;
-        if (a < COAST) { sk(-RI - SH, a, -RI - SH, b, hv(i0, t), hv(i0, t + 1), 1); sk(RI, b, RI, a, hv(i1, t + 1), hv(i1, t), 0); }
-      }
-      for (let t = i0; t < i1; t++) { const a = XA + t * cs, b = a + cs; sk(b, -RI, a, -RI, hv(t + 1, k0), hv(t, k0), 5); }
-    };
-    const TM = L.horizonT = {};
-    mesh(6, R0, 516);
-    mesh(24, 516, 1524);
-    TM.ground = Math.round(performance.now() - t0);
-
-    // ---- far canopy clumps: 1 m voxel trees from the nature specs, merged into the horizon mesh
-    const specs = L.treeSpecs || [];
-    const clumpLib = { autumn: [], ever: [], bare: [] };
-    if (L.makeTree && specs.length) {
-      const pickS = (id) => specs.find((s) => s.id === id);
-      const mk = (spec, seed, vs, kind) => { if (!spec) return; const t = L.makeTree(spec, seed, vs); const g = AF.meshModel(t.m, { vs, anchor: [0.5, 0, 0.5] }); clumpLib[kind].push({ g, vs }); };
-      let sd = 900;
-      for (const id of ['maple-scarlet', 'maple-orange', 'maple-gold', 'red-oak', 'oak', 'elm', 'sweetgum', 'pin-oak']) for (const sc of [0.7, 1.05]) { const s0 = pickS(id); if (s0) mk(Object.assign({}, s0, { h: s0.h * sc, w: s0.w * sc }), sd++, 1, 'autumn'); }
-      for (const id of ['pine', 'spruce']) for (const sc of [0.8, 1.2]) { const s0 = pickS(id); if (s0) mk(Object.assign({}, s0, { h: s0.h * sc, w: s0.w * sc }), sd++, 1, 'ever'); }
-      const s0 = pickS('oak'); if (s0) for (const sc of [0.8, 1.1]) mk(Object.assign({}, s0, { h: s0.h * sc, w: s0.w * sc * 0.8, leaves: [0x6a5446, 0x5a4a3e, 0x4e4036, 0x7a6450] }), sd++, 1, 'bare');
-      // distant hills: 2 m voxel clumps (a quarter of the faces)
-      clumpLib.coarse = { autumn: [], ever: [], bare: [] };
-      for (const id of ['maple-scarlet', 'maple-orange', 'maple-gold', 'red-oak', 'oak']) { const s1 = pickS(id); if (s1) { const t = L.makeTree(Object.assign({}, s1, { h: s1.h * 1.2, w: s1.w * 1.2 }), sd++, 2); clumpLib.coarse.autumn.push({ g: AF.meshModel(t.m, { vs: 2, anchor: [0.5, 0, 0.5] }), vs: 2 }); } }
-      for (const id of ['pine', 'spruce']) { const s1 = pickS(id); if (s1) { const t = L.makeTree(Object.assign({}, s1, { h: s1.h * 1.2, w: s1.w * 1.2 }), sd++, 2); clumpLib.coarse.ever.push({ g: AF.meshModel(t.m, { vs: 2, anchor: [0.5, 0, 0.5] }), vs: 2 }); } }
-      // r2: a finer (1/2 m) set for the first ~28 m of hillside behind the park, where eye-level cameras get close
-      clumpLib.fine = []; clumpLib.fineEver = [];
-      for (const id of ['maple-scarlet', 'maple-orange', 'maple-gold', 'red-oak', 'elm', 'sweetgum']) { const s1 = pickS(id); if (s1) { const t = L.makeTree(Object.assign({}, s1), sd++, 0.5); clumpLib.fine.push({ g: AF.meshModel(t.m, { vs: 0.5, anchor: [0.5, 0, 0.5] }), vs: 0.5 }); } }
-      for (const id of ['pine', 'spruce']) { const s1 = pickS(id); if (s1) { const t = L.makeTree(Object.assign({}, s1), sd++, 0.5); clumpLib.fineEver.push({ g: AF.meshModel(t.m, { vs: 0.5, anchor: [0.5, 0, 0.5] }), vs: 0.5 }); } }
-    }
-    const appendGeo = (g, x, y, z, s = 1) => {
-      const p = g.attributes.position.array, uv = g.attributes.aBU.array, pal = g.attributes.aPal.array, an = g.attributes.aAN.array, ix = g.index.array;
-      const B = bufAt(x, z), b = B.n;
-      for (let v = 0; v < p.length / 3; v++) { B.p.push(x + p[v * 3] * s, y + p[v * 3 + 1] * s, z + p[v * 3 + 2] * s); B.uv.push(uv[v * 2], uv[v * 2 + 1]); B.pal.push(pal[v]); B.an.push(an[v]); }
-      for (let q = 0; q < ix.length; q++) B.idx.push(b + ix[q]);
-      B.n += p.length / 3;
-    };
-    TM.lib = Math.round(performance.now() - t0);
-    // r2: HEIGHTS DRIVE — a lamp-lit switchback climbing the wooded face behind Central Park, past villas to the crest
-    const DRIVE = L.DRIVE = [
-      [[74, -301], [30, -310], [-40, -318], [-100, -326], [-128, -338], [-104, -350], [-40, -349], [30, -347], [96, -352], [128, -366],
-       [112, -386], [70, -396], [0, -402], [-80, -404], [-150, -396], [-196, -378], [-212, -362]],
-      [[96, -352], [140, -348], [168, -338]],
-    ];
-    const driveSegs = [];
-    for (const pl of DRIVE) for (let i = 0; i < pl.length - 1; i++) { const [ax, az] = pl[i], [bx, bz] = pl[i + 1], len = Math.hypot(bx - ax, bz - az); driveSegs.push({ ax, az, dx: bx - ax, dz: bz - az, len }); }
-    const INC = L.INCLINE = { x: -152, z0: -303, z1: -388 };      // r2: Heights Incline Railway (funicular) up the wooded face
-    L.roadNear = (x, z, m) => { for (const g of driveSegs) { const u = clamp(((x - g.ax) * g.dx + (z - g.az) * g.dz) / (g.len * g.len), 0, 1); if (Math.hypot(x - g.ax - g.dx * u, z - g.az - g.dz * u) < m) return true; } return false; };
-    let clumps = 0;
-    const RC = AF.rng(4417);
-    const hasClumps = clumpLib.autumn.length > 0;
-    for (const [x, z, h, hue, cs, sd, slope] of cells) {
-      const nn = nearN(x, z);
-      if (!hasClumps || sd < 3 || sd > 520 || slope > (nn ? 1.6 : 0.7)) continue;
-      const forest = hue === 'ever' || hue === 'rust' || hue === 'ochre' || hue === 'olive';
-      const dens = forest ? (nn ? 1 : sd < 100 ? 0.8 : 0.45) : (nn && (hue === 'meadow' || hue === 'scrub') ? 1 : 0.05);
-      const nper = cs <= 6 ? 1 : 2;
-      for (let q = 0; q < nper; q++) {
-        if (RC() > dens * (cs <= 6 ? (nn ? (sd < 60 ? 0.92 : 0.5) : 0.3) : 0.22) * (sd > 220 ? 0.7 : 1)) continue;
-        const px = x + (RC() - 0.5) * cs * 0.9, pz = z + (RC() - 0.5) * cs * 0.9;
-        if (sdSq(px, pz) < 3 || pz > coastZ(px) - 6) continue;
-        const behindSign = Math.abs(px - SGX) < 70 && pz < SGZ + 3 && pz > SGZ - 16;
-        if (inClearing(px, pz) || behindSign) {      // the scrub clearing keeps the SOLACE HEIGHTS sign readable: only low bushes
-          if (RC() < 0.3) { const lb = clumpLib.autumn; appendGeo(lb[(RC() * lb.length) | 0].g, Math.round(px * 2) / 2, hgt(px, pz) - 0.3, Math.round(pz * 2) / 2, 0.32 + RC() * 0.12); clumps++; }
-          continue;
-        }
-        if (L.roadNear && L.roadNear(px, pz, 6.5)) continue;
-        if (Math.abs(px - INC.x) < 6 && pz < INC.z0 + 2 && pz > INC.z1 - 10) continue;
-        const r = RC(), kind = hue === 'ever' ? (r < 0.75 ? 'ever' : 'autumn') : (r < 0.72 ? 'autumn' : r < 0.87 ? 'ever' : 'bare');
-        let lib = clumpLib[kind].length ? clumpLib[kind] : clumpLib.autumn;
-        if (nn && sd < 28 && clumpLib.fine && clumpLib.fine.length) lib = kind === 'ever' && clumpLib.fineEver.length ? clumpLib.fineEver : clumpLib.fine;
-        else if (sd > 40 && clumpLib.coarse && clumpLib.coarse.autumn.length) lib = kind === 'ever' && clumpLib.coarse.ever.length ? clumpLib.coarse.ever : clumpLib.coarse.autumn;
-        const it = lib[(RC() * lib.length) | 0];
-        appendGeo(it.g, Math.round(px * 2) / 2, hgt(px, pz) - 0.5, Math.round(pz * 2) / 2, sd > 260 ? 1.35 : nn ? 1.1 + RC() * 0.25 : sd > 100 ? 1.3 : 1);
-        clumps++;
-      }
-    }
-
-    TM.clumps = Math.round(performance.now() - t0);
-    // ---- simple far buildings: farmhouses, hill-village houses, a steeple town (W), barns
-    const box = (x0, y0, z0, x1, y1, z1, c, cTop) => {
-      const T = cTop ?? c;
-      buf.quad([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0 * 4, z0 * 4], [x0 * 4, z1 * 4], [x1 * 4, z1 * 4], [x1 * 4, z0 * 4], T, 2, [3, 3, 3, 3]);
-      buf.quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [z1 * 4, y0 * 4], [z0 * 4, y0 * 4], [z0 * 4, y1 * 4], [z1 * 4, y1 * 4], c, 0, [1, 1, 3, 3]);
-      buf.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [z0 * 4, y0 * 4], [z1 * 4, y0 * 4], [z1 * 4, y1 * 4], [z0 * 4, y1 * 4], c, 1, [1, 1, 3, 3]);
-      buf.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [x0 * 4, y0 * 4], [x1 * 4, y0 * 4], [x1 * 4, y1 * 4], [x0 * 4, y1 * 4], c, 4, [1, 1, 3, 3]);
-      buf.quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1 * 4, y0 * 4], [x0 * 4, y0 * 4], [x0 * 4, y1 * 4], [x1 * 4, y1 * 4], c, 5, [1, 1, 3, 3]);
-    };
-    // stepped gable roof along x
-    const roof = (x0, y0, z0, x1, z1, c) => { const d = z1 - z0; for (let i = 0; i < 4; i++) { const ins = d * 0.13 * i; box(x0, y0 + i * d * 0.12, z0 + ins, x1, y0 + (i + 1) * d * 0.12, z1 - ins, c); } };
-    const WALLS = [0xf2ede2, 0xe8dcc4, 0xd8c8a8, 0xf4ecda, 0xc8b89a].map((h) => AF.col(h, { jitter: 0.3 }));
-    const ROOFS = [0xb35a3a, 0x8a4a3a, 0x6a5a5a, 0x4f7a6a, 0x9a3e32].map((h) => AF.col(h, { jitter: 0.4 }));
-    const WINL = AF.col(0xffd89a, { emit: 0xffb060, emitK: 2.2, mode: 'night' });
-    const barnR = AF.col(0x9a3a2a, { jitter: 0.4 }), stoneW = AF.col(0xb8b0a0, { jitter: 0.4 }), steelC = AF.col(0x6a6660, { jitter: 0.2, metal: 0.6, rough: 0.5 });
-    const house = (x, z, s, rng) => {
-      const y = hgt(x, z) - 0.3, w = (6 + rng() * 5) * s, d = (5 + rng() * 3) * s, hh = (4 + rng() * 3) * s;
-      const wc = WALLS[(rng() * WALLS.length) | 0], rc = ROOFS[(rng() * ROOFS.length) | 0];
-      box(x - w / 2, y, z - d / 2, x + w / 2, y + hh, z + d / 2, wc);
-      roof(x - w / 2 - 0.4, y + hh, z - d / 2 - 0.4, x + w / 2 + 0.4, z + d / 2 + 0.4, rc);
-      if (rng() < 0.55) box(x - w / 4, y + hh * 0.35, z + d / 2, x - w / 4 + 1.2 * s, y + hh * 0.35 + 1.4 * s, z + d / 2 + 0.15, WINL);
-      if (rng() < 0.35) box(x + w / 5, y + hh * 0.35, z + d / 2, x + w / 5 + 1.2 * s, y + hh * 0.35 + 1.4 * s, z + d / 2 + 0.15, WINL);
-      if (rng() < 0.5) box(x + w / 2 - 1.6 * s, y + hh, z - 0.6 * s, x + w / 2 - 0.6 * s, y + hh + 3 * s, z + 0.4 * s, AF.col(0x8a4a38, { jitter: 0.4 }));
-    };
-    const RH = AF.rng(733);
-    let houses = 0;
-    // farmhouses + barns on field cells, villages clustered on the near hills
-    for (const [x, z, h, hue, cs, sd] of cells) {
-      if (sd < 20 || sd > 700) continue;
-      if ((hue === 'field' || hue === 'meadow' || hue === 'plough') && RH() < (cs <= 6 ? 0.012 : 0.05)) {
-        house(x, z, 1, RH); houses++;
-        if (RH() < 0.6) { const bx = x + 12, bz = z + 4, by = hgt(bx, bz) - 0.3; box(bx - 5, by, bz - 4, bx + 5, by + 6, bz + 4, barnR); roof(bx - 5.4, by + 6, bz - 4.4, bx + 5.4, bz + 4.4, ROOFS[2]); }
-      }
-      const vil = N2(x * 0.004 + 21, z * 0.004 - 13);
-      if (vil > 0.66 && sd < 450 && RH() < (cs <= 6 ? 0.1 : 0.4)) { house(x + (RH() - 0.5) * cs, z + (RH() - 0.5) * cs, 1, RH); houses++; }
-    }
-    // r2: Heights Drive surface (draped quads), kerb lamps (bulbs glow at dusk), and hillside villas along it
-    { const ROADC = AF.col(0x6a6258, { jitter: 0.5, rough: 0.85 }), KERB = AF.col(0xb8ae9a, { jitter: 0.3 }), POLE = AF.col(0x2e3a32, { jitter: 0.1, metal: 0.5, rough: 0.5 });
-      const BULB = AF.col(0xfff0c8, { emit: 0xffc878, emitK: 3.4, mode: 'night' });
-      const VW = [0xf2ede2, 0xf4ecda, 0xefe6d2, 0xe8dcc4].map((h) => AF.col(h, { jitter: 0.25 })), VR = [0xb35a3a, 0xa8483a, 0x9a3e32, 0x4f7a6a].map((h) => AF.col(h, { jitter: 0.35 }));
-      const RV = AF.rng(1936); let lampAcc = 0, lamps = 0, vil = 0, villaAcc = 0;
-      const W2 = 2.6, st = 3;
-      for (const g of driveSegs) {
-        const ux = g.dx / g.len, uz = g.dz / g.len, nx = -uz, nz = ux;
-        for (let s = 0; s < g.len; s += st) {
-          const s1 = Math.min(g.len, s + st), ax = g.ax + ux * s, az = g.az + uz * s, bx = g.ax + ux * s1, bz = g.az + uz * s1;
-          const ya = hgt(ax, az) + 0.55, yb = hgt(bx, bz) + 0.55;
-          buf.quad([ax + nx * W2, ya, az + nz * W2], [bx + nx * W2, yb, bz + nz * W2], [bx - nx * W2, yb, bz - nz * W2], [ax - nx * W2, ya, az - nz * W2], [0, 0], [0, 1], [1, 1], [1, 0], ROADC, 2, [3, 3, 3, 3]);
-          for (const sg of [1, -1]) { const ox = nx * sg, oz = nz * sg;
-            buf.quad([ax + ox * (W2 + 0.5), ya + 0.3, az + oz * (W2 + 0.5)], [bx + ox * (W2 + 0.5), yb + 0.3, bz + oz * (W2 + 0.5)], [bx + ox * W2, yb + 0.3, bz + oz * W2], [ax + ox * W2, ya + 0.3, az + oz * W2], [0, 0], [0, 1], [1, 1], [1, 0], KERB, 2, [3, 3, 3, 3]); }
-          lampAcc += st; villaAcc += st;
-          if (lampAcc >= 18) { lampAcc = 0; lamps++;
-            const lx = ax + nx * (W2 + 1), lz = az + nz * (W2 + 1), ly = hgt(lx, lz) - 0.2;
-            box(lx - 0.15, ly, lz - 0.15, lx + 0.15, ly + 4.6, lz + 0.15, POLE); box(lx - 0.35, ly + 4.4, lz - 0.35, lx + 0.35, ly + 5.2, lz + 0.35, BULB); }
-          if (villaAcc >= 34 && RV() < 0.8) { villaAcc = 0;
-            const sd2 = RV() < 0.5 ? 1 : -1, off = W2 + 9 + RV() * 4, vx = ax + nx * off * sd2, vz = az + nz * off * sd2;
-            if (inClearing(vx, vz) || L.roadNear(vx, vz, 7.5) || sdSq(vx, vz) < 8 || (Math.abs(vx - INC.x) < 12 && vz > INC.z1 - 14)) continue;
-            const vy = hgt(vx, vz), w = 9 + RV() * 5, d = 7 + RV() * 3, hh = 4.5 + RV() * 2.5, wc = VW[(RV() * 4) | 0];
-            const y0 = vy - 3.5;       // a stone terrace under the house bites into the slope
-            box(vx - w / 2 - 1.2, y0, vz - d / 2 - 1.2, vx + w / 2 + 1.2, vy + 0.6, vz + d / 2 + 1.2, stoneW);
-            box(vx - w / 2, vy + 0.6, vz - d / 2, vx + w / 2, vy + 0.6 + hh, vz + d / 2, wc);
-            if (RV() < 0.45) { box(vx - w / 2 - 0.3, vy + 0.6 + hh, vz - d / 2 - 0.3, vx + w / 2 + 0.3, vy + 1.0 + hh, vz + d / 2 + 0.3, wc);       // streamline moderne: flat roof + a round-cornered upper storey
-              box(vx - w / 4, vy + 1.0 + hh, vz - d / 3, vx + w / 2 - 0.5, vy + 3.6 + hh, vz + d / 3, wc);
-              box(vx - w / 4 + 0.5, vy + 2 + hh, vz + d / 3, vx + w / 2 - 1, vy + 2.9 + hh, vz + d / 3 + 0.12, WINL); }
-            else roof(vx - w / 2 - 0.5, vy + 0.6 + hh, vz - d / 2 - 0.5, vx + w / 2 + 0.5, vz + d / 2 + 0.5, VR[(RV() * 4) | 0]);
-            for (let k = 0; k < 3; k++) if (RV() < 0.7) { const wx = vx - w / 2 + 1.2 + k * (w - 2.4) / 2; box(wx - 0.6, vy + 1.8, vz + d / 2, wx + 0.6, vy + 3.4, vz + d / 2 + 0.12, WINL); }
-            if (RV() < 0.6) { box(vx + w / 2 - 2, vy + 0.6 + hh, vz - 0.5, vx + w / 2 - 1, vy + 3.6 + hh, vz + 0.5, AF.col(0x8a4a38, { jitter: 0.4 })); if (vil % 2 === 0 && AF.addChimney) AF.addChimney(vx + w / 2 - 1.5, vy + 3.7 + hh, vz); }
-            vil++; houses++; }
-        }
-      }
-      TM.drive = { lamps, villas: vil };
-    }
-    // r2: THE HEIGHTS INCLINE — two counterbalanced funicular cars on a trestle, passing on a loop halfway up
-    { const len = INC.z0 - INC.z1, N = Math.ceil(len), Y = new Float32Array(N + 1);
-      for (let i = 0; i <= N; i++) { const z = INC.z0 - i; let a = 0; for (let k = -3; k <= 3; k++) a += hgt(INC.x, z - k * 1.5); Y[i] = Math.max(a / 7, hgt(INC.x, z)) + 1.1; }
-      const loopOff = (i) => 2.2 * smooth(len * 0.35, len * 0.45, i) * smooth(len * 0.65, len * 0.55, i);
-      INC.Y = Y; INC.len = len; INC.loopOff = loopOff;
-      const sleeper = AF.col(0x4a3a2a, { jitter: 0.5 }), rail = AF.col(0x8a8a88, { metal: 0.8, rough: 0.35 }), tres = AF.col(0x5a4632, { jitter: 0.5, edge: 0.8 });
-      const strip = (x0, x1, i, y, cc) => { const za = INC.z0 - i, zb = za - 1, ya = Y[i] + y, yb = Y[Math.min(N, i + 1)] + y;
-        buf.quad([x0, ya, za], [x0, yb, zb], [x1, yb, zb], [x1, ya, za], [0, 0], [0, 1], [1, 1], [1, 0], cc, 2, [3, 3, 3, 3]); buf.quad([x1, ya, za], [x1, yb, zb], [x0, yb, zb], [x0, ya, za], [0, 0], [0, 1], [1, 1], [1, 0], cc, 3, [3, 3, 3, 3]); };
-      for (let i = 0; i < N; i++) {
-        const offs = loopOff(i + 0.5) > 0.05 ? [-loopOff(i + 0.5), loopOff(i + 0.5)] : [0];
-        for (const o of offs) { const x = INC.x + o; strip(x - 1.6, x + 1.6, i, -0.12, sleeper); strip(x - 1.05, x - 0.85, i, 0.05, rail); strip(x + 0.85, x + 1.05, i, 0.05, rail); }
-        if (i % 4 === 0) { const z = INC.z0 - i, g = hgt(INC.x, z); if (Y[i] - g > 0.9) for (const sx of [-1.3, 1.3]) box(INC.x + sx - 0.18, g - 0.5, z - 0.18, INC.x + sx + 0.18, Y[i] - 0.1, z + 0.18, tres); }
-      }
-      // stations: a deco kiosk at the foot, a station house + lookout terrace at the top
-      const cream = AF.col(0xf2e8d2, { jitter: 0.25, pat: 'stucco' }), maroon = AF.col(0x7a2a2a, { jitter: 0.2 }), gold = AF.col(0xd8b04a, { metal: 0.7, rough: 0.35 });
-      { const z = INC.z0 + 1, y = Y[0] - 1.2; box(INC.x - 3.5, y, z - 4, INC.x + 3.5, y + 4.2, z, cream); box(INC.x - 3.9, y + 4.2, z - 4.4, INC.x + 3.9, y + 4.7, z + 0.4, maroon); box(INC.x - 1.6, y + 4.7, z - 0.1, INC.x + 1.6, y + 6.2, z + 0.1, gold);
-        box(INC.x - 2.8, y + 1.4, z, INC.x - 1, y + 3, z + 0.12, WINL); box(INC.x + 1, y + 1.4, z, INC.x + 2.8, y + 3, z + 0.12, WINL); }
-      { const z = INC.z1 - 1, y = Y[N] - 1.2; box(INC.x - 6, y - 3, z - 8, INC.x + 6, y + 0.4, z + 3, stoneW); box(INC.x - 5, y + 0.4, z - 7, INC.x + 5, y + 5.5, z - 1, cream);
-        box(INC.x - 5.5, y + 5.5, z - 7.5, INC.x + 5.5, y + 6.1, z - 0.5, maroon); box(INC.x - 1.5, y + 6.1, z - 4.5, INC.x + 1.5, y + 9, z - 3.5, cream); box(INC.x - 0.4, y + 9, z - 4.4, INC.x + 0.4, y + 12, z - 3.6, gold);
-        for (const dx of [-3.5, 0, 3.5]) box(INC.x + dx - 0.9, y + 1.8, z - 1, INC.x + dx + 0.9, y + 3.8, z - 0.88, WINL);
-        box(INC.x - 6, y + 0.4, z + 2.8, INC.x + 6, y + 1.5, z + 3, cream); }
-      // the two cars (stepped compartments, cream + maroon, lit at night) — one dynamic mesh each, moved by one tick
-      if (typeof AF.Model === 'function' && typeof AF.modelMesh === 'function') {
-        const glass = AF.col(0xffe2a0, { emit: 0xffc070, emitK: 2.4, mode: 'night' }), dark = AF.col(0x2a2e34, { jitter: 0.1 });
-        const mk = (livery) => { const m = new AF.Model(18, 26, 34);
-          for (let k = 0; k < 4; k++) { const z0 = k * 8, y0 = k * 3; m.box(1, y0 + 2, z0, 17, y0 + 19, z0 + 8, cream); m.box(1, y0 + 2, z0, 17, y0 + 6, z0 + 8, livery); m.box(0, y0 + 9, z0 + 1, 18, y0 + 15, z0 + 7, glass); m.box(2, y0 + 10, z0, 16, y0 + 15, z0 + 1, glass); m.box(0, y0 + 19, z0, 18, y0 + 20, z0 + 8, livery); }
-          m.box(3, 0, 2, 6, 3, 5, dark); m.box(12, 0, 2, 15, 3, 5, dark); m.box(3, 0, 28, 6, 3, 31, dark); m.box(12, 0, 28, 15, 3, 31, dark);
-          m.box(4, 23, 30, 14, 25, 32, gold); return AF.meshModel(m, { vs: 1 / 6, anchor: [0.5, 0, 0.5] }); };
-        const cars = [mk(maroon), mk(AF.col(0x2f5a4a, { jitter: 0.2 }))].map((g) => { const me = AF.modelMesh(g); me.frustumCulled = false; me.castShadow = false; me.rotation.order = 'YXZ'; me.rotation.y = Math.PI; AF.scene.add(me); return me; });
-        INC.cars = cars;
-        const place = (me, s, side) => { const i = clamp(s, 0, len - 0.001), i0 = Math.floor(i), f = i - i0, y = Y[i0] * (1 - f) + Y[Math.min(N, i0 + 1)] * f, gr = Y[Math.min(N, i0 + 1)] - Y[i0];
-          me.position.set(INC.x + side * loopOff(i), y + 0.08, INC.z0 - i); me.rotation.x = -(Math.atan(gr) - 0.36); };
-        const CYC = 96, RUN = 38;
-        AF.onTick('land-incline', 320, (dt, t) => {
-          const ph = t % CYC, leg = ph < CYC / 2 ? 0 : 1, u = clamp(((ph % (CYC / 2)) - 5) / RUN, 0, 1), e = u * u * (3 - 2 * u);
-          const sA = leg === 0 ? e * (len - 4) + 2 : (1 - e) * (len - 4) + 2;
-          place(cars[0], sA, -1); place(cars[1], len - sA, 1);
-        });
-      }
-    }
-    // steeple town on the western hills
-    const ST0 = { x: -560 - SH, z: -80 };
-    for (let i = 0; i < 46; i++) { const a = RH() * Math.PI * 2, r = 10 + RH() * 60; house(ST0.x + Math.cos(a) * r, ST0.z + Math.sin(a) * r * 0.8, 1.1, RH); houses++; }
-    { const y = hgt(ST0.x, ST0.z) - 0.3, x = ST0.x, z = ST0.z;
-      box(x - 5, y, z - 10, x + 5, y + 12, z + 10, stoneW); roof(x - 5.5, y + 12, z - 10.5, x + 5.5, z + 10.5, ROOFS[2]);
-      box(x - 3.5, y, z + 8, x + 3.5, y + 24, z + 15, stoneW);
-      for (let i = 0; i < 9; i++) { const ins = i * 0.38; box(x - 3.5 + ins, y + 24 + i * 1.9, z + 8 + ins, x + 3.5 - ins, y + 24 + (i + 1) * 1.9, z + 15 - ins, i < 1 ? stoneW : ROOFS[3]); }
-      box(x - 1, y + 17, z + 15, x + 1, y + 19, z + 15.2, WINL); }
-    // eastern lattice radio mast (WSOL relay) with a blinking red light + a stone railway viaduct
-    const MS = { x: 620, z: -260 }; let mastTop = null;
-    { const y = hgt(MS.x, MS.z) - 0.5;
-      for (let i = 0; i < 16; i++) { const w = 3.2 - i * 0.18, yy = y + i * 5; for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box(MS.x + sx * w - 0.3, yy, MS.z + sz * w - 0.3, MS.x + sx * w + 0.3, yy + 5, MS.z + sz * w + 0.3, steelC); box(MS.x - w, yy + 4.6, MS.z - w, MS.x + w, yy + 5, MS.z + w, steelC); }
-      mastTop = [MS.x, y + 81, MS.z]; }
-    { // viaduct: a row of stone arches crossing a valley east of the Terminal
-      const vz = -40, vx0 = 380, vx1 = 560, top = 26;
-      for (let x = vx0; x < vx1; x += 14) { const g = hgt(x + 7, vz) - 1; box(x, g, vz - 3, x + 3, top, vz + 3, stoneW); }
-      box(vx0, top, vz - 3.4, vx1, top + 3, vz + 3.4, stoneW); box(vx0, top + 3, vz - 3.4, vx1, top + 3.6, vz - 2.9, steelC); box(vx0, top + 3, vz + 2.9, vx1, top + 3.6, vz + 3.4, steelC);
-      for (let x = vx0; x < vx1 - 1; x += 14) box(x + 3, top - 4, vz - 3, x + 14, top, vz + 3, stoneW);
-    }
-    // a sister-city skyline far to the north-east, blue in the haze
-    { const SK = AF.col(0x8a96ae, { jitter: 0.2 }), SKL = AF.col(0xffe0a8, { emit: 0xffc070, emitK: 1.8, mode: 'night' }), RS = AF.rng(99);
-      for (let i = 0; i < 22; i++) { const x = 900 + i * 22 + RS() * 10, z = -1150 + RS() * 60 - i * 6, g = hgt(x, z) - 2, hh = 20 + RS() * 70 * (1 - Math.abs(i - 11) / 14); const w = 10 + RS() * 10;
-        box(x, g, z, x + w, g + hh, z + w, SK); if (hh > 50) box(x + w * 0.25, g + hh, z + w * 0.25, x + w * 0.75, g + hh + 12, z + w * 0.75, SK);
-        for (let k = 0; k < 3; k++) if (RS() < 0.6) box(x + 2, g + 6 + RS() * (hh - 10), z + w, x + w - 2, g + 7 + RS() * (hh - 10), z + w + 0.3, SKL); } }
-
-    // ---- the sea horizon: islands with a far lighthouse, a breakwater, steamers + schooners
-    const ISL = [{ x: -720, z: 900, r: 70, h: 18 }, { x: 520, z: 1150, r: 110, h: 30 }, { x: -120, z: 1350, r: 45, h: 10 }];
-    L.islands = ISL;
-    const rockC = AF.col(0x8a847c, { jitter: 0.5 }), grassI = AF.col(0x6a7a3a, { jitter: 0.5 }), sandI = AF.col(0xd8c8a0, { jitter: 0.4 });
-    for (const I of ISL) {
-      for (let a = -I.r; a < I.r; a += 6) for (let b = -I.r; b < I.r; b += 6) {
-        const dd = Math.hypot(a, b) / I.r + (N2((I.x + a) * 0.03, (I.z + b) * 0.03) - 0.5) * 0.35; if (dd > 1) continue;
-        const h = Math.max(-1, I.h * Math.pow(1 - dd, 0.8) + (dd > 0.85 ? -1 : 0));
-        box(I.x + a, -4, I.z + b, I.x + a + 6, h, I.z + b + 6, dd > 0.8 ? rockC : dd > 0.7 ? sandI : grassI, dd > 0.82 ? rockC : dd > 0.72 ? sandI : grassI);
-      }
-    }
-    const LHw = AF.col(0xf4efe4, { jitter: 0.2 }), LHr = AF.col(0xb8322a, { jitter: 0.2 });
-    let farBeam = null;
-    { const I = ISL[0], x = I.x + 30, z = I.z - 30, y = I.h * 0.35;
-      for (let i = 0; i < 8; i++) { const w = 3 - i * 0.18; box(x - w, y + i * 3, z - w, x + w, y + (i + 1) * 3, z + w, i % 2 ? LHr : LHw); }
-      box(x - 2, y + 24, z - 2, x + 2, y + 27, z + 2, AF.col(0xfff2c0, { emit: 0xffe8a0, emitK: 3, mode: 'night' })); box(x - 2.4, y + 27, z - 2.4, x + 2.4, y + 28.2, z + 2.4, LHr);
-      farBeam = [x, y + 25.5, z]; }
-    const hullC = [0x2a2e38, 0x3a2a24, 0x28323a].map((h) => AF.col(h, { jitter: 0.2 })), whiteC = AF.col(0xf2ede2, { jitter: 0.2 }), funC = AF.col(0xc8402a, { jitter: 0.2 }), sailC = AF.col(0xf0e8d8, { jitter: 0.2 });
-    const SHIPS = [];
-    const RSH = AF.rng(2024);
-    for (let i = 0; i < 5; i++) {       // steamers (static; far enough that motion would not read)
-      const x = -900 + i * 420 + RSH() * 150, z = 700 + RSH() * 700, L2 = 40 + RSH() * 30, y = SEA_Y;
-      box(x - L2 / 2, y - 1, z - 4, x + L2 / 2, y + 4, z + 4, hullC[i % 3], whiteC);
-      box(x - L2 / 4, y + 4, z - 3, x + L2 / 6, y + 9, z + 3, whiteC);
-      box(x - 2, y + 9, z - 1.5, x + 2, y + 16, z + 1.5, funC);
-      SHIPS.push([x, y + 17, z]);
-    }
-    for (let i = 0; i < 8; i++) {       // schooners
-      const x = -1100 + RSH() * 2200, z = 520 + RSH() * 800, y = SEA_Y;
-      if (Math.abs(x) < 320 && z < 560) continue;
-      box(x - 7, y - 0.6, z - 1.8, x + 7, y + 1.6, z + 1.8, hullC[1], whiteC);
-      box(x - 5, y + 2, z - 0.1, x - 0.5, y + 13, z + 0.1, sailC); box(x + 0.5, y + 2, z - 0.1, x + 5, y + 10, z + 0.1, sailC);
-    }
-    L.farShips = SHIPS;
-
-    // ---- north hero: the SOLACE HEIGHTS hillside sign on scaffold legs, an observatory dome + a water tower on the crest
-    const SG = L.SIGN = { x: 0, z: -372, vs: 1.5 };
-    SG.y = hgt(SG.x, SG.z) + 3;
-    const SHW = (14 * 6 - 1) * SG.vs / 2 + 1;
-    for (let x = -SHW; x <= SHW; x += 5.5) { const g = hgt(x, SG.z - 2) - 1; box(x - 0.35, g, SG.z - 2.6, x + 0.35, SG.y + 9.8, SG.z - 1.9, steelC); box(x - 0.3, g, SG.z - 5.5, x + 0.3, SG.y + 4, SG.z - 4.9, steelC); }
-    box(-SHW, SG.y + 1, SG.z - 2.8, SHW, SG.y + 1.5, SG.z - 1.8, steelC); box(-SHW, SG.y + 7.5, SG.z - 2.8, SHW, SG.y + 8, SG.z - 1.8, steelC);
-    { const OB = { x: -215, z: -350 }, y = hgt(OB.x, OB.z) - 0.5, dome = AF.col(0xe8e4dc, { jitter: 0.15, metal: 0.3, rough: 0.4 }), slit = AF.col(0x2a2e38, { jitter: 0.1 });
-      box(OB.x - 9, y, OB.z - 9, OB.x + 9, y + 8, OB.z + 9, stoneW); box(OB.x - 9.6, y + 8, OB.z - 9.6, OB.x + 9.6, y + 9, OB.z + 9.6, WALLS[0]);
-      for (let i = 0; i < 8; i++) { const r = 8 * Math.cos(Math.asin(i / 8)); box(OB.x - r, y + 9 + i, OB.z - r, OB.x + r, y + 10 + i, OB.z + r, dome); }
-      box(OB.x - 0.8, y + 10, OB.z + 5, OB.x + 0.8, y + 17, OB.z + 8.2, slit);
-      for (const dx of [-5, 0, 5]) box(OB.x + dx - 0.8, y + 3, OB.z + 9, OB.x + dx + 0.8, y + 6, OB.z + 9.2, WINL);
-      L.observatory = { x: OB.x, y, z: OB.z }; }
-    { const WT = { x: 175, z: -345 }, y = hgt(WT.x, WT.z) - 0.5, tank = AF.col(0xb8b4a8, { jitter: 0.2, metal: 0.5, rough: 0.5 }), cap = AF.col(0x4f7a6a, { jitter: 0.2 });
-      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box(WT.x + sx * 5 - 0.4, y, WT.z + sz * 5 - 0.4, WT.x + sx * 5 + 0.4, y + 20, WT.z + sz * 5 + 0.4, steelC);
-      box(WT.x - 5.2, y + 9, WT.z - 5.2, WT.x + 5.2, y + 9.4, WT.z + 5.2, steelC);
-      for (let i = 0; i < 4; i++) { const r = 6.5 - (i === 0 || i === 3 ? 0.8 : 0); box(WT.x - r, y + 20 + i * 2.5, WT.z - r * 0.42, WT.x + r, y + 22.5 + i * 2.5, WT.z + r * 0.42, tank); box(WT.x - r * 0.42, y + 20 + i * 2.5, WT.z - r, WT.x + r * 0.42, y + 22.5 + i * 2.5, WT.z + r, tank); box(WT.x - r * 0.78, y + 20 + i * 2.5, WT.z - r * 0.78, WT.x + r * 0.78, y + 22.5 + i * 2.5, WT.z + r * 0.78, tank); }
-      for (let i = 0; i < 5; i++) { const r = 6 - i * 1.25; box(WT.x - r, y + 30 + i * 0.9, WT.z - r, WT.x + r, y + 30.9 + i * 0.9, WT.z + r, cap); } }
-    { const grp = new THREE.Group(); grp.name = 'land-horizon'; let nq = 0;
-      for (const b of chunks.values()) { if (!b.n) continue;
-        const meshH = new THREE.Mesh(b.geometry(), AF.mat.voxel);
-        AF.releaseStaticGeometry(meshH.geometry);
-        meshH.name = 'land-horizon-chunk'; meshH.receiveShadow = false; meshH.castShadow = false; meshH.matrixAutoUpdate = false; meshH.updateMatrix();
-        meshH.frustumCulled = true; grp.add(meshH); nq += b.n / 4; }
-      grp.matrixAutoUpdate = false; AF.scene.add(grp); L.horizon = grp;
-      AF.stats = Object.assign(AF.stats || {}, { horizonQuads: nq, horizonChunks: grp.children.length, horizonClumps: clumps, horizonHouses: houses });
-    }
-    // sign letters: cream letters + a bulb layer per word that flashes word by word at night
-    if (typeof AF.textModel === 'function') {
-      const cream = AF.col(0xf4efe2, { jitter: 0.15, rough: 0.6 }), bulb = AF.col(0xfff0c0, { emit: 0xffe0a0, emitK: 3.2, mode: 'always' });
-      const tm = AF.textModel('SOLACE HEIGHTS', cream, { depth: 1 });
-      const g = AF.meshModel(tm, { vs: SG.vs, anchor: [0.5, 0, 0.5] });
-      const m = AF.modelMesh(g); m.position.set(SG.x, SG.y, SG.z); m.castShadow = false; m.frustumCulled = false; AF.scene.add(m);
-      const words = [];
-      for (const [wd, off] of [['SOLACE', -(14 * 6 - 1) / 2 + (6 * 6 - 1) / 2], ['HEIGHTS', -(14 * 6 - 1) / 2 + 7 * 6 + (7 * 6 - 1) / 2]]) {
-        const bm = AF.textModel(wd, bulb, { depth: 1 });
-        const bg = AF.meshModel(bm, { vs: SG.vs, anchor: [0.5, 0, 0.5] });
-        const mm = AF.modelMesh(bg); mm.position.set(SG.x + off * SG.vs, SG.y, SG.z + 0.2); mm.castShadow = false; mm.frustumCulled = false; mm.visible = false; AF.scene.add(mm); words.push(mm);
-      }
-      SG.mesh = m; SG.words = words;
-    }
-    // seabed under the open sea beyond the map (so the water never shows the void)
-    { const sb = new G(), bed = AF.col(0x44564e, { jitter: 0.25 });
-      const bq = (x0, z0, x1, z1) => sb.quad([x0, -4, z0], [x0, -4, z1], [x1, -4, z1], [x1, -4, z0], [0, 0], [0, 1], [1, 1], [1, 0], bed, 2, [3, 3, 3, 3]);
-      bq(-1500, 300, 1500, 1520); bq(-1500, COAST - 4, XW, 300); bq(300, COAST - 4, 1500, 300);
-      const m = new THREE.Mesh(sb.geometry(), AF.mat.voxel); m.name = 'land-seabed'; m.matrixAutoUpdate = false; m.updateMatrix(); m.frustumCulled = false; AF.scene.add(m); }
-    // blinking red aviation light on the mast + the far lighthouse lamp (tiny dynamic meshes, one tick)
-    { const red = new THREE.Mesh(new THREE.SphereGeometry(2, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a1a, fog: false }));
-      red.position.set(...mastTop); red.frustumCulled = false; AF.scene.add(red);
-      const lamp = new THREE.Mesh(new THREE.SphereGeometry(2.2, 8, 6), new THREE.MeshBasicMaterial({ color: 0xfff0b0, fog: false, transparent: true, opacity: 0.9 }));
-      lamp.position.set(...farBeam); lamp.frustumCulled = false; AF.scene.add(lamp);
-      L.farLights = { red, lamp };
-      AF.onTick('land-far-lights', 705, (dt, t) => {
-        const night = AF.time ? AF.time.night : 0, hr = AF.time ? AF.time.hours : 12;
-        const dusk = hr > 18.4 || hr < 6.3;
-        red.visible = (t % 1.6) < 0.5;
-        lamp.visible = dusk && (t % 6) < 0.9;
-        if (SG.words && SG.words.length === 2) { const ph = t % 5; SG.words[0].visible = dusk && ph < 3.8; SG.words[1].visible = dusk && ph > 1.2 && ph < 3.8; }
-      });
-    }
-    L.horizonMs = Math.round(performance.now() - t0);
   });
 
   // ------------------------------------------------------------ r2: SOLACE SANDS beach dressing (closed for the season):
@@ -828,10 +530,10 @@ try {
     const hE = W.groundY(200, -296), hW = W.groundY(-270, -296), park = W.groundY(-20, -290);
     return { ok: Math.max(hE, hW) > 25 && park < 1, info: `E ${hE} W ${hW} park ${park}` };
   });
-  AF.test('land: horizon world (hills, clumps, houses, open sea south)', () => {
-    const s = AF.stats || {};
-    const seaOpen = L.coastZ ? L.coastZ(0) === COAST : false;
-    return { ok: !!L.horizon && (s.horizonClumps || 0) > 300 && (s.horizonHouses || 0) > 40 && seaOpen, info: `quads ${s.horizonQuads} clumps ${s.horizonClumps} houses ${s.horizonHouses} ms ${L.horizonMs} ${JSON.stringify(L.horizonT || {})} canopies ${(AF.canopies || []).length} kit ${AF.TREEKIT ? JSON.stringify(AF.TREEKIT.stats()) : '-'}` };
+  AF.test('land: island coastline (beaches, dunes, rocks, sea cliffs, north-west bay)', () => {
+    const t = L.coastT || {};
+    const bay = W.groundY(-425, -285);
+    return { ok: t.beach > 5000 && t.dune > 200 && t.rock > 500 && t.cliff > 200 && bay < SEA_Y, info: `${JSON.stringify(t)} bay bed ${bay}` };
   });
   AF.test('land: breakwater walkable to the lighthouse', () => {
     const p0 = L.bwPoint(0.5);

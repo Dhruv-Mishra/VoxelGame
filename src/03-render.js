@@ -4,8 +4,15 @@ try {
 {
   const cv = document.getElementById('cv');
   const R = AF.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: !AF.MOBILE, preserveDrawingBuffer: AF.SHOT || AF.TEST, powerPreference: AF.MOBILE ? 'default' : 'high-performance' });
-  // base pixel ratio per tier (Low 0.75 · Balanced 0.9 · High 1.25); ?shot renders at 1 (or ?dpr=N)
-  AF.basePR = () => AF.MOBILE ? 0.75 * Math.min(devicePixelRatio || 1, 1) : AF.SHOT ? AF.clamp(+AF.Q.get('dpr') || 1, 0.5, 3) : Math.min(devicePixelRatio || 1, AF.GFX.tier === 'low' ? 0.75 : AF.GFX.tier === 'high' ? 0.9 : 1.25);
+  // base pixel ratio in CSS px: the menu's Resolution (AF.GFX.res 0.75/0.9/1) or the tier default (Low 0.8 · Laptop/Balanced 1 · High 1.25),
+  // never above devicePixelRatio. Below 1 the browser upscales the canvas (soft + shimmering edges), so Balanced renders at 1 CSS px.
+  // ?shot renders at 1 (or ?dpr=N)
+  AF.basePR = () => {
+    const dpr = devicePixelRatio || 1, G = AF.GFX;
+    if (AF.MOBILE) return 0.75 * Math.min(dpr, 1);
+    if (AF.SHOT) return AF.clamp(+AF.Q.get('dpr') || 1, 0.5, 3);
+    return Math.min(dpr, G.res > 0 ? G.res : G.tier === 'low' ? 0.8 : G.tier === 'high' ? 1 : 1.25);
+  };
   R.setPixelRatio(AF.basePR());
   R.outputColorSpace = THREE.SRGBColorSpace;
   R.toneMapping = THREE.ACESFilmicToneMapping;
@@ -44,10 +51,10 @@ try {
     let r = AF.shadowRadius, fx = AF.shadowFocus.x, fz = AF.shadowFocus.z;
     if (far) {
       cam.getWorldDirection(_fw); _fw.y = 0; const l = _fw.length() || 1; _fw.multiplyScalar(1 / l);
-      const rStreet = AF.GFX.cinema ? 48 : AF.GFX.tier === 'ultra' ? 42 : AF.GFX.tier === 'high' ? 36 : 30;
+      const rStreet = AF.GFX.cinema ? 48 : AF.GFX.tier === 'ultra' ? 42 : AF.GFX.tier === 'high' && !AF.GFX.lite ? 36 : 30;
       const k = AF.smooth(12, 60, alt);                       // 0 street .. 1 aerial
       const rs = rStreet, cxs = cp.x + _fw.x * rs * 0.72, czs = cp.z + _fw.z * rs * 0.72;
-      r = AF.lerp(rs, Math.min(AF.shadowRadius, 200), k);
+      r = AF.lerp(rs, Math.min(AF.shadowRadius, AF.GFX.lite || AF.GFX.tier === 'low' ? 130 : 200), k);   // beyond: the far cascade
       fx = AF.lerp(cxs, fx, k); fz = AF.lerp(czs, fz, k);
       r = Math.round(r / 4) * 4;
     }
@@ -149,7 +156,7 @@ try {
     }
     const every = AF.SHOT || AF.TEST ? 1 : AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' ? 2 : 3;
     if (AF.clock.frame % every === 0 || AF.shadowDirty) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
-    try { AF.renderFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
+    try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
   };
   AF.frame = frame;
@@ -208,6 +215,20 @@ try {
     }
     C.stats.managed = C.list.length;
   };
+  // plain voxel-material meshes never displace vertices, so their bounding spheres are exact: parts that opted out of frustum
+  // culling (static signs, clocks, swinging props, far ships) get it back. Instanced/points/lines keep their own flags.
+  const recull = () => {
+    let n = 0;
+    for (const top of AF.scene.children) {
+      if (!top.isMesh || top.isInstancedMesh || top.frustumCulled || top.material !== AF.mat.voxel || !top.geometry || !top.geometry.attributes.position) continue;
+      const g = top.geometry; if (!g.boundingSphere && g.attributes.position.array) g.computeBoundingSphere();
+      if (!g.boundingSphere || !isFinite(g.boundingSphere.radius)) continue;
+      top.frustumCulled = true; n++;
+    }
+    C.stats.recull = n;
+  };
+  let reculled = false;
+  AF.onTick('dyn-cull-ready', 884, () => { if (AF.ready && !reculled) { reculled = true; recull(); } });
   AF.onTick('dyn-cull', 885, () => {
     if (!AF.ready) return;
     if (C.frame++ % 90 === 0) collect();
@@ -238,26 +259,31 @@ try {
     try { const gl = R.getContext(); const ext = gl.getExtension('WEBGL_debug_renderer_info'); gpu = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)); } catch (e) {}
     AF.gfx.gpu = gpu;
     if (!G.forced) {
-      // Balanced ('high') is the default everywhere; phones, tablets and software renderers start on Low. High ('ultra') is opt-in.
+      // Balanced ('high') on discrete GPUs; integrated laptop GPUs (Intel UHD/Iris/Xe, AMD Radeon Graphics/Vega APUs, Safari's masked
+      // 'Apple GPU') start on Laptop ('lite'); phones, tablets and software renderers on Low. High ('ultra') is opt-in.
       let t = 'high';
       const saved = (() => { try { return localStorage.getItem('portSolace.gfx'); } catch (e) { return null; } })();
-      if (AF.MOBILE || /swiftshader|llvmpipe|software|mali|adreno|powervr|apple gpu/i.test(gpu) || !R.capabilities.isWebGL2 || R.capabilities.maxTextureSize < 8192) t = 'low';
-      if (saved && ['low', 'high', 'ultra'].includes(saved)) { t = saved; G.auto = false; }
-      G.tier = t;
+      AF.gfx.integrated = (/intel/i.test(gpu) && !/\barc\b/i.test(gpu)) || /radeon(\(tm\))? (vega \d+ )?graphics|radeon(\(tm\))? \d{3}m\b|apple gpu/i.test(gpu);
+      if (AF.gfx.integrated) t = 'lite';
+      if (AF.MOBILE || /swiftshader|llvmpipe|software|mali|adreno|powervr/i.test(gpu) || !R.capabilities.isWebGL2 || R.capabilities.maxTextureSize < 8192) t = 'low';
+      if (saved && ['low', 'lite', 'high', 'ultra'].includes(saved)) { t = saved; G.auto = false; }
+      G.tier = t === 'lite' ? 'high' : t; G.lite = t === 'lite';
     }
   }
   if (AF.MOBILE) { G.tier = 'low'; G.cinema = false; G.auto = false; }
-  // per-tier settings (read by R1 code every frame). near/far = shadow map sizes, lights = physical point lights, ao = SAO samples
+  // per-tier settings (read by R1 code every frame). near/far = shadow map sizes, lights = physical point lights, ao = SAO samples,
+  // regLod/farLod = metres to the 0.5 m coarse / 1 m far region copies, lod = near props, propCull = far props hidden beyond
   const TIER = {
-    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 12, pools: 24, regLod: 150, lod: 110, propCull: 900 },
-    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 6, pools: 16, regLod: 95, lod: 80, propCull: 460 },
-    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 4, pools: 0, regLod: 65, lod: 60, propCull: 320 },
-    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, propCull: 2000 },
+    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 12, pools: 24, regLod: 150, farLod: 420, lod: 110, propCull: 900 },
+    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 6, pools: 16, regLod: 95, farLod: 320, lod: 80, propCull: 380 },
+    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 4, pools: 12, regLod: 80, farLod: 240, lod: 70, propCull: 300 },
+    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 4, pools: 0, regLod: 65, farLod: 180, lod: 60, propCull: 240 },
+    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
   const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 0, regLod: 45, lod: 40, propCull: 160 };
   if (AF.MOBILE) TIER.low = mobileTier;
-  const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : (TIER[G.tier] || TIER.ultra);
+  const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : G.lite && G.tier === 'high' ? TIER.lite : (TIER[G.tier] || TIER.ultra);
   const texSeen = new WeakSet();
   const sharpenTextures = () => {     // anisotropic filtering on every mip-mapped texture in the scene (signs, decals, sky cards)
     if (AF.MOBILE) return;
@@ -276,6 +302,7 @@ try {
     const T = cur(), sun = AF.sun;
     AF.LOD_DIST = T.lod || 110;
     AF.REGION_LOD = T.regLod || 130;
+    AF.FAR_LOD = T.farLod || 1e9;
     AF.PROP_CULL = T.propCull || 900;
     if (AF.gfx.pools) AF.gfx.pools.max = T.pools;
     if (AF.atmos && AF.atmos.setLights) AF.atmos.setLights(T.lights);
@@ -288,24 +315,31 @@ try {
     if (AF.gfx.far) AF.gfx.far.resize(T.far, T.farR);
   };
   G.onChange(applyTier);
-  // ---------------------------------------------------------------- auto-downgrade + dynamic resolution (never in ?shot / ?test)
+  // ---------------------------------------------------------------- auto tier (only while G.auto: no saved/forced choice; never in ?shot / ?test)
+  // Down one step after 3 s of > 22 ms frames; up one step (never to High, never back to a tier that was too slow) after 20 s at the
+  // display rate. rAF intervals can't show headroom beyond vsync, so an upgrade is a trial that the downgrade rule reverts.
   {
-    const base = AF.basePR;
-    let ema = 16.7, slowT = 0, adjT = 0, fastT = 0;
+    const base = AF.basePR, LADDER = ['low', 'lite', 'high', 'ultra'], tooSlow = new Set();
+    let ema = 16.7, slowT = 0, adjT = 0, goodT = 0, grace = 2, vsync = 16.7;
+    G.onChange(() => { ema = vsync; slowT = goodT = 0; grace = 2; });
     AF.onTick('gfx-adapt', 960, (dt) => {
       if (AF.SHOT || AF.TEST || !AF.ready || AF.paused || document.hidden || G.cinema) return;   // cinema: fixed full resolution, never downgrade
       const ms = dt * 1000; if (ms <= 0 || ms > 250) return;
-      ema += (ms - ema) * 0.08; adjT += dt;
-      // dynamic resolution: 0.7..1.0 of the base pixel ratio
+      if (grace > 0) { grace -= dt; return; }                 // tier switches reallocate targets and recompile: ignore that hitch
+      ema += (ms - ema) * 0.08; adjT += dt; vsync = Math.min(vsync + dt * 0.02, Math.max(6, ms));
+      // dynamic resolution (?dynres): 0.7..1.0 of the base pixel ratio
       if (adjT > 1.0) {
         adjT = 0; const T = cur(); let s = G.scale;
         if (ema > 19) s = Math.max(T.dynMin, s - 0.05); else if (ema < 14.5) s = Math.min(1, s + 0.05);
         if (s !== G.scale && AF.Q.has('dynres')) { G.scale = s; R.setPixelRatio(base() * s); AF.resize(); }   // off by default: every change reallocates the render targets and stutters
       }
-      // tier downgrade: > 22 ms for 3 s with resolution already at its floor
-      if (G.auto && ema > 22) slowT += dt; else slowT = Math.max(0, slowT - dt);
-      if (slowT > 6) { slowT = 0; if (G.tier === 'ultra') G.set('high', 'slow frames'); else if (G.tier === 'high' && ema > 26) G.set('low', 'slow frames'); }
-      fastT = 0;
+      if (!G.auto) return;
+      const i = LADDER.indexOf(G.name);
+      if (ema > 22) slowT += dt; else slowT = Math.max(0, slowT - dt);
+      if (slowT > 3 && i > 0) { tooSlow.add(G.name); G.set(LADDER[i - 1], 'slow frames'); return; }
+      if (ema < vsync * 1.04 + 0.3) goodT += dt; else goodT = 0;
+      const up = LADDER[i + 1];
+      if (goodT > 20 && up && up !== 'ultra' && !tooSlow.has(up)) G.set(up, 'headroom');
     });
   }
 
@@ -442,7 +476,19 @@ try {
     console.log('[af] r1 auto surfaces: ' + n + ' palette entries, tier ' + G.tier + ', gpu ' + (AF.gfx.gpu || '?'));
   });
   // expose for tests / debugging
-  AF.gfx.stats = () => ({ tier: G.tier, cinema: G.cinema, lod: AF.LOD_DIST, pr: R.getPixelRatio(), scale: G.scale, near: AF.sun.shadow.mapSize.x, nearR: AF.shadowNear.r, far: AF.gfx.far && { on: AF.gfx.far.on, size: AF.gfx.far.size, R: AF.gfx.far.R, renders: AF.gfx.far.renders, ms: AF.gfx.far.ms }, env: AF.gfx.env && { src: AF.gfx.env.src, n: AF.gfx.env.n, ms: AF.gfx.env.ms }, autoSurf: AF.PAL.autoCount });
+  AF.gfx.stats = () => ({ tier: G.name, lod: AF.LOD_DIST, pr: R.getPixelRatio(), render: R.domElement.width + 'x' + R.domElement.height, scale: G.scale, res: G.res, near: AF.sun.shadow.mapSize.x, nearR: AF.shadowNear.r, far: AF.gfx.far && { on: AF.gfx.far.on, size: AF.gfx.far.size, R: AF.gfx.far.R, renders: AF.gfx.far.renders, ms: AF.gfx.far.ms }, env: AF.gfx.env && { src: AF.gfx.env.src, n: AF.gfx.env.n, ms: AF.gfx.env.ms }, farLod: AF.world.farStats, autoSurf: AF.PAL.autoCount });
+  AF.test('renderer: laptop profile + resolution setting', () => {
+    if (AF.MOBILE) return { ok: true, info: 'mobile profile' };
+    const was = G.name, wasAuto = G.auto, wasRes = G.res;
+    G.set('lite'); AF.renderFrame();
+    const P = AF.post, lite = G.tier === 'high' && cur() === TIER.lite && AF.FAR_LOD === TIER.lite.farLod && (!P.composer || (P.sceneRT.samples === 0 && P.fxaa.enabled && !(P.aoPass && P.aoPass.enabled)));
+    const prLite = R.getPixelRatio();
+    G.res = 0.75; R.setPixelRatio(AF.basePR() * G.scale); const pr75 = R.getPixelRatio();
+    G.res = wasRes; G.set(was); G.auto = wasAuto; R.setPixelRatio(AF.basePR() * G.scale); AF.resize();
+    const near = (a, b) => Math.abs(a - b) < 1e-3;
+    const ok = lite && near(prLite, Math.min(devicePixelRatio || 1, 1)) && near(pr75, Math.min(devicePixelRatio || 1, 0.75)) && G.name === was;
+    return { ok, info: 'lite ' + lite + ', pr ' + prLite + ' / 75% ' + pr75 + ', back to ' + G.name + ', gpu integrated ' + !!AF.gfx.integrated };
+  });
   AF.test('renderer: mobile GPU budgets stay bounded', () => {
     if (!AF.MOBILE) return { ok: true, info: 'desktop profile' };
     const cfg = cur(), context = R.getContext().getContextAttributes();
@@ -554,7 +600,7 @@ try {
       setSize(w, h) { const hw = Math.max(4, Math.round(w / 2)), hh = Math.max(4, Math.round(h / 2)); rtA.setSize(hw, hh); rtB.setSize(hw, hh); uAO.uFull.value.set(w, h); uBlur.uTx.value.set(1 / hw, 1 / hh); uComp.uHalf.value.set(hw, hh); },
       render(r, writeBuffer, readBuffer) {
         const depth = (AF.gfx && AF.gfx.depthTexture) || readBuffer.depthTexture;
-        const on = depth && G.tier !== 'low' && !AF.Q.has('noao');
+        const on = depth && G.tier !== 'low' && !G.lite && !AF.Q.has('noao');
         const cam = (AF.post && AF.post.renderPass && AF.post.renderPass.camera) || AF.camera;
         uComp.tDiffuse.value = readBuffer.texture;
         if (!on) { uComp.uStrength.value = 0; uComp.tDepth.value = depth || null; if (!depth) { mComp.defines = mComp.defines || {}; } }

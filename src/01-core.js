@@ -8,29 +8,32 @@ AF.TEST = AF.Q.has('test');
 AF.SHOT = AF.Q.has('shot');
 AF.DBG = AF.Q.has('dbg');
 AF.IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-AF.MOBILE = AF.Q.has('mobile') || AF.IOS || /Android/i.test(navigator.userAgent) || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
+AF.MOBILE = AF.Q.has('mobile') || AF.IOS || /Android/i.test(navigator.userAgent);
 AF.HAS_POINTER_LOCK = typeof HTMLCanvasElement.prototype.requestPointerLock === 'function';
 AF.ready = false;
 
 // ---------------------------------------------------------------- graphics tier (R1). Read AF.GFX.tier every frame or AF.GFX.onChange(fn).
-// ?gfx=ultra|high|low forces a tier (no auto). 03-render auto-picks at boot, auto-downgrades (frame > 22 ms for 3 s) and runs dynamic resolution.
+// ?gfx=ultra|high|lite|low forces a tier (no auto). 03-render auto-picks at boot (integrated GPUs -> 'lite'), steps down after 3 s of slow
+// frames and tries one step up after 20 s at the display rate. 'lite' = the 'high' tier (tier stays 'high') minus AO, god rays and MSAA
+// (FXAA instead) with shorter LOD ranges: read AF.GFX.lite / AF.GFX.name. AF.GFX.res = render scale in CSS px (0 = tier default).
 AF.GFX = {
-  tier: 'ultra', cinema: false, forced: false, auto: true, scale: 1, _subs: [],
+  tier: 'ultra', cinema: false, lite: false, res: 0, forced: false, auto: true, scale: 1, _subs: [],
   // ROUND 2: 'cinema' = the ultra tier + capture quality (native DPR up to 2, no dynamic-resolution drops, no auto-downgrade,
   // props at full detail to 200 m, 4096 far shadow, 16-sample AO, anisotropic textures). tier stays 'ultra' so every
   // `tier === 'ultra'` check elsewhere keeps working; read AF.GFX.cinema (or AF.GFX.name) for the extra quality.
-  get name() { return this.cinema ? 'cinema' : this.tier; },
+  get name() { return this.cinema ? 'cinema' : this.lite && this.tier === 'high' ? 'lite' : this.tier; },
   set(t, why) {
-    const cin = t === 'cinema'; if (cin) t = 'ultra';
-    if (!['ultra', 'high', 'low'].includes(t) || (t === this.tier && cin === this.cinema)) return;
-    const prev = this.tier, prevName = this.name; this.tier = t; this.cinema = cin; if (cin) this.auto = false;
+    const cin = t === 'cinema', lite = t === 'lite'; if (cin) t = 'ultra'; if (lite) t = 'high';
+    if (!['ultra', 'high', 'low'].includes(t) || (t === this.tier && cin === this.cinema && lite === this.lite)) return;
+    const prev = this.tier, prevName = this.name; this.tier = t; this.cinema = cin; this.lite = lite; if (cin) this.auto = false;
     console.log('[af] gfx tier ' + prevName + ' -> ' + this.name + (why ? ' (' + why + ')' : ''));
     for (const f of this._subs) { try { f(t, prev); } catch (e) { console.error('[af] gfx onChange', e); } }
   },
   onChange(fn) { this._subs.push(fn); },
   is(t) { const o = { low: 0, high: 1, ultra: 2 }; return o[this.tier] >= o[t]; },   // AF.GFX.is('high') -> tier high or better
 };
-{ const g = AF.Q.get('gfx'); if (g && ['ultra', 'high', 'low', 'cinema'].includes(g)) { AF.GFX.tier = g === 'cinema' ? 'ultra' : g; AF.GFX.cinema = g === 'cinema'; AF.GFX.forced = true; AF.GFX.auto = false; } }
+{ const g = AF.Q.get('gfx'); if (g && ['ultra', 'high', 'lite', 'low', 'cinema'].includes(g)) { AF.GFX.tier = g === 'cinema' ? 'ultra' : g === 'lite' ? 'high' : g; AF.GFX.cinema = g === 'cinema'; AF.GFX.lite = g === 'lite'; AF.GFX.forced = true; AF.GFX.auto = false; } }
+{ const r = +(() => { try { return localStorage.getItem('portSolace.res'); } catch (e) { return 0; } })(); if ([0.75, 0.9, 1].includes(r)) AF.GFX.res = r; }
 
 // ---------------------------------------------------------------- hooks
 // Build stages run once at boot, sorted by order (see CONTRACT.md for the order table).

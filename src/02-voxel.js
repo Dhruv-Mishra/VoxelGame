@@ -166,15 +166,17 @@ W.stamp = (m, x, y, z, rot = 0, opts = {}) => {
 };
 
 // ---------------------------------------------------------------- geometry emission (shared by all meshers)
-// Vertex layout: position(3) uv(2: block units, in-plane) aPal(1: palette index) aAN(1: ao*8 + normalIndex)
+// Vertex layout: position(3) uv(2: block units, in-plane) aPal(1: palette index) aAN(1: riser*32 + ao*8 + normalIndex)
+// riser = low same-colour terrain step: its normal bends to +y with distance so hillside terraces don't alias into moire
 // normal index: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z
 class GeoBuf {
   constructor() { this.p = []; this.uv = []; this.pal = []; this.an = []; this.idx = []; this.n = 0; }
-  quad(v0, v1, v2, v3, uv0, uv1, uv2, uv3, pal, nIdx, ao) { // v* = [x,y,z], ao = [a0..a3] 0..3 ; CCW when seen from outside
+  quad(v0, v1, v2, v3, uv0, uv1, uv2, uv3, pal, nIdx, ao, fl = 0) { // v* = [x,y,z], ao = [a0..a3] 0..3 ; CCW when seen from outside
     const b = this.n;
     this.p.push(v0[0], v0[1], v0[2], v1[0], v1[1], v1[2], v2[0], v2[1], v2[2], v3[0], v3[1], v3[2]);
     this.uv.push(uv0[0], uv0[1], uv1[0], uv1[1], uv2[0], uv2[1], uv3[0], uv3[1]);
     this.pal.push(pal, pal, pal, pal);
+    nIdx += fl;
     this.an.push(ao[0] * 8 + nIdx, ao[1] * 8 + nIdx, ao[2] * 8 + nIdx, ao[3] * 8 + nIdx);
     if (ao[0] + ao[2] < ao[1] + ao[3]) this.idx.push(b + 1, b + 2, b + 3, b + 1, b + 3, b);
     else this.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
@@ -386,15 +388,17 @@ AF.mat = {};
   const nrmCode = `
     float nIdx = mod(aAN, 8.0);
     vec3 objectNormal = nIdx < 0.5 ? vec3(1.,0.,0.) : nIdx < 1.5 ? vec3(-1.,0.,0.) : nIdx < 2.5 ? vec3(0.,1.,0.) : nIdx < 3.5 ? vec3(0.,-1.,0.) : nIdx < 4.5 ? vec3(0.,0.,1.) : vec3(0.,0.,-1.);
+    if (afRk > 0.0) objectNormal = normalize(mix(objectNormal, vec3(0., 1., 0.), afRk));
     #ifdef USE_TANGENT
       vec3 objectTangent = vec3( tangent.xyz );
     #endif
   `;
   const palCode = `
+    float afRk = aAN > 31.5 ? smoothstep(25.0, 80.0, distance((modelMatrix * vec4(position, 1.0)).xyz, cameraPosition)) : 0.0;
     vec2 pUV = vec2((mod(aPal, 128.0) + 0.5) / 128.0, (floor(aPal / 128.0) + 0.5) / 64.0);
     vec4 pa = texture2D(uPalA, pUV); vec4 pe = texture2D(uPalE, pUV);
     vAlb = pa.rgb; vJit = pa.a; vEmi = pe; vBU = aBU; vNI = mod(aAN, 8.0);
-    vAO = floor(aAN / 8.0 + 0.001);
+    vAO = mix(floor(mod(aAN, 32.0) / 8.0 + 0.001), 3.0, afRk);
     vMat = texture2D(uPalM, pUV); vAfOP = position;
   `;
   // world position + far-cascade shadow coordinate (after three's worldpos chunk)
@@ -902,17 +906,17 @@ function meshTerrainRegion(rx, rz, buf) {
           if (H[c2] !== h || W.hB(bx2 + dx, bz2 + dz) !== nh || C[c2] !== topC || (S[c2] || (h - nh > 1 ? dirtI : C[c2])) !== sideC) break;
           run++;
         }
-        const emit = (ylo, yhi, col) => {
+        const emit = (ylo, yhi, col, fl = 0) => {
           if (yhi <= ylo) return;
           const Y0b = ylo * VS, Y1b = yhi * VS;
           if (alongX) {
             const zf = Z0 + (bz0 + b + (dz > 0 ? 1 : 0)) * VS, xa = X0 + (bx0 + a) * VS, xb = xa + run * VS, u0 = bx0 + a;
-            if (dz > 0) buf.quad([xa, Y0b, zf], [xb, Y0b, zf], [xb, Y1b, zf], [xa, Y1b, zf], [u0, ylo], [u0 + run, ylo], [u0 + run, yhi], [u0, yhi], col, nIdx, [1, 1, 3, 3]);
-            else buf.quad([xb, Y0b, zf], [xa, Y0b, zf], [xa, Y1b, zf], [xb, Y1b, zf], [u0 + run, ylo], [u0, ylo], [u0, yhi], [u0 + run, yhi], col, nIdx, [1, 1, 3, 3]);
+            if (dz > 0) buf.quad([xa, Y0b, zf], [xb, Y0b, zf], [xb, Y1b, zf], [xa, Y1b, zf], [u0, ylo], [u0 + run, ylo], [u0 + run, yhi], [u0, yhi], col, nIdx, [1, 1, 3, 3], fl);
+            else buf.quad([xb, Y0b, zf], [xa, Y0b, zf], [xa, Y1b, zf], [xb, Y1b, zf], [u0 + run, ylo], [u0, ylo], [u0, yhi], [u0 + run, yhi], col, nIdx, [1, 1, 3, 3], fl);
           } else {
             const xf = X0 + (bx0 + b + (dx > 0 ? 1 : 0)) * VS, za = Z0 + (bz0 + a) * VS, zb = za + run * VS, u0 = bz0 + a;
-            if (dx > 0) buf.quad([xf, Y0b, zb], [xf, Y0b, za], [xf, Y1b, za], [xf, Y1b, zb], [u0 + run, ylo], [u0, ylo], [u0, yhi], [u0 + run, yhi], col, nIdx, [1, 1, 3, 3]);
-            else buf.quad([xf, Y0b, za], [xf, Y0b, zb], [xf, Y1b, zb], [xf, Y1b, za], [u0, ylo], [u0 + run, ylo], [u0 + run, yhi], [u0, yhi], col, nIdx, [1, 1, 3, 3]);
+            if (dx > 0) buf.quad([xf, Y0b, zb], [xf, Y0b, za], [xf, Y1b, za], [xf, Y1b, zb], [u0 + run, ylo], [u0, ylo], [u0, yhi], [u0 + run, yhi], col, nIdx, [1, 1, 3, 3], fl);
+            else buf.quad([xf, Y0b, za], [xf, Y0b, zb], [xf, Y1b, zb], [xf, Y1b, za], [u0, ylo], [u0 + run, ylo], [u0 + run, yhi], [u0, yhi], col, nIdx, [1, 1, 3, 3], fl);
           }
         };
         if (W.sideFn && h - nh > 1) {
@@ -920,7 +924,7 @@ function meshTerrainRegion(rx, rz, buf) {
           let y0 = nh, cur = W.sideFn(bx, bz, nh, topC) || sideC;
           for (let y = nh + 1; y <= h - 1; y++) { const c2 = y === h - 1 ? -1 : (W.sideFn(bx, bz, y, topC) || sideC); if (c2 !== cur) { emit(y0, y, cur); y0 = y; cur = c2; } }
           emit(h - 1, h, topC);
-        } else if (sideC === topC) emit(nh, h, topC); else { emit(nh, h - 1, sideC); emit(h - 1, h, topC); }
+        } else if (sideC === topC) emit(nh, h, topC, h - nh <= 2 ? 32 : 0); else { emit(nh, h - 1, sideC); emit(h - 1, h, topC); }
         a += run;
       }
     }
@@ -1019,33 +1023,112 @@ const coarseChunk = (key) => {
   coarseCache.set(key, c);
   return c;
 };
-function meshVoxelRegionCoarse(rx, rz, out) {
+// FAR level: coarse cells downsampled 2x again (1 m cells, same >= 2 of 8 rule)
+const farCache = new Map();
+const farChunk = (key) => {
+  let c = farCache.get(key); if (c !== undefined) return c;
+  const s = coarseChunk(key); if (!s) { farCache.set(key, null); return null; }
+  c = new Uint16Array(64); let any = false;
+  const OP = AF.PAL.opaque, cols = new Uint16Array(8), cnts = new Uint8Array(8);
+  for (let X = 0; X < 4; X++) for (let Y = 0; Y < 4; Y++) for (let Z = 0; Z < 4; Z++) {
+    let n = 0, nOp = 0, gl = 0, nc = 0;
+    for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) for (let d = 0; d < 2; d++) {
+      const v = s[((X * 2 + a) * 8 + Y * 2 + b) * 8 + Z * 2 + d]; if (!v) continue;
+      n++;
+      if (OP[v] !== 1) { gl = v; continue; }
+      nOp++;
+      let j = 0; while (j < nc && cols[j] !== v) j++;
+      if (j === nc) { cols[nc] = v; cnts[nc++] = 1; } else cnts[j]++;
+    }
+    if (n < 2) continue;
+    let best = gl;
+    if (nOp >= 2 || !gl) { let bn = 0; for (let j = 0; j < nc; j++) if (cnts[j] > bn) { bn = cnts[j]; best = cols[j]; } }
+    if (best) { c[(X * 4 + Y) * 4 + Z] = best; any = true; }
+  }
+  if (!any) c = null;
+  farCache.set(key, c);
+  return c;
+};
+// F = 2 (coarse, 0.5 m cells) or 4 (far, 1 m cells)
+function meshVoxelRegionCoarse(rx, rz, out, F = 2) {
+  const S = 16 / F, P = S + 2, get = F === 2 ? coarseChunk : farChunk;
   const bx0 = rx * REG, bz0 = rz * REG;
-  const pad = new Uint16Array(10 * 10 * 10), hcol = new Int32Array(10 * 10);
+  const pad = new Uint16Array(P * P * P), hcol = new Int32Array(P * P);
   for (let cx = bx0 >> 4; cx < Math.min(CX, (bx0 + REG) >> 4); cx++) for (let cz = bz0 >> 4; cz < Math.min(CZ, (bz0 + REG) >> 4); cz++) {
     const ox = cx * 16, oz = cz * 16;
     let colsReady = false;
     for (let cy = 0; cy < CY; cy++) {
-      const me = coarseChunk((cx * CY + cy) * CZ + cz); if (!me) continue;
+      const me = get((cx * CY + cy) * CZ + cz); if (!me) continue;
       if (!colsReady) {   // lowest ground (fine blocks) under each coarse column, incl. the 1-cell border
-        for (let X = -1; X <= 8; X++) for (let Z = -1; Z <= 8; Z++) { let h = 1e9; for (let a = 0; a < 2; a++) for (let d = 0; d < 2; d++) h = Math.min(h, W.hB(ox + X * 2 + a, oz + Z * 2 + d)); hcol[(X + 1) * 10 + Z + 1] = h + GOFF; }
+        for (let X = -1; X <= S; X++) for (let Z = -1; Z <= S; Z++) { let h = 1e9; for (let a = 0; a < F; a++) for (let d = 0; d < F; d++) h = Math.min(h, W.hB(ox + X * F + a, oz + Z * F + d)); hcol[(X + 1) * P + Z + 1] = h + GOFF; }
         colsReady = true;
       }
       const oy = cy * 16;
       for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let d = -1; d <= 1; d++) {
         const nx = cx + a, ny = cy + b, nz = cz + d;
-        const nch = (nx < 0 || ny < 0 || nz < 0 || nx >= CX || ny >= CY || nz >= CZ) ? null : (a | b | d ? coarseChunk((nx * CY + ny) * CZ + nz) : me);
-        const xs = a < 0 ? 7 : 0, xe = a < 0 ? 8 : a > 0 ? 1 : 8, ys = b < 0 ? 7 : 0, ye = b < 0 ? 8 : b > 0 ? 1 : 8, zs = d < 0 ? 7 : 0, ze = d < 0 ? 8 : d > 0 ? 1 : 8;
+        const nch = (nx < 0 || ny < 0 || nz < 0 || nx >= CX || ny >= CY || nz >= CZ) ? null : (a | b | d ? get((nx * CY + ny) * CZ + nz) : me);
+        const xs = a < 0 ? S - 1 : 0, xe = a < 0 ? S : a > 0 ? 1 : S, ys = b < 0 ? S - 1 : 0, ye = b < 0 ? S : b > 0 ? 1 : S, zs = d < 0 ? S - 1 : 0, ze = d < 0 ? S : d > 0 ? 1 : S;
         for (let x = xs; x < xe; x++) for (let y = ys; y < ye; y++) for (let z = zs; z < ze; z++) {
-          const px = a < 0 ? 0 : a > 0 ? 9 : x + 1, py = b < 0 ? 0 : b > 0 ? 9 : y + 1, pz = d < 0 ? 0 : d > 0 ? 9 : z + 1;
-          pad[(px * 10 + py) * 10 + pz] = nch ? nch[(x * 8 + y) * 8 + z] : 0;
+          const px = a < 0 ? 0 : a > 0 ? S + 1 : x + 1, py = b < 0 ? 0 : b > 0 ? S + 1 : y + 1, pz = d < 0 ? 0 : d > 0 ? S + 1 : z + 1;
+          pad[(px * P + py) * P + pz] = nch ? nch[(x * S + y) * S + z] : 0;
         }
       }
-      for (let X = -1; X <= 8; X++) for (let Z = -1; Z <= 8; Z++) {
-        const top = hcol[(X + 1) * 10 + Z + 1] - oy;   // fine y below which everything is underground
-        for (let Y = -1; Y <= 8; Y++) { if (Y * 2 + 1 >= top) break; const i = ((X + 1) * 10 + Y + 1) * 10 + Z + 1; if (pad[i] === 0) pad[i] = 65535; }
+      for (let X = -1; X <= S; X++) for (let Z = -1; Z <= S; Z++) {
+        const top = hcol[(X + 1) * P + Z + 1] - oy;   // fine y below which everything is underground
+        for (let Y = -1; Y <= S; Y++) { if (Y * F + F - 1 >= top) break; const i = ((X + 1) * P + Y + 1) * P + Z + 1; if (pad[i] === 0) pad[i] = 65535; }
       }
-      greedyPad(8, 8, 8, pad, VS * 2, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox >> 1, oy >> 1, oz >> 1], out, true, null, 2);
+      greedyPad(S, S, S, pad, VS * F, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox / F, oy / F, oz / F], out, true, null, F);
+    }
+  }
+}
+// FAR level terrain: F x F columns -> one cell at their most common height; low same-colour steps are soft risers
+function meshTerrainRegionFar(rx, rz, buf, F) {
+  const H = W.H, C = W.C, SC = W.S, dirtI = AF.col('dirt');
+  const bx0 = rx * REG, bz0 = rz * REG, w = ((Math.min(NX, bx0 + REG) - bx0) / F) | 0, d = ((Math.min(NZ, bz0 + REG) - bz0) / F) | 0;
+  const P = d + 2, hs = new Int32Array((w + 2) * P), cs = new Uint16Array((w + 2) * P), ss = new Uint16Array((w + 2) * P);
+  const vals = new Int32Array(F * F);
+  for (let i = -1; i <= w; i++) for (let k = -1; k <= d; k++) {
+    const bx = bx0 + i * F, bz = bz0 + k * F, o = (i + 1) * P + k + 1;
+    if (bx < 0 || bz < 0 || bx + F > NX || bz + F > NZ) { hs[o] = -99999; continue; }
+    let n = 0; for (let a = 0; a < F; a++) for (let b = 0; b < F; b++) vals[n++] = H[(bx + a) * NZ + bz + b];
+    let best = vals[0], bn = 0;
+    if (vals.some((v) => v !== best)) for (let p = 0; p < n; p++) { let m = 0; for (let q = 0; q < n; q++) if (vals[q] === vals[p]) m++; if (m > bn) { bn = m; best = vals[p]; } }
+    let ci = bx * NZ + bz;
+    for (let a = 0; a < F; a++) for (let b = 0; b < F; b++) if (H[(bx + a) * NZ + bz + b] === best) { ci = (bx + a) * NZ + bz + b; a = b = F; }
+    hs[o] = best; cs[o] = C[ci]; ss[o] = SC[ci];
+  }
+  const done = new Uint8Array(w * d);
+  for (let i = 0; i < w; i++) for (let k = 0; k < d; k++) {
+    if (done[i * d + k]) continue;
+    const o = (i + 1) * P + k + 1, h = hs[o], c = cs[o];
+    let len = 1; while (k + len < d && !done[i * d + k + len] && hs[o + len] === h && cs[o + len] === c) len++;
+    let wid = 1;
+    for (; i + wid < w; wid++) { let ok = true; for (let t = 0; t < len; t++) { const q = (i + wid + 1) * P + k + t + 1; if (done[(i + wid) * d + k + t] || hs[q] !== h || cs[q] !== c) { ok = false; break; } } if (!ok) break; }
+    for (let a = 0; a < wid; a++) for (let t = 0; t < len; t++) done[(i + a) * d + k + t] = 1;
+    const y = h * VS, xa = X0 + (bx0 + i * F) * VS, xb = xa + wid * F * VS, za = Z0 + (bz0 + k * F) * VS, zb = za + len * F * VS, u0 = bx0 + i * F, v0 = bz0 + k * F;
+    buf.quad([xa, y, za], [xa, y, zb], [xb, y, zb], [xb, y, za], [u0, v0], [u0, v0 + len * F], [u0 + wid * F, v0 + len * F], [u0 + wid * F, v0], c, 2, [3, 3, 3, 3]);
+  }
+  const L = [1, 1, 3, 3];
+  for (const [dx, dz, nIdx] of [[1, 0, 0], [-1, 0, 1], [0, 1, 4], [0, -1, 5]]) {
+    for (let i = 0; i < w; i++) for (let k = 0; k < d; k++) {
+      const o = (i + 1) * P + k + 1, h = hs[o], nh = hs[o + dx * P + dz];
+      if (nh === -99999 || nh >= h) continue;
+      const topC = cs[o], soft = h - nh <= F, sideC = soft ? topC : (ss[o] || (W.sideFn && W.sideFn(bx0 + i * F, bz0 + k * F, (h + nh) >> 1, topC)) || dirtI);
+      const bx = bx0 + i * F, bz = bz0 + k * F;
+      const face = (ylo, yhi, col, fl) => {
+        if (yhi <= ylo) return;
+        const Y0b = ylo * VS, Y1b = yhi * VS;
+        if (dz !== 0) {
+          const zf = Z0 + (bz + (dz > 0 ? F : 0)) * VS, xa = X0 + bx * VS, xb = xa + F * VS;
+          if (dz > 0) buf.quad([xa, Y0b, zf], [xb, Y0b, zf], [xb, Y1b, zf], [xa, Y1b, zf], [bx, ylo], [bx + F, ylo], [bx + F, yhi], [bx, yhi], col, nIdx, L, fl);
+          else buf.quad([xb, Y0b, zf], [xa, Y0b, zf], [xa, Y1b, zf], [xb, Y1b, zf], [bx + F, ylo], [bx, ylo], [bx, yhi], [bx + F, yhi], col, nIdx, L, fl);
+        } else {
+          const xf = X0 + (bx + (dx > 0 ? F : 0)) * VS, za = Z0 + bz * VS, zb = za + F * VS;
+          if (dx > 0) buf.quad([xf, Y0b, zb], [xf, Y0b, za], [xf, Y1b, za], [xf, Y1b, zb], [bz + F, ylo], [bz, ylo], [bz, yhi], [bz + F, yhi], col, nIdx, L, fl);
+          else buf.quad([xf, Y0b, za], [xf, Y0b, zb], [xf, Y1b, zb], [xf, Y1b, za], [bz, ylo], [bz + F, ylo], [bz + F, yhi], [bz, yhi], col, nIdx, L, fl);
+        }
+      };
+      if (soft) face(nh, h, topC, 32); else { face(nh, h - 1, sideC, 0); face(h - 1, h, topC, 0); }
     }
   }
 }
@@ -1117,6 +1200,48 @@ AF.world.lod = new Map();   // key -> {cx, cz, far, near, nearGlass, props}
 AF.world.coarse = new Map(); // key -> [coarse region meshes] (shown instead of the full region beyond AF.REGION_LOD)
 AF.LOD_DIST = 110;
 AF.REGION_LOD = 130;
+AF.FAR_LOD = 1e9;
+// FAR copies (1 m voxels + 1 m terrain) are lazy: built after the first frame, a few ms per frame, farthest regions first.
+// Only kept when they are < 70 % of the quads they replace. AF.world.farStats = { built, kept, pending, ms }.
+const farQueue = []; let farQ0 = false;
+const FS = AF.world.farStats = { built: 0, kept: 0, pending: 0, ms: 0 };
+function buildFar(k) {
+  const r = AF.world.regLod && AF.world.regLod.get(k); if (!r || r.farBuilt) return;
+  r.farBuilt = true; FS.built++;
+  const t = performance.now(), out = { opaque: new GeoBuf(), glass: new GeoBuf() };
+  meshTerrainRegionFar(k >> 6, k & 63, out.opaque, 4);
+  meshVoxelRegionCoarse(k >> 6, k & 63, out, 4);
+  coarseCache.clear(); farCache.clear();
+  if (out.opaque.n && out.opaque.n < r.q * 0.7) {
+    const m = regMesh(out.opaque.geometry(), AF.mat.voxel, true); m.userData.region = k; m.userData.far = true; m.visible = false; r.far.push(m);
+    if (out.glass.n) { const g = regMesh(out.glass.geometry(), AF.mat.glass, false); g.userData.far = true; g.visible = false; r.far.push(g); }
+    FS.kept++;
+  }
+  FS.ms += performance.now() - t;
+}
+AF.world.buildFarAll = () => { while (farQueue.length) buildFar(farQueue.pop()); FS.pending = 0; };
+AF.test('voxel: far region LOD (1 m) replaces the coarse copy', () => {
+  let r = null;
+  // mobile has no coarse copies: the far copy replaces the full region directly
+  const base = (x) => x.coarse.length || AF.MOBILE;
+  for (const x of AF.world.regLod.values()) if (base(x) && x.far.length) { r = x; break; }
+  if (!r) for (const [k, x] of AF.world.regLod) if (base(x) && !x.farBuilt) { buildFar(k); if (x.far.length) { r = x; break; } }
+  const f = r && r.far[0];
+  const ok = !!f && f.material === AF.mat.voxel && f.userData.far && AF.FAR_LOD > AF.REGION_LOD && f.geometry.index.count / 6 < 0.7 * r.q / 4;
+  return { ok, info: 'far ' + (f ? f.geometry.index.count / 6 + ' quads vs ' + r.q / 4 : 'none') + ', FAR_LOD ' + AF.FAR_LOD + ', built ' + FS.built + ' kept ' + FS.kept };
+});
+AF.onTick('far-lod-build', 879, () => {
+  if (!AF.ready || !AF.world.regLod) return;
+  if (!farQ0) {
+    farQ0 = true; const c = AF.camera.position, dist = (k) => { const r = AF.world.regLod.get(k); return r ? Math.hypot(r.cx - c.x, r.cz - c.z) : 0; };
+    farQueue.push(...[...AF.world.regLod.keys()].sort((a, b) => dist(a) - dist(b)));
+  }
+  if (!farQueue.length) return;
+  if (AF.SHOT) { AF.world.buildFarAll(); return; }
+  const t0 = performance.now();
+  while (farQueue.length && performance.now() - t0 < 3) buildFar(farQueue.pop());
+  FS.pending = farQueue.length;
+});
 // far prop meshes skip what can't be seen from a distance: furniture under a roof and tiny clutter
 const roofOver = (x, y, z) => { const bx = W.bx(x), bz = W.bz(z), OP = AF.PAL.opaque; for (let by = W.by(y), e = Math.min(NY - 1, W.by(y + 14)); by <= e; by++) { const c = W.get(bx, by, bz); if (c && OP[c]) return true; } return false; };
 const farPick = (pr) => {
@@ -1168,7 +1293,9 @@ AF.meshRegion = (rx, rz) => {
   AF.world.regions.set(k, meshes);
   if (cmeshes.length) AF.world.coarse.set(k, cmeshes); else AF.world.coarse.delete(k);
   const RL = AF.world.regLod || (AF.world.regLod = new Map());
-  RL.set(k, { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: meshes, coarse: cmeshes, showCoarse: false });
+  const oldR = RL.get(k); if (oldR) for (const m of oldR.far) dropMesh(m);
+  RL.set(k, { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: meshes, coarse: cmeshes, far: [], lvl: 0, q: cmeshes.length ? cout.opaque.n : out.opaque.n, farBuilt: false });
+  if (farQ0) farQueue.push(k);
   const props = AF.world.propsByRegion.get(k) || [];
   let farQ = 0;
   if (props.length) {
@@ -1184,17 +1311,19 @@ AF.meshRegion = (rx, rz) => {
 AF.onTick('prop-lod', 880, () => {
   if (!AF.world.group) return;
   const c = AF.camera.position, D = AF.LOD_DIST;
-  // region LOD: full voxels near the camera, the coarse copy beyond (hysteresis so nothing flickers on the boundary)
+  // region LOD: full voxels near the camera, the 0.5 m coarse copy beyond AF.REGION_LOD, the 1 m far copy beyond AF.FAR_LOD
+  // (hysteresis so nothing flickers on a boundary)
   if (AF.world.regLod) {
-    const RD = AF.REGION_LOD;
+    const RD = AF.REGION_LOD, FD = AF.FAR_LOD || 1e9;
     for (const r of AF.world.regLod.values()) {
-      if (!r.coarse.length) continue;
+      if (!r.coarse.length && !r.far.length) continue;
       const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
-      const want = r.showCoarse ? d > RD - 12 : d > RD + 12;
-      if (want === r.showCoarse) continue;
-      r.showCoarse = want;
-      for (const m of r.full) m.visible = !want;
-      for (const m of r.coarse) m.visible = want;
+      const want = r.far.length && d > FD + (r.lvl === 2 ? -16 : 16) ? 2 : r.coarse.length && d > RD + (r.lvl >= 1 ? -12 : 12) ? 1 : 0;
+      if (want === r.lvl) continue;
+      r.lvl = want;
+      for (const m of r.full) m.visible = want === 0;
+      for (const m of r.coarse) m.visible = want === 1;
+      for (const m of r.far) m.visible = want === 2;
     }
   }
   let budget = AF.SHOT || AF.TEST ? 1e9 : 10, best = null, bestD = 1e9;

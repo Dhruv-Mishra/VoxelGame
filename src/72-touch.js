@@ -25,7 +25,7 @@ try {
     const DEF = [
       ['RUN', 'run', 'toggle', ['walk']], ['&#x2B06;', 'Space', 'tap', ['walk'], 'big'],
       ['BRAKE', 'Space', 'hold', ['drive'], 'big'], ['EXIT', 'KeyE', 'tap', ['drive']],
-      ['ENGINE ON', 'Space', 'tap', ['fly']], ['ENGINE OFF', 'ShiftLeft', 'tap', ['fly']], ['EXIT', 'KeyF', 'tap', ['fly']],
+      ['THR +', 'thr+', 'hold', ['fly']], ['THR &minus;', 'thr-', 'hold', ['fly']], ['EXIT', 'KeyF', 'tap', ['fly']], ['BRAKE', 'KeyB', 'hold', ['fly']],
       ['WALK', 'Tab', 'tap', ['aerial']],
     ];
     const rows = [document.createElement('div'), document.createElement('div')]; rows.forEach((r) => { r.className = 'tc-row'; pad.appendChild(r); });
