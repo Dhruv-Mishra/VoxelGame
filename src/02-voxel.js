@@ -379,6 +379,8 @@ AF.mat = {};
     uLP: { value: Array.from({ length: 24 }, () => new THREE.Vector4(0, -999, 0, 1)) }, uLC: { value: Array.from({ length: 24 }, () => new THREE.Vector4()) }, uLN: { value: 0 }, uPoolK: { value: 1 },
     // LOD cross-fade progress 0..1 (AF.world.fade); only the fadeIn / fadeOut variants read it
     uFadeK: { value: 0 },
+    // 1 = 4-fetch bilinear near shadows (Standard / Low / phones), 0 = three's PCF-soft (Balanced / High); 03-render sets it per tier
+    uShadowFast: { value: 1 },
   };
   const vsHead = `
     attribute float aPal; attribute float aAN; attribute vec2 aBU;
@@ -419,7 +421,7 @@ AF.mat = {};
   const fsHead = `
     uniform float uNight; uniform float uEmitBoost; uniform float uEdge; uniform vec4 uAO;
     uniform float uPatK; uniform float uWinK; uniform float uAfTime; uniform float uDayK; uniform float uEnvDiffuse; uniform float uSpecOcc;
-    uniform sampler2D uFarMap; uniform float uFarOn; uniform vec2 uFarTexel; uniform float uFarBias; uniform float uNearFade;
+    uniform sampler2D uFarMap; uniform float uFarOn; uniform vec2 uFarTexel; uniform float uFarBias; uniform float uNearFade; uniform float uShadowFast;
     uniform vec4 uLP[24]; uniform vec4 uLC[24]; uniform float uLN; uniform float uPoolK; uniform float uLitFrac; uniform float uNeon; uniform float uFarEmit; uniform float uCloudK; uniform vec2 uCloudOff; uniform float uCloudScale; uniform vec3 uSunW;
     varying vec3 vAlb; varying vec4 vEmi; varying vec2 vBU; varying float vAO; varying float vJit; varying float vNI;
     varying vec4 vMat; varying vec3 vAfOP; varying vec3 vAfWP; varying vec4 vFarSC;
@@ -792,7 +794,15 @@ AF.mat = {};
       float e = min(min(c.x, 1.0 - c.x), min(c.y, 1.0 - c.y));
       float wN = (c.z + bias <= 1.0) ? smoothstep(0.0, uNearFade, e) : 0.0;
       float sN = 1.0, sF = 1.0;
-      if (wN > 0.001) sN = getShadow(map, size, bias, radius, sc);
+      if (wN > 0.001) {
+        if (uShadowFast > 0.5) {
+          // one bilinear 2x2 compare (4 fetches) instead of PCF-soft's 36: the near map is ~3 cm per texel at street level
+          float z = c.z + bias; vec2 ts = 1.0 / size, uv = c.xy, f = fract(uv / ts + 0.5); uv -= f * ts;
+          float s00 = step(z, unpackRGBAToDepth(texture2D(map, uv))), s10 = step(z, unpackRGBAToDepth(texture2D(map, uv + vec2(ts.x, 0.0))));
+          float s01 = step(z, unpackRGBAToDepth(texture2D(map, uv + vec2(0.0, ts.y)))), s11 = step(z, unpackRGBAToDepth(texture2D(map, uv + ts)));
+          sN = mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
+        } else sN = getShadow(map, size, bias, radius, sc);
+      }
       if (wN < 0.999) sF = afFarShadow();
       float sh = mix(sF, sN, wN);
       if (uCloudK > 0.001) {     // cloud layer at y 420, projected along the sun

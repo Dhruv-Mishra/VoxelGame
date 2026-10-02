@@ -302,6 +302,20 @@ try {
     }
     C.stats.emptyInst = empty;
   });
+  // instanced buffers are sized for the worst case (117 k slots, ~5 k used): upload only the live [0, count) slice
+  AF.onTick('inst-ranges', 895, () => {
+    for (const o of C.inst) {
+      const a = o.instanceMatrix, c = o.instanceColor;
+      if (a.version !== o.userData.afMV) {
+        o.userData.afMV = a.version; a.clearUpdateRanges();
+        if (o.count < a.count) a.addUpdateRange(0, Math.max(1, o.count) * 16);
+      }
+      if (c && c.version !== o.userData.afCV) {
+        o.userData.afCV = c.version; c.clearUpdateRanges();
+        if (o.count < c.count) c.addUpdateRange(0, Math.max(1, o.count) * 3);
+      }
+    }
+  });
 }
 
 // ================================================================ R1: GFX tiers, far shadow cascade, environment reflections, surfaces
@@ -369,6 +383,7 @@ try {
     if (AF.ready) { try { sharpenTextures(); } catch (e) { AF.warnOnce('aniso', e); } }
     if (sun && sun.shadow.mapSize.x !== T.near) { sun.shadow.mapSize.set(T.near, T.near); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
     U.uPatK.value = T.pat; U.uWinK.value = T.win;
+    U.uShadowFast.value = !G.cinema && (AF.MOBILE || G.tier === 'low' || G.lite) ? 1 : 0;
     if (AF.gfx.far) AF.gfx.far.resize(T.far, T.farR);
   };
   G.onChange(applyTier);

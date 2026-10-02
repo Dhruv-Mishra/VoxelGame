@@ -860,11 +860,16 @@ VV.simTraffic = (dt) => {
   VV.clockT += dt;
   if ((cabSwapT -= dt) <= 0) { cabSwapT = 3; nightCabs(); }
   const all = VV.cars, cam = AF.camera && AF.camera.position, fr = VV.simN = (VV.simN || 0) + 1;
-  // cars far from the camera tick at a quarter rate with the accumulated time (nobody can see them take bigger steps)
+  // cars far from the camera tick at a quarter rate with the accumulated time (nobody can see them take bigger steps);
+  // far cars outside the view (last frame's frustum) tick at an eighth
   for (const c of VV.ai) {
     if (!c.ai) continue;
     c.aiAcc = (c.aiAcc || 0) + dt;
-    if (cam && ((fr + c.id) & 3) !== 0 && (c.x - cam.x) ** 2 + (c.z - cam.z) ** 2 > 240 * 240) continue;
+    if (cam && (c.x - cam.x) ** 2 + (c.z - cam.z) ** 2 > 240 * 240) {
+      const slot = fr + c.id;
+      if ((slot & 3) !== 0) continue;
+      if ((slot & 7) !== 0) { SIM_S.center.set(c.x, c.y + 1, c.z); SIM_S.radius = c.halfL + 1.5; if (!FRUSTUM.intersectsSphere(SIM_S)) continue; }
+    }
     aiStep(c, Math.min(c.aiAcc, 0.25), all); c.aiAcc = 0;
   }
   for (const car of all) if (!car.ai && !car.player && car.pushLife > 0) stepPush(car, dt);
@@ -1186,7 +1191,7 @@ AF.modes.drive = {
 // ---------------------------------------------------------------- per-frame: instanced bodies + wheels + drivers + night lamps
 let WHEEL_IM = null, DRV_IM = null;
 const tmpObj = new THREE.Object3D();
-const FRUSTUM = new THREE.Frustum(), FR_M = new THREE.Matrix4(), FR_S = new THREE.Sphere();
+const FRUSTUM = new THREE.Frustum(), FR_M = new THREE.Matrix4(), FR_S = new THREE.Sphere(), SIM_S = new THREE.Sphere();
 const IMS = VV.ims = new Map();          // model key -> { full, glass, lod, cap, n, nl }
 const LOD_D = 90, FAR_D = 300, LAMP_D = 720, DETAIL_D = 110;
 function ensureIM(key, cap) {

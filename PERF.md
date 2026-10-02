@@ -37,12 +37,27 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
 - Sun-shadow refresh cadence is time based (≈30 Hz High/Balanced, ≈15 Hz Standard/Low at the 30 fps cap).
 - Simulation code must use `dt` (≤ 0.1 s); nothing may assume 60 Hz.
 
+## 2b. Renderer CPU (locked)
+- Instanced voxel meshes use `AF.mat.voxelInst` / `voxelInstC` + `AF.mat.depthInst` (`AF.mat.splitInstanced`, run by the
+  dyn-cull scan). Sharing `AF.mat.voxel` between plain and instanced meshes made three re-derive the program ~75× per
+  pass (`getParameters` was the #2 CPU cost). New instanced voxel content: assign `AF.mat.voxelInst` directly.
+- `inst-ranges` (03, order 895) uploads only `[0, count)` of every instanced buffer (117 k slots allocated, ~5 k live).
+- Near sun shadows on Standard / Low / phones use a 4-fetch bilinear compare (`uShadowFast`) instead of PCF-soft (36).
+- Flags (`civic-flags`) animate only on screen; beyond 90 m at 10 Hz.
+- Profile with `tools/cpu-prof.js` (CDP sampling of `AF.step` in the open session page).
+- Simulations are local (Oct 2026 survey, `tools/tick-survey.js` → `afTicks(poses)`): all ticks together cost 1.7–3.2 ms
+  per frame anywhere on the map. Park, zoo, harbour, crowd, animals, flags, air traffic gate by distance/view; AI traffic
+  runs full rate within 240 m, 1/4 rate beyond in view, 1/8 beyond and off screen. Keep new simulations under this rule.
+
 ## 3. Depth precision / z-fighting (locked)
 - Precision of a 24-bit depth buffer (Windows ANGLE/D3D11) is ≈ d² / (near · 2²⁴). `near` is **dynamic** (`cam-near`
   tick, 03-render): 0.1 m on foot / driving, grows with altitude and chase distance (fly/aerial/cine) up to 6 m.
   Never hard-code `camera.near` back to 0.08.
 - Never place two coplanar opaque surfaces (decals, flat props flush on voxel faces). Lift by ≥ 0.02 m or use
   `polygonOffset` on the overlay material.
+- Shader hashes keyed on world position (fake window rooms, neon cells) must sample a few cm *behind* the face: faces lie
+  exactly on the 0.25 m grid, so `floor()` of the face plane flips per pixel on D3D (looked like z-fighting on skyscraper
+  windows).
 
 ## 4. LOD transitions (locked)
 - Every LOD swap of voxel-material meshes (region full ↔ 0.5 m coarse, cluster full ↔ 1 m far, props near ↔ far,

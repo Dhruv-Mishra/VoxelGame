@@ -207,10 +207,18 @@ try {
       return true;
     } catch (e) { return false; }
   };
+  const flagFr = new THREE.Frustum(), flagM = new THREE.Matrix4(), flagS = new THREE.Sphere();
+  let flagFrame = 0;
   AF.onTick('civic-flags', 330, (dt, t) => {
     const cam = AF.camera; if (!cam) return;
+    flagFrame++;
+    flagFr.setFromProjectionMatrix(flagM.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
     for (const f of CIV.flags) {
-      if (Math.hypot(cam.position.x - f.x, cam.position.z - f.z) > 230) continue;
+      const d = Math.hypot(cam.position.x - f.x, cam.position.z - f.z);
+      if (d > 230) continue;
+      // off-screen flags hold their pose; beyond 90 m they wave at 10 Hz
+      flagS.center.copy(f.mesh.position); flagS.radius = f.len + 1;
+      if (!flagFr.intersectsSphere(flagS) || (d > 90 && (flagFrame + f.ph * 10 | 0) % 3)) continue;
       const a = f.pos.array, b = f.base;
       for (let v = 0; v < a.length; v += 3) { const u = b[v] / f.len; a[v + 2] = b[v + 2] + Math.sin(t * 3.4 - b[v] * 4.2 + f.ph) * 0.14 * u; a[v] = b[v] - Math.abs(Math.sin(t * 1.1 + f.ph)) * 0.05 * u; a[v + 1] = b[v + 1] - 0.04 * u * u; }
       f.pos.needsUpdate = true;

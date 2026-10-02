@@ -782,6 +782,8 @@ AF.mat = {};
     uLP: { value: Array.from({ length: 24 }, () => new THREE.Vector4(0, -999, 0, 1)) }, uLC: { value: Array.from({ length: 24 }, () => new THREE.Vector4()) }, uLN: { value: 0 }, uPoolK: { value: 1 },
     // LOD cross-fade progress 0..1 (AF.world.fade); only the fadeIn / fadeOut variants read it
     uFadeK: { value: 0 },
+    // 1 = 4-fetch bilinear near shadows (Standard / Low / phones), 0 = three's PCF-soft (Balanced / High); 03-render sets it per tier
+    uShadowFast: { value: 1 },
   };
   const vsHead = `
     attribute float aPal; attribute float aAN; attribute vec2 aBU;
@@ -822,7 +824,7 @@ AF.mat = {};
   const fsHead = `
     uniform float uNight; uniform float uEmitBoost; uniform float uEdge; uniform vec4 uAO;
     uniform float uPatK; uniform float uWinK; uniform float uAfTime; uniform float uDayK; uniform float uEnvDiffuse; uniform float uSpecOcc;
-    uniform sampler2D uFarMap; uniform float uFarOn; uniform vec2 uFarTexel; uniform float uFarBias; uniform float uNearFade;
+    uniform sampler2D uFarMap; uniform float uFarOn; uniform vec2 uFarTexel; uniform float uFarBias; uniform float uNearFade; uniform float uShadowFast;
     uniform vec4 uLP[24]; uniform vec4 uLC[24]; uniform float uLN; uniform float uPoolK; uniform float uLitFrac; uniform float uNeon; uniform float uFarEmit; uniform float uCloudK; uniform vec2 uCloudOff; uniform float uCloudScale; uniform vec3 uSunW;
     varying vec3 vAlb; varying vec4 vEmi; varying vec2 vBU; varying float vAO; varying float vJit; varying float vNI;
     varying vec4 vMat; varying vec3 vAfOP; varying vec3 vAfWP; varying vec4 vFarSC;
@@ -1195,7 +1197,15 @@ AF.mat = {};
       float e = min(min(c.x, 1.0 - c.x), min(c.y, 1.0 - c.y));
       float wN = (c.z + bias <= 1.0) ? smoothstep(0.0, uNearFade, e) : 0.0;
       float sN = 1.0, sF = 1.0;
-      if (wN > 0.001) sN = getShadow(map, size, bias, radius, sc);
+      if (wN > 0.001) {
+        if (uShadowFast > 0.5) {
+          // one bilinear 2x2 compare (4 fetches) instead of PCF-soft's 36: the near map is ~3 cm per texel at street level
+          float z = c.z + bias; vec2 ts = 1.0 / size, uv = c.xy, f = fract(uv / ts + 0.5); uv -= f * ts;
+          float s00 = step(z, unpackRGBAToDepth(texture2D(map, uv))), s10 = step(z, unpackRGBAToDepth(texture2D(map, uv + vec2(ts.x, 0.0))));
+          float s01 = step(z, unpackRGBAToDepth(texture2D(map, uv + vec2(0.0, ts.y)))), s11 = step(z, unpackRGBAToDepth(texture2D(map, uv + ts)));
+          sN = mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
+        } else sN = getShadow(map, size, bias, radius, sc);
+      }
       if (wN < 0.999) sF = afFarShadow();
       float sh = mix(sF, sN, wN);
       if (uCloudK > 0.001) {     // cloud layer at y 420, projected along the sun
@@ -1239,6 +1249,17 @@ AF.mat = {};
   AF.mat.voxel = patch(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'solid');
   AF.mat.glass = patch(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.12, metalness: 0.0, transparent: true, opacity: 0.38, depthWrite: false }), 'glass');
   AF.mat.water = new THREE.MeshStandardMaterial({ color: 0x3b6f8f, roughness: 0.08, metalness: 0.0, transparent: true, opacity: 0.82 });
+  // PERF.md §2b: three re-derives the program (getParameters) every time one material alternates between instanced and plain
+  // meshes in a pass. Instanced voxel users get their own material object (same program cache key = no extra compiles) and a
+  // shared depth material, so each pass switches programs once per kind instead of ~75 times.
+  AF.mat.voxelInst = patch(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'solid');
+  AF.mat.voxelInstC = patch(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'solid');
+  AF.mat.depthInst = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  AF.mat.splitInstanced = (o) => {
+    if (!o.isInstancedMesh) return;
+    if (o.material === AF.mat.voxel) o.material = o.instanceColor ? AF.mat.voxelInstC : AF.mat.voxelInst;
+    if (o.customDepthMaterial === undefined && (o.material === AF.mat.voxelInst || o.material === AF.mat.voxelInstC)) o.customDepthMaterial = AF.mat.depthInst;
+  };
 }
 
 // ---------------------------------------------------------------- world meshing (runs as build stage 500)
@@ -2682,6 +2703,7 @@ try {
     for (const top of AF.scene.children) {
       if (skipNames.has(top.name) || top.isLight || top.isCamera) continue;
       top.traverse((o) => {
+        if (o.isInstancedMesh && AF.mat.splitInstanced) AF.mat.splitInstanced(o);
         if (o.isInstancedMesh && (o.layers.mask === 1 || o.userData.afEmpty)) { C.inst.push(o); return; }
         if (!(o.isMesh) || o.isInstancedMesh || o.frustumCulled === false || !o.geometry) return;
         const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere();
@@ -2730,6 +2752,20 @@ try {
       if (e) empty++;
     }
     C.stats.emptyInst = empty;
+  });
+  // instanced buffers are sized for the worst case (117 k slots, ~5 k used): upload only the live [0, count) slice
+  AF.onTick('inst-ranges', 895, () => {
+    for (const o of C.inst) {
+      const a = o.instanceMatrix, c = o.instanceColor;
+      if (a.version !== o.userData.afMV) {
+        o.userData.afMV = a.version; a.clearUpdateRanges();
+        if (o.count < a.count) a.addUpdateRange(0, Math.max(1, o.count) * 16);
+      }
+      if (c && c.version !== o.userData.afCV) {
+        o.userData.afCV = c.version; c.clearUpdateRanges();
+        if (o.count < c.count) c.addUpdateRange(0, Math.max(1, o.count) * 3);
+      }
+    }
   });
 }
 
@@ -2798,6 +2834,7 @@ try {
     if (AF.ready) { try { sharpenTextures(); } catch (e) { AF.warnOnce('aniso', e); } }
     if (sun && sun.shadow.mapSize.x !== T.near) { sun.shadow.mapSize.set(T.near, T.near); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
     U.uPatK.value = T.pat; U.uWinK.value = T.win;
+    U.uShadowFast.value = !G.cinema && (AF.MOBILE || G.tier === 'low' || G.lite) ? 1 : 0;
     if (AF.gfx.far) AF.gfx.far.resize(T.far, T.farR);
   };
   G.onChange(applyTier);
@@ -2921,7 +2958,7 @@ try {
       const rt = pmrem.fromScene(src, 0, 0.1, 5000);
       R.setRenderTarget(prevRT);
       const old = E.rt; E.rt = rt;
-      for (const m of [AF.mat.voxel, AF.mat.glass]) { const had = !!m.envMap; m.envMap = rt.texture; if (!had) m.needsUpdate = true; }
+      for (const m of [AF.mat.voxel, AF.mat.glass, AF.mat.voxelInst, AF.mat.voxelInstC]) { if (!m) continue; const had = !!m.envMap; m.envMap = rt.texture; if (!had) m.needsUpdate = true; }
       if (old) old.dispose();
       E.n++; E.ms = Math.round((performance.now() - t0) * 10) / 10;
     };
@@ -2934,7 +2971,8 @@ try {
       const ind = (AF.atmos && AF.atmos.indoor) || 0;
       const k = T.env * (1 - 0.75 * ind);
       AF.mat.voxel.envMapIntensity = k; AF.mat.glass.envMapIntensity = k * 1.2;
-      if (T.env <= 0) { if (AF.mat.voxel.envMap) { AF.mat.voxel.envMapIntensity = 0; AF.mat.glass.envMapIntensity = 0; } return; }
+      if (AF.mat.voxelInst) AF.mat.voxelInst.envMapIntensity = AF.mat.voxelInstC.envMapIntensity = k;
+      if (T.env <= 0) { if (AF.mat.voxel.envMap) { AF.mat.voxel.envMapIntensity = 0; AF.mat.glass.envMapIntensity = 0; if (AF.mat.voxelInst) AF.mat.voxelInst.envMapIntensity = AF.mat.voxelInstC.envMapIntensity = 0; } return; }
       if (AF.gfx.far && AF.gfx.far.frameN === 0) return;      // never on the same frame as a far-shadow refresh
       let need = !E.rt;
       if (sky && ver !== undefined) need = need || (ver !== E.ver && acc > 0.5);
@@ -13262,10 +13300,18 @@ try {
       return true;
     } catch (e) { return false; }
   };
+  const flagFr = new THREE.Frustum(), flagM = new THREE.Matrix4(), flagS = new THREE.Sphere();
+  let flagFrame = 0;
   AF.onTick('civic-flags', 330, (dt, t) => {
     const cam = AF.camera; if (!cam) return;
+    flagFrame++;
+    flagFr.setFromProjectionMatrix(flagM.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
     for (const f of CIV.flags) {
-      if (Math.hypot(cam.position.x - f.x, cam.position.z - f.z) > 230) continue;
+      const d = Math.hypot(cam.position.x - f.x, cam.position.z - f.z);
+      if (d > 230) continue;
+      // off-screen flags hold their pose; beyond 90 m they wave at 10 Hz
+      flagS.center.copy(f.mesh.position); flagS.radius = f.len + 1;
+      if (!flagFr.intersectsSphere(flagS) || (d > 90 && (flagFrame + f.ph * 10 | 0) % 3)) continue;
       const a = f.pos.array, b = f.base;
       for (let v = 0; v < a.length; v += 3) { const u = b[v] / f.len; a[v + 2] = b[v + 2] + Math.sin(t * 3.4 - b[v] * 4.2 + f.ph) * 0.14 * u; a[v] = b[v] - Math.abs(Math.sin(t * 1.1 + f.ph)) * 0.05 * u; a[v + 1] = b[v + 1] - 0.04 * u * u; }
       f.pos.needsUpdate = true;
@@ -19805,7 +19851,7 @@ try {
     AF.on('ready', () => {
       for (const id in Z.species) for (const mesh of Z.species[id].meshes) mesh.material = zooFadeMaterial();
       AF.renderer.compile(AF.scene, AF.camera);
-      for (const id in Z.species) for (const mesh of Z.species[id].meshes) mesh.material = AF.mat.voxel;
+      for (const id in Z.species) for (const mesh of Z.species[id].meshes) mesh.material = AF.mat.voxelInst;
     });
   });
   const stepAnimal = Z.stepAnimal = (an, dt, hours, player) => {
@@ -19943,7 +19989,7 @@ try {
     const cp = AF.camera.position, low = AF.GFX && AF.GFX.tier === 'low', limit = low ? 120 : 150;
     viewMatrix.multiplyMatrices(AF.camera.projectionMatrix, AF.camera.matrixWorldInverse); frustum.setFromProjectionMatrix(viewMatrix);
     Z.near = false;
-    for (const id in Z.species) for (const mesh of Z.species[id].meshes) { mesh.count = 0; mesh.material = AF.mat.voxel; }
+    for (const id in Z.species) for (const mesh of Z.species[id].meshes) { mesh.count = 0; mesh.material = AF.mat.voxelInst; }
     for (const an of Z.list) {
       const dx = cp.x - an.x, dy = cp.y - an.y, dz = cp.z - an.z, distance = dx * dx + dy * dy + dz * dz;
       sphere.center.set(an.x, an.y + an.elevation + an.sp.G.height * 0.5, an.z); sphere.radius = Math.max(2.5, an.sp.G.height);
@@ -19983,7 +20029,7 @@ try {
       near += full; far += geo.index.count;
       ok = ok && geo.index.count < full * 0.5 && attributes.position.count === attributes.aPal.count
         && attributes.position.count === attributes.aAN.count && attributes.position.count === attributes.aBU.count
-        && attributes.aZooFade.count >= sp.list.length && !sp.far.castShadow && sp.far.material === AF.mat.voxel;
+        && attributes.aZooFade.count >= sp.list.length && !sp.far.castShadow && [AF.mat.voxel, AF.mat.voxelInst].includes(sp.far.material);
       for (const value of attributes.position.array) if (!Number.isFinite(value)) ok = false;
       for (const value of geo.index.array) if (value >= attributes.position.count) ok = false;
     }
@@ -21537,11 +21583,16 @@ VV.simTraffic = (dt) => {
   VV.clockT += dt;
   if ((cabSwapT -= dt) <= 0) { cabSwapT = 3; nightCabs(); }
   const all = VV.cars, cam = AF.camera && AF.camera.position, fr = VV.simN = (VV.simN || 0) + 1;
-  // cars far from the camera tick at a quarter rate with the accumulated time (nobody can see them take bigger steps)
+  // cars far from the camera tick at a quarter rate with the accumulated time (nobody can see them take bigger steps);
+  // far cars outside the view (last frame's frustum) tick at an eighth
   for (const c of VV.ai) {
     if (!c.ai) continue;
     c.aiAcc = (c.aiAcc || 0) + dt;
-    if (cam && ((fr + c.id) & 3) !== 0 && (c.x - cam.x) ** 2 + (c.z - cam.z) ** 2 > 240 * 240) continue;
+    if (cam && (c.x - cam.x) ** 2 + (c.z - cam.z) ** 2 > 240 * 240) {
+      const slot = fr + c.id;
+      if ((slot & 3) !== 0) continue;
+      if ((slot & 7) !== 0) { SIM_S.center.set(c.x, c.y + 1, c.z); SIM_S.radius = c.halfL + 1.5; if (!FRUSTUM.intersectsSphere(SIM_S)) continue; }
+    }
     aiStep(c, Math.min(c.aiAcc, 0.25), all); c.aiAcc = 0;
   }
   for (const car of all) if (!car.ai && !car.player && car.pushLife > 0) stepPush(car, dt);
@@ -21863,7 +21914,7 @@ AF.modes.drive = {
 // ---------------------------------------------------------------- per-frame: instanced bodies + wheels + drivers + night lamps
 let WHEEL_IM = null, DRV_IM = null;
 const tmpObj = new THREE.Object3D();
-const FRUSTUM = new THREE.Frustum(), FR_M = new THREE.Matrix4(), FR_S = new THREE.Sphere();
+const FRUSTUM = new THREE.Frustum(), FR_M = new THREE.Matrix4(), FR_S = new THREE.Sphere(), SIM_S = new THREE.Sphere();
 const IMS = VV.ims = new Map();          // model key -> { full, glass, lod, cap, n, nl }
 const LOD_D = 90, FAR_D = 300, LAMP_D = 720, DETAIL_D = 110;
 function ensureIM(key, cap) {
