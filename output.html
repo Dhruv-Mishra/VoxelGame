@@ -29,7 +29,7 @@
 </script>
 <script type="module">
 // Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.
-// Parts: 00-prologue, 01-core, 02-voxel, 03-render, 05-plan, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 45-west, 46-zoo, 47-airfield, 48-sea, 50-vehicles, 52-planes, 55-people, 56-animals, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 98-tests, 99-boot
+// Parts: 00-prologue, 01-core, 02-voxel, 03-render, 05-plan, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 45-west, 46-zoo, 47-airfield, 48-sea, 50-vehicles, 52-planes, 53-airtraffic, 55-people, 56-animals, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 98-tests, 99-boot
 // ===== prologue: module scope shared by every part (only THREE + ADDONS live here) =====
 window.AF = window.AF || {};
 {
@@ -116,9 +116,14 @@ AF.GFX = {
 // ---------------------------------------------------------------- hooks
 // Build stages run once at boot, sorted by order (see CONTRACT.md for the order table).
 // Ticks run every frame sorted by order: fn(dt, t). Errors are caught, logged once per hook, and the hook keeps running.
-AF.hooks = { build: [], tick: [], tests: [] };
+AF.hooks = { build: [], tick: [], tests: [], idle: [] };
 AF.onBuild = (name, order, fn) => { AF.hooks.build.push({ name, order, fn }); };
 AF.onTick = (name, order, fn) => { AF.hooks.tick.push({ name, order, fn, errs: 0 }); AF.hooks.tick.sort((a, b) => a.order - b.order); };
+// idle work: fn(budgetMs) -> true when it still has work. Runs in the rAF slots the fps cap skips (PERF.md §2), never in a rendered frame.
+AF.onIdle = (name, fn) => { AF.hooks.idle.push({ name, fn, errs: 0 }); };
+// frame cap (PERF.md §2, locked): 30 by default, 60 or 0 (= display rate) from the menu; saved per browser
+AF.fpsCap = (() => { try { const s = localStorage.getItem('portSolace.fps'); if (s !== null && [0, 30, 60].includes(+s)) return +s; } catch (e) { /* storage blocked */ } return 30; })();
+AF.setFpsCap = (v) => { AF.fpsCap = [0, 30, 60].includes(+v) ? +v : 30; try { localStorage.setItem('portSolace.fps', String(AF.fpsCap)); } catch (e) { /* storage blocked */ } };
 AF.test = (name, fn) => { AF.hooks.tests.push({ name, fn }); };
 AF.warnOnce = (() => { const seen = new Set(); return (k, ...a) => { if (!seen.has(k)) { seen.add(k); console.warn('[af]', k, ...a); } }; })();
 
@@ -775,6 +780,8 @@ AF.mat = {};
     uCloudK: { value: 0.0 }, uCloudOff: { value: new THREE.Vector2() }, uCloudScale: { value: 1 / 210 }, uSunW: { value: new THREE.Vector3(0.5, 0.5, 0.3) },
     // R1 night light pools: up to 24 nearest street/porch/sign/shop lights (xyz, range) + colour*intensity
     uLP: { value: Array.from({ length: 24 }, () => new THREE.Vector4(0, -999, 0, 1)) }, uLC: { value: Array.from({ length: 24 }, () => new THREE.Vector4()) }, uLN: { value: 0 }, uPoolK: { value: 1 },
+    // LOD cross-fade progress 0..1 (AF.world.fade); only the fadeIn / fadeOut variants read it
+    uFadeK: { value: 0 },
   };
   const vsHead = `
     attribute float aPal; attribute float aAN; attribute vec2 aBU;
@@ -1027,7 +1034,8 @@ AF.mat = {};
         vec3 q = vec3(dot(vAfWP, T), vAfWP.y - 0.25, 0.0) / RS;
         vec3 rd = vec3(dot(V, T), V.y, -dot(V, N)) / RS;
         vec3 rc = floor(q); vec3 s0 = vec3(fract(q.xy), 0.0);
-        float plane = floor(dot(vAfWP, N) * 2.0 + 0.5);
+        // faces sit on the voxel grid: sample 3 cm behind the face so floor() never lands on the plane (per-pixel noise on D3D)
+        float plane = floor((dot(vAfWP, N) - 0.03) * 2.0);
         float rh = afHash(vec3(rc.xy, plane + kind * 13.0));
         float rh2 = afHash(vec3(rc.yx + 3.7, plane * 1.3));
         // night: slowly changing lit / dark / TV rooms
@@ -1132,7 +1140,8 @@ AF.mat = {};
       float mode = floor(vEmi.a);
       float on = mode > 1.5 ? 1.0 : mode > 0.5 ? uNight : 0.0;
       if (mode > 2.5 && uNeon < 1.0) {                 // neon: per-cell switch-on sequence with a brief flicker
-        float th = afHash(floor(vAfWP / 2.5) + 0.5) * 0.85; float nd = uNeon - th;
+        vec3 Nn = vNI < 0.5 ? vec3(1.,0.,0.) : vNI < 1.5 ? vec3(-1.,0.,0.) : vNI < 2.5 ? vec3(0.,1.,0.) : vNI < 3.5 ? vec3(0.,-1.,0.) : vNI < 4.5 ? vec3(0.,0.,1.) : vec3(0.,0.,-1.);
+        float th = afHash(floor((vAfWP - Nn * 0.03) / 2.5) + 0.5) * 0.85; float nd = uNeon - th;
         on = nd < 0.0 ? 0.0 : nd > 0.06 ? 1.0 : step(0.45, fract(sin(uAfTime * 37.0 + th * 91.0) * 43758.5));
       }
       vec3 em = vEmi.rgb * on * uEmitBoost;
@@ -1217,6 +1226,10 @@ AF.mat = {};
         .replace('#include <lights_fragment_maps>', THREE.ShaderChunk.lights_fragment_maps
           .replace('iblIrradiance += getIBLIrradiance( geometryNormal );', 'iblIrradiance += getIBLIrradiance( geometryNormal ) * uEnvDiffuse;')
           + '\n radiance *= afSpecAO * mix(1.0, 0.3, smoothstep(0.45, 0.9, material.roughness));\n');
+      if (key === 'fadeIn' || key === 'fadeOut') {
+        // screen-door cross-fade: the two variants discard complementary pixels, so in + out always cover the surface once
+        sh.fragmentShader = 'uniform float uFadeK;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n{ float afD = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715)))); if (afD ' + (key === 'fadeIn' ? '>=' : '<') + ' uFadeK) discard; }');
+      }
       if (AF.mat.extraPatch) AF.mat.extraPatch(sh, key);
     };
     mat.customProgramCacheKey = () => 'afvox2-' + key;
@@ -1253,9 +1266,9 @@ AF.removeStatic = (pr) => {
   const k = regionKeyOf(pr.x, pr.z), list = AF.world.propsByRegion.get(k);
   if (list) { const j = list.indexOf(pr); if (j >= 0) list.splice(j, 1); }
   const reg = AF.world.lod.get(k); if (!reg) return;
-  const wasNear = reg.nearBuilt; freeNear(reg); dropMesh(reg.far); reg.far = null;
-  const fg = mergeProps(reg.props, farPick); if (fg) reg.far = regMesh(fg, AF.mat.voxel, true);
-  if (wasNear) buildNear(reg);
+  const wasNear = reg.nearBuilt; FADE.cancel(reg); freeNear(reg); dropMesh(reg.far); reg.far = null;
+  const fg = mergeProps(reg.props, farPick); if (fg) { reg.far = regMesh(fg, AF.mat.voxel, true); reg.far.visible = !!reg.farSeen; }
+  if (wasNear) { buildNear(reg); if (reg.showNear) { if (reg.near) reg.near.visible = true; if (reg.nearGlass) reg.nearGlass.visible = true; } }
 };
 AF.addWater = (geo, mat) => { AF.world.water.push({ geo, mat }); };
 
@@ -1613,6 +1626,69 @@ AF.world.coarse = new Map(); // key -> [coarse region meshes] (shown instead of 
 AF.LOD_DIST = 110;
 AF.REGION_LOD = 130;
 AF.FAR_LOD = 1e9;
+// LOD CROSS-FADE (PERF.md §4, locked): every swap between voxel-material LOD copies (region full <-> 0.5 m coarse, cluster
+// regions <-> 1 m far copy, props near <-> far, far-prop cull) dithers over FADE.dur instead of popping. All swaps requested
+// while a ramp runs start together with the next ramp (shared uFadeK; at most FADE.dur late). Owners must not write .visible
+// on their LOD meshes while owner.fadeE is set. Non-voxel meshes (glass) switch when the ramp starts. ?nofade disables.
+const FADE = AF.world.fade = { on: !AF.Q.has('nofade') && !AF.SHOT && !AF.TEST, dur: 0.3, k: 1, act: [], pend: [], mats: null, swaps: 0, warmKey: '' };
+const fadeMats = () => FADE.mats || (FADE.mats = {
+  in: AF.mat.patchVoxel(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'fadeIn'),
+  out: AF.mat.patchVoxel(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'fadeOut'),
+});
+const seenByCam = (m) => m.visible && (m.layers.mask & 1) !== 0 && !!m.parent;
+FADE.swap = (owner, outs, ins, done) => {
+  const live = AF.ready && FADE.on;
+  const e = { owner, outs: [], ins: [], done };
+  for (const m of outs) if (m && seenByCam(m)) e.outs.push(m);
+  for (const m of ins) {
+    if (!m) continue;
+    if (!live) { m.layers.set(0); m.visible = true; continue; }
+    if (seenByCam(m) && m.material === AF.mat.voxel) continue;     // already on screen: nothing to fade in
+    m.visible = false; e.ins.push(m);                                // shown when the ramp starts
+  }
+  if (!live) { for (const m of e.outs) m.visible = false; if (done) done(); return; }
+  owner.fadeE = e; FADE.pend.push(e); FADE.swaps++;
+};
+const fadeStart = () => {
+  const M = fadeMats(), V = AF.mat.voxel;
+  for (const m of [M.in, M.out]) { if (!!m.envMap !== !!V.envMap) m.needsUpdate = true; m.envMap = V.envMap; m.envMapIntensity = V.envMapIntensity; }
+  const t = FADE.act; FADE.act = FADE.pend; FADE.pend = t; FADE.pend.length = 0; FADE.k = 0;
+  for (const e of FADE.act) {
+    for (const m of e.outs) if (m.material === V) m.material = M.out;
+    for (const m of e.ins) { m.layers.set(0); m.visible = true; if (m.material === V) m.material = M.in; }
+  }
+};
+const fadeFinish = (e) => {
+  const M = fadeMats(), V = AF.mat.voxel;
+  for (const m of e.outs) { m.visible = false; if (m.material === M.out) m.material = V; }
+  for (const m of e.ins) if (m.material === M.in) m.material = V;
+  if (e.owner.fadeE === e) e.owner.fadeE = null;
+  if (e.done) e.done();
+};
+const fadeEnd = () => { for (const e of FADE.act) fadeFinish(e); FADE.act.length = 0; FADE.k = 1; };
+// drop an owner's swap before it decides again: a pending one leaves the old state (ins hidden, outs shown), a running one completes
+FADE.cancel = (owner) => {
+  const e = owner.fadeE; if (!e) return; owner.fadeE = null;
+  let i = FADE.pend.indexOf(e); if (i >= 0) { FADE.pend.splice(i, 1); return; }
+  i = FADE.act.indexOf(e); if (i >= 0) { FADE.act.splice(i, 1); fadeFinish(e); }
+};
+AF.onTick('lod-fade', 881, (dt) => {
+  const U = AF.mat.uniforms;
+  if (FADE.act.length) { FADE.k += dt / FADE.dur; if (FADE.k >= 1) fadeEnd(); }
+  if (!FADE.act.length && FADE.pend.length) fadeStart();
+  U.uFadeK.value = Math.min(1, FADE.k);
+  // first use of a fade variant would compile a big program mid-game: compile both whenever the voxel program inputs change
+  // (tier = light / shadow state, env map) by drawing a degenerate triangle with each for one frame
+  if (!AF.ready || !FADE.on) return;
+  const key = AF.GFX.name + (AF.mat.voxel.envMap ? 'e' : '');
+  if (FADE.warm) { for (const w of FADE.warm) AF.scene.remove(w); FADE.warm = null; }
+  if (key !== FADE.warmKey) {
+    FADE.warmKey = key; const M = fadeMats(), V = AF.mat.voxel;
+    for (const m of [M.in, M.out]) { if (!!m.envMap !== !!V.envMap) m.needsUpdate = true; m.envMap = V.envMap; }
+    const g = FADE.warmGeo || (FADE.warmGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)));
+    FADE.warm = [M.in, M.out].map((mat) => { const w = new THREE.Mesh(g, mat); w.frustumCulled = false; w.receiveShadow = true; AF.scene.add(w); return w; });
+  }
+});
 // FAR clusters: 4 x 4 regions (128 m) merged into ONE 1 m mesh (voxels + terrain) — ~16x fewer far draw calls,
 // shadow casters and state changes than per-region copies. Built lazily after the first frame, one member region per frame
 // (farthest clusters first), shown when the whole cluster box is beyond AF.FAR_LOD. AF.world.farStats = { built, kept, pending, ms }.
@@ -1634,13 +1710,16 @@ function farStep(c) {
   const t = performance.now();
   if (!c.out) c.out = { opaque: new GeoBuf(), glass: new GeoBuf() };
   const k = c.regs[c.i++];
+  // per-region index ranges of the merged copy: a half-streamed cluster hides the parts whose full regions are ready (partial reveal)
+  const o0 = c.out.opaque.n, g0 = c.out.glass.n;
   meshTerrainRegionFar(k >> 6, k & 63, c.out.opaque, 4);
   meshVoxelRegionCoarse(k >> 6, k & 63, c.out, 4);
+  (c.ranges || (c.ranges = [])).push({ k, os: o0 * 1.5, oc: (c.out.opaque.n - o0) * 1.5, gs: g0 * 1.5, gc: (c.out.glass.n - g0) * 1.5 });
   coarseCache.clear(); farCache.clear();
   if (c.i >= c.regs.length) {
     const o = c.out; c.out = null; c.built = true; FS.built++;
-    if (o.opaque.n) { const m = regMesh(o.opaque.geometry(), AF.mat.voxel, true); m.userData.far = true; m.userData.cluster = c.ck; m.visible = false; c.far.push(m); FS.kept++; }
-    if (o.glass.n) { const g = regMesh(o.glass.geometry(), AF.mat.glass, false); g.userData.far = true; g.visible = false; c.far.push(g); }
+    if (o.opaque.n) { const m = regMesh(o.opaque.geometry(), AF.mat.voxel, true); m.userData.far = true; m.userData.cluster = c.ck; m.visible = false; c.far.push(m); c.farO = m; FS.kept++; }
+    if (o.glass.n) { const g = regMesh(o.glass.geometry(), AF.mat.glass, false); g.userData.far = true; g.visible = false; c.far.push(g); c.farG = g; }
   }
   FS.ms += performance.now() - t;
   return c.built;
@@ -1684,6 +1763,9 @@ function buildNear(reg) {
   const gg = mergeProps(reg.props, (pr) => pr.geo.userData.glass || null);
   reg.near = g ? regMesh(g, AF.mat.voxel, true) : null;
   reg.nearGlass = gg ? regMesh(gg, AF.mat.glass, false) : null;
+  // hidden until prop-lod shows (or fades) them in
+  if (reg.near) reg.near.visible = false;
+  if (reg.nearGlass) reg.nearGlass.visible = false;
   reg.nearBuilt = true;
   AF.stats.nearMs = Math.round(performance.now() - t);
 }
@@ -1734,7 +1816,7 @@ function* meshRegionG(rx, rz) {
   if (cmeshes.length) AF.world.coarse.set(k, cmeshes); else AF.world.coarse.delete(k);
   const RL = AF.world.regLod || (AF.world.regLod = new Map());
   const cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
-  RL.set(k, { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: meshes, coarse: cmeshes, lvl: -1, hid: cl.lvl === 1, q: cmeshes.length ? nC : nO });
+  RL.set(k, { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: meshes, coarse: cmeshes, lvl: -1, hid: cl.lvl === 1 && !cl.part, q: cmeshes.length ? nC : nO });
   const props = AF.world.propsByRegion.get(k) || [];
   let farQ = 0;
   if (props.length) {
@@ -1756,15 +1838,27 @@ function* meshRegionG(rx, rz) {
 const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, done: 0, unloaded: 0, t: 0, maxStep: 0 };
 const regionCluster = (k) => CLS.get(((k >> 6) >> 2) * 64 + ((k & 63) >> 2));
 const clDist = (cl, c, vy) => Math.hypot(Math.max(cl.x0 - c.x, 0, c.x - cl.x1), Math.max(cl.z0 - c.z, 0, c.z - cl.z1), vy);
-AF.onTick('region-stream', 878, (dt) => {
-  if (!STR.on || !AF.ready) return;
+// Priority (PERF.md §5): the nearer of the camera and a 1.5 s velocity-predicted point (fast planes load ahead of the nose).
+// Work runs a little every frame plus in the idle slots of the fps cap (AF.onIdle), where it costs the rendered frames nothing.
+const LA = { x: 0, z: 0, px: 0, pz: 0, vx: 0, vz: 0, init: false };
+AF.onTick('stream-look', 877, (dt) => {
+  const c = AF.camera.position;
+  if (!LA.init || dt <= 0) { LA.px = c.x; LA.pz = c.z; LA.init = true; }
+  const k = Math.min(1, dt * 3), vx = (c.x - LA.px) / Math.max(dt, 1e-3), vz = (c.z - LA.pz) / Math.max(dt, 1e-3);
+  if (Math.hypot(vx, vz) < 400) { LA.vx += (vx - LA.vx) * k; LA.vz += (vz - LA.vz) * k; }     // ignore teleports
+  LA.px = c.x; LA.pz = c.z;
+  const s = Math.min(1, 250 / (Math.hypot(LA.vx, LA.vz) * 1.5 + 1e-3));
+  LA.x = c.x + LA.vx * 1.5 * s; LA.z = c.z + LA.vz * 1.5 * s;
+});
+const streamWork = (budget) => {
+  if (!STR.on || !AF.ready) return false;
   const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, FD = AF.FAR_LOD || 1e9;
-  const t0 = performance.now(), budget = AF.MOBILE ? 3 : AF.mode === 'cine' ? 9 : 5;
+  const t0 = performance.now();
   while (performance.now() - t0 < budget) {
     if (!STR.gen) {
       let best = null, bd = FD + 48;
-      for (const cl of CLS.values()) if (cl.pending > 0) { const d = clDist(cl, c, vy); if (d < bd) { bd = d; best = cl; } }
-      if (!best) break;
+      for (const cl of CLS.values()) if (cl.pending > 0) { const d = Math.min(clDist(cl, c, vy), clDist(cl, LA, vy) + 24); if (d < bd) { bd = d; best = cl; } }
+      if (!best) return false;
       let bk = -1, bkd = 1e18;
       for (const k of best.regs) if (STR.pending.has(k)) { const x = X0 + ((k >> 6) + 0.5) * REG * VS, z = Z0 + ((k & 63) + 0.5) * REG * VS, d = (x - c.x) ** 2 + (z - c.z) ** 2; if (d < bkd) { bkd = d; bk = k; } }
       if (bk < 0) { best.pending = 0; continue; }
@@ -1774,16 +1868,54 @@ AF.onTick('region-stream', 878, (dt) => {
     if (st > STR.maxStep) STR.maxStep = st;
     if (fin) { STR.gen = null; STR.pending.delete(STR.key); const cl = regionCluster(STR.key); if (cl) cl.pending = Math.max(0, cl.pending - 1); STR.done++; coarseCache.clear(); }
   }
+  return true;
+};
+AF.onIdle('region-stream', (ms) => streamWork(ms));
+AF.onTick('region-stream', 878, (dt) => {
+  if (!STR.on || !AF.ready) return;
+  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, FD = AF.FAR_LOD || 1e9;
+  // idle slots ran recently (fps cap on): a token slice here; otherwise the old per-frame budget
+  const idle = AF.frameStats && AF.frameStats.idleT > AF.clock.t - 0.25;
+  streamWork(idle ? 1.5 : AF.MOBILE ? 3 : AF.mode === 'cine' ? 9 : 5);
   if ((STR.t += dt) > 2) {
     STR.t = 0;
     const cur = STR.gen ? regionCluster(STR.key) : null;
     for (const cl of CLS.values()) {
-      if (cl.pending > 0 || !cl.built || cl === cur || clDist(cl, c, vy) < FD + (AF.MOBILE ? 140 : 220)) continue;
+      if (cl.pending > 0 || !cl.built || cl === cur || clDist(cl, c, vy) < FD + (AF.MOBILE ? 140 : 420)) continue;
       for (const k of cl.regs) { dropRegion(k); STR.pending.add(k); }
       cl.pending = cl.regs.length; STR.unloaded++;
     }
   }
 });
+const HIDDEN_MAT = new THREE.MeshBasicMaterial({ visible: false });
+function setPartial(cl, on, RL, keepRegions) {
+  cl.part = on; cl.partN = -1;
+  const O = cl.farO, G = cl.farG;
+  O.geometry.clearGroups(); if (G) G.geometry.clearGroups();
+  if (on) {
+    for (const r of cl.ranges) { if (r.oc) O.geometry.addGroup(r.os, r.oc, 0); if (G && r.gc) G.geometry.addGroup(r.gs, r.gc, 0); }
+    O.material = [AF.mat.voxel, HIDDEN_MAT]; if (G) G.material = [AF.mat.glass, HIDDEN_MAT];
+    return;
+  }
+  O.material = AF.mat.voxel; if (G) G.material = AF.mat.glass;
+  if (keepRegions) return;
+  for (const k of cl.regs) {
+    const r = RL.get(k); if (!r || r.hid) continue;
+    FADE.cancel(r); r.hid = true; r.lvl = 3;
+    for (const m of r.full) m.visible = false;
+    for (const m of r.coarse) m.visible = false;
+  }
+}
+function updatePartial(cl, RL) {
+  cl.partN = cl.pending;
+  const O = cl.farO, G = cl.farG; let oi = 0, gi = 0;
+  for (const rg of cl.ranges) {
+    const r = RL.get(rg.k), ready = !!r;
+    if (rg.oc) O.geometry.groups[oi++].materialIndex = ready ? 1 : 0;
+    if (G && rg.gc) G.geometry.groups[gi++].materialIndex = ready ? 1 : 0;
+    if (ready && r.hid) { r.hid = false; r.lvl = -1; }
+  }
+}
 AF.onTick('prop-lod', 880, () => {
   if (!AF.world.group) return;
   const c = AF.camera.position, D = AF.LOD_DIST;
@@ -1792,23 +1924,70 @@ AF.onTick('prop-lod', 880, () => {
   const RL = AF.world.regLod;
   if (RL) {
     const RD = AF.REGION_LOD, FD = AF.FAR_LOD || 1e9, vy = Math.max(0, c.y - 12) * 0.7;
+    const regWant = (r) => r.coarse.length && Math.hypot(r.cx - c.x, r.cz - c.z, vy) > RD + (r.lvl === 1 ? -12 : 12) ? 1 : 0;
     for (const cl of CLS.values()) {
       if (!cl.built) continue;
       const dx = Math.max(cl.x0 - c.x, 0, c.x - cl.x1), dz = Math.max(cl.z0 - c.z, 0, c.z - cl.z1);
-      const want = cl.pending > 0 || Math.hypot(dx, dz, vy) > FD + (cl.lvl ? -16 : 16) ? 1 : 0;
+      const near = Math.hypot(dx, dz, vy) <= FD + (cl.lvl ? -16 : 16);
+      const want = cl.pending > 0 || !near ? 1 : 0;
+      // PARTIAL REVEAL (PERF.md §5): a streaming cluster in view range shows each region as soon as it is meshed and hides that
+      // region's slice of the 1 m copy (geometry groups, one extra draw per slice only while half-loaded)
+      const part = cl.pending > 0 && near && !!cl.ranges && cl.farO && !!STR.on;
+      if (part !== !!cl.part) setPartial(cl, part, RL);
+      if (part && cl.partN !== cl.pending) updatePartial(cl, RL);
       if (want === cl.lvl) continue;
-      cl.lvl = want;
-      for (const m of cl.far) m.visible = !!want;
-      for (const k of cl.regs) { const r = RL.get(k); if (r) { r.hid = !!want; r.lvl = -1; } }
+      cl.lvl = want; FADE.cancel(cl);
+      for (const k of cl.regs) { const r = RL.get(k); if (r) FADE.cancel(r); }
+      if (!want && cl.part) {
+        // the last slices just finished: everything else is already on screen
+        setPartial(cl, false, RL, true);
+        for (const m of cl.far) m.visible = false;
+        for (const k of cl.regs) { const r = RL.get(k); if (r && r.hid) { r.hid = false; r.lvl = -1; } }
+        continue;
+      }
+      if (want && cl.part) {
+        // went back to streaming while revealing (boot, unload): keep the revealed regions, show the rest of the 1 m copy
+        for (const m of cl.far) { m.visible = true; m.layers.set(0); }
+        cl.partN = -1; updatePartial(cl, RL);
+        continue;
+      }
+      if (want) {
+        // regions -> the cluster's 1 m copy: what is on screen now fades out; shadow-only stand-ins go at once
+        const outs = [];
+        for (const k of cl.regs) {
+          const r = RL.get(k); if (!r) continue;
+          r.hid = true; r.lvl = 3;
+          for (const m of r.full) if (seenByCam(m)) outs.push(m); else m.visible = false;
+          for (const m of r.coarse) if (seenByCam(m)) outs.push(m); else m.visible = false;
+        }
+        FADE.swap(cl, outs, cl.far);
+      } else {
+        // 1 m copy -> regions, each straight at its own level (full or 0.5 m)
+        const ins = [];
+        for (const k of cl.regs) {
+          const r = RL.get(k); if (!r) continue;
+          r.hid = false; r.lvl = -1; r.lvl = regWant(r); r.sh = false;
+          for (const m of r.full) { if (m.material === AF.mat.voxel) m.castShadow = true; if (r.lvl === 0) ins.push(m); else m.visible = false; }
+          for (const m of r.coarse) { if (r.lvl === 1) ins.push(m); else { m.visible = false; m.layers.set(0); } }
+        }
+        FADE.swap(cl, cl.far, ins);
+      }
     }
     for (const r of RL.values()) {
-      let want = 3;
-      if (!r.hid) { const d = Math.hypot(r.cx - c.x, r.cz - c.z, vy); want = r.coarse.length && d > RD + (r.lvl === 1 ? -12 : 12) ? 1 : 0; }
+      if (r.fadeE) continue;
+      const want = r.hid ? 3 : regWant(r);
       if (want !== r.lvl) {
-        r.lvl = want; r.sh = false;
-        for (const m of r.full) { m.visible = want === 0; if (m.material === AF.mat.voxel) m.castShadow = true; }
-        for (const m of r.coarse) { m.visible = want === 1; m.layers.set(0); }
+        const prev = r.lvl; r.lvl = want; r.sh = false;
+        if ((prev === 0 || prev === 1) && want < 2) {
+          // full <-> 0.5 m: fade the copy on screen out, the other in (the coarse copy may be a shadow stand-in on layer 1)
+          for (const m of r.full) if (m.material === AF.mat.voxel) m.castShadow = true;
+          FADE.swap(r, prev === 0 ? r.full : r.coarse, want === 0 ? r.full : r.coarse, () => { for (const m of r.coarse) if (!m.visible) m.layers.set(0); });
+        } else {
+          for (const m of r.full) { m.visible = want === 0; if (m.material === AF.mat.voxel) m.castShadow = true; }
+          for (const m of r.coarse) { m.visible = want === 1; m.layers.set(0); }
+        }
       }
+      if (r.fadeE) continue;
       // full-detail regions away from the near shadow cascade cast through their 0.5 m copy (layer 1 = shadow pass only):
       // a tower 60 m up the sun line still shadows the street, at a fraction of the depth-pass triangles
       // (phones keep no 0.5 m copy: their far regions simply stop casting)
@@ -1824,29 +2003,58 @@ AF.onTick('prop-lod', 880, () => {
     }
   }
   let budget = AF.SHOT || AF.TEST ? 1e9 : 10, best = null, bestD = 1e9;
-  const t0 = performance.now(), SN = AF.shadowNear;
+  const t0 = performance.now(), SN = AF.shadowNear, PC = AF.PROP_CULL || 900;
   for (const [k, r] of AF.world.lod) {
-    const rl = RL && RL.get(k);
-    if (rl && rl.hid) {
-      if (r.nearBuilt) freeNear(r);
-      if (r.far) { r.far.visible = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7) < (AF.PROP_CULL || 900); r.far.layers.set(0); }
-      continue;
-    }
+    const rl = RL && RL.get(k), hid = !!(rl && rl.hid);
     const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
-    if (!r.nearBuilt && d < D) {
+    if (hid) { if (r.nearBuilt) { FADE.cancel(r); freeNear(r); } }
+    else if (!r.nearBuilt && d < D) {
       if (budget > 1e8) buildNear(r);
       else if (d < bestD) { bestD = d; best = r; }
-    } else if (r.nearBuilt && d > D + 70) freeNear(r);
-    const showNear = r.nearBuilt && d < D + 25;
+    } else if (r.nearBuilt && d > D + 70) { FADE.cancel(r); freeNear(r); }
+    const showNear = !hid && r.nearBuilt && d < D + 25, farSeen = !!r.far && !showNear && d < PC;
+    // near <-> far props and the far-prop cull cross-fade (PERF.md §4); the first decision for a region just sets the state
+    if (!r.fadeE && r.showNear !== undefined && (r.showNear !== showNear || r.farSeen !== farSeen)) {
+      const outs = [], ins = [];
+      if (r.showNear && !showNear) outs.push(r.near, r.nearGlass); else if (!r.showNear && showNear) ins.push(r.near, r.nearGlass);
+      if (r.farSeen && !farSeen) outs.push(r.far); else if (!r.farSeen && farSeen) ins.push(r.far);
+      FADE.swap(r, outs, ins);
+    }
+    r.showNear = showNear; r.farSeen = farSeen;
+    if (r.fadeE) continue;
     if (r.near) r.near.visible = showNear;
     if (r.nearGlass) r.nearGlass.visible = showNear;
     // full-detail props cast only right around the shadow focus; further out their LOD copy casts instead (shadow pass only, layer 1)
     const proxy = showNear && !!r.far && Math.hypot(r.cx - SN.cx, r.cz - SN.cz) > 26;
     if (r.near && r.near.castShadow === proxy) r.near.castShadow = !proxy;
-    if (r.far) { r.far.visible = showNear ? proxy : d < (AF.PROP_CULL || 900); r.far.layers.set(showNear ? 1 : 0); }
+    if (r.far) { r.far.visible = showNear ? proxy : farSeen; r.far.layers.set(showNear ? 1 : 0); }
     if (AF.MOBILE && r.far) r.far.castShadow = Math.hypot(r.cx - SN.cx, r.cz - SN.cz) < SN.r + 24;
   }
   if (best && performance.now() - t0 < budget) buildNear(best);
+});
+// PERF.md §4/§5 guard: whatever the camera does, each region shows exactly one copy (full, 0.5 m or its cluster's 1 m slice)
+AF.test('voxel: one LOD copy per region on screen', () => {
+  const RL = AF.world.regLod; if (!RL) return { ok: false, info: 'no region LOD table' };
+  const prev = AF.mode, P = { x: 0, y: 0, z: 0 };
+  AF.modes._lodtest = { enter() {}, exit() {}, update() { AF.camera.position.set(P.x, P.y, P.z); AF.camTarget.set(P.x + 40, 0, P.z - 40); AF.camera.lookAt(AF.camTarget); } };
+  const on = (m) => m.visible && (m.layers.mask & 1) && m.material !== AF.mat.glass && !!m.parent;
+  let bad = 0, checked = 0;
+  try {
+    AF.setMode('_lodtest');
+    for (const [x, y, z] of [[0, 2, -40], [-300, 180, 250], [-550, 40, -150], [0, 2, -40]]) {
+      P.x = x; P.y = y; P.z = z; AF.step(3);
+      for (const cl of CLS.values()) {
+        if (!cl.built) continue;
+        const farOn = cl.far.some(on);
+        for (const k of cl.regs) {
+          const r = RL.get(k); if (!r) continue; checked++;
+          const n = (farOn && !(cl.part && !r.hid) ? 1 : 0) + (r.full.some(on) ? 1 : 0) + (r.coarse.some(on) ? 1 : 0);
+          if (n !== 1 && !(n === 0 && cl.lvl === 1 && !cl.far.length)) bad++;
+        }
+      }
+    }
+  } finally { delete AF.modes._lodtest; if (prev && AF.modes[prev]) AF.setMode(prev); }
+  return { ok: bad === 0 && checked > 0, info: checked + ' region checks, ' + bad + ' with zero or two copies' };
 });
 AF.meshWorld = async (progress) => {
   AF.stats = AF.stats || {}; AF.stats.meshT = null;
@@ -2225,13 +2433,14 @@ try {
 // ===== 03-render: renderer, scene, camera, baseline lights, loop, debug handle  (OWNER: coordinator) =====
 {
   const cv = document.getElementById('cv');
-  const R = AF.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: !AF.MOBILE, preserveDrawingBuffer: AF.SHOT || AF.TEST, powerPreference: AF.MOBILE ? 'default' : 'high-performance' });
+  // phones keep MSAA: resolving on tile-based GPUs is nearly free and it beats rendering more pixels (PERF.md §6)
+  const R = AF.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: AF.SHOT || AF.TEST, powerPreference: AF.MOBILE ? 'default' : 'high-performance' });
   // base pixel ratio in CSS px: the menu's Resolution (AF.GFX.res 0.75/0.9/1) or the tier default (Low 0.8 · Laptop/Balanced 1 · High 1.25),
   // never above devicePixelRatio. Below 1 the browser upscales the canvas (soft + shimmering edges), so Balanced renders at 1 CSS px.
   // ?shot renders at 1 (or ?dpr=N)
   AF.basePR = () => {
     const dpr = devicePixelRatio || 1, G = AF.GFX;
-    if (AF.MOBILE) return 0.75 * Math.min(dpr, 1);
+    if (AF.MOBILE) return Math.min(dpr, 1);
     if (AF.SHOT) return AF.clamp(+AF.Q.get('dpr') || 1, 0.5, 3);
     return Math.min(dpr, G.res > 0 ? G.res : G.tier === 'low' ? 0.8 : G.tier === 'high' ? 1 : 1.25);
   };
@@ -2292,6 +2501,20 @@ try {
     sun.position.copy(sun.target.position).addScaledVector(d, 400);
   });
   const _lx = new THREE.Vector3(), _ly = new THREE.Vector3(), _lz = new THREE.Vector3();
+
+  // dynamic near plane (PERF.md §3, locked): 24-bit depth precision is ~ d^2 / (near * 2^24), so a fixed 0.08 m near plane
+  // z-fights from ~150 m on Windows (ANGLE / D3D11). On foot / driving 0.1 m; from the air it grows with altitude and the
+  // distance to the followed target (plane, orbit centre) up to 6 m.
+  const HIGH_MODES = new Set(['fly', 'skydive', 'aerial', 'cine', 'probe']);
+  AF.onTick('cam-near', 886, () => {
+    let n = 0.1;
+    if (HIGH_MODES.has(AF.mode)) {
+      const cp = cam.position; let gy = 0; try { gy = AF.W ? Math.max(0, AF.W.groundY(cp.x, cp.z) || 0) : 0; } catch (e) { gy = 0; }
+      const alt = cp.y - gy, dT = cp.distanceTo(AF.camTarget);
+      n = AF.clamp(Math.min(alt * 0.04, dT > 0.5 ? dT * 0.15 : 6), 0.1, 6);
+    }
+    if (Math.abs(cam.near - n) > cam.near * 0.04) { cam.near = n; cam.updateProjectionMatrix(); }
+  });
 
   // fallback time-of-day (the atmosphere part replaces AF.timeTick)
   AF.timeTick = (dt) => {
@@ -2381,16 +2604,42 @@ try {
       try { h.fn(dt, AF.clock.t); }
       catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (AF.MOBILE) AF.reportError(e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
     }
-    const every = AF.SHOT || AF.TEST ? 1 : (AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' && !AF.GFX.lite ? 2 : 3) * (AF.shadowNear.k > 0.8 ? 2 : 1);
+    // near map refresh in Hz, not frames: at the 30 fps cap High + Balanced refresh every frame, Standard + Low every 2nd
+    const base = AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' && !AF.GFX.lite ? 2 : 3;
+    const every = AF.SHOT || AF.TEST ? 1 : (AF.frameStats && AF.frameStats.capped && AF.fpsCap <= 30 ? Math.ceil(base / 2) : base) * (AF.shadowNear.k > 0.8 ? 2 : 1);
     if (AF.clock.frame % every === 0 || AF.shadowDirty) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
     try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
   };
   AF.frame = frame;
-  let lastTick = 0;
+  let lastTick = 0, slot = 0, rafEma = 16.7, rafLast = 0;
+  // idle work (PERF.md §2): rAF slots skipped by the fps cap run AF.onIdle hooks (streaming, far builds) for ~60 % of a display
+  // interval, so the rendered frames never pay for them
+  const FS = AF.frameStats = { idleT: -1, idleMs: 0, capped: false };
+  const runIdle = () => {
+    const L = AF.hooks.idle; if (!L.length) return;
+    const t0 = performance.now(), end = t0 + Math.min(AF.MOBILE ? 6 : 10, rafEma * 0.6);
+    for (let pass = 0; pass < 4 && performance.now() < end - 0.5; pass++) {
+      let busy = false;
+      for (const h of L) {
+        const left = end - performance.now(); if (left < 0.5) break;
+        try { if (h.fn(left)) busy = true; }
+        catch (e) { if (h.errs++ < 3) console.error('[af] idle ' + h.name + ' threw:', e); }
+      }
+      if (!busy) break;
+    }
+    FS.idleT = AF.clock.t; FS.idleMs = performance.now() - t0;
+  };
   const loop = (now) => {
     requestAnimationFrame(loop);
-    if (!AF.ready || AF.paused || graphicsReset || (AF.MOBILE && document.hidden)) { last = now; return; }
+    if (rafLast) rafEma += (Math.min(50, now - rafLast) - rafEma) * 0.05; rafLast = now;
+    if (!AF.ready || AF.paused || graphicsReset || (AF.MOBILE && document.hidden)) { last = now; slot = now; return; }
+    const cap = AF.SHOT || AF.TEST ? 0 : AF.fpsCap; FS.capped = cap > 0;
+    if (cap > 0) {
+      const iv = 1000 / cap;
+      if (now - slot < iv - Math.min(4, rafEma * 0.4)) { runIdle(); return; }
+      slot = now - slot > iv * 2 ? now : slot + iv;
+    }
     const dt = Math.min(0.1, (now - last) / 1000); last = now; lastTick = now;
     fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { AF.fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
     frame(dt);
@@ -2518,7 +2767,7 @@ try {
     cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
-  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 0, regLod: 45, farLod: 110, lod: 40, propCull: 160 };
+  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 50, farLod: 125, lod: 40, propCull: 180 };
   if (AF.MOBILE) TIER.low = mobileTier;
   const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : G.lite && G.tier === 'high' ? TIER.lite : (TIER[G.tier] || TIER.ultra);
   const texSeen = new WeakSet();
@@ -2553,25 +2802,29 @@ try {
   };
   G.onChange(applyTier);
   // ---------------------------------------------------------------- auto tier (only while G.auto: no saved/forced choice; never in ?shot / ?test)
-  // Down one step after 3 s of > 22 ms frames; never up (higher tiers are opt-in from the menu).
+  // Down one step after 3 s of frames 32 % over the frame target (the fps cap interval, 16.7 ms uncapped); never up.
+  // Phones: adaptive resolution (0.8..1 of the base pixel ratio, checked every 4 s) holds the 30 fps target.
   {
     const base = AF.basePR, LADDER = ['low', 'lite', 'high', 'ultra'];
-    let ema = 16.7, slowT = 0, adjT = 0, grace = 2, vsync = 16.7;
-    G.onChange(() => { ema = vsync; slowT = 0; grace = 2; });
+    const target = () => (AF.fpsCap > 0 ? 1000 / AF.fpsCap : 16.7);
+    let ema = target(), slowT = 0, adjT = 0, grace = 2;
+    G.onChange(() => { ema = target(); slowT = 0; grace = 2; });
     AF.onTick('gfx-adapt', 960, (dt) => {
       if (AF.SHOT || AF.TEST || !AF.ready || AF.paused || document.hidden || G.cinema) return;   // cinema: fixed full resolution, never downgrade
       const ms = dt * 1000; if (ms <= 0 || ms > 250) return;
       if (grace > 0) { grace -= dt; return; }                 // tier switches reallocate targets and recompile: ignore that hitch
-      ema += (ms - ema) * 0.08; adjT += dt; vsync = Math.min(vsync + dt * 0.02, Math.max(6, ms));
-      // dynamic resolution (?dynres): 0.7..1.0 of the base pixel ratio
-      if (adjT > 1.0) {
+      const tg = target();
+      ema += (ms - ema) * 0.08; adjT += dt;
+      // dynamic resolution (phones by default, ?dynres on desktop): every change reallocates the canvas, so it moves rarely
+      const dyn = AF.MOBILE || AF.Q.has('dynres');
+      if (dyn && adjT > (AF.MOBILE ? 4 : 1)) {
         adjT = 0; const T = cur(); let s = G.scale;
-        if (ema > 19) s = Math.max(T.dynMin, s - 0.05); else if (ema < 14.5) s = Math.min(1, s + 0.05);
-        if (s !== G.scale && AF.Q.has('dynres')) { G.scale = s; R.setPixelRatio(base() * s); AF.resize(); }   // off by default: every change reallocates the render targets and stutters
+        if (ema > tg * 1.14) s = Math.max(T.dynMin, s - (AF.MOBILE ? 0.1 : 0.05)); else if (ema < tg * 1.04) s = Math.min(1, s + 0.05);
+        if (Math.abs(s - G.scale) > 1e-3) { G.scale = s; R.setPixelRatio(base() * s); AF.resize(); }
       }
       if (!G.auto) return;
       const i = LADDER.indexOf(G.name);
-      if (ema > 22) slowT += dt; else slowT = Math.max(0, slowT - dt);
+      if (ema > tg * 1.32) slowT += dt; else slowT = Math.max(0, slowT - dt);
       if (slowT > 3 && i > 0) { G.set(LADDER[i - 1], 'slow frames'); return; }
     });
   }
@@ -2710,6 +2963,10 @@ try {
   });
   // expose for tests / debugging
   AF.gfx.stats = () => ({ tier: G.name, lod: AF.LOD_DIST, pr: R.getPixelRatio(), render: R.domElement.width + 'x' + R.domElement.height, scale: G.scale, res: G.res, near: AF.sun.shadow.mapSize.x, nearR: AF.shadowNear.r, far: AF.gfx.far && { on: AF.gfx.far.on, size: AF.gfx.far.size, R: AF.gfx.far.R, renders: AF.gfx.far.renders, ms: AF.gfx.far.ms }, env: AF.gfx.env && { src: AF.gfx.env.src, n: AF.gfx.env.n, ms: AF.gfx.env.ms }, farLod: AF.world.farStats, autoSurf: AF.PAL.autoCount });
+  AF.test('renderer: fps cap, idle streaming and dynamic near plane stay wired (PERF.md)', () => {
+    const near = AF.hooks.tick.some((x) => x.name === 'cam-near'), idle = AF.hooks.idle.some((x) => x.name === 'region-stream');
+    return { ok: near && idle && [0, 30, 60].includes(AF.fpsCap) && AF.camera.near >= 0.1 - 1e-6, info: 'cap ' + AF.fpsCap + ', near ' + AF.camera.near.toFixed(2) + ', idle hooks ' + AF.hooks.idle.length };
+  });
   AF.test('renderer: laptop profile + resolution setting', () => {
     if (AF.MOBILE) return { ok: true, info: 'mobile profile' };
     const was = G.name, wasAuto = G.auto, wasRes = G.res;
@@ -2725,8 +2982,8 @@ try {
   AF.test('renderer: mobile GPU budgets stay bounded', () => {
     if (!AF.MOBILE) return { ok: true, info: 'desktop profile' };
     const cfg = cur(), context = R.getContext().getContextAttributes();
-    const ok = !context.antialias && R.getPixelRatio() <= 0.75 * Math.min(devicePixelRatio || 1, 2) && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools === 0 && AF.LOD_DIST === 40 && AF.REGION_LOD === 45 && AF.PROP_CULL === 160 && (!AF.atmos.pool || AF.atmos.pool.length === 0);
-    return { ok, info: 'pr ' + R.getPixelRatio() + ', near ' + sunSize() + ', direct renderer, no far/env/AO/light pools' };
+    const ok = R.getPixelRatio() <= Math.min(devicePixelRatio || 1, 1) + 1e-3 && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools <= 6 && AF.LOD_DIST === 40 && AF.REGION_LOD === 50 && AF.PROP_CULL === 180 && (!AF.atmos.pool || AF.atmos.pool.length === 0);
+    return { ok, info: 'pr ' + R.getPixelRatio() + ', msaa ' + context.antialias + ', near ' + sunSize() + ', direct renderer, no far/env/AO/point lights, ' + cfg.pools + ' shader pools' };
   });
   function sunSize() { return AF.sun.shadow.mapSize.x; }
 }
@@ -3183,7 +3440,7 @@ AF.PLAN = (() => {
     // 12 plots, 6 each side of Friends Lane, 35 m frontage. side -1 = west side (door faces east), +1 = east side (door faces west)
     plots: [],
     zoo: { x0: -650, z0: -290, x1: -448, z1: -16, gate: [-548, -14] },
-    air: { x0: -650, z0: 12, x1: -308, z1: 204, runway: { x0: -640, x1: -326, z: 152, w: 24 }, taxiZ: 124, apron: [-600, 72, -330, 112], terminal: [-500, 44, -440, 68], tower: [-424, 50], hangars: [[-632, 40, -598, 96], [-590, 40, -556, 96]] },
+    air: { x0: -650, z0: 12, x1: -308, z1: 204, runway: { x0: -640, x1: -326, z: 152, w: 24 }, taxiZ: 124, apron: [-600, 72, -330, 112], terminal: [-548, 44, -434, 70], tower: [-424, 50], hangars: [[-632, 40, -598, 96], [-590, 40, -556, 96]] },
   };
   for (let i = 0; i < 6; i++) for (const side of [-1, 1]) {
     const z1 = -10 - i * 36, z0 = z1 - 34;
@@ -5488,6 +5745,7 @@ try {
     return o;
   };
   const GC_NEAR = 18;
+  let coverViewX = 0, coverViewY = 0, coverViewZ = -1;
   AF.onBuild('land-ground-cover', 520, () => {
     const t0 = performance.now();
     const K = GC.kinds = coverModels().map((k) => ({ ...k, geo: AF.meshModel(k.m, { vs: k.vs, anchor: [0.5, 0, 0.5], flat: true }), geoF: AF.meshModel(coarsen(k.m), { vs: k.vs * 2, anchor: [0.5, 0, 0.5], flat: true }), m: null }));
@@ -5540,12 +5798,15 @@ try {
     const K = GC.kinds, Rr = coverRadius() + 8, R2 = Rr * Rr, N2 = GC_NEAR * GC_NEAR;
     for (const k of K) k.n = k.nF = 0;
     const high = cy - Math.max(0, W.groundY(cx, cz)) > 45;
+    const cameraMatrix = AF.camera.matrixWorld.elements;
+    coverViewX = -cameraMatrix[8]; coverViewY = -cameraMatrix[9]; coverViewZ = -cameraMatrix[10];
     if (!high) {
       const gcx = Math.floor(cx / 16), gcz = Math.floor(cz / 16);
       for (const [ox, oz] of cellRing(Rr)) {
         const a = GC.cells.get((gcx + ox) * 1000 + gcz + oz); if (!a) continue;
         for (let i = 0; i < a.length; i += 6) {
           const dx = a[i] - cx, dz = a[i + 2] - cz, d2 = dx * dx + dz * dz; if (d2 > R2) continue;
+          if (d2 >= N2 && dx * coverViewX + (a[i + 1] - cy) * coverViewY + dz * coverViewZ < -8) continue;
           const k = K[a[i + 5]], near = d2 < N2, im = near ? k.im : k.imF, n = near ? k.n : k.nF; if (n >= im.instanceMatrix.count) continue;
           const s = a[i + 4];
           const c = Math.cos(a[i + 3]) * s, sn = Math.sin(a[i + 3]) * s, arr = im.instanceMatrix.array, o = n * 16;
@@ -5572,7 +5833,9 @@ try {
     if (M.envMap !== V.envMap) { M.envMap = V.envMap; M.needsUpdate = true; }
     M.envMapIntensity = V.envMapIntensity;
     GC.t -= dt;
-    const moved = Math.abs(f.x - GC.at.x) + Math.abs(f.z - GC.at.z) > 6 || Math.abs(c.y - GC.at.y) > 12;
+    const cameraMatrix = AF.camera.matrixWorld.elements;
+    const turned = Math.abs(-cameraMatrix[8] - coverViewX) + Math.abs(-cameraMatrix[9] - coverViewY) + Math.abs(-cameraMatrix[10] - coverViewZ) > 0.05;
+    const moved = Math.abs(f.x - GC.at.x) + Math.abs(f.z - GC.at.z) > 6 || Math.abs(c.y - GC.at.y) > 12 || turned;
     if (moved || GC.t <= 0) { GC.t = 3; refreshCover(f.x, f.z, c.y); }
   });
   AF.test('land: ground cover scattered + drawn near the camera', () => {
@@ -5625,6 +5888,120 @@ try {
   };
   const hasKit = () => !!(AF.peopleKit && typeof AF.peopleKit.buildPerson === 'function' && typeof AF.peopleKit.makeLook === 'function');
   const inPark = (x, z, m = 0) => x > PK.x0 + m && x < PK.x1 - m && z > PK.z0 + m && z < PK.z1 - m;
+  const parkDirection = new THREE.Vector3();
+  const movers = [];
+  const moving = (object, kind) => {
+    movers.push({ geometry: object.geometry, material: object.material, matrix: object.matrixWorld, object, kind, visible: true, shadow: false });
+    object.visible = false; object.castShadow = false; object.frustumCulled = false; return object;
+  };
+  const parkTick = (name, order, fn) => {
+    let frame = 0, elapsed = 0, hidden = true;
+    AF.onTick(name, order, (dt, time) => {
+      const distance = parkDistance();
+      if (!Number.isFinite(distance)) { hidden = true; elapsed = 0; return; }
+      elapsed += dt;
+      if (!hidden && distance > 60 && ++frame % 3 !== 0) return;
+      hidden = false; fn(elapsed, time); elapsed = 0;
+    });
+  };
+  const parkDistance = () => {
+    const camera = AF.camera; if (!camera) return Infinity;
+    const pos = camera.position, dx = Math.max(PK.x0 - pos.x, 0, pos.x - PK.x1), dz = Math.max(PK.z0 - pos.z, 0, pos.z - PK.z1);
+    const distance = Math.hypot(dx, dz, Math.max(0, pos.y - 30));
+    if (distance > 150) return Infinity;
+    camera.getWorldDirection(parkDirection);
+    const cx = (PK.x0 + PK.x1) * 0.5 - pos.x, cz = (PK.z0 + PK.z1) * 0.5 - pos.z;
+    const extent = Math.abs(parkDirection.x) * (PK.x1 - PK.x0) * 0.5 + Math.abs(parkDirection.z) * (PK.z1 - PK.z0) * 0.5 + Math.abs(parkDirection.y) * 15;
+    return cx * parkDirection.x + (15 - pos.y) * parkDirection.y + cz * parkDirection.z + extent < -10 ? Infinity : distance;
+  };
+  const parkBatches = (entries, parent, name, shadows = false) => {
+    if (!entries.length) return null;
+    const groups = new Map(), data = new Float32Array(entries.length * 20);
+    const texture = new THREE.DataTexture(data, 5, entries.length, THREE.RGBAFormat, THREE.FloatType);
+    texture.minFilter = texture.magFilter = THREE.NearestFilter; texture.generateMipmaps = false;
+    const head = `uniform sampler2D uParkPose; attribute float aParkSlot; varying float vParkFade;
+      mat4 parkMatrix() { float row = (aParkSlot + 0.5) / ${entries.length.toFixed(1)};
+        return mat4(texture2D(uParkPose, vec2(0.1,row)), texture2D(uParkPose, vec2(0.3,row)),
+          texture2D(uParkPose, vec2(0.5,row)), texture2D(uParkPose, vec2(0.7,row))); }\n`;
+    const patch = (shader, depth) => {
+      shader.uniforms.uParkPose = { value: texture };
+      shader.vertexShader = head + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('void main() {', `void main() { mat4 parkPose = parkMatrix();
+        vParkFade = texture2D(uParkPose, vec2(0.9,(aParkSlot+0.5)/${entries.length.toFixed(1)})).y;`);
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `vec3 transformed = (parkPose * vec4(position,1.0)).xyz;
+        ${depth ? `if (texture2D(uParkPose, vec2(0.9,(aParkSlot+0.5)/${entries.length.toFixed(1)})).x < 0.5) transformed = vec3(0.0);` : ''}`);
+      shader.vertexShader = shader.vertexShader.replace('#include <defaultnormal_vertex>', `mat3 parkNormal = mat3(parkPose);
+        objectNormal /= max(vec3(dot(parkNormal[0],parkNormal[0]),dot(parkNormal[1],parkNormal[1]),dot(parkNormal[2],parkNormal[2])),vec3(0.000001));
+        objectNormal = parkNormal * objectNormal;
+        #include <defaultnormal_vertex>`);
+      shader.fragmentShader = 'varying float vParkFade;\n' + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace('void main() {', `void main() {
+        float parkDither = fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233))) * 43758.5453);
+        if (${name === 'park-life-far' ? 'parkDither < 1.0 - vParkFade' : 'parkDither >= vParkFade'}) discard;`);
+    };
+    for (let index = 0; index < entries.length; index++) {
+      const entry = entries[index], geometry = entry.geometry.clone();
+      geometry.setAttribute('aParkSlot', new THREE.BufferAttribute(new Float32Array(geometry.attributes.position.count).fill(index), 1));
+      const key = (name === 'park-moving-parts' ? 'rigid' : entry.kind) + ':' + entry.material.uuid;
+      if (!groups.has(key)) groups.set(key, { material: entry.material, geometries: [], entries: [] });
+      groups.get(key).geometries.push(geometry);
+      groups.get(key).entries.push(entry);
+    }
+    const meshes = [];
+    for (const group of groups.values()) {
+      const geometry = AF.addons.BGU.mergeGeometries(group.geometries, false), material = group.material.clone();
+      group.index = geometry.index.array.slice(); group.ranges = [];
+      let indexStart = 0;
+      for (let index = 0; index < group.entries.length; index++) {
+        const count = group.geometries[index].index.count;
+        group.ranges.push({ entry: group.entries[index], start: indexStart, count, active: null }); indexStart += count;
+      }
+      geometry.index.setUsage(THREE.DynamicDrawUsage);
+      const baseCompile = group.material.onBeforeCompile;
+      material.onBeforeCompile = (shader, renderer) => { baseCompile.call(material, shader, renderer); patch(shader, false); };
+      material.customProgramCacheKey = () => name + ':' + entries.length + ':' + group.material.uuid;
+      const mesh = new THREE.InstancedMesh(geometry, material, 1);
+      mesh.setMatrixAt(0, new THREE.Matrix4()); mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = shadows;
+      mesh.name = name; parent.add(mesh); meshes.push(mesh);
+      group.mesh = mesh;
+      if (shadows) {
+        const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+        depth.onBeforeCompile = (shader) => patch(shader, true); depth.customProgramCacheKey = () => name + ':depth:' + entries.length;
+        mesh.customDepthMaterial = depth;
+      }
+      for (const source of group.geometries) source.dispose();
+    }
+    const update = () => {
+      for (let index = 0; index < entries.length; index++) {
+        const entry = entries[index], offset = index * 20;
+        if (entry.visible === false) { data.fill(0, offset, offset + 16); data[offset + 15] = 1; }
+        else for (let component = 0; component < 16; component++) data[offset + component] = entry.matrix.elements[component];
+        data[offset + 16] = entry.shadow ? 1 : 0;
+        data[offset + 17] = entry.visible === false ? 0 : entry.fade ?? 1;
+      }
+      for (const group of groups.values()) {
+        let visible = false, shadow = false, changed = false;
+        for (const range of group.ranges) {
+          const entry = range.entry, active = entry.visible !== false && (entry.fade ?? 1) > 0;
+          if (active) visible = true; if (entry.shadow) shadow = true;
+          if (active !== range.active) { range.active = active; changed = true; }
+        }
+        if (changed) {
+          let count = 0; const indexArray = group.mesh.geometry.index.array;
+          for (const range of group.ranges) if (range.active) {
+            for (let index = range.start; index < range.start + range.count; index++) indexArray[count++] = group.index[index];
+          }
+          group.mesh.geometry.setDrawRange(0, count); group.mesh.geometry.index.needsUpdate = true;
+        }
+        group.mesh.count = visible ? 1 : 0; group.mesh.castShadow = shadows && shadow;
+        const material = group.mesh.material, source = group.material;
+        if (material.envMap !== source.envMap) { material.envMap = source.envMap; material.needsUpdate = true; }
+        material.envMapIntensity = source.envMapIntensity;
+      }
+      texture.needsUpdate = true;
+    };
+    return { entries, meshes, update };
+  };
 
   // ------------------------------------------------------------ PATH network (polylines, painted with a round brush)
   const PATHS = [
@@ -5982,18 +6359,19 @@ try {
         if (d > 0.8 && d < 6.2 && (ribA < 0.035 || ribA > 0.965) && (Math.floor(d * 2.5) & 1)) cm.set(x, 30 + Math.floor((6.4 - d) * 1.4), z, bulbC);
         if (d >= 0.45 && d < 1.45) for (let y = 4; y < 26; y++) { const panel = Math.floor((ang + Math.PI) / (Math.PI * 2) * 12) & 1; cm.set(x, y, z, y < 6 || y > 23 || y === 14 ? k.gold : d < 1.3 ? k.redD : panel ? mirror : k.canvasW); }
       }
-      const canopy = AF.modelMesh(AF.meshModel(cm, { vs: 1 / 8, anchor: [0.5, 0, 0.5] })); grp.add(canopy);
+      const canopy = AF.modelMesh(AF.meshModel(cm, { vs: 1 / 8, anchor: [0.5, 0, 0.5] })); grp.add(canopy); moving(canopy, 'canopy');
       const horses = [];
+      const poleGeometry = new THREE.CylinderGeometry(0.04, 0.04, 3.4, 5);
+      const poleMaterial = new THREE.MeshStandardMaterial({ color: 0xd4a83e, metalness: 0.6, roughness: 0.35 });
       for (let i = 0; i < 12; i++) {
         const a = i / 12 * Math.PI * 2, r = i & 1 ? 4.4 : 3.3;
         const h = AF.modelMesh(horseGeo(i % 3)); h.position.set(Math.cos(a) * r, 0.6, Math.sin(a) * r); h.rotation.y = -a; h.castShadow = false;
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 3.4, 5), new THREE.MeshStandardMaterial({ color: 0xd4a83e, metalness: 0.6, roughness: 0.35 }));
+        const pole = new THREE.Mesh(poleGeometry, poleMaterial);
         pole.position.set(Math.cos(a) * r, 1.9, Math.sin(a) * r);
-        grp.add(h, pole); horses.push({ h, ph: i * 1.3 });
+        grp.add(h, pole); moving(h, 'horse'); moving(pole, 'pole'); horses.push({ h, ph: i * 1.3 });
       }
       PKS.carouselHorses = horses.map((o) => o.h);
-      AF.onTick('park-carousel', 330, (dt, t) => {
-        const c = AF.camera; if (c && Math.hypot(c.position.x - cx, c.position.z - cz) > 170) return;
+      parkTick('park-carousel', 330, (dt, t) => {
         grp.rotation.y = -t * 0.45;
         for (const o of horses) o.h.position.y = 0.6 + Math.sin(t * 2.2 + o.ph) * 0.28;
       });
@@ -6072,8 +6450,7 @@ try {
       W.clear(rcx - 1.5, 0.25, rcz + rrz - 0.8, rcx + 1.5, 1.25, rcz + rrz + 1.5);
       const figs = [];
       for (let i = 0; i < (hasKit() ? 0 : 8); i++) { const m = AF.modelMesh(figureGeo(i)); m.castShadow = true; AF.scene.add(m); figs.push({ m, ph: i / 8 * Math.PI * 2, sp: 0.35 + (i % 3) * 0.04, r: 0.72 + (i % 3) * 0.1 }); }
-      AF.onTick('park-skaters', 331, (dt, t) => {
-        const c = AF.camera; if (c && Math.hypot(c.position.x - rcx, c.position.z - rcz) > 170) return;
+      parkTick('park-skaters', 331, (dt, t) => {
         for (const f of figs) { const a = f.ph + t * f.sp; f.m.position.set(rcx + Math.cos(a) * rrx * f.r, 0.25 + Math.abs(Math.sin(t * 3 + f.ph)) * 0.05, rcz + Math.sin(a) * rrz * f.r); f.m.rotation.set(0, Math.atan2(-Math.sin(a) * rrx, Math.cos(a) * rrz), 0.12 * Math.sin(t * 3 + f.ph)); }
       });
       AF.addLabel('Roller Rink', rcx, rcz, 'place'); AF.addLabel('Skating Pond', PD.cx, PD.cz, 'place');
@@ -6093,7 +6470,9 @@ try {
       const im = new THREE.InstancedMesh(dg, dmat, N), dm = new THREE.Object3D();
       im.frustumCulled = false; AF.scene.add(im);
       AF.onTick('park-fountain', 332, (dt, t) => {
-        const c = AF.camera; if (c && Math.hypot(c.position.x - fx, c.position.z - fz) > 140) { im.visible = false; return; } im.visible = true;
+        const c = AF.camera, distance = c ? Math.hypot(c.position.x - fx, c.position.y - 2, c.position.z - fz) : Infinity;
+        im.visible = Number.isFinite(parkDistance()) && distance < 140; if (!im.visible) return;
+        if (distance > 60 && Math.floor(t * 10) === fountainFrame) return; fountainFrame = Math.floor(t * 10);
         let n = 0;
         for (let s = 0; s < 9; s++) for (let j = 0; j < 14; j++) {
           const u = ((t * 0.8 + j / 14) % 1);
@@ -6103,6 +6482,7 @@ try {
         }
         im.instanceMatrix.needsUpdate = true;
       });
+      let fountainFrame = -1;
       // flower beds round the fountain plaza
       for (let q = 0; q < 4; q++) {
         const a = q * Math.PI / 2 + Math.PI / 4, bx = fx + Math.cos(a) * 11.5, bz = fz + Math.sin(a) * 11.5;
@@ -6119,8 +6499,8 @@ try {
       const seatM = new AF.Model(6, 42, 3); seatM.box(0, 0, 0, 6, 1, 3, k.woodD); seatM.box(0, 1, 1, 1, 42, 2, k.iron); seatM.box(5, 1, 1, 6, 42, 2, k.iron);
       const sg = AF.meshModel(seatM, { vs: 1 / 8, anchor: [0.5, 1, 0.5] });
       const swings = [];
-      for (let i = 0; i < 3; i++) { const m = AF.modelMesh(sg); m.position.set(x0 + 1 + 2.5 + i * 3.5, 0.25 + 21.5 * 0.25, z0 + 2 + 1.5); AF.scene.add(m); swings.push({ m, ph: i * 1.7, amp: 0.3 + i * 0.12 }); }
-      AF.onTick('park-swings', 333, (dt, t) => { const c = AF.camera; if (c && Math.hypot(c.position.x - x0, c.position.z - z0) > 140) return; for (const s of swings) s.m.rotation.x = Math.sin(t * 2.1 + s.ph) * s.amp; });
+      for (let i = 0; i < 3; i++) { const m = AF.modelMesh(sg); m.position.set(x0 + 1 + 2.5 + i * 3.5, 0.25 + 21.5 * 0.25, z0 + 2 + 1.5); AF.scene.add(m); moving(m, 'swing'); swings.push({ m, ph: i * 1.7, amp: 0.3 + i * 0.12 }); }
+      parkTick('park-swings', 333, (dt, t) => { for (const s of swings) s.m.rotation.x = Math.sin(t * 2.1 + s.ph) * s.amp; });
       for (let i = 0; i < 3; i++) AF.addSpot({ building: 'park-playground', x: x0 + 3.5 + i * 3.5, y: 0.25, z: z0 + 6, yaw: Math.PI, kind: 'play' });
       // slide: ladder + ramp
       const sx = x0 + 14, sz = z0 + 4;
@@ -6158,12 +6538,13 @@ try {
         for (let i = 0; i < NB; i++) {
           const a = i / NB * Math.PI * 2, x = hx + Math.cos(a) * 0.45 + Math.sin(t * 1.3 + i) * 0.08, y = 2.9 + (i % 3) * 0.3 + Math.sin(t * 1.7 + i * 0.9) * 0.1, z = hz + Math.sin(a) * 0.45 + Math.cos(t * 1.1 + i) * 0.08;
           dm.position.set(x, y, z); dm.updateMatrix(); bim.setMatrixAt(i, dm.matrix);
-          sp.set([hx, hy, hz, x, y - 0.3, z], i * 6);
+          const offset = i * 6; sp[offset] = hx; sp[offset + 1] = hy; sp[offset + 2] = hz; sp[offset + 3] = x; sp[offset + 4] = y - 0.3; sp[offset + 5] = z;
         }
         bim.instanceMatrix.needsUpdate = true; sgeo.attributes.position.needsUpdate = true;
       };
       upd(0);
-      AF.onTick('park-balloons', 334, (dt, t) => { const c = AF.camera; if (c && Math.hypot(c.position.x - bx, c.position.z - bz) > 130) return; upd(t); });
+      parkTick('park-balloons', 334, (dt, t) => upd(t));
+      AF.onTick('park-balloons-visible', 334, () => { bim.visible = strings.visible = Number.isFinite(parkDistance()); });
       // statues: the Grand Ave gate lawn + the lake loop
       put(statueGeo(0), -4, 0.25, -184, 0, true); put(statueGeo(1), -60, 0.25, -212, 1, true);
       // KITE flying high over the bandshell lawn (dynamic), string to a kid
@@ -6178,11 +6559,12 @@ try {
       const kupd = (t) => {
         const X = kx - 14 + Math.sin(t * 0.37) * 4, Y = 26 + Math.sin(t * 0.53) * 2.5, Z = kz - 22 + Math.cos(t * 0.29) * 3;
         kite.position.set(X, Y, Z); kite.rotation.set(0.3, 0.6 + Math.sin(t * 0.7) * 0.2, Math.sin(t * 1.1) * 0.35);
-        for (let i = 0; i < 9; i++) { const u0 = i / 9, u1 = (i + 1) / 9, sag = (u) => -Math.sin(u * Math.PI) * 2.2; kp.set([kx + (X - kx) * u0, 1.3 + (Y - 1.3) * u0 + sag(u0), kz + (Z - kz) * u0, kx + (X - kx) * u1, 1.3 + (Y - 1.3) * u1 + sag(u1), kz + (Z - kz) * u1], i * 6); }
+        for (let i = 0; i < 9; i++) { const u0 = i / 9, u1 = (i + 1) / 9, offset = i * 6; kp[offset] = kx + (X - kx) * u0; kp[offset + 1] = 1.3 + (Y - 1.3) * u0 - Math.sin(u0 * Math.PI) * 2.2; kp[offset + 2] = kz + (Z - kz) * u0; kp[offset + 3] = kx + (X - kx) * u1; kp[offset + 4] = 1.3 + (Y - 1.3) * u1 - Math.sin(u1 * Math.PI) * 2.2; kp[offset + 5] = kz + (Z - kz) * u1; }
         kl.attributes.position.needsUpdate = true;
       };
       kupd(0);
-      AF.onTick('park-kite', 335, (dt, t) => kupd(t));
+      parkTick('park-kite', 335, (dt, t) => kupd(t));
+      AF.onTick('park-kite-visible', 335, () => { kite.visible = kline.visible = Number.isFinite(parkDistance()); });
     }
 
     // ---- ROWBOATS on Swan Lake: 5 moored at the jetty bobbing, 3 rowed slowly round the lake
@@ -6191,15 +6573,14 @@ try {
       // nested 3 deep so 62-water's lake-floater scan (depth <= 2) skips them: its square hull-foam ring is far too big for 3 m rowboats
       const hold = new THREE.Group(), hold1 = new THREE.Group(), hold2 = new THREE.Group(); hold.add(hold1); hold1.add(hold2); AF.scene.add(hold);
       const moor = [[-110.5, -229, 0], [-103.5, -229, 0], [-110.5, -232.5, 0], [-103.5, -232.5, 0], [-111.8, -237.6, 1]];
-      for (const [x, z, r] of moor) { const m = AF.modelMesh(bg); m.position.set(x, lakeY - 0.12, z); m.rotation.y = r ? 0 : Math.PI / 2; hold2.add(m); boats.push({ m, ph: x * 0.7 + z, moving: false, y0: lakeY - 0.12, yaw: m.rotation.y }); }
+      for (const [x, z, r] of moor) { const m = AF.modelMesh(bg); m.position.set(x, lakeY - 0.12, z); m.rotation.y = r ? 0 : Math.PI / 2; hold2.add(m); moving(m, 'hull'); boats.push({ m, ph: x * 0.7 + z, moving: false, y0: lakeY - 0.12, yaw: m.rotation.y }); }
       const rg = rowerGeo();
       for (let i = 0; i < 0; i++) {
         const g = new THREE.Group(), m = AF.modelMesh(bg), r = AF.modelMesh(rg); r.rotation.y = Math.PI / 2; r.position.y = 0.3; m.add(r);
         g.add(m); AF.scene.add(g); boats.push({ m: g, ph: i * 2.1, moving: true, rr: 0.45 + i * 0.12, sp: 0.018 + i * 0.004, dir: i === 1 ? -1 : 1 });
       }
       cnt.boats = boats.length;
-      AF.onTick('park-boats', 336, (dt, t) => {
-        const c = AF.camera; if (c && Math.hypot(c.position.x - LK.cx, c.position.z - LK.cz) > 200) return;
+      parkTick('park-boats', 336, (dt, t) => {
         for (const b of boats) {
           if (!b.moving) { b.m.position.y = b.y0 + Math.sin(t * 1.3 + b.ph) * 0.05; b.m.rotation.z = Math.sin(t * 0.9 + b.ph) * 0.03; continue; }
           const a = b.ph + t * b.sp * b.dir, x = LK.cx + Math.cos(a) * LK.rx * b.rr, z = LK.cz + Math.sin(a) * LK.rz * b.rr;
@@ -6303,8 +6684,8 @@ try {
       W.eachCol(px - pr - 0.5, pz - pr - 0.5, px + pr + 0.5, pz + pr + 0.5, (bx, bz, i, x, z) => { const d = Math.hypot(x - px, z - pz); if (d < pr) W.C[i] = k.sand; else if (d < pr + 0.25 && !(Math.abs(z - pz) < 0.8 && x < px)) W.fill(x - 0.125, 0.25, z - 0.125, x + 0.125, (bx + bz) % 5 === 0 ? 1.25 : 1.0, z + 0.125, (bx + bz) % 5 === 0 ? k.white : k.woodL); });
       block(px - pr - 1, pz - pr - 1, px + pr + 1, pz + pr + 1);
       const ponies = [];
-      for (let i = 0; i < 2; i++) { const m = AF.modelMesh(horseGeo(i + 2)); m.scale.set(1.1, 1.1, 1.1); AF.scene.add(m); ponies.push({ m, ph: i * Math.PI }); } PKS.ponies = ponies.map((o) => o.m);
-      AF.onTick('park-ponies', 337, (dt, t) => { const cam = AF.camera; if (cam && Math.hypot(cam.position.x - px, cam.position.z - pz) > 150) return; for (const o of ponies) { const a = o.ph + t * 0.25; o.m.position.set(px + Math.cos(a) * 2.6, 0.25 + Math.abs(Math.sin(t * 4 + o.ph)) * 0.04, pz + Math.sin(a) * 2.6); o.m.rotation.y = -a - Math.PI / 2; } });
+      for (let i = 0; i < 2; i++) { const m = AF.modelMesh(horseGeo(i + 2)); m.scale.set(1.1, 1.1, 1.1); AF.scene.add(m); moving(m, 'horse'); ponies.push({ m, ph: i * Math.PI }); } PKS.ponies = ponies.map((o) => o.m);
+      parkTick('park-ponies', 337, (dt, t) => { for (const o of ponies) { const a = o.ph + t * 0.25; o.m.position.set(px + Math.cos(a) * 2.6, 0.25 + Math.abs(Math.sin(t * 4 + o.ph)) * 0.04, pz + Math.sin(a) * 2.6); o.m.rotation.y = -a - Math.PI / 2; } });
       AF.addSpot({ building: 'park-ponies', x: px, y: 0.25, z: pz, yaw: 0, kind: 'work' }); AF.addLabel('Pony Rides', px, pz, 'place');
       for (let i = 0; i < 3; i++) AF.addSpot({ building: 'park-ponies', x: px - pr - 1.2, y: 0.25, z: pz - 1 + i, yaw: Math.PI / 2, kind: 'stand' });
       // lamp standards round the lake shore
@@ -6401,20 +6782,20 @@ try {
     PKS.ms = Math.round(performance.now() - t0);
   });
 
-  // ------------------------------------------------------------ PARK LIFE (order 655): a band that plays, rowers pulling oars,
+  // ------------------------------------------------------------ PARK LIFE (before region meshing): a band that plays, rowers pulling oars,
   // skaters, nannies with prams, keepers raking, a kid leaping into a leaf pile, the swan feeder, couples strolling, kite kids,
   // carousel + pony riders (animated, AF.peopleKit), and a seated/standing crowd baked into the static world (free to draw).
-  AF.onBuild('park-life', 655, () => {
+  AF.onBuild('park-life', 490, () => {
     const k = pal(), K2 = AF.peopleKit, lakeY = (AF.land && AF.land.LAKE_Y) ?? LK.waterY ?? -0.75;
     const life = PKS.life = { actors: 0, baked: 0, boats: 0 };
     const root = new THREE.Group(); root.name = 'park-life'; AF.scene.add(root);
     const rnd = AF.rng(1936);
     const BGU = AF.addons && AF.addons.BGU;
     const look = (role, g, age, fix) => { try { const L = K2.makeLook(role, g, age, rnd); if (fix) fix(L); return L; } catch (e) { return null; } };
-    const actor = (L, x, y, z, yaw, par) => { if (!hasKit() || !L) return null; try { const p = K2.buildPerson(L); p.root.position.set(x, y, z); p.root.rotation.y = yaw; (par || root).add(p.root); life.actors++; return p; } catch (e) { return null; } };
+    const actors = [];
+    const actor = (L, x, y, z, yaw, par) => { if (!hasKit() || !L) return null; try { const p = K2.buildPerson(L); p.root.position.set(x, y, z); p.root.rotation.y = yaw; (par || root).add(p.root); actors.push(p); life.actors++; return p; } catch (e) { return null; } };
     const seat = (p) => { if (p && p.legBG) { p.legL.geometry = p.legBG; p.legR.geometry = p.legBG; } return p; };
-    // bake a posed person into ONE static voxel geometry (merged into the region meshes at build 500 is too early, so
-    // placeStatic here would miss it; instead we collect the baked people into one shared mesh per ~40 m cell below)
+    // Bake static spectators before region meshing, collecting nearby figures into shared props.
     const bakeList = [];
     const bake = (L, x, y, z, yaw, pose) => {
       if (!hasKit() || !L || !BGU) return;
@@ -6499,9 +6880,9 @@ try {
     const orbits = [[-92, -240, 14, 9, 0.05, 1], [-79, -240, 9, 7, 0.07, -1], [-104, -249, 9, 4.5, 0.06, 1], [-90, -236, 18, 12, 0.035, -1], [-90, -232, 7, 4.5, 0.08, 1], [-76, -231, 6.5, 3.8, 0.075, -1], [-112, -245, 5.5, 5.5, 0.07, 1]];
     const boats = [];
     orbits.forEach(([ocx, ocz, orx, orz, sp, dir], i) => {
-      const g = new THREE.Group(), hull = AF.modelMesh(bg); g.add(hull); boatHold.add(g);
+      const g = new THREE.Group(), hull = AF.modelMesh(bg); g.add(hull); boatHold.add(g); moving(hull, 'hull');
       const oars = [];
-      for (const s of [-1, 1]) { const piv = new THREE.Group(); piv.position.set(0.15, 0.58, s * 0.62); g.add(piv); const o = im(inst.oar, piv, 0, 0, 0); o.rotation.y = s > 0 ? 0 : Math.PI; o.position.z = -s * 0.45; oars.push({ piv, s }); }
+      for (const s of [-1, 1]) { const piv = new THREE.Group(); piv.position.set(0.15, 0.58, s * 0.62); g.add(piv); const o = im(inst.oar, piv, 0, 0, 0); o.rotation.y = s > 0 ? 0 : Math.PI; o.position.z = -s * 0.45; moving(o, 'oar'); oars.push({ piv, s }); }
       const rower = actor(look(i % 3 === 1 ? 'boatman' : 'citizen', i === 4 ? 'f' : 'm', i === 2 ? 'teen' : 'adult'), 0.35, 0, 0, -Math.PI / 2, g);
       if (rower) { seat(rower); rower.root.position.y = SEATY(rower, 0.52); }
       let pass = null;
@@ -6521,7 +6902,7 @@ try {
     // ---- walkers on the lake loop: nannies pushing prams, two couples arm in arm
     const pramG = G('pram', () => null);
     const loopRX = LK.rx * 1.3, loopRZ = LK.rz * 1.38, walkers = [];
-    const walker = (L, ph, dir, off, pram) => { const p = actor(L, 0, 0.25, 0, 0); if (!p) return; let pm = null; if (pram && pramG) { pm = AF.modelMesh(pramG); root.add(pm); } walkers.push({ p, ph, dir, off, pm, sp: pram ? 0.018 : 0.015 }); };
+    const walker = (L, ph, dir, off, pram) => { const p = actor(L, 0, 0.25, 0, 0); if (!p) return; let pm = null; if (pram && pramG) { pm = AF.modelMesh(pramG); root.add(pm); moving(pm, 'pram'); } walkers.push({ p, ph, dir, off, pm, sp: pram ? 0.018 : 0.015 }); };
     walker(look('nurse', 'f', 'adult'), 0.4, 1, 0, true); walker(look('nurse', 'f', 'adult'), 3.3, -1, 0, true); walker(look('grandma', 'f', 'elder'), 4.9, 1, 0, true);
     walker(look('citizen', 'm', 'adult'), 1.8, -1, -0.28, false); walker(look('citizen', 'f', 'adult'), 1.8, -1, 0.28, false);
     walker(look('citizen', 'm', 'elder'), 5.6, 1, -0.28, false); walker(look('grandma', 'f', 'elder'), 5.6, 1, 0.28, false);
@@ -6577,7 +6958,7 @@ try {
           m.box(2, 0, 0, 11, 2, 3, hull); m.box(1, 1, 0, 2, 2, 3, hull); m.box(11, 1, 1, 12, 2, 2, hull); m.box(2, 2, 0, 11, 3, 3, k.woodL); m.box(2, 1, 0, 11, 2, 1, stripe); m.box(2, 1, 2, 11, 2, 3, stripe);
           m.box(6, 3, 1, 7, 16, 2, k.woodD); for (let y = 4; y < 15; y++) { const w = Math.ceil((15 - y) * 0.45); m.box(7, y, 1, 7 + w, y + 1, 2, sail); } for (let y = 4; y < 12; y++) { const w = Math.ceil((12 - y) * 0.45); m.box(6 - w, y, 1, 6, y + 1, 2, sail); }
           m.set(6, 15, 1, k.red); return AF.meshModel(m, { vs: 1 / 16, anchor: [0.5, 0, 0.5] }); });
-        const me = AF.modelMesh(g); me.castShadow = false; me.scale.setScalar(1.5); root.add(me); extras.yachts.push({ m: me, ph: i * 1.7, w: 0.05 + i * 0.008, rx: PD.r * (0.35 + (i % 3) * 0.17), rz: PD.r * (0.3 + ((i + 1) % 3) * 0.16), y: pondY - 0.04 });
+        const me = AF.modelMesh(g); me.castShadow = false; me.scale.setScalar(1.5); root.add(me); moving(me, 'yacht'); extras.yachts.push({ m: me, ph: i * 1.7, w: 0.05 + i * 0.008, rx: PD.r * (0.35 + (i % 3) * 0.17), rz: PD.r * (0.3 + ((i + 1) % 3) * 0.16), y: pondY - 0.04 });
       });
       // kids with sticks at the rim, one crouched launching a boat; a mother on the rim bench
       [[2.25, 'm'], [2.7, 'f'], [0.55, 'm']].forEach(([a, gg], i) => { const x = PD.cx + Math.cos(a) * (PD.r + 0.95), z = PD.cz + Math.sin(a) * (PD.r + 0.95); const p = actor(look('kid', gg, 'kid'), x, 0.25, z, Math.atan2(PD.cx - x, PD.cz - z)); if (p) { const st = im(inst.stick, p.armR, 0, -p.B.ah / 16, 0.1); st.scale.set(1, 1, 3.2); st.rotation.x = 0.6; extras.kids.push({ p, ph: i * 2.1, crouch: i === 1 }); } });
@@ -6589,7 +6970,7 @@ try {
         m.box(0, 2, 0, 3, 8, 3, tl); m.box(1, 8, 0, 4, 9, 3, tl); m.box(0, 3 + f, 1, 1, 7, 2, bl); return AF.meshModel(m, { vs: 1 / 20, anchor: [0.5, 0, 0.5] }); }));
       const tr = (PKS.trees || []).filter((q) => q.kind !== 'fail' && q.kind !== 'pine');
       const pick = [0, 3, 6, 9, 13, 18, 24, 31, 40, 52].map((i) => tr[i]).filter(Boolean);
-      pick.forEach((q, i) => { const me = new THREE.Mesh(sqG[0], AF.mat.voxel); me.castShadow = false; root.add(me); extras.squirrels.push({ m: me, q, ph: i * 3.7, ang: i * 1.3, r: Math.max(0.35, Math.min(0.9, (q.trunkR || 0.5))) + 0.08 }); });
+      pick.forEach((q, i) => { const me = new THREE.Mesh(sqG[0], AF.mat.voxel); me.castShadow = false; root.add(me); moving(me, 'squirrel'); extras.squirrels.push({ m: me, q, ph: i * 3.7, ang: i * 1.3, r: Math.max(0.35, Math.min(0.9, (q.trunkR || 0.5))) + 0.08 }); });
       life.squirrels = extras.squirrels.length; extras.sqG = sqG;
       // hot-chestnut cart just inside Merchants' Gate: glowing brazier + steam
       const chG = G('chestnut', () => { const m = new AF.Model(16, 24, 9), rd = c(0x8e2a21, { jitter: 0.15, edge: 0.3 }), coal = c(0xff7a30, { emit: 0xff5a1a, emitK: 2.6, mode: 'always', jitter: 0.2, edge: 0 });
@@ -6608,26 +6989,66 @@ try {
       (PKS.cafe || []).forEach(([x, z], i) => { bake(look('citizen', i ? 'm' : 'f', 'adult'), x - 0.75, 0.5 + 4 / 8, z, Math.PI / 2, { sit: true, arms: [-1.2, -0.4] }); bake(look(i ? 'kid' : 'grandma', 'f', i ? 'kid' : 'elder'), x + 0.75, 0.5 + 4 / 8, z, -Math.PI / 2, { sit: true, arms: [-0.9, -0.5] }); });
       bake(look('kid', 'm', 'kid'), 30.75, 0.5 + 0.5, -245.6, 0, { sit: true, arms: [-1.3, -1.3] });
     }
-    // ---- bake: one static mesh per ~48 m cell (free to animate, frustum-culled per cell)
+    // ---- bake: static props merged into the world regions
     if (bakeList.length && BGU) {
       const cells = new Map();
       for (const g of bakeList) { g.computeBoundingBox(); const c = g.boundingBox.getCenter(new THREE.Vector3()), key = Math.floor(c.x / 48) + ',' + Math.floor(c.z / 48); if (!cells.has(key)) cells.set(key, []); cells.get(key).push(g); }
       for (const list of cells.values()) {
-        try { const mg = BGU.mergeGeometries(list, false); if (!mg) continue; mg.computeBoundingSphere(); const me = new THREE.Mesh(mg, AF.mat.voxel); me.castShadow = true; me.receiveShadow = true; me.matrixAutoUpdate = false; me.updateMatrix(); root.add(me); } catch (e) { }
+        try { const mg = BGU.mergeGeometries(list, false); if (!mg) continue; mg.computeBoundingBox(); const center = mg.boundingBox.getCenter(new THREE.Vector3()); mg.translate(-center.x, 0, -center.z); put(mg, center.x, 0, center.z, 0, false); for (const source of list) source.dispose(); } catch (e) { }
       }
     }
     life.dyn = A.length + boats.length + skaters.length + walkers.length + rakers.length;
+
+    for (const animated of A) animated.fn(0);
+    root.updateMatrixWorld(true);
+    const partEntries = [], farEntries = [], inverse = new THREE.Matrix4(), relative = new THREE.Matrix4();
+    const partNames = ['torso', 'head', 'armL', 'armR', 'legL', 'legR'];
+    for (const person of actors) {
+      person.root.updateWorldMatrix(true, true); inverse.copy(person.root.matrixWorld).invert();
+      const farGeometry = [], nearParts = [];
+      person.root.traverse((object) => {
+        if (!object.isMesh) return;
+        const kind = partNames.find((part) => person[part] === object) || 'accessory';
+        const entry = { geometry: object.geometry, material: object.material, kind, matrix: object.matrixWorld, visible: true, shadow: false, object };
+        partEntries.push(entry); nearParts.push(entry);
+        if (object.geometry.attributes.aPal) {
+          relative.multiplyMatrices(inverse, object.matrixWorld);
+          const geometry = object.geometry.clone(); geometry.applyMatrix4(relative);
+          const normals = geometry.attributes.aAN.array, map = remapN(relative);
+          for (let index = 0; index < normals.length; index++) { const normal = normals[index] % 8; normals[index] = normals[index] - normal + map[normal]; }
+          farGeometry.push(geometry);
+        }
+        object.visible = false; object.castShadow = false; object.frustumCulled = false;
+      });
+      const geometry = BGU.mergeGeometries(farGeometry, false);
+      const far = { geometry, material: AF.mat.voxel, kind: 'pose', matrix: person.root.matrixWorld, visible: false };
+      farEntries.push(far); person.parkParts = nearParts; person.parkFar = far; person.parkFade = 1;
+      for (const source of farGeometry) source.dispose();
+    }
+    const nearBatch = parkBatches(partEntries, root, 'park-life-parts', true);
+    const farBatch = parkBatches(farEntries, root, 'park-life-far');
+    life.partBatches = nearBatch ? nearBatch.meshes.length : 0; life.farBatches = farBatch ? farBatch.meshes.length : 0;
+    const actorPosition = new THREE.Vector3();
+    let lifeFrame = 0, lifeElapsed = 0, lifeHidden = true;
 
     // ---- one tick for all park life
     const nightGlow = [];
     AF.onTick('park-life', 338, (dt, t) => {
       const c = AF.camera; if (!c) return;
-      const dc = Math.hypot(c.position.x + 37, c.position.z + 232);
-      const on = dc < 280; if (root.visible !== on) root.visible = on; if (!on) return;
-      const near = dc < 190;
-      if (!near) return;
-      for (const a of A) a.fn(t, dt, a);
+      const distance = parkDistance(), on = Number.isFinite(distance);
+      root.visible = on; if (!on) { lifeHidden = true; lifeElapsed = 0; return; }
+      lifeElapsed += dt;
+      lifeFrame++;
+      if (!lifeHidden && distance > 60 && lifeFrame % 3 !== 0) return;
+      dt = lifeElapsed; lifeElapsed = 0; lifeHidden = false;
+      for (const person of actors) {
+        person.root.updateWorldMatrix(true, false); actorPosition.setFromMatrixPosition(person.root.matrixWorld);
+        person.parkAnimate = !person.parkInitialized || actorPosition.distanceTo(c.position) < 60 || lifeFrame % 3 === 0;
+        person.parkInitialized = true;
+      }
+      for (const a of A) if (a.p.parkAnimate) a.fn(t, dt, a);
       for (const b of boats) {
+        if (b.rower && !b.rower.parkAnimate) continue;
         const a = b.ph + t * b.sp * b.dir, x = b.ocx + Math.cos(a) * b.orx, z = b.ocz + Math.sin(a) * b.orz;
         const dx = -Math.sin(a) * b.orx * b.dir, dz = Math.cos(a) * b.orz * b.dir;
         const st = t * 2.6 + b.ph * 3, s = Math.sin(st), cc = Math.cos(st);
@@ -6636,6 +7057,7 @@ try {
         if (b.rower) { const r = b.rower; r.hips.rotation.x = -0.1 - s * 0.28; r.armR.rotation.x = r.armL.rotation.x = -1.2 + s * 0.45; r.armR.rotation.z = 0.25; r.armL.rotation.z = -0.25; }
       }
       for (const k2 of skaters) {
+        if (!k2.p.parkAnimate) continue;
         const a = k2.ph + t * k2.sp, x = rcx + Math.cos(a) * rrx * k2.r, z = rcz + Math.sin(a) * rrz * k2.r, p = k2.p;
         const dx = -Math.sin(a) * rrx, dz = Math.cos(a) * rrz, st = t * (k2.kid ? 4.2 : 3.2) + k2.ph * 5, s = Math.sin(st);
         p.root.position.set(x, 0.25, z); p.root.rotation.y = Math.atan2(dx, dz);
@@ -6643,6 +7065,7 @@ try {
         p.armL.rotation.x = s * 0.7; p.armR.rotation.x = -s * 0.7; p.hips.rotation.x = 0.22; p.hips.rotation.z = 0.12 + (k2.kid ? Math.sin(t * 7) * 0.1 : 0); p.body.position.y = Math.abs(s) * 0.02;
       }
       for (const w of walkers) {
+        if (!w.p.parkAnimate) continue;
         if (w.mall) {   // promenade up and down the Mall (lane by direction), turn at each end
           const Lm = 42, sm = (t * 1.05 + w.ph) % (2 * Lm), fwd = sm < Lm, zz = fwd ? -208 - sm : -208 - (2 * Lm - sm), xx = -40 + (fwd ? -1.1 : 1.1) + w.off;
           const p = w.p, st = t * 5.2 + w.ph * 3, sn = Math.sin(st);
@@ -6659,7 +7082,7 @@ try {
         if (w.pm) { p.armL.rotation.x = p.armR.rotation.x = -0.95; w.pm.position.set(x + dx * 1.05, 0.25, z + dz * 1.05); w.pm.rotation.y = Math.atan2(dz, -dx); }
         else { p.armL.rotation.x = -s * 0.35; p.armR.rotation.x = s * 0.35; if (w.off < 0) p.armL.rotation.x = -0.35; else p.armR.rotation.x = -0.35; }
       }
-      for (const r of rakers) { const s = Math.sin(t * 2.2 + r.ph); r.p.hips.rotation.y = s * 0.4; r.p.hips.rotation.x = 0.3; r.p.armR.rotation.x = -1.0 + s * 0.15; r.p.armL.rotation.x = -0.8 - s * 0.15; r.p.armR.rotation.z = 0.2; }
+      for (const r of rakers) { if (!r.p.parkAnimate) continue; const s = Math.sin(t * 2.2 + r.ph); r.p.hips.rotation.y = s * 0.4; r.p.hips.rotation.x = 0.3; r.p.armR.rotation.x = -1.0 + s * 0.15; r.p.armL.rotation.x = -0.8 - s * 0.15; r.p.armR.rotation.z = 0.2; }
       if (jumper) {
         const p = jumper.p, q = jumper.q, cyc = (t % 9) / 9, x0 = q.x - 7;
         let x = x0, y = 0.25, lie = 0;
@@ -6669,18 +7092,18 @@ try {
         else { const u = (cyc - 0.8) / 0.2; x = q.x - u * 7; lie = 0; const s = Math.sin(t * 7); p.legL.rotation.x = s * 0.4; p.legR.rotation.x = -s * 0.4; p.armL.rotation.x = -s * 0.2; p.armR.rotation.x = s * 0.2; }
         p.root.position.set(x, y, q.z); p.root.rotation.set(lie ? -1.3 : 0, cyc < 0.8 ? Math.PI / 2 : -Math.PI / 2, 0, 'YXZ');
         if (lie) { p.armL.rotation.x = p.armR.rotation.x = -2.9 + Math.sin(t * 6) * 0.3; p.legL.rotation.x = Math.sin(t * 8) * 0.3; p.legR.rotation.x = -Math.sin(t * 8) * 0.3; }
-        if (burstT === 0) for (let i = 0; i < NL; i++) { const a = i * 2.4, sp = 1.2 + (i % 5) * 0.4; leafV.set([q.x + Math.cos(a) * 0.3, 0.25 + q.h, q.z + Math.sin(a) * 0.3, Math.cos(a) * sp, 2.2 + (i % 7) * 0.35, Math.sin(a) * sp], i * 6); }
+        if (burstT === 0) for (let i = 0; i < NL; i++) { const a = i * 2.4, sp = 1.2 + (i % 5) * 0.4, offset = i * 6; leafV[offset] = q.x + Math.cos(a) * 0.3; leafV[offset + 1] = 0.25 + q.h; leafV[offset + 2] = q.z + Math.sin(a) * 0.3; leafV[offset + 3] = Math.cos(a) * sp; leafV[offset + 4] = 2.2 + (i % 7) * 0.35; leafV[offset + 5] = Math.sin(a) * sp; }
         if (burstT >= 0) {
           burstT += dt;
-          for (let i = 0; i < NL; i++) { const o = i * 6; if (burstT > 0 && leafV[o + 1] > 0.27) { leafV[o + 4] -= 3.2 * dt; if (leafV[o + 4] < -0.6) leafV[o + 4] = -0.6; leafV[o] += (leafV[o + 3] + Math.sin(t * 3 + i) * 0.4) * dt; leafV[o + 1] += leafV[o + 4] * dt; leafV[o + 2] += (leafV[o + 5] + Math.cos(t * 2.6 + i) * 0.4) * dt; leafV[o + 3] *= 0.985; leafV[o + 5] *= 0.985; } dm.position.set(leafV[o], Math.max(0.27, leafV[o + 1]), leafV[o + 2]); dm.rotation.set(t * 3 + i, t * 2 + i * 0.7, 0); dm.updateMatrix(); leafIM.setMatrixAt(i, dm.matrix); }
+          for (let i = 0; i < NL; i++) { const o = i * 6; if (burstT > 0 && leafV[o + 1] > 0.27) { leafV[o + 4] -= 3.2 * dt; if (leafV[o + 4] < -0.6) leafV[o + 4] = -0.6; leafV[o] += (leafV[o + 3] + Math.sin(t * 3 + i) * 0.4) * dt; leafV[o + 1] += leafV[o + 4] * dt; leafV[o + 2] += (leafV[o + 5] + Math.cos(t * 2.6 + i) * 0.4) * dt; leafV[o + 3] *= Math.exp(-0.907 * dt); leafV[o + 5] *= Math.exp(-0.907 * dt); } dm.position.set(leafV[o], Math.max(0.27, leafV[o + 1]), leafV[o + 2]); dm.rotation.set(t * 3 + i, t * 2 + i * 0.7, 0); dm.updateMatrix(); leafIM.setMatrixAt(i, dm.matrix); }
           leafIM.instanceMatrix.needsUpdate = true; leafIM.visible = true; if (burstT > 4.5) { burstT = -1; leafIM.visible = false; }
         } else leafIM.visible = false;
       }
-      if (feeder) { const u = (t % 3.2) / 3.2, s = u < 0.25 ? Math.sin(u / 0.25 * Math.PI) : 0; feeder.armR.rotation.x = -0.5 - s * 1.2; feeder.hips.rotation.x = 0.15 + s * 0.08; feeder.armL.rotation.x = -0.6; }
-      if (kiteKid) { kiteKid.armR.rotation.x = -2.3 + Math.sin(t * 0.9) * 0.15; kiteKid.armL.rotation.x = -1.9 + Math.sin(t * 0.9 + 0.4) * 0.15; }
-      for (const p of riders) p.armR.rotation.x = -0.5 + Math.sin(t * 2) * 0.3;
+      if (feeder && feeder.parkAnimate) { const u = (t % 3.2) / 3.2, s = u < 0.25 ? Math.sin(u / 0.25 * Math.PI) : 0; feeder.armR.rotation.x = -0.5 - s * 1.2; feeder.hips.rotation.x = 0.15 + s * 0.08; feeder.armL.rotation.x = -0.6; }
+      if (kiteKid && kiteKid.parkAnimate) { kiteKid.armR.rotation.x = -2.3 + Math.sin(t * 0.9) * 0.15; kiteKid.armL.rotation.x = -1.9 + Math.sin(t * 0.9 + 0.4) * 0.15; }
+      for (const p of riders) if (p.parkAnimate) p.armR.rotation.x = -0.5 + Math.sin(t * 2) * 0.3;
       for (let i = 0; i < extras.yachts.length; i++) { const y = extras.yachts[i], a = t * y.w * 6.283 + y.ph, x = PD.cx + Math.cos(a) * y.rx, z = PD.cz + Math.sin(a * 1.3) * y.rz, vx = -Math.sin(a) * y.rx, vz = Math.cos(a * 1.3) * 1.3 * y.rz; y.m.position.set(x, y.y + Math.sin(t * 2.2 + i) * 0.015, z); y.m.rotation.set(0, Math.atan2(-vz, vx), 0.12 + Math.sin(t * 1.1 + i) * 0.06, 'YXZ'); }
-      for (const q of extras.kids) { const s = Math.sin(t * 1.3 + q.ph); q.p.armR.rotation.x = -1.2 + s * 0.35; q.p.armL.rotation.x = -0.3 + s * 0.1; if (q.crouch) { q.p.hips.rotation.x = 0.5; q.p.legL.rotation.x = -1.0; q.p.legR.rotation.x = -1.0; q.p.root.position.y = 0.05; } }
+      for (const q of extras.kids) { if (!q.p.parkAnimate) continue; const s = Math.sin(t * 1.3 + q.ph); q.p.armR.rotation.x = -1.2 + s * 0.35; q.p.armL.rotation.x = -0.3 + s * 0.1; if (q.crouch) { q.p.hips.rotation.x = 0.5; q.p.legL.rotation.x = -1.0; q.p.legR.rotation.x = -1.0; q.p.root.position.y = 0.05; } }
       for (const s of extras.squirrels) {
         const u = t + s.ph, cyc = (u % 16) / 16, q = s.q; let h = 0, r = s.r, pitch = 0, ya;
         if (cyc < 0.4 || cyc >= 0.92) { const hop = Math.sin(u * 8) > 0; s.ang += hop ? dt * 0.8 : 0; const e = cyc < 0.4 ? Math.min(1, (0.4 - cyc) / 0.05) : Math.min(1, (cyc - 0.92) / 0.05); r = s.r + (0.6 + Math.sin(u * 0.7) * 0.35) * e; h = hop ? Math.abs(Math.sin(u * 8)) * 0.1 : 0; ya = s.ang + Math.PI / 2; }
@@ -6690,6 +7113,35 @@ try {
         s.m.position.set(q.x + Math.cos(s.ang) * r, 0.25 + h, q.z + Math.sin(s.ang) * r); s.m.rotation.set(0, -ya, pitch, 'YXZ'); s.m.geometry = extras.sqG[Math.floor(u * 4) % 2];
       }
       for (let i = 0; i < pieces.length; i++) { const pc = pieces[i], cyc = ((t + i * 7) % 14) / 14, sq = Math.floor((t + i * 7) / 14); const hx = ((sq * 5 + i * 3) % 6) - 2.5, hz = ((sq * 3 + i) % 6) - 2.5, px = ((sq * 5 + i * 3 + 5) % 6) - 2.5, pz = ((sq * 3 + i + 2) % 6) - 2.5; const u = Math.min(1, Math.max(0, (cyc - 0.9) / 0.1)); pc.m.position.set(pc.x + (px + (hx - px) * u) / 8, 1.0 + Math.sin(u * Math.PI) * 0.12, pc.z + (pz + (hz - pz) * u) / 8); }
+      for (const person of actors) {
+        person.root.updateWorldMatrix(true, false); actorPosition.setFromMatrixPosition(person.root.matrixWorld);
+        const distance = actorPosition.distanceTo(c.position);
+        const forward = (actorPosition.x - c.position.x) * parkDirection.x + (actorPosition.y + 1 - c.position.y) * parkDirection.y + (actorPosition.z - c.position.z) * parkDirection.z;
+        const visible = distance < 150 && forward > -3;
+        const near = distance < 45;
+        person.parkFade = AF.clamp(person.parkFade + (near ? 1 : -1) * dt / 0.3, 0, 1);
+        person.parkFar.visible = visible && person.parkFade < 1; person.parkFar.fade = 1 - person.parkFade;
+        if (person.parkFade > 0) person.root.updateWorldMatrix(false, true);
+        for (const part of person.parkParts) { part.visible = visible && person.parkFade > 0; part.fade = person.parkFade; part.shadow = part.kind !== 'accessory' && part.visible && distance < 40 && person.B.lh / 16 + person.B.th / 16 > 1; }
+      }
+      if (nearBatch) nearBatch.update(); if (farBatch) farBatch.update();
+    });
+    const moverRoot = new THREE.Group(); moverRoot.name = 'park-movers'; AF.scene.add(moverRoot);
+    const moverBatch = parkBatches(movers, moverRoot, 'park-moving-parts');
+    life.moverBatches = moverBatch ? moverBatch.meshes.length : 0;
+    let moverFrame = 0, moversHidden = true;
+    AF.onTick('park-movers', 339, () => {
+      const on = Number.isFinite(parkDistance()); moverRoot.visible = on; if (!on || !moverBatch) { moversHidden = true; return; }
+      moverFrame++;
+      for (const entry of movers) {
+        actorPosition.setFromMatrixPosition(entry.matrix);
+        const distance = actorPosition.distanceTo(AF.camera.position);
+        if (!moversHidden && distance > 60 && moverFrame % 3 !== 0) continue;
+        entry.object.updateWorldMatrix(true, false);
+        entry.visible = distance < 150;
+      }
+      moversHidden = false;
+      moverBatch.update();
     });
   });
 
@@ -18745,6 +19197,12 @@ try {
       for (let z = b + 1; z < d - 1; z += 0.5) { const q = AF.hash2((z * 4) | 0, (ox * 4) | 0), ci = W.col(ox + 0.25, z + 0.25); if (ci < 0 || isPave.has(W.C[ci])) continue; if (q < 0.55) W.fill(ox, 0.25, z, ox + 0.5, 0.5 + (q < 0.2 ? 0.25 : 0), z + 0.5, hed[q < 0.12 ? 2 : q < 0.2 ? 3 : q < 0.4 ? 0 : 1]); }
     }
     // ---- water: ponds per habitat
+    const pondGeos = new Map();
+    const collectPond = (geo) => {
+      const y = geo.userData.waterY;
+      if (!pondGeos.has(y)) pondGeos.set(y, []);
+      pondGeos.get(y).push(geo);
+    };
     const pool = (cx, cz, rx, rz, deep, wy, hab) => {
       const bed = col(0x4a4034, { jitter: 0.7 }), shore = col(0x7a6a4a, { jitter: 0.8 });
       W.eachCol(cx - rx - 2, cz - rz - 2, cx + rx + 2, cz + rz + 2, (bx, bz, i, x, z) => {
@@ -18764,7 +19222,7 @@ try {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((v, i) => (i % 3 === 1 ? 1 : 0)), 3));
       geo.setIndex(idx); geo.computeBoundingSphere(); geo.userData.kind = 'pond'; geo.userData.waterY = wy;
-      AF.addWater(geo);
+      collectPond(geo);
       POOLS.push({ cx, cz, rx, rz, y: wy, hab });
       P.pools.push({ x0: cx - rx, z0: cz - rz, x1: cx + rx, z1: cz + rz, y: wy });
     };
@@ -18785,14 +19243,12 @@ try {
     for (const H of HAB) {
       H.pool = POOLS.find((p) => p.hab === H.id) || null;
       const [a, b, c, d] = H.rect;
-      H.browse = [a + 7, b + 11]; H.rest = H.id === 'lions' ? [-526, -111] : [c - 8, d - 9];
-      H.entry = H.id === 'lions' ? [-526, -104] : H.rest;
+      H.browse = [a + 7, b + 11]; H.rest = H.id === 'lions' ? [-524, -111] : [c - 8, d - 9];
+      H.entry = H.id === 'lions' ? [-524, -105] : H.rest;
       H.frames = [[a + 9, b + 15, 3.25], [c - 10, b + 27, 4.5], [a + 11, d - 13, 3.75]];
     }
     const timber = col(0x886944), rope = col(0xc7b287), ice = col(0xdcebf0), mud = col(0x665043);
     W.eachCol(-636, -111, -628, -100, (bx, bz, i) => { W.C[i] = mud; });
-    W.fill(-524, 0.25, -130, -510, 4, -124, stoneW); W.clear(-520, 0.25, -125, -514, 2.5, -122);
-    W.fill(-520, 2.5, -126, -514, 3, -121, cap);
     for (const [x, z, height] of HAB.find((h) => h.id === 'primates').frames) {
       for (const dx of [-2, 2]) for (const dz of [-2, 2]) W.fill(x + dx, 0.25, z + dz, x + dx + 0.5, height, z + dz + 0.5, timber);
       W.fill(x - 2.5, height, z - 2.5, x + 3, height + 0.25, z + 3, timber);
@@ -18812,7 +19268,22 @@ try {
     const bay = new THREE.BufferGeometry();
     bay.setAttribute('position', new THREE.Float32BufferAttribute([-594.25, 0, -208, -594.25, 0, -184, -585, 0, -184, -585, 0, -208], 3));
     bay.setAttribute('normal', new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], 3));
-    bay.setIndex([0, 1, 2, 0, 2, 3]); bay.computeBoundingSphere(); bay.userData.kind = 'pond'; bay.userData.waterY = 0; AF.addWater(bay);
+    bay.setIndex([0, 1, 2, 0, 2, 3]); bay.computeBoundingSphere(); bay.userData.kind = 'pond'; bay.userData.waterY = 0; collectPond(bay);
+    for (const [y, geos] of pondGeos) {
+      let vertices = 0, indices = 0;
+      for (const geo of geos) { vertices += geo.attributes.position.count; indices += geo.index.count; }
+      const positions = new Float32Array(vertices * 3), normals = new Float32Array(vertices * 3), index = new Uint32Array(indices);
+      let vertexOffset = 0, indexOffset = 0;
+      for (const geo of geos) {
+        positions.set(geo.attributes.position.array, vertexOffset * 3); normals.set(geo.attributes.normal.array, vertexOffset * 3);
+        for (const value of geo.index.array) index[indexOffset++] = value + vertexOffset;
+        vertexOffset += geo.attributes.position.count; geo.dispose();
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+      geo.setIndex(new THREE.BufferAttribute(index, 1)); geo.computeBoundingSphere(); geo.userData.kind = 'pond'; geo.userData.waterY = y;
+      AF.addWater(geo);
+    }
     P.pools.push({ x0: -594.25, z0: -208, x1: -585, z1: -184, y: 0 });
     for (let k = 0; k < 8; k++) {
       W.eachCol(-601, -211 - k * 0.5, -595, -210.5 - k * 0.5, (bx, bz, i) => { W.H[i] = -7 + k; W.C[i] = pave; });
@@ -18827,12 +19298,10 @@ try {
     // ---- features
     const rock = [col(0x8a847c, { jitter: 0.6 }), col(0x9a9288, { jitter: 0.6 }), col(0x7a746c, { jitter: 0.6 })];
     const boulder = (x, z, r, h) => { for (let y = 0; y < h; y += 0.5) { const rr = r * Math.sqrt(1 - (y / h) * 0.8); W.eachCol(x - rr, z - rr, x + rr, z + rr, (bx, bz, i, px, pz) => { if (Math.hypot(px - x, pz - z) < rr - AF.hash2(bx, bz) * 0.4) W.fill(px - 0.125, 0.25 + y, pz - 0.125, px + 0.125, 0.75 + y, pz + 0.125, rock[(bx + bz + y * 2) % 3 | 0]); }); } };
-    // Pride Rock: stepped ledges up to a jutting lip
     boulder(-516, -118, 9, 3); boulder(-512, -122, 6, 5.5); boulder(-509, -125, 3.5, 7);
-    W.fill(-514, 6.75, -128, -504, 7.25, -121, rock[1]);
-    W.clear(-520, 0.25, -126, -514, 2.5, -108);
-    W.fill(-529, 0.25, -114, -523, 1, -108, rock[1]);
-    for (let step = 0; step < 3; step++) W.fill(-528, 0.25, -108 + step, -524, 1 - step * 0.25, -107 + step, rock[1]);
+    boulder(-507.5, -125, 3, 6.5);
+    W.clear(-520, 0.25, -126, -514, 2.5, -120);
+    boulder(-524, -111, 5, 1.5); boulder(-524, -106.5, 3, 0.75);
     // savannah: acacias (a thin trunk + a flat umbrella crown), termite mounds, rocks
     const bark = col(0x5a4632, { jitter: 0.5 }), leafA = col(0x6a8a2e, { jitter: 0.7 }), leafB = col(0x7a9a3a, { jitter: 0.7 });
     const acacia = (x, z, s) => { W.fill(x - 0.25, 0.25, z - 0.25, x + 0.25, 4.5 * s, z + 0.25, bark); W.fill(x - 1.5, 4 * s, z - 0.25, x + 1.5, 4.25 * s, z + 0.25, bark); for (const [r, y] of [[3.8 * s, 4.5 * s], [4.6 * s, 4.75 * s], [3.2 * s, 5 * s]]) W.eachCol(x - r, z - r, x + r, z + r, (bx, bz, i, px, pz) => { if (Math.hypot(px - x, pz - z) < r - AF.hash2(bx, bz) * 0.8) W.fill(px - 0.125, y, pz - 0.125, px + 0.125, y + 0.25, pz + 0.125, AF.hash2(bx * 3, bz) < 0.5 ? leafA : leafB); }); };
@@ -18959,7 +19428,6 @@ try {
       W.fill(x - 1.25, 0.25, z + 2.25, x + 1.25, 1.0, z + 2.75, wt); W.fill(x - 1.0, 1.25, z + 2.5, x + 1.0, 2.0, z + 2.75, col(stripe, { emit: stripe, emitK: 0.5, jitter: 0 }));
       AF.placeStatic(fitText(name, 0xffffff, 3.0, 'deco'), x, 2.85, z - 0.4, 2, { collide: false });
       W.fill(x - 1.75, 2.75, z + 1.25, x + 1.75, 3.25, z + 1.5, st);
-      AF.addLight({ x, y: 2.2, z: z + 0.2, color: 0xffe0b0, intensity: 0.6, range: 7, kind: 'shop' });
       if (AF.addSpot) { AF.addSpot({ building: 'zoo-kiosk', x, y: 0.25, z: z + 1.4, yaw: PI, kind: 'counter' }); AF.addSpot({ building: 'zoo', x: x - 0.6, y: 0.25, z: z - 1.6, yaw: 0, kind: 'queue' }); AF.addSpot({ building: 'zoo', x: x + 0.7, y: 0.25, z: z - 2.4, yaw: 0.2, kind: 'queue' }); }
     };
     kiosk(-578, -144.5, 'ICE CREAM', 0xe86a9a, 0xf6e8d8); kiosk(-520, -144.5, 'SNACKS', 0xd8502a, 0xf2e2c0); kiosk(-470, -144.5, 'GIFTS', 0x2f6a8a, 0xe8eef2);
@@ -19129,7 +19597,9 @@ try {
         }
         if (id === 'lion' || id === 'lioness' || id === 'tiger') refined.box(Math.floor(refined.w * 0.38), noseY + 1, noseZ, Math.ceil(refined.w * 0.62), noseY + 3, noseZ + 1, c.dark);
       }
-      return AF.meshModel(refined, { vs: 1 / 16, anchor });
+      const geo = AF.meshModel(refined, { vs: 1 / 16, anchor });
+      geo.userData.farGeo = AF.meshModel(m, { vs: VS, anchor });
+      return geo;
     };
     const add = (name, dims, position, parent, anchor = [0.5, 0, 0.5], color = c.body, kind = name, rotation = 0, side = 0) => {
       const part = { name, geo: shape(dims, kind, color, anchor), x: position[0], y: position[1], z: position[2], parent, rotation, side, matrix: new THREE.Matrix4(), mesh: null };
@@ -19208,6 +19678,57 @@ try {
     }
     an.tx = boundX(an, an.rect[2] - an.pad); an.tz = boundZ(an, an.rect[3] - an.pad);
   };
+  const mergeAnimal = (G) => {
+    const parts = G.parts.filter((part) => part.name !== 'spray' && part.name !== 'droplet');
+    let vertices = 0, indices = 0;
+    for (const part of parts) { const geo = part.geo.userData.farGeo; vertices += geo.attributes.position.count; indices += geo.index.count; }
+    const positions = new Float32Array(vertices * 3), uv = new Int16Array(vertices * 2), palette = new Uint16Array(vertices), normals = new Uint8Array(vertices), index = new Uint32Array(indices);
+    let vertexOffset = 0, indexOffset = 0;
+    const point = new THREE.Vector3(), normal = new THREE.Vector3();
+    for (const part of G.parts) {
+      tmpE.set(part.name === 'tail' ? -0.95 : part.name === 'tailTip' ? -0.15 : part.rotation, 0, 0); tmpQ.setFromEuler(tmpE);
+      part.matrix.compose(tmpV.set(part.x, part.y, part.z), tmpQ, one.set(1, 1, 1));
+      if (part.parent >= 0) part.matrix.premultiply(G.parts[part.parent].matrix);
+      const geo = part.geo.userData.farGeo;
+      if (parts.includes(part)) {
+        for (let vertex = 0; vertex < geo.attributes.position.count; vertex++) {
+          point.fromBufferAttribute(geo.attributes.position, vertex).applyMatrix4(part.matrix); point.toArray(positions, (vertexOffset + vertex) * 3);
+          const packed = geo.attributes.aAN.array[vertex], axis = packed % 8;
+          normal.set(axis === 0 ? 1 : axis === 1 ? -1 : 0, axis === 2 ? 1 : axis === 3 ? -1 : 0, axis === 4 ? 1 : axis === 5 ? -1 : 0).transformDirection(part.matrix);
+          const ax = Math.abs(normal.x), ay = Math.abs(normal.y), az = Math.abs(normal.z);
+          const remapped = ax > ay && ax > az ? (normal.x > 0 ? 0 : 1) : ay > az ? (normal.y > 0 ? 2 : 3) : (normal.z > 0 ? 4 : 5);
+          normals[vertexOffset + vertex] = packed - axis + remapped;
+        }
+        uv.set(geo.attributes.aBU.array, vertexOffset * 2); palette.set(geo.attributes.aPal.array, vertexOffset);
+        for (const value of geo.index.array) index[indexOffset++] = value + vertexOffset;
+        vertexOffset += geo.attributes.position.count;
+      }
+      geo.dispose(); delete part.geo.userData.farGeo;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3)); geo.setAttribute('aBU', new THREE.BufferAttribute(uv, 2));
+    geo.setAttribute('aPal', new THREE.BufferAttribute(palette, 1)); geo.setAttribute('aAN', new THREE.BufferAttribute(normals, 1));
+    geo.setIndex(new THREE.BufferAttribute(index, 1)); geo.computeBoundingSphere(); return geo;
+  };
+  let fadeMaterial;
+  const zooFadeMaterial = () => {
+    if (fadeMaterial) return fadeMaterial;
+    fadeMaterial = AF.mat.voxel.clone();
+    const patch = AF.mat.voxel.onBeforeCompile;
+    fadeMaterial.onBeforeCompile = (shader, renderer) => {
+      patch.call(fadeMaterial, shader, renderer);
+      shader.vertexShader = 'attribute float aZooFade; varying float vZooFade;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvZooFade = aZooFade;');
+      shader.fragmentShader = 'varying float vZooFade;\n' + shader.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nfloat zooDither = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715))));\nif (vZooFade < 0.0 ? zooDither < -vZooFade - 1.0 : zooDither >= vZooFade) discard;');
+    };
+    fadeMaterial.customProgramCacheKey = () => AF.mat.voxel.customProgramCacheKey() + '-zoo-fade';
+    return fadeMaterial;
+  };
+  const appendInstance = (mesh, matrix, fade) => {
+    const instance = mesh.count++;
+    mesh.setMatrixAt(instance, matrix);
+    mesh.geometry.attributes.aZooFade.array[instance] = fade;
+    if (fade > -2 && fade < -1 || fade > 0 && fade < 1) mesh.material = zooFadeMaterial();
+  };
   const decide = (an, hours) => {
     const id = an.sp.id, H = an.H, roll = random(an), night = hours >= 20 || hours < 6;
     an.elapsed = 0; an.timer = 5 + random(an) * 10; an.next = '';
@@ -19244,11 +19765,17 @@ try {
       if (!sp) {
         const G = makeGeo(id);
         sp = Z.species[id] = { id, G, meshes: [], list: [] };
+        const farGeo = mergeAnimal(G);
+        farGeo.setAttribute('aZooFade', new THREE.InstancedBufferAttribute(new Float32Array(128), 1).setUsage(THREE.DynamicDrawUsage));
+        sp.far = new THREE.InstancedMesh(farGeo, AF.mat.voxel, 128);
+        sp.far.name = 'zoo:' + id + ':far'; sp.far.count = 0; sp.far.frustumCulled = false; sp.far.receiveShadow = true;
+        sp.far.instanceMatrix.setUsage(THREE.DynamicDrawUsage); sp.meshes.push(sp.far); AF.scene.add(sp.far);
         const cache = new Map();
         for (const part of G.parts) {
           const key = part.name + ':' + part.geo.boundingBox.min.toArray().join(',') + ':' + part.geo.boundingBox.max.toArray().join(',');
           let mesh = cache.get(key);
           if (!mesh) {
+            part.geo.setAttribute('aZooFade', new THREE.InstancedBufferAttribute(new Float32Array(128), 1).setUsage(THREE.DynamicDrawUsage));
             mesh = new THREE.InstancedMesh(part.geo, AF.mat.voxel, 128);
             mesh.castShadow = true; mesh.receiveShadow = true; mesh.frustumCulled = false; mesh.count = 0;
             mesh.name = 'zoo:' + id + ':' + part.name; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -19266,15 +19793,20 @@ try {
           phase: R() * 6, clock: R() * 20, v: 0, scale: id === 'giraffe' ? 0.94 + R() * 0.06 : 0.92 + R() * 0.08,
           state: 'wander', next: 'graze', timer: 25, elapsed: 0, seed: (R() * 4294967296) >>> 0, leader,
           fl: (k % 2 ? -1 : 1) * (2 + k * 0.6), fb: -2 - k * 1.5, frame: k % H.frames.length,
-          elevation: 0, sx: x, sz: z, sy: 0, acc: 0, floorAcc: 0, cooldown: 5 + k, attention: 0, pose: 0, wet: false };
+          elevation: 0, sx: x, sz: z, sy: 0, acc: 0, floorAcc: 0, cooldown: 5 + k, attention: 0, pose: 0, wet: false, far: false, fade: 0 };
         if (!leader) leader = an;
         dryTarget(an); an.x = an.tx; an.z = an.tz; an.y = W.groundY(an.x, an.z);
         if (id === 'penguin') { an.x = a + pad + k * 2.4; an.z = d - pad - 3; }
         if (id === 'giraffe' && k === 0) { an.x = H.browse[0] + 1.5; an.z = H.browse[1]; an.state = 'browse'; an.timer = 8; }
-        if (id === 'lion' || id === 'lioness') { an.x = H.rest[0] + (k - 0.5) * 1.5; an.z = H.rest[1]; an.y = 1; an.state = 'rest'; an.timer = 8 + k * 5; }
+        if (id === 'lion' || id === 'lioness') { an.x = H.rest[0] + (id === 'lion' ? -1.5 : k * 1.5); an.z = H.rest[1]; an.y = AF.surfaceBelow(an.x, an.z, 4, 4); an.state = 'rest'; an.timer = 8 + k * 5; }
         sp.list.push(an); Z.list.push(an);
       }
     }
+    AF.on('ready', () => {
+      for (const id in Z.species) for (const mesh of Z.species[id].meshes) mesh.material = zooFadeMaterial();
+      AF.renderer.compile(AF.scene, AF.camera);
+      for (const id in Z.species) for (const mesh of Z.species[id].meshes) mesh.material = AF.mat.voxel;
+    });
   });
   const stepAnimal = Z.stepAnimal = (an, dt, hours, player) => {
     const id = an.sp.id, S = an.sp.G.S, H = an.H, night = hours >= 20 || hours < 6;
@@ -19335,7 +19867,7 @@ try {
     if (an.state === 'ascend') target(an, H.rest[0], H.rest[1], 'wander', 'rest', 15);
     an.phase += dt * an.v * (4.5 / Math.max(0.5, an.sp.G.lift));
     const wet = inPool(an.hab, an.x, an.z); an.wet = !!wet;
-    if (an.floorAcc >= 0.3) {
+    if (an.floorAcc >= (an.far ? 0.9 : 0.3)) {
       an.floorAcc = 0;
       an.y = wet ? wet.y : H.id === 'primates' ? W.groundY(an.x, an.z) : AF.surfaceBelow(an.x, an.z, Math.max(W.groundY(an.x, an.z) + 1.2, an.y + 0.75), 3);
       if (!Number.isFinite(an.y)) an.y = W.groundY(an.x, an.z);
@@ -19403,7 +19935,7 @@ try {
       part.matrix.premultiply(part.parent < 0 ? tmpM : G.parts[part.parent].matrix);
       if ((name === 'spray' || name === 'droplet') && state !== 'spray') continue;
       if (!detail && (name === 'jaw' || name === 'ear' || name === 'antler' || name === 'droplet' || name === 'finger' || name === 'scute' || name === 'fold')) continue;
-      const mesh = part.mesh; mesh.setMatrixAt(mesh.count++, part.matrix);
+      appendInstance(part.mesh, part.matrix, -1 - an.fade);
     }
   };
   AF.onTick('zoo', 430, (dt) => {
@@ -19411,17 +19943,28 @@ try {
     const cp = AF.camera.position, low = AF.GFX && AF.GFX.tier === 'low', limit = low ? 120 : 150;
     viewMatrix.multiplyMatrices(AF.camera.projectionMatrix, AF.camera.matrixWorldInverse); frustum.setFromProjectionMatrix(viewMatrix);
     Z.near = false;
-    for (const id in Z.species) for (const mesh of Z.species[id].meshes) mesh.count = 0;
+    for (const id in Z.species) for (const mesh of Z.species[id].meshes) { mesh.count = 0; mesh.material = AF.mat.voxel; }
     for (const an of Z.list) {
-      const dx = cp.x - an.x, dz = cp.z - an.z, distance = dx * dx + dz * dz;
+      const dx = cp.x - an.x, dy = cp.y - an.y, dz = cp.z - an.z, distance = dx * dx + dy * dy + dz * dz;
       sphere.center.set(an.x, an.y + an.elevation + an.sp.G.height * 0.5, an.z); sphere.radius = Math.max(2.5, an.sp.G.height);
       if (distance > limit * limit || !frustum.intersectsSphere(sphere)) { an.acc = 0; continue; }
       Z.near = true; an.acc += dt;
-      const interval = distance < 2500 ? 0 : distance < 10000 ? 0.2 : 0.5;
+      if (distance > 62 * 62) an.far = true;
+      else if (distance < 52 * 52) an.far = false;
+      an.fade = Math.max(0, Math.min(1, an.fade + (an.far ? dt : -dt) / 0.3));
+      const interval = distance < 80 * 80 ? 0 : 0.1;
       if (an.acc >= interval) { stepAnimal(an, Math.min(an.acc, 0.5), AF.time ? AF.time.hours : 12, cp); an.acc = 0; }
-      renderAnimal(an, distance < (low ? 1600 : 5625));
+      if (an.fade < 1) renderAnimal(an, true);
+      if (an.fade > 0) {
+        const G = an.sp.G;
+        tmpE.set(an.state === 'swim' && an.sp.id === 'penguin' ? PI / 2 : 0, an.yaw, 0); tmpQ.setFromEuler(tmpE);
+        tmpM.compose(tmpV.set(an.x, an.y + an.elevation + (G.lift + an.pose) * an.scale, an.z), tmpQ, one.set(an.scale, an.scale, an.scale));
+        appendInstance(an.sp.far, tmpM, an.fade);
+      }
     }
-    for (const id in Z.species) for (const mesh of Z.species[id].meshes) { mesh.visible = mesh.count > 0; if (mesh.visible) mesh.instanceMatrix.needsUpdate = true; }
+    for (const id in Z.species) for (const mesh of Z.species[id].meshes) {
+      if (mesh.count) { mesh.layers.set(0); mesh.instanceMatrix.needsUpdate = true; mesh.geometry.attributes.aZooFade.needsUpdate = true; }
+    }
   });
   AF.test('zoo: giraffes stand at least 4.5 metres tall', () => {
     const sp = Z.species.giraffe;
@@ -19432,6 +19975,29 @@ try {
     ok: HAB.every((H) => Z.list.some((an) => an.hab === H.id) && H.rect[0] > ZOO.x0 && H.rect[2] < ZOO.x1 && H.rect[1] > ZOO.z0 && H.rect[3] < ZOO.z1),
     info: HAB.length + ' habitats, ' + Z.list.length + ' animals'
   }));
+  AF.test('zoo: merged far species preserve voxel attributes and reduce triangles', () => {
+    let ok = true, near = 0, far = 0;
+    for (const id in Z.species) {
+      const sp = Z.species[id], geo = sp.far.geometry, attributes = geo.attributes;
+      const full = sp.G.parts.reduce((total, part) => total + part.geo.index.count, 0);
+      near += full; far += geo.index.count;
+      ok = ok && geo.index.count < full * 0.5 && attributes.position.count === attributes.aPal.count
+        && attributes.position.count === attributes.aAN.count && attributes.position.count === attributes.aBU.count
+        && attributes.aZooFade.count >= sp.list.length && !sp.far.castShadow && sp.far.material === AF.mat.voxel;
+      for (const value of attributes.position.array) if (!Number.isFinite(value)) ok = false;
+      for (const value of geo.index.array) if (value >= attributes.position.count) ok = false;
+    }
+    return { ok, info: 'standing triangles ' + near / 3 + ' near, ' + far / 3 + ' far' };
+  });
+  AF.test('zoo: lion resting ledge has grounded natural rock', () => {
+    const H = HAB.find((habitat) => habitat.id === 'lions');
+    let ok = true;
+    for (const offset of [-1.5, 0, 1.5]) {
+      const x = H.rest[0] + offset, z = H.rest[1], y = AF.surfaceBelow(x, z, 4, 4);
+      ok = ok && y >= 1 && y <= 2 && AF.solidAt(x, y - 0.125, z);
+    }
+    return { ok, info: 'three supported rest positions; no rectangular upper lip' };
+  });
   AF.test('zoo: simulated herds move and stay inside their habitat bounds', () => {
     let moved = 0, inside = true;
     for (const original of Z.list) {
@@ -19504,6 +20070,7 @@ try {
     paint(ax0, az0, ax1, az1, (x, z) => conc[((Math.floor(x / 5) + Math.floor(z / 5)) & 1)]);
     paint(ax0, az1, ax1, A.taxiZ - 6, (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1]);
     for (let x = -580; x <= -380; x += 40) paint(x - 0.25, az0 + 6, x + 0.25, az1, () => yellow);   // stand lines
+    for (const x of [-450, -360]) { paint(x - 0.25, 84, x + 0.25, 118, () => yellow); paint(x - 3, 92, x + 3, 92.5, () => yellow); }
     // car park + forecourt off Airfield Road
     paint(-520, 12, -420, 42, (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1]);
     for (let x = -516; x < -424; x += 3) { paint(x, 14, x + 0.2, 20, () => white); paint(x, 34, x + 0.2, 40, () => white); }
@@ -19513,23 +20080,186 @@ try {
     for (let x = -600; x <= -350; x += 10) for (const z of [A.taxiZ - 6.25, A.taxiZ + 6]) W.fill(x, 0.25, z, x + 0.25, 0.5, z + 0.25, bl);
     // ---- terminal: deco, two storeys, glass wall on the apron side, the name on the roof line
     const [tx0, tz0, tx1, tz1] = A.terminal, cream = col(0xf2ece0, { pat: 'stucco', rough: 0.9 }), teal = col(0x2f6a7a), glass = col(0xa9c9d6, { glass: true, jitter: 0.05, edge: 0 });
-    W.fill(tx0, 0.25, tz0, tx1, 8.5, tz1, cream); W.clear(tx0 + 0.25, 0.5, tz0 + 0.25, tx1 - 0.25, 7.25, tz1 - 0.25);
+    W.fill(tx0, 0.25, tz0, tx1, 8.5, tz0 + 0.5, cream); W.fill(tx0, 0.25, tz1 - 0.5, tx1, 8.5, tz1, cream);
+    W.fill(tx0, 0.25, tz0, tx0 + 0.5, 8.5, tz1, cream); W.fill(tx1 - 0.5, 0.25, tz0, tx1, 8.5, tz1, cream);
+    W.fill(tx0, 8, tz0, tx1, 8.5, tz1, cream);
     W.fill(tx0 + 0.25, 0.25, tz0 + 0.25, tx1 - 0.25, 0.5, tz1 - 0.25, col(0xe8e4dc, { pat: 'none', patTop: 'checker', rough: 0.3 }));
-    W.fill(tx0 - 0.5, 8.5, tz0 - 0.5, tx1 + 0.5, 9, tz1 + 0.5, teal); W.fill(tx0 - 0.5, 4.25, tz0 - 0.5, tx1 + 0.5, 4.5, tz1 + 0.5, teal);
-    for (let x = tx0 + 2; x < tx1 - 2; x += 4) { W.fill(x, 1.0, tz1 - 0.25, x + 3, 4.0, tz1, glass); W.fill(x, 5.0, tz1 - 0.25, x + 3, 7.75, tz1, glass); W.fill(x, 5.0, tz0, x + 3, 7.75, tz0 + 0.25, glass); }
+    W.fill(tx0 - 0.5, 8.5, tz0 - 0.5, tx1 + 0.5, 9, tz1 + 0.5, teal);
+    W.fill(tx0 - 0.5, 4.25, tz0 - 0.5, tx1 + 0.5, 4.5, tz0 + 0.5, teal); W.fill(tx0 - 0.5, 4.25, tz1 - 0.5, tx1 + 0.5, 4.5, tz1 + 0.5, teal);
+    for (let x = tx0 + 2; x < tx1 - 2; x += 4) { W.fill(x, 1.0, tz1 - 0.5, x + 3, 4.0, tz1, glass); W.fill(x, 5.0, tz1 - 0.5, x + 3, 7.75, tz1, glass); W.fill(x, 5.0, tz0, x + 3, 7.75, tz0 + 0.5, glass); }
     const mid = (tx0 + tx1) / 2;
-    W.clear(mid - 2, 0.5, tz0, mid + 2, 3.5, tz0 + 0.25); W.clear(mid - 2, 0.5, tz1 - 0.25, mid + 2, 3.5, tz1);   // doors both sides
+    W.clear(mid - 3, 0.5, tz0, mid + 3, 4.5, tz0 + 0.5);
     W.fill(mid - 3, 3.5, tz0 - 2, mid + 3, 3.75, tz0, teal); W.fill(mid - 3, 3.5, tz1, mid + 3, 3.75, tz1 + 2, teal);   // canopies
-    const nameG = K().text('WESTGATE AIRFIELD', 0xffe9b0, { font: 'deco', vs: 1 / 10, k: 2.2 });
-    AF.placeStatic(nameG, mid, 9.1, tz0 - 0.35, 2, { collide: false }); AF.placeStatic(nameG, mid, 9.1, tz1 + 0.35, 0, { collide: false });
+    const nameG = K().text('WESTGATE AIRFIELD', 0xffe9b0, { font: 'deco', vs: 1 / 10, k: 1.5 });
+    AF.placeStatic(nameG, mid, 15.6, tz0 - 0.75, 2, { collide: false }); AF.placeStatic(nameG, mid, 11.1, tz1 + 0.35, 0, { collide: false });
     // inside: check-in desks, benches, a departures board, a café counter
     const wood = col(0x8a5a34, { rough: 0.5 }), brass = AF.MAT.brass;
     for (let x = tx0 + 4; x < tx0 + 20; x += 5) { W.fill(x, 0.5, tz0 + 4, x + 3.5, 1.5, tz0 + 5, wood); W.fill(x, 1.5, tz0 + 4, x + 3.5, 1.6, tz0 + 5, brass); }
-    for (let x = mid - 10; x < mid + 12; x += 6) { W.fill(x, 0.5, tz0 + 12, x + 4, 1.0, tz0 + 13, wood); W.fill(x, 1.0, tz0 + 12.75, x + 4, 1.75, tz0 + 13, wood); }
-    W.fill(mid - 6, 3.0, tz0 + 0.25, mid + 6, 6.5, tz0 + 0.5, col(0x141414)); for (let r = 0; r < 5; r++) W.fill(mid - 5.5, 3.4 + r * 0.6, tz0 + 0.5, mid + 5.5, 3.6 + r * 0.6, tz0 + 0.55, glow(0xffc84a, 1.2));
+    for (let x = tx0 + 6; x < tx1 - 12; x += 8) { W.fill(x, 0.5, 63, x + 4, 1, 64, teal); W.fill(x, 1, 63.75, x + 4, 1.75, 64, teal); }
+    W.fill(mid - 17, 4.75, tz0 + 0.5, mid - 5, 7.5, tz0 + 0.75, col(0x141414));
     W.fill(tx1 - 12, 0.5, tz0 + 3, tx1 - 3, 1.5, tz0 + 4.5, col(0x2f6a7a)); W.fill(tx1 - 12, 1.5, tz0 + 3, tx1 - 3, 1.6, tz0 + 4.5, col(0xeeeae0, { pat: 'marble' }));
-    for (let x = tx0 + 5; x < tx1 - 4; x += 10) { W.fill(x, 7.0, tz0 + 8, x + 1, 7.25, tz0 + 16, glow(0xfff4dc, 1.8, 'night')); AF.addLight({ x: x + 0.5, y: 6.8, z: tz0 + 12, color: 0xffe6c0, intensity: 1, range: 12, kind: 'interior' }); }
-    AF.addBuilding({ id: 'terminal-west', name: 'Westgate Airfield Terminal', kind: 'airport', box: [tx0, 0, tz0, tx1, 9, tz1], doors: [{ x: mid, y: 0.5, z: tz0, yaw: 0 }, { x: mid, y: 0.5, z: tz1, yaw: PI }], interior: true, owner: 'west' });
+    const lamp = glow(0xfff4dc, 1.8), ink = col(0x17252a), steel = AF.MAT.steel;
+    const sign = (text, x, y, z, vs = 0.125) => AF.placeStatic(K().text(text, 0xffe9b0, { font: 'deco', vs, k: 1.5 }), x, y, z, 2, { collide: false });
+    W.fill(tx0 + 4, 8.75, 49, tx1 - 4, 9.5, 65, cream); W.fill(mid - 13, 9.5, 50, mid + 13, 11, 64, teal);
+    for (let x = tx0 + 4; x < tx1 - 2; x += 8) W.fill(x, 7.5, 48, x + 1, 7.75, 68, lamp);
+    for (let depth = 0; depth < 6; depth += 0.25) {
+      const inset = Math.ceil((6 - Math.sqrt(36 - (6 - depth - 0.125) ** 2)) * 4) / 4;
+      for (const front of [true, false]) {
+        const edgeZ = front ? tz0 + depth : tz1 - depth - 0.25;
+        W.clear(tx0 - 0.5, 0.5, edgeZ, tx0 + inset, 9.25, edgeZ + 0.25);
+        W.clear(tx1 - inset, 0.5, edgeZ, tx1 + 0.5, 9.25, edgeZ + 0.25);
+        for (const edgeX of [tx0 + inset, tx1 - inset - 0.5]) {
+          W.fill(edgeX, 0.5, edgeZ, edgeX + 0.5, 8, edgeZ + 0.25, cream);
+          for (const height of [2, 5.5]) W.fill(edgeX, height, edgeZ, edgeX + 0.5, height + 1.5, edgeZ + 0.25, glass);
+        }
+        W.fill(tx0 + inset - 0.5, 8, edgeZ, tx1 - inset + 0.5, 8.5, edgeZ + 0.25, cream);
+        W.fill(tx0 + inset - 0.75, 8.5, edgeZ, tx1 - inset + 0.75, 8.75, edgeZ + 0.25, teal);
+      }
+    }
+    for (let x = tx0 + 10; x < tx1 - 7; x += 7) {
+      if (Math.abs(x - mid) < 15) continue;
+      for (const faceZ of [tz0 - 0.5, tz1]) {
+        W.fill(x, 0.5, faceZ, x + 0.75, 9.5, faceZ + 0.5, cream);
+        W.fill(x + 0.25, 2, faceZ - 0.25, x + 0.5, 8.75, faceZ, brass);
+      }
+      W.fill(x + 1.25, 1.5, tz0, x + 5.75, 3.5, tz0 + 0.5, glass);
+    }
+    for (const height of [3.75, 4.25, 7.75]) {
+      W.fill(tx0 + 6, height, tz0 - 0.25, tx1 - 6, height + 0.25, tz0, teal);
+      W.fill(tx0 + 6, height, tz1, tx1 - 6, height + 0.25, tz1 + 0.25, teal);
+    }
+    W.clear(mid - 12, 8, tz0, mid + 12, 11, 55.5);
+    for (const x of [mid - 12.5, mid + 12]) W.fill(x, 8, tz0, x + 0.5, 14, 55.5, cream);
+    W.fill(mid - 12, 8, 55.5, mid + 12, 14, 56, cream);
+    W.fill(mid - 12, 4.5, tz0, mid + 12, 14, tz0 + 0.5, cream);
+    W.fill(mid - 10, 6.5, tz0, mid + 10, 13.5, tz0 + 0.5, glass);
+    for (let offset = -10; offset <= 10; offset += 5) {
+      const finTop = 14 - Math.abs(offset) * 0.125;
+      W.fill(mid + offset - 0.25, 5.5, tz0 - 0.75, mid + offset + 0.25, finTop, tz0 + 0.75, cream);
+      W.fill(mid + offset - 0.25, 6.75, tz0 - 1, mid + offset + 0.25, finTop - 0.5, tz0 - 0.75, brass);
+    }
+    W.fill(mid - 13.5, 14, tz0 - 1, mid + 13.5, 14.5, 57, teal);
+    W.fill(mid - 11, 14.5, tz0 + 1, mid + 11, 15, 55, cream);
+    W.fill(mid - 8, 15, tz0 + 2, mid + 8, 15.5, 54, cream);
+    W.fill(mid - 11, 14.5, tz0 - 0.5, mid + 11, 16.75, tz0, teal);
+    for (let clockX = -1.75; clockX <= 1.75; clockX += 0.25) for (let clockY = -1.75; clockY <= 1.75; clockY += 0.25) {
+      const radius = Math.hypot(clockX, clockY);
+      if (radius > 1.75) continue;
+      W.fill(mid + clockX, 11.25 + clockY, tz0 - 1.25, mid + clockX + 0.25, 11.5 + clockY, tz0 - 1, radius > 1.4 ? brass : lamp);
+    }
+    W.fill(mid - 0.125, 11.25, tz0 - 1.5, mid + 0.125, 12.5, tz0 - 1.25, ink);
+    W.fill(mid, 11.25, tz0 - 1.5, mid + 1, 11.5, tz0 - 1.25, ink);
+    for (const doorX of [mid - 6, mid, mid + 6]) {
+      W.clear(doorX - 2.75, 0.5, tz0, doorX + 2.75, 4.25, tz0 + 0.5);
+      W.fill(doorX - 3, 0.5, tz0 - 0.25, doorX - 2.75, 4.5, tz0 + 0.5, brass);
+      W.fill(doorX + 2.75, 0.5, tz0 - 0.25, doorX + 3, 4.5, tz0 + 0.5, brass);
+    }
+    sign('DEPARTURES', mid - 6, 4.8, tz0 - 0.75, 0.1); sign('ARRIVALS', mid + 6, 4.8, tz0 - 0.75, 0.1);
+    W.fill(mid - 25, 5.75, 30, mid + 25, 6.5, 44, cream);
+    W.fill(mid - 25.5, 6.5, 29.5, mid + 25.5, 6.75, 44, teal);
+    W.fill(mid - 24, 5.5, 30.5, mid + 24, 5.75, 31, brass);
+    for (const offset of [-23, -14, 14, 23]) {
+      W.fill(mid + offset, 0.25, 30.5, mid + offset + 0.5, 5.75, 31, steel);
+      W.fill(mid + offset - 0.5, 5.25, 30, mid + offset + 1, 5.75, 31.5, cream);
+    }
+    for (let x = mid - 21; x < mid + 22; x += 7) W.fill(x, 5.5, 32, x + 0.5, 5.75, 42, lamp);
+    paint(mid - 25, 31.5, mid + 25, 36.5, () => asph[0]);
+    paint(mid - 25, 32, mid + 25, 32.25, () => yellow); paint(mid - 25, 36, mid + 25, 36.25, () => yellow);
+    for (let z = 30; z < 38; z += 1) paint(mid - 3, z, mid + 3, z + 0.5, () => white);
+    for (const x of [mid - 19, mid + 17]) {
+      W.fill(x, 0.25, 39.5, x + 3, 1, 42, cream);
+      W.fill(x + 0.25, 1, 39.75, x + 2.75, 1.5, 41.75, grassA);
+      W.fill(x - 4, 0.5, 40, x - 1, 1, 41, wood); W.fill(x - 4, 1, 40.75, x - 1, 1.75, 41, teal);
+    }
+    for (const x of [mid - 28, mid + 28]) {
+      W.fill(x, 0.25, 29, x + 0.25, 10, 29.25, steel);
+      W.fill(x + 0.25, 7.75, 29, x + 2.75, 9.5, 29.25, teal); W.fill(x + 0.25, 8.5, 28.75, x + 2.75, 8.75, 29, brass);
+      W.fill(x, 0.25, 39, x + 0.5, 5, 39.5, ink);
+      W.fill(x - 0.5, 4.75, 38.5, x + 1, 5, 40, cream); W.fill(x - 0.25, 5, 38.75, x + 0.75, 5.75, 39.75, lamp);
+    }
+    for (const railZ of [59, 66]) {
+      W.fill(mid - 24, 9.5, railZ, mid + 24, 9.75, railZ + 0.25, steel);
+      W.fill(mid - 24, 10.75, railZ, mid + 24, 11, railZ + 0.25, brass);
+      for (let x = mid - 24; x <= mid + 24; x += 2) W.fill(x, 9.5, railZ, x + 0.25, 10.75, railZ + 0.25, steel);
+    }
+    for (const x of [mid - 24, mid + 23.75]) { W.fill(x, 10.75, 59, x + 0.25, 11, 66, brass); for (let z = 59; z <= 66; z += 2) W.fill(x, 9.5, z, x + 0.25, 10.75, z + 0.25, steel); }
+    W.fill(-473, 3.75, 21, -467, 4.25, 38, teal);
+    for (const z of [22, 29, 36]) for (const x of [-473, -467.5]) W.fill(x, 0.25, z, x + 0.5, 3.75, z + 0.5, cream);
+    W.fill(mid - 4, 4.5, 43.5, mid + 4, 5, 45, AF.MAT.brass);
+    for (const x of [mid - 3, mid + 2.75]) W.fill(x, 0.5, 43.5, x + 0.25, 4.5, 44.5, AF.MAT.brass);
+    for (const x of [mid - 2.75, mid + 2.5]) { W.fill(x, 0.5, 44.5, x + 0.25, 3.75, 46.5, glass); W.fill(x, 3.75, 44.5, x + 0.25, 4, 46.5, AF.MAT.brass); }
+    W.fill(mid - 3, 0.25, 37, mid + 3, 0.5, 44, col(0x9f3034));
+    W.fill(tx0 + 0.5, 0.5, 56, tx1 - 0.5, 8, 56.5, cream);
+    for (const x of [-490, -484]) {
+      W.clear(x - 1, 0.5, 56, x + 1, 3.5, 56.5);
+      W.fill(x - 1.25, 0.5, 55.5, x - 1, 3.5, 57, steel); W.fill(x + 1, 0.5, 55.5, x + 1.25, 3.5, 57, steel);
+      W.fill(x - 1.25, 3.5, 55.5, x + 1.25, 3.75, 57, teal); W.fill(x - 0.5, 3.25, 55.5, x + 0.5, 3.5, 55.75, glow(0x56ff98, 2));
+      for (const side of [-1.5, 1.5]) { W.fill(x + side, 0.5, 51, x + side + 0.25, 2, 55.5, steel); }
+      W.fill(x + 1.75, 0.75, 51, x + 3.5, 1.25, 58, ink); W.fill(x + 1.75, 1.25, 54, x + 3.5, 2.75, 56, teal);
+      W.clear(x + 2, 1.25, 54, x + 3.25, 1.75, 56);
+      for (const z of [51.5, 52.75, 57]) W.fill(x + 2, 1.25, z, x + 3.25, 1.5, z + 0.75, steel);
+      W.fill(x - 2.75, 0.5, 58, x - 1.5, 1.5, 59, teal);
+    }
+    for (const x of [-499, -493]) for (let z = 49; z <= 54; z += 2.5) { W.fill(x, 0.5, z, x + 0.25, 1.5, z + 0.25, AF.MAT.brass); W.fill(x, 1.25, z, x + 0.25, 1.5, Math.min(55, z + 2.5), col(0x9f3034)); }
+    sign('SECURITY', -487, 4.3, 55.75); sign('CHECK IN', -534, 3, 48); sign('CAFE / NEWS', -445, 3, 61);
+    W.fill(-454, 0.5, 59, -438, 1.5, 60.5, teal); W.fill(-454, 1.5, 59, -438, 1.75, 60.5, brass);
+    for (let x = -452; x < -440; x += 2) W.fill(x, 1.75, 60, x + 1, 2.75, 60.5, wood);
+    W.fill(-542, 0.5, 50, -521, 1, 54, ink); W.fill(-540, 1, 51, -523, 1.5, 53, steel);
+    sign('ARRIVALS / BAGGAGE', -531, 3, 54.5);
+    for (let x = tx0 + 4; x < tx0 + 21; x += 5) { W.fill(x + 3.5, 0.5, 48, x + 4.5, 1, 51, ink); W.fill(x + 3.5, 1, 49, x + 4.5, 1.25, 50, steel); W.fill(x, 1.75, 48.5, x + 0.75, 2.25, 49, ink); }
+    AF.placeStatic(K().text('SA109 COAST G1', 0xffc84a, { font: 'deco', vs: 0.1, k: 1.5 }), -502, 5.25, 45, 0, { collide: false });
+    AF.placeStatic(K().text('SA227 ISLES G2', 0xffc84a, { font: 'deco', vs: 0.1, k: 1.5 }), -502, 6.5, 45, 0, { collide: false });
+    for (const gx of [-450, -440]) {
+      W.clear(gx - 1.5, 0.5, 69.5, gx + 1.5, 5.25, 70.5);
+      sign(gx === -450 ? 'GATE 1' : 'GATE 2', gx, 5.75, 69.25);
+      W.clear(gx - 1.5, 0.5, 62, gx + 1.5, 4, 69.5);
+      for (let step = 0; step < 5; step++) W.fill(gx - 1.5, 0.5, 62 + step * 1.5, gx + 1.5, 0.75 + step * 0.25, 63.5 + step * 1.5, cream);
+      for (const x of [gx - 1.75, gx + 1.5]) {
+        for (let step = 0; step < 5; step++) W.fill(x, 1.75 + step * 0.25, 62 + step * 1.5, x + 0.25, 2 + step * 0.25, 63.5 + step * 1.5, brass);
+      }
+    }
+    W.fill(-453, 1.5, 69.5, -354, 1.75, 78, cream);
+    W.fill(-453, 1.75, 77.5, -354, 2.75, 78, cream); W.fill(-453, 2.75, 77.5, -354, 4.75, 78, glass);
+    W.fill(-434, 1.75, 69.5, -354, 2.75, 70, cream); W.fill(-434, 2.75, 69.5, -354, 4.75, 70, glass);
+    W.fill(-453, 4.75, 69.5, -354, 5.5, 78, cream); W.fill(-454, 5.5, 69, -353, 5.75, 78.5, teal);
+    W.fill(-453, 1.75, 70, -452.5, 4.75, 77.5, cream); W.fill(-354.5, 1.75, 70, -354, 4.75, 77.5, cream);
+    for (let x = -450; x < -354; x += 8) {
+      W.fill(x, 1.75, 77.25, x + 0.5, 5.5, 78.25, cream);
+      if (x > -432) W.fill(x, 1.75, 69.25, x + 0.5, 5.5, 70.25, cream);
+      W.fill(x, 0.25, 73, x + 0.75, 1.5, 74.5, steel);
+      W.fill(x + 2, 5, 71, x + 2.5, 5.25, 76, lamp);
+    }
+    for (const stand of [-450, -360]) {
+      const bridgeX = stand + 2;
+      for (let slice = -3.5; slice < 3.5; slice += 0.25) {
+        const reach = Math.floor(Math.sqrt(12.25 - (slice + 0.125) ** 2) * 4) / 4;
+        W.fill(bridgeX + slice, 1.5, 74 - reach, bridgeX + slice + 0.25, 1.75, 74 + reach, cream);
+        W.fill(bridgeX + slice, 5.25, 74 - reach, bridgeX + slice + 0.25, 5.75, 74 + reach, teal);
+      }
+      for (let slice = -4.25; slice < 4.25; slice += 0.25) {
+        const reach = Math.floor(Math.sqrt(18.0625 - (slice + 0.125) ** 2) * 4) / 4;
+        if (reach < 0.25) continue;
+        W.fill(bridgeX + slice, 5.75, 74 - reach, bridgeX + slice + 0.25, 6.5, 74 - reach + 0.25, glass);
+        W.fill(bridgeX + slice, 5.75, 74 + reach - 0.25, bridgeX + slice + 0.25, 6.5, 74 + reach, glass);
+        W.fill(bridgeX + slice, 6.5, 74 - reach - 0.25, bridgeX + slice + 0.25, 6.75, 74 + reach + 0.25, teal);
+      }
+      for (const offset of [-3, 0, 3]) for (const z of [70.5, 77.25]) W.fill(bridgeX + offset, 5.75, z, bridgeX + offset + 0.25, 6.5, z + 0.25, brass);
+      W.clear(bridgeX - 1.5, 1.75, 77.25, bridgeX + 1.5, 5.25, 78.25);
+      W.fill(bridgeX - 1.5, 1.5, 76, bridgeX + 1.5, 1.75, 83, steel);
+      W.fill(bridgeX - 1.5, 5, 76, bridgeX + 1.5, 5.5, 83, cream);
+      for (const x of [bridgeX - 1.5, bridgeX + 1.25]) {
+        W.fill(x, 1.75, 76, x + 0.25, 2.75, 83, cream);
+        W.fill(x, 2.75, 76, x + 0.25, 4.25, 83, glass);
+        W.fill(x, 4.25, 76, x + 0.25, 5, 83, cream);
+        for (const z of [78, 80, 82]) W.fill(x, 2.75, z, x + 0.25, 4.25, z + 0.25, steel);
+      }
+      W.fill(bridgeX - 0.5, 0.5, 79.5, bridgeX + 0.5, 1.5, 80.5, steel);
+      W.fill(bridgeX - 1.25, 0.75, 79.75, bridgeX + 1.25, 1, 80.25, steel);
+      for (const x of [bridgeX - 1.5, bridgeX + 1]) W.fill(x, 0.25, 79.5, x + 0.5, 1, 80.5, ink);
+      sign(stand === -450 ? '01' : '02', bridgeX, 4.3, 76.75, 0.2);
+    }
+    for (const x of [-531, -495, -460, -442]) AF.addLight({ x, y: 6.8, z: 61, color: 0xffe6c0, intensity: 1, range: 18, kind: 'interior' });
+    AF.addBuilding({ id: 'terminal-west', name: 'Westgate Airfield Terminal', kind: 'airport', box: [tx0, 0, tz0, tx1, 16.75, tz1], doors: [{ x: mid, y: 0.5, z: tz0, yaw: 0 }, { x: mid - 6, y: 0.5, z: tz0, yaw: 0 }, { x: mid + 6, y: 0.5, z: tz0, yaw: 0 }, { x: -450, y: 1.75, z: tz1, yaw: PI }, { x: -440, y: 1.75, z: tz1, yaw: PI }], interior: true, owner: 'west' });
     // ---- control tower with a glass cab + a rotating-looking beacon (glows at night)
     const [twx, twz] = A.tower;
     W.fill(twx - 3, 0.25, twz - 3, twx + 3, 16, twz + 3, cream); W.fill(twx - 3.5, 16, twz - 3.5, twx + 3.5, 16.5, twz + 3.5, teal);
@@ -19558,6 +20288,34 @@ try {
     W.fill(A.x0, 1.75, A.z0, -522, 1.875, A.z0 + 0.125, post); W.fill(-418, 1.75, A.z0, A.x1, 1.875, A.z0 + 0.125, post);
     AF.addLabel('Westgate Airfield', (A.x0 + A.x1) / 2, 150, 'place');
     A.buildMs = Math.round(performance.now() - t0);
+  });
+  let securityAt = -30, securityZ = 0;
+  AF.onTick('airfield-security', 445, (dt, t) => {
+    const player = AF.player;
+    if (AF.mode !== 'walk' || !player || Math.abs(player.x + 487) > 10 || Math.abs(player.z - 56) > 8) { securityZ = 0; return; }
+    if (securityZ > 0 && securityZ < 56.25 && player.z >= 56.25 && player.y < 2 && (Math.abs(player.x + 490) < 0.85 || Math.abs(player.x + 484) < 0.85) && t - securityAt > 12) { AF.emit('toast', 'Security: all clear, enjoy your flight'); securityAt = t; }
+    securityZ = player.z;
+  });
+  AF.test('airfield: entry and security arches are walkable', () => {
+    let ok = true;
+    const feet = (x, z) => Math.max(AF.surfaceBelow(x - 0.3, z, 2, 3), AF.surfaceBelow(x + 0.3, z, 2, 3), AF.surfaceBelow(x, z - 0.3, 2, 3), AF.surfaceBelow(x, z + 0.3, 2, 3));
+    for (const x of [-491, -490, -484]) for (let z = x === -491 ? 38 : 52; z < (x === -491 ? 50 : 60); z += 0.5) if (AF.boxBlocked(x, 0.5, z, 0.3, 1.75)) ok = false;
+    for (let z = 22; z < 38; z += 0.5) { const y = feet(-470, z); if (y > 0.5 || AF.boxBlocked(-470, y, z, 0.3, 1.75)) ok = false; }
+    for (let x = -470; x >= -491; x -= 0.5) { const y = feet(x, 38); if (y > 0.5 || AF.boxBlocked(x, y, 38, 0.3, 1.75)) ok = false; }
+    return { ok, info: 'car park, covered entrance and two checkpoint lanes' };
+  });
+  AF.test('airfield: covered concourse and raised boarding tubes are walkable', () => {
+    let ok = true;
+    for (const x of [-504, -503.5, -503, -479, -478.5, -478]) if (AF.boxBlocked(x, 0.5, 49, 0.3, 1.75)) ok = false;
+    for (let x = -450; x <= -357; x += 0.5) if (AF.boxBlocked(x, 1.75, 74, 0.3, 1.75)) ok = false;
+    for (const x of [-448, -358]) for (let z = 74; z < 83; z += 0.5) {
+      if (AF.boxBlocked(x, 1.75, z, 0.3, 1.75) || Math.abs(AF.surfaceBelow(x, z, 2, 3) - 1.75) > 0.01) ok = false;
+    }
+    for (const x of [-450, -440]) for (let step = 0; step < 5; step++) {
+      const z = 62.75 + step * 1.5, y = 0.75 + step * 0.25;
+      if (AF.boxBlocked(x, y, z, 0.3, 1.75)) ok = false;
+    }
+    return { ok, info: 'two gate stairs, continuous covered pier, bridge floors at 1.75m' };
   });
 }
 
@@ -21615,6 +22373,14 @@ try {
         return { m, prop: [cx - 22, cy - 2, 66.5], prop2: [cx + 22, cy - 2, 66.5], blade: 6, pc: K }; } },
   };
   const geoCache = {};
+  PL.trafficGeometry = () => {
+    const B = TYPES.airliner.build(), red = C(0xff3040, { emit: 0xff2030, emitK: 2, mode: 'always' }), green = C(0x30ff80, { emit: 0x20ff60, emitK: 2, mode: 'always' }), white = C(0xffffff, { emit: 0xffffff, emitK: 2, mode: 'always' });
+    const gear = new AF.Model(B.m.w, B.m.h, B.m.d);
+    for (let x = 0; x < B.m.w; x++) for (let y = 0; y < 6; y++) for (let z = 0; z < B.m.d; z++) { const value = B.m.get(x, y, z); if (value && (Math.abs(x - 59) >= 20 && Math.abs(x - 59) <= 24)) { gear.set(x, y, z, value); B.m.set(x, y, z, 0); } }
+    B.m.box(0, 7, 55, 2, 9, 57, red); B.m.box(116, 7, 55, 118, 9, 57, green); B.m.box(58, 20, 2, 60, 22, 4, white);
+    const options = { vs: 0.25, anchor: [0.5, 0, 0.5] }, shared = planeGeo('airliner');
+    return { body: AF.meshModel(B.m, options), gear: AF.meshModel(gear, options), prop: shared.pgeo, props: shared.props };
+  };
   const planeGeo = (id) => {
     if (geoCache[id]) return geoCache[id];
     const T = TYPES[id], B = T.build();
@@ -21908,6 +22674,137 @@ try {
 }
 
 } catch (e) { AF.partError('52-planes.js', e); }
+
+try {
+{
+  const A = AF.PLAN.west.air, PI = Math.PI, PERIOD = 480;
+  const traffic = AF.airTraffic = { period: PERIOD, flights: [], runway: -1, bridges: [false, false] };
+  const pose = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' };
+  const matrix = new THREE.Matrix4(), position = new THREE.Vector3(), scale = new THREE.Vector3(1, 1, 1), rotation = new THREE.Quaternion(), euler = new THREE.Euler(0, 0, 0, 'YXZ');
+  let bodies, gears, props, strobes, docks, batches, model, lastFar = -1;
+  const rounded = (points) => {
+    const samples = [], append = (x, z) => samples.push(x, z);
+    append(points[0][0], points[0][1]);
+    for (let index = 1; index < points.length - 1; index++) {
+      const before = points[index - 1], at = points[index], after = points[index + 1], inLength = Math.hypot(at[0] - before[0], at[1] - before[1]), outLength = Math.hypot(after[0] - at[0], after[1] - at[1]);
+      const radius = Math.min(7, inLength * 0.3, outLength * 0.3), ax = at[0] + (before[0] - at[0]) * radius / inLength, az = at[1] + (before[1] - at[1]) * radius / inLength, bx = at[0] + (after[0] - at[0]) * radius / outLength, bz = at[1] + (after[1] - at[1]) * radius / outLength;
+      append(ax, az);
+      for (let step = 1; step <= 16; step++) { const amount = step / 16, rest = 1 - amount; append(rest * rest * ax + 2 * rest * amount * at[0] + amount * amount * bx, rest * rest * az + 2 * rest * amount * at[1] + amount * amount * bz); }
+    }
+    append(points[points.length - 1][0], points[points.length - 1][1]);
+    const distances = new Float64Array(samples.length / 2);
+    for (let index = 1; index < distances.length; index++) distances[index] = distances[index - 1] + Math.hypot(samples[index * 2] - samples[index * 2 - 2], samples[index * 2 + 1] - samples[index * 2 - 1]);
+    return { points: new Float64Array(samples), distances, length: distances[distances.length - 1] };
+  };
+  const along = (path, amount, result) => {
+    const distance = Math.max(0, Math.min(1, amount)) * path.length, lengths = path.distances, points = path.points;
+    let low = 1, high = lengths.length - 1;
+    while (low < high) { const middle = (low + high) >> 1; if (lengths[middle] < distance) low = middle + 1; else high = middle; }
+    const index = low, fraction = (distance - lengths[index - 1]) / (lengths[index] - lengths[index - 1]), dx = points[index * 2] - points[index * 2 - 2], dz = points[index * 2 + 1] - points[index * 2 - 1];
+    result.x = points[index * 2 - 2] + dx * fraction; result.z = points[index * 2 - 1] + dz * fraction; result.yaw = Math.atan2(dx, dz);
+  };
+  const smooth = (amount) => amount * amount * (3 - 2 * amount);
+  const sample = traffic.sample = (flight, time, result) => {
+    result.y = 0.25; result.pitch = result.roll = 0; result.gear = true;
+    if (time < 55) {
+      const amount = time / 55; result.x = -2600 + 1994 * amount; result.z = 152; result.yaw = PI / 2;
+      const distance = -606 - result.x; result.y = 0.25 + (distance > 80 ? distance * 0.0524 : 0.0524 * (2 * distance * distance / 80 - distance * distance * distance / 6400));
+      result.pitch = distance < 80 ? 0.06 * (1 - distance / 80) : -0.0524; result.gear = distance < 1000; result.phase = 'arrival';
+    } else if (time < 70) { const amount = (time - 55) / 15; result.x = -606 + 258 * (1.88 * amount - 0.88 * amount * amount); result.z = 152; result.yaw = PI / 2; result.phase = 'rollout'; }
+    else if (time < 105) { along(flight.arrival, smooth((time - 70) / 35), result); result.phase = 'taxi-in'; }
+    else if (time < 180) { result.x = flight.stand; result.z = 94; result.yaw = PI; result.phase = 'parked'; }
+    else if (time < 190) { result.x = flight.stand; result.z = 94 + 22 * smooth((time - 180) / 10); result.yaw = PI; result.phase = 'pushback'; }
+    else if (time < 240) { along(flight.departure, smooth((time - 190) / 50), result); result.phase = 'taxi-out'; }
+    else if (time < 254) { const amount = (time - 240) / 14; result.x = -352 - 266 * (0.08 * amount + 0.92 * amount * amount); result.z = 152; result.yaw = -PI / 2; result.pitch = Math.max(0, (amount - 0.75) * 0.48); result.phase = 'takeoff'; }
+    else { const elapsed = time - 254, angle = Math.min(PI / 3, elapsed * 0.018), radius = 2200; result.x = -618 - radius * Math.sin(angle) - Math.max(0, elapsed - PI / 0.054) * 40 * Math.cos(PI / 3); result.z = 152 + radius * (1 - Math.cos(angle)) + Math.max(0, elapsed - PI / 0.054) * 40 * Math.sin(PI / 3); result.y = 0.25 + elapsed * 3.5; result.yaw = -PI / 2 + angle; result.pitch = 0.09; result.roll = elapsed < PI / 0.054 ? -0.12 : 0; result.gear = elapsed < 5; result.phase = 'climb'; }
+    return result;
+  };
+  const phaseAt = (time, offset) => ((time - offset) % PERIOD + PERIOD) % PERIOD;
+  const runwayUse = (time) => time >= 48 && time < 80 || time >= 240 && time < 266;
+  const hazard = () => { const plane = AF.mode === 'fly' && AF.planes.cur; return !!(plane && plane.x > A.runway.x0 - 30 && plane.x < A.runway.x1 + 30 && Math.abs(plane.z - 152) < 26 && plane.y < 30); };
+  const batch = (geometry, count, name) => { const mesh = new THREE.InstancedMesh(geometry, AF.mat.voxel, count); mesh.name = name; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = true; mesh.receiveShadow = true; mesh.matrixAutoUpdate = false; AF.scene.add(mesh); return mesh; };
+  AF.onBuild('air-traffic', 641, () => {
+    model = AF.planes.trafficGeometry();
+    bodies = batch(model.body, 2, 'air-traffic bodies'); gears = batch(model.gear, 2, 'air-traffic gear'); props = batch(model.prop, 4, 'air-traffic propellers');
+    const flash = new AF.Model(2, 2, 2); flash.box(0, 0, 0, 2, 2, 2, AF.westKit.glow(0xffffff, 3));
+    strobes = batch(AF.meshModel(flash, { vs: 0.125, anchor: [0.5, 0.5, 0.5] }), 2, 'air-traffic strobes');
+    const dock = new AF.Model(12, 14, 10), color = AF.col(0x394b52, { jitter: 0, rough: 0.8 });
+    dock.box(0, 0, 0, 12, 14, 10, color); dock.box(1, 1, 0, 11, 13, 10, 0);
+    docks = batch(AF.meshModel(dock, { vs: 0.25, anchor: [0.5, 0, 0.5] }), 2, 'air-traffic bridge bellows');
+    batches = [bodies, gears, props, strobes, docks];
+    for (let index = 0; index < 2; index++) {
+      const stand = index === 0 ? -450 : -360;
+      traffic.flights.push({ name: index === 0 ? 'SA109 Coast' : 'SA227 Isles', offset: index * 240, stand, cycle: -999, delay: 0, diverted: false, goAt: 0, goX: 0, goY: 0, goZ: 0, x: 0, y: 0, z: 0, phase: '', arrival: rounded([[-348, 152], [-344, 152], [-344, 124], [stand, 124], [stand, 94]]), departure: rounded([[stand, 116], [stand, 124], [-344, 124], [-344, 152], [-352, 152]]) });
+    }
+  });
+  const update = traffic.update = (dt, time) => {
+    if (!bodies) return;
+    const camera = AF.camera.position, blocked = hazard(), farSlot = Math.floor(time * 4);
+    let dirty = false, near = false, inRange = false;
+    for (let index = 0; index < traffic.flights.length; index++) {
+      const flight = traffic.flights[index], cycle = Math.floor((time - flight.offset) / PERIOD);
+      if (flight.cycle === -999 || time - flight.offset - flight.cycle * PERIOD - flight.delay >= PERIOD || cycle < flight.cycle) { if (traffic.runway === index) traffic.runway = -1; flight.cycle = cycle; flight.delay = 0; flight.diverted = false; }
+      let phase = time - flight.offset - flight.cycle * PERIOD - flight.delay;
+      if (blocked && traffic.runway === index && phase >= 240 && phase < 254) { flight.delay += dt; phase -= dt; }
+      if (phase >= 48 && phase < 55 && !flight.diverted) {
+        if (blocked || traffic.runway >= 0 && traffic.runway !== index) { sample(flight, phase, pose); flight.diverted = true; flight.goAt = time; flight.goX = pose.x; flight.goY = pose.y; flight.goZ = pose.z; if (traffic.runway === index) traffic.runway = -1; }
+        else traffic.runway = index;
+      }
+      if (!flight.diverted && phase >= 240 && phase < 266 && traffic.runway !== index) {
+        const other = phaseAt(time, traffic.flights[1 - index].offset);
+        if (blocked || traffic.runway >= 0 || other >= 20 && other < 80) { flight.delay += dt; phase = 240; }
+        else traffic.runway = index;
+      }
+      if (traffic.runway === index && (phase >= 80 && phase < 240 || phase >= 266)) traffic.runway = -1;
+      sample(flight, phase, pose);
+      if (flight.diverted) { const elapsed = time - flight.goAt, turn = Math.min(PI / 2, elapsed * 0.05); pose.x = flight.goX + 700 * Math.sin(turn); pose.z = flight.goZ + 700 * (1 - Math.cos(turn)) + Math.max(0, elapsed - PI * 10) * 35; pose.y = flight.goY + elapsed * 4; pose.yaw = PI / 2 - turn; pose.pitch = 0.11; pose.roll = turn < PI / 2 ? 0.18 : 0; pose.gear = elapsed < 4; pose.phase = 'go-around'; }
+      flight.x = pose.x; flight.y = pose.y; flight.z = pose.z; flight.phase = pose.phase;
+      traffic.bridges[index] = pose.phase === 'parked';
+      const distance2 = (pose.x - camera.x) ** 2 + (pose.y - camera.y) ** 2 + (pose.z - camera.z) ** 2;
+      if (distance2 < 22500) near = true;
+      if (distance2 < 4000000 || traffic.bridges[index]) inRange = true;
+      if (distance2 > 22500 && farSlot === lastFar) continue;
+      dirty = true;
+      euler.set(-pose.pitch, pose.yaw, pose.roll, 'YXZ'); rotation.setFromEuler(euler); position.set(pose.x, pose.y, pose.z); scale.setScalar(distance2 > 4000000 ? 0 : 1); matrix.compose(position, rotation, scale); bodies.setMatrixAt(index, matrix);
+      scale.setScalar(pose.gear && distance2 < 4000000 ? 1 : 0); matrix.compose(position, rotation, scale); gears.setMatrixAt(index, matrix);
+      for (let propIndex = 0; propIndex < 2; propIndex++) { position.copy(model.props[propIndex]).applyQuaternion(rotation); position.x += pose.x; position.y += pose.y; position.z += pose.z; euler.set(-pose.pitch, pose.yaw, pose.roll, 'YXZ'); rotation.setFromEuler(euler); const spinning = pose.phase === 'parked' ? 0 : time * 45; euler.set(0, 0, spinning); matrix.makeRotationFromEuler(euler); matrix.premultiply(newRotation(rotation)); matrix.setPosition(position); if (distance2 > 4000000) matrix.scale(scale.setScalar(0)); props.setMatrixAt(index * 2 + propIndex, matrix); }
+      euler.set(-pose.pitch, pose.yaw, pose.roll, 'YXZ'); rotation.setFromEuler(euler); position.set(0, 5.5, -8).applyQuaternion(rotation); position.x += pose.x; position.y += pose.y; position.z += pose.z; scale.setScalar(distance2 < 4000000 && time % 1.4 < 0.09 && pose.phase !== 'parked' ? 1 : 0); matrix.compose(position, rotation, scale); strobes.setMatrixAt(index, matrix);
+      position.set(flight.stand + 2, 1.75, 84); rotation.identity(); scale.setScalar(traffic.bridges[index] ? 1 : 0); matrix.compose(position, rotation, scale); docks.setMatrixAt(index, matrix);
+    }
+    lastFar = farSlot;
+    bodies.castShadow = gears.castShadow = props.castShadow = near;
+    // all aircraft beyond 2 km (and no bridge docked): the five batches cost nothing instead of five empty draws + shadow draws
+    if (bodies.visible !== inRange) bodies.visible = gears.visible = props.visible = strobes.visible = docks.visible = inRange;
+    if (dirty) {
+      bodies.instanceMatrix.needsUpdate = gears.instanceMatrix.needsUpdate = props.instanceMatrix.needsUpdate = strobes.instanceMatrix.needsUpdate = docks.instanceMatrix.needsUpdate = true;
+      // r160 culls an InstancedMesh by its instances' bounding sphere: a handful of instances, so recomputing is cheap
+      for (const mesh of batches) mesh.computeBoundingSphere();
+    }
+  };
+  const rotationMatrix = new THREE.Matrix4();
+  const newRotation = (quaternion) => rotationMatrix.makeRotationFromQuaternion(quaternion);
+  AF.onTick('air-traffic', 442, update);
+  AF.test('air traffic: timetable separates runway reservations and stays above ground', () => {
+    let ok = traffic.flights.length === 2, minimum = Infinity, maximum = 0;
+    const result = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' };
+    for (let time = 0; time < PERIOD * 2; time += 0.25) {
+      let occupied = 0;
+      for (const flight of traffic.flights) { const phase = phaseAt(time, flight.offset); if (runwayUse(phase)) occupied++; sample(flight, phase, result); const clearance = result.y - Math.max(-1.25, AF.W.groundY(result.x, result.z)); minimum = Math.min(minimum, clearance); if (clearance < -0.01) ok = false; }
+      maximum = Math.max(maximum, occupied); if (occupied > 1) ok = false;
+    }
+    const triangles = model ? model.body.index.count / 3 : Infinity;
+    let parkedClear = true;
+    for (const flight of traffic.flights) for (let time = 70; time < 240; time += 0.25) {
+      sample(flight, time, result);
+      for (const parked of AF.planes.list) {
+        const radiusX = Math.abs(Math.sin(result.yaw)) * 10.25 + Math.abs(Math.cos(result.yaw)) * 14.75, radiusZ = Math.abs(Math.cos(result.yaw)) * 10.25 + Math.abs(Math.sin(result.yaw)) * 14.75;
+        if (Math.abs(result.x - parked.home.x) < radiusX + parked.G.halfW && Math.abs(result.z - parked.home.z) < radiusZ + parked.G.halfL) parkedClear = false;
+      }
+    }
+    return { ok: ok && triangles < 6000 && parkedClear, info: 'runway max=' + maximum + ', clearance=' + minimum.toFixed(2) + 'm, parked clear=' + parkedClear + ', body=' + triangles + ' tris' };
+  });
+}
+} catch (error) { AF.partError('53-airtraffic.js', error); }
 
 // ================================================================ 55-people.js
 try {
@@ -24649,9 +25546,10 @@ try {
   const T = AF.time, W = AF.W;
   const V3 = THREE.Vector3;
   const clamp = AF.clamp, lerp = AF.lerp, smooth = AF.smooth;
-  // player brightness (exposure multiplier, saved per browser); phones default brighter
-  AF.brightness = (() => { try { const v = parseFloat(localStorage.getItem('portSolace.bright')); if (v >= 0.6 && v <= 2) return v; } catch (e) { /* storage blocked */ } return AF.MOBILE ? 1.3 : 1.0; })();
-  AF.setBrightness = (v) => { AF.brightness = clamp(+v || 1, 0.6, 2); try { localStorage.setItem('portSolace.bright', String(AF.brightness)); } catch (e) { /* storage blocked */ } };
+  // player brightness (exposure multiplier, saved per browser). Default = the slider's maximum (owner request, Oct 2026); the key
+  // was bumped to '.bright2' so earlier saved values don't hide the new default. ?shot / ?test keep 1.0 for comparable captures.
+  AF.brightness = (() => { try { const v = parseFloat(localStorage.getItem('portSolace.bright2')); if (v >= 0.6 && v <= 2) return v; } catch (e) { /* storage blocked */ } return AF.SHOT || AF.TEST ? 1.0 : 2.0; })();
+  AF.setBrightness = (v) => { AF.brightness = clamp(+v || 1, 0.6, 2); try { localStorage.setItem('portSolace.bright2', String(AF.brightness)); } catch (e) { /* storage blocked */ } };
   if (AF.Q.has('hour')) T.hours = ((+AF.Q.get('hour') % 24) + 24) % 24;
   else T.hours = 20.6;   // boot at night: the lit city, neon and light pools are the best first look
   if (AF.Q.has('speed')) T.speed = +AF.Q.get('speed');
@@ -28093,6 +28991,7 @@ try {
     <div class="row"><label>Clock</label><div class="seg" data-k="clock"><button data-v="run">Running</button><button data-v="stop">Stopped</button></div></div>
     <div class="row"><label>Look sensitivity</label><input data-k="sens" type="range" min="0.1" max="1.5" step="0.05"></div>
     <div class="row"><label>Brightness</label><input data-k="bright" type="range" min="0.6" max="2" step="0.05"></div>
+    <div class="row"><label>Frame rate</label><div class="seg" data-k="fps"><button data-v="30" title="Default: smooth, cool and battery-friendly">30</button><button data-v="60">60</button><button data-v="0">Max</button></div></div>
     <div class="stack"><button class="btn primary" data-k="resume">Resume</button><button class="btn" data-k="map">Map</button><button class="btn" data-k="help">Controls</button><button class="btn" data-k="switch">Switch friend</button></div></div>`); menu.id = 'm-menu';
   const help = h('div', 'sheet pe', ''); help.id = 'm-help';
   const mapEl = h('div', 'sheet pe', `<div class="panel"><div class="hd"><b class="deco" style="color:#ffe6a8">MAP</b><span>pick a place to go there</span><button class="btn" data-k="closemap">Close</button></div><div class="wrap"><canvas></canvas><div class="labs"></div></div></div>`); mapEl.id = 'm-map';
@@ -28322,6 +29221,7 @@ try {
     const hr = menu.querySelector('[data-k=hour]'); if (document.activeElement !== hr) hr.value = AF.time.hours.toFixed(2);
     menu.querySelector('[data-k=sens]').value = String(AF.lookSens());
     menu.querySelector('[data-k=bright]').value = String(AF.brightness ?? 1);
+    menu.querySelectorAll('[data-k=fps] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === AF.fpsCap));
   };
   const exitLock = () => AF.input.releaseLock();
   const toggleMenu = (on, resume = true) => { S.menu = on ?? !S.menu; if (S.menu) { syncMenu(); S.help = false; S.map = false; mapEl.classList.remove('open'); help.classList.remove('open'); exitLock(); } menu.classList.toggle('open', S.menu); if (!S.menu && resume) AF.input.requestLock(); };
@@ -28344,6 +29244,7 @@ try {
       AF.renderer.setPixelRatio(AF.basePR() * G.scale); AF.resize();
     }
     else if (seg === 'clock') AF.time.paused = b.dataset.v === 'stop';
+    else if (seg === 'fps') AF.setFpsCap(b.dataset.v);
     else if (b.dataset.k === 'resume') toggleMenu(false);
     else if (b.dataset.k === 'map') { toggleMenu(false, false); toggleMap(true); }
     else if (b.dataset.k === 'help') { toggleMenu(false, false); toggleHelp(true); }

@@ -661,6 +661,7 @@ try {
     return o;
   };
   const GC_NEAR = 18;
+  let coverViewX = 0, coverViewY = 0, coverViewZ = -1;
   AF.onBuild('land-ground-cover', 520, () => {
     const t0 = performance.now();
     const K = GC.kinds = coverModels().map((k) => ({ ...k, geo: AF.meshModel(k.m, { vs: k.vs, anchor: [0.5, 0, 0.5], flat: true }), geoF: AF.meshModel(coarsen(k.m), { vs: k.vs * 2, anchor: [0.5, 0, 0.5], flat: true }), m: null }));
@@ -713,12 +714,15 @@ try {
     const K = GC.kinds, Rr = coverRadius() + 8, R2 = Rr * Rr, N2 = GC_NEAR * GC_NEAR;
     for (const k of K) k.n = k.nF = 0;
     const high = cy - Math.max(0, W.groundY(cx, cz)) > 45;
+    const cameraMatrix = AF.camera.matrixWorld.elements;
+    coverViewX = -cameraMatrix[8]; coverViewY = -cameraMatrix[9]; coverViewZ = -cameraMatrix[10];
     if (!high) {
       const gcx = Math.floor(cx / 16), gcz = Math.floor(cz / 16);
       for (const [ox, oz] of cellRing(Rr)) {
         const a = GC.cells.get((gcx + ox) * 1000 + gcz + oz); if (!a) continue;
         for (let i = 0; i < a.length; i += 6) {
           const dx = a[i] - cx, dz = a[i + 2] - cz, d2 = dx * dx + dz * dz; if (d2 > R2) continue;
+          if (d2 >= N2 && dx * coverViewX + (a[i + 1] - cy) * coverViewY + dz * coverViewZ < -8) continue;
           const k = K[a[i + 5]], near = d2 < N2, im = near ? k.im : k.imF, n = near ? k.n : k.nF; if (n >= im.instanceMatrix.count) continue;
           const s = a[i + 4];
           const c = Math.cos(a[i + 3]) * s, sn = Math.sin(a[i + 3]) * s, arr = im.instanceMatrix.array, o = n * 16;
@@ -745,7 +749,9 @@ try {
     if (M.envMap !== V.envMap) { M.envMap = V.envMap; M.needsUpdate = true; }
     M.envMapIntensity = V.envMapIntensity;
     GC.t -= dt;
-    const moved = Math.abs(f.x - GC.at.x) + Math.abs(f.z - GC.at.z) > 6 || Math.abs(c.y - GC.at.y) > 12;
+    const cameraMatrix = AF.camera.matrixWorld.elements;
+    const turned = Math.abs(-cameraMatrix[8] - coverViewX) + Math.abs(-cameraMatrix[9] - coverViewY) + Math.abs(-cameraMatrix[10] - coverViewZ) > 0.05;
+    const moved = Math.abs(f.x - GC.at.x) + Math.abs(f.z - GC.at.z) > 6 || Math.abs(c.y - GC.at.y) > 12 || turned;
     if (moved || GC.t <= 0) { GC.t = 3; refreshCover(f.x, f.z, c.y); }
   });
   AF.test('land: ground cover scattered + drawn near the camera', () => {

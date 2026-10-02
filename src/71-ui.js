@@ -185,6 +185,7 @@ try {
     <div class="row"><label>Clock</label><div class="seg" data-k="clock"><button data-v="run">Running</button><button data-v="stop">Stopped</button></div></div>
     <div class="row"><label>Look sensitivity</label><input data-k="sens" type="range" min="0.1" max="1.5" step="0.05"></div>
     <div class="row"><label>Brightness</label><input data-k="bright" type="range" min="0.6" max="2" step="0.05"></div>
+    <div class="row"><label>Frame rate</label><div class="seg" data-k="fps"><button data-v="30" title="Default: smooth, cool and battery-friendly">30</button><button data-v="60">60</button><button data-v="0">Max</button></div></div>
     <div class="stack"><button class="btn primary" data-k="resume">Resume</button><button class="btn" data-k="map">Map</button><button class="btn" data-k="help">Controls</button><button class="btn" data-k="switch">Switch friend</button></div></div>`); menu.id = 'm-menu';
   const help = h('div', 'sheet pe', ''); help.id = 'm-help';
   const mapEl = h('div', 'sheet pe', `<div class="panel"><div class="hd"><b class="deco" style="color:#ffe6a8">MAP</b><span>pick a place to go there</span><button class="btn" data-k="closemap">Close</button></div><div class="wrap"><canvas></canvas><div class="labs"></div></div></div>`); mapEl.id = 'm-map';
@@ -414,6 +415,7 @@ try {
     const hr = menu.querySelector('[data-k=hour]'); if (document.activeElement !== hr) hr.value = AF.time.hours.toFixed(2);
     menu.querySelector('[data-k=sens]').value = String(AF.lookSens());
     menu.querySelector('[data-k=bright]').value = String(AF.brightness ?? 1);
+    menu.querySelectorAll('[data-k=fps] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === AF.fpsCap));
   };
   const exitLock = () => AF.input.releaseLock();
   const toggleMenu = (on, resume = true) => { S.menu = on ?? !S.menu; if (S.menu) { syncMenu(); S.help = false; S.map = false; mapEl.classList.remove('open'); help.classList.remove('open'); exitLock(); } menu.classList.toggle('open', S.menu); if (!S.menu && resume) AF.input.requestLock(); };
@@ -436,6 +438,7 @@ try {
       AF.renderer.setPixelRatio(AF.basePR() * G.scale); AF.resize();
     }
     else if (seg === 'clock') AF.time.paused = b.dataset.v === 'stop';
+    else if (seg === 'fps') AF.setFpsCap(b.dataset.v);
     else if (b.dataset.k === 'resume') toggleMenu(false);
     else if (b.dataset.k === 'map') { toggleMenu(false, false); toggleMap(true); }
     else if (b.dataset.k === 'help') { toggleMenu(false, false); toggleHelp(true); }

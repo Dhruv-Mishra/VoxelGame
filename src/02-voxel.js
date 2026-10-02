@@ -377,6 +377,8 @@ AF.mat = {};
     uCloudK: { value: 0.0 }, uCloudOff: { value: new THREE.Vector2() }, uCloudScale: { value: 1 / 210 }, uSunW: { value: new THREE.Vector3(0.5, 0.5, 0.3) },
     // R1 night light pools: up to 24 nearest street/porch/sign/shop lights (xyz, range) + colour*intensity
     uLP: { value: Array.from({ length: 24 }, () => new THREE.Vector4(0, -999, 0, 1)) }, uLC: { value: Array.from({ length: 24 }, () => new THREE.Vector4()) }, uLN: { value: 0 }, uPoolK: { value: 1 },
+    // LOD cross-fade progress 0..1 (AF.world.fade); only the fadeIn / fadeOut variants read it
+    uFadeK: { value: 0 },
   };
   const vsHead = `
     attribute float aPal; attribute float aAN; attribute vec2 aBU;
@@ -629,7 +631,8 @@ AF.mat = {};
         vec3 q = vec3(dot(vAfWP, T), vAfWP.y - 0.25, 0.0) / RS;
         vec3 rd = vec3(dot(V, T), V.y, -dot(V, N)) / RS;
         vec3 rc = floor(q); vec3 s0 = vec3(fract(q.xy), 0.0);
-        float plane = floor(dot(vAfWP, N) * 2.0 + 0.5);
+        // faces sit on the voxel grid: sample 3 cm behind the face so floor() never lands on the plane (per-pixel noise on D3D)
+        float plane = floor((dot(vAfWP, N) - 0.03) * 2.0);
         float rh = afHash(vec3(rc.xy, plane + kind * 13.0));
         float rh2 = afHash(vec3(rc.yx + 3.7, plane * 1.3));
         // night: slowly changing lit / dark / TV rooms
@@ -734,7 +737,8 @@ AF.mat = {};
       float mode = floor(vEmi.a);
       float on = mode > 1.5 ? 1.0 : mode > 0.5 ? uNight : 0.0;
       if (mode > 2.5 && uNeon < 1.0) {                 // neon: per-cell switch-on sequence with a brief flicker
-        float th = afHash(floor(vAfWP / 2.5) + 0.5) * 0.85; float nd = uNeon - th;
+        vec3 Nn = vNI < 0.5 ? vec3(1.,0.,0.) : vNI < 1.5 ? vec3(-1.,0.,0.) : vNI < 2.5 ? vec3(0.,1.,0.) : vNI < 3.5 ? vec3(0.,-1.,0.) : vNI < 4.5 ? vec3(0.,0.,1.) : vec3(0.,0.,-1.);
+        float th = afHash(floor((vAfWP - Nn * 0.03) / 2.5) + 0.5) * 0.85; float nd = uNeon - th;
         on = nd < 0.0 ? 0.0 : nd > 0.06 ? 1.0 : step(0.45, fract(sin(uAfTime * 37.0 + th * 91.0) * 43758.5));
       }
       vec3 em = vEmi.rgb * on * uEmitBoost;
@@ -819,6 +823,10 @@ AF.mat = {};
         .replace('#include <lights_fragment_maps>', THREE.ShaderChunk.lights_fragment_maps
           .replace('iblIrradiance += getIBLIrradiance( geometryNormal );', 'iblIrradiance += getIBLIrradiance( geometryNormal ) * uEnvDiffuse;')
           + '\n radiance *= afSpecAO * mix(1.0, 0.3, smoothstep(0.45, 0.9, material.roughness));\n');
+      if (key === 'fadeIn' || key === 'fadeOut') {
+        // screen-door cross-fade: the two variants discard complementary pixels, so in + out always cover the surface once
+        sh.fragmentShader = 'uniform float uFadeK;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n{ float afD = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715)))); if (afD ' + (key === 'fadeIn' ? '>=' : '<') + ' uFadeK) discard; }');
+      }
       if (AF.mat.extraPatch) AF.mat.extraPatch(sh, key);
     };
     mat.customProgramCacheKey = () => 'afvox2-' + key;
@@ -828,6 +836,17 @@ AF.mat = {};
   AF.mat.voxel = patch(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'solid');
   AF.mat.glass = patch(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.12, metalness: 0.0, transparent: true, opacity: 0.38, depthWrite: false }), 'glass');
   AF.mat.water = new THREE.MeshStandardMaterial({ color: 0x3b6f8f, roughness: 0.08, metalness: 0.0, transparent: true, opacity: 0.82 });
+  // PERF.md §2b: three re-derives the program (getParameters) every time one material alternates between instanced and plain
+  // meshes in a pass. Instanced voxel users get their own material object (same program cache key = no extra compiles) and a
+  // shared depth material, so each pass switches programs once per kind instead of ~75 times.
+  AF.mat.voxelInst = patch(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'solid');
+  AF.mat.voxelInstC = patch(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'solid');
+  AF.mat.depthInst = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  AF.mat.splitInstanced = (o) => {
+    if (!o.isInstancedMesh) return;
+    if (o.material === AF.mat.voxel) o.material = o.instanceColor ? AF.mat.voxelInstC : AF.mat.voxelInst;
+    if (o.customDepthMaterial === undefined && (o.material === AF.mat.voxelInst || o.material === AF.mat.voxelInstC)) o.customDepthMaterial = AF.mat.depthInst;
+  };
 }
 
 // ---------------------------------------------------------------- world meshing (runs as build stage 500)
@@ -855,9 +874,9 @@ AF.removeStatic = (pr) => {
   const k = regionKeyOf(pr.x, pr.z), list = AF.world.propsByRegion.get(k);
   if (list) { const j = list.indexOf(pr); if (j >= 0) list.splice(j, 1); }
   const reg = AF.world.lod.get(k); if (!reg) return;
-  const wasNear = reg.nearBuilt; freeNear(reg); dropMesh(reg.far); reg.far = null;
-  const fg = mergeProps(reg.props, farPick); if (fg) reg.far = regMesh(fg, AF.mat.voxel, true);
-  if (wasNear) buildNear(reg);
+  const wasNear = reg.nearBuilt; FADE.cancel(reg); freeNear(reg); dropMesh(reg.far); reg.far = null;
+  const fg = mergeProps(reg.props, farPick); if (fg) { reg.far = regMesh(fg, AF.mat.voxel, true); reg.far.visible = !!reg.farSeen; }
+  if (wasNear) { buildNear(reg); if (reg.showNear) { if (reg.near) reg.near.visible = true; if (reg.nearGlass) reg.nearGlass.visible = true; } }
 };
 AF.addWater = (geo, mat) => { AF.world.water.push({ geo, mat }); };
 
@@ -1215,6 +1234,69 @@ AF.world.coarse = new Map(); // key -> [coarse region meshes] (shown instead of 
 AF.LOD_DIST = 110;
 AF.REGION_LOD = 130;
 AF.FAR_LOD = 1e9;
+// LOD CROSS-FADE (PERF.md §4, locked): every swap between voxel-material LOD copies (region full <-> 0.5 m coarse, cluster
+// regions <-> 1 m far copy, props near <-> far, far-prop cull) dithers over FADE.dur instead of popping. All swaps requested
+// while a ramp runs start together with the next ramp (shared uFadeK; at most FADE.dur late). Owners must not write .visible
+// on their LOD meshes while owner.fadeE is set. Non-voxel meshes (glass) switch when the ramp starts. ?nofade disables.
+const FADE = AF.world.fade = { on: !AF.Q.has('nofade') && !AF.SHOT && !AF.TEST, dur: 0.3, k: 1, act: [], pend: [], mats: null, swaps: 0, warmKey: '' };
+const fadeMats = () => FADE.mats || (FADE.mats = {
+  in: AF.mat.patchVoxel(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'fadeIn'),
+  out: AF.mat.patchVoxel(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'fadeOut'),
+});
+const seenByCam = (m) => m.visible && (m.layers.mask & 1) !== 0 && !!m.parent;
+FADE.swap = (owner, outs, ins, done) => {
+  const live = AF.ready && FADE.on;
+  const e = { owner, outs: [], ins: [], done };
+  for (const m of outs) if (m && seenByCam(m)) e.outs.push(m);
+  for (const m of ins) {
+    if (!m) continue;
+    if (!live) { m.layers.set(0); m.visible = true; continue; }
+    if (seenByCam(m) && m.material === AF.mat.voxel) continue;     // already on screen: nothing to fade in
+    m.visible = false; e.ins.push(m);                                // shown when the ramp starts
+  }
+  if (!live) { for (const m of e.outs) m.visible = false; if (done) done(); return; }
+  owner.fadeE = e; FADE.pend.push(e); FADE.swaps++;
+};
+const fadeStart = () => {
+  const M = fadeMats(), V = AF.mat.voxel;
+  for (const m of [M.in, M.out]) { if (!!m.envMap !== !!V.envMap) m.needsUpdate = true; m.envMap = V.envMap; m.envMapIntensity = V.envMapIntensity; }
+  const t = FADE.act; FADE.act = FADE.pend; FADE.pend = t; FADE.pend.length = 0; FADE.k = 0;
+  for (const e of FADE.act) {
+    for (const m of e.outs) if (m.material === V) m.material = M.out;
+    for (const m of e.ins) { m.layers.set(0); m.visible = true; if (m.material === V) m.material = M.in; }
+  }
+};
+const fadeFinish = (e) => {
+  const M = fadeMats(), V = AF.mat.voxel;
+  for (const m of e.outs) { m.visible = false; if (m.material === M.out) m.material = V; }
+  for (const m of e.ins) if (m.material === M.in) m.material = V;
+  if (e.owner.fadeE === e) e.owner.fadeE = null;
+  if (e.done) e.done();
+};
+const fadeEnd = () => { for (const e of FADE.act) fadeFinish(e); FADE.act.length = 0; FADE.k = 1; };
+// drop an owner's swap before it decides again: a pending one leaves the old state (ins hidden, outs shown), a running one completes
+FADE.cancel = (owner) => {
+  const e = owner.fadeE; if (!e) return; owner.fadeE = null;
+  let i = FADE.pend.indexOf(e); if (i >= 0) { FADE.pend.splice(i, 1); return; }
+  i = FADE.act.indexOf(e); if (i >= 0) { FADE.act.splice(i, 1); fadeFinish(e); }
+};
+AF.onTick('lod-fade', 881, (dt) => {
+  const U = AF.mat.uniforms;
+  if (FADE.act.length) { FADE.k += dt / FADE.dur; if (FADE.k >= 1) fadeEnd(); }
+  if (!FADE.act.length && FADE.pend.length) fadeStart();
+  U.uFadeK.value = Math.min(1, FADE.k);
+  // first use of a fade variant would compile a big program mid-game: compile both whenever the voxel program inputs change
+  // (tier = light / shadow state, env map) by drawing a degenerate triangle with each for one frame
+  if (!AF.ready || !FADE.on) return;
+  const key = AF.GFX.name + (AF.mat.voxel.envMap ? 'e' : '');
+  if (FADE.warm) { for (const w of FADE.warm) AF.scene.remove(w); FADE.warm = null; }
+  if (key !== FADE.warmKey) {
+    FADE.warmKey = key; const M = fadeMats(), V = AF.mat.voxel;
+    for (const m of [M.in, M.out]) { if (!!m.envMap !== !!V.envMap) m.needsUpdate = true; m.envMap = V.envMap; }
+    const g = FADE.warmGeo || (FADE.warmGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)));
+    FADE.warm = [M.in, M.out].map((mat) => { const w = new THREE.Mesh(g, mat); w.frustumCulled = false; w.receiveShadow = true; AF.scene.add(w); return w; });
+  }
+});
 // FAR clusters: 4 x 4 regions (128 m) merged into ONE 1 m mesh (voxels + terrain) — ~16x fewer far draw calls,
 // shadow casters and state changes than per-region copies. Built lazily after the first frame, one member region per frame
 // (farthest clusters first), shown when the whole cluster box is beyond AF.FAR_LOD. AF.world.farStats = { built, kept, pending, ms }.
@@ -1236,13 +1318,16 @@ function farStep(c) {
   const t = performance.now();
   if (!c.out) c.out = { opaque: new GeoBuf(), glass: new GeoBuf() };
   const k = c.regs[c.i++];
+  // per-region index ranges of the merged copy: a half-streamed cluster hides the parts whose full regions are ready (partial reveal)
+  const o0 = c.out.opaque.n, g0 = c.out.glass.n;
   meshTerrainRegionFar(k >> 6, k & 63, c.out.opaque, 4);
   meshVoxelRegionCoarse(k >> 6, k & 63, c.out, 4);
+  (c.ranges || (c.ranges = [])).push({ k, os: o0 * 1.5, oc: (c.out.opaque.n - o0) * 1.5, gs: g0 * 1.5, gc: (c.out.glass.n - g0) * 1.5 });
   coarseCache.clear(); farCache.clear();
   if (c.i >= c.regs.length) {
     const o = c.out; c.out = null; c.built = true; FS.built++;
-    if (o.opaque.n) { const m = regMesh(o.opaque.geometry(), AF.mat.voxel, true); m.userData.far = true; m.userData.cluster = c.ck; m.visible = false; c.far.push(m); FS.kept++; }
-    if (o.glass.n) { const g = regMesh(o.glass.geometry(), AF.mat.glass, false); g.userData.far = true; g.visible = false; c.far.push(g); }
+    if (o.opaque.n) { const m = regMesh(o.opaque.geometry(), AF.mat.voxel, true); m.userData.far = true; m.userData.cluster = c.ck; m.visible = false; c.far.push(m); c.farO = m; FS.kept++; }
+    if (o.glass.n) { const g = regMesh(o.glass.geometry(), AF.mat.glass, false); g.userData.far = true; g.visible = false; c.far.push(g); c.farG = g; }
   }
   FS.ms += performance.now() - t;
   return c.built;
@@ -1286,6 +1371,9 @@ function buildNear(reg) {
   const gg = mergeProps(reg.props, (pr) => pr.geo.userData.glass || null);
   reg.near = g ? regMesh(g, AF.mat.voxel, true) : null;
   reg.nearGlass = gg ? regMesh(gg, AF.mat.glass, false) : null;
+  // hidden until prop-lod shows (or fades) them in
+  if (reg.near) reg.near.visible = false;
+  if (reg.nearGlass) reg.nearGlass.visible = false;
   reg.nearBuilt = true;
   AF.stats.nearMs = Math.round(performance.now() - t);
 }
@@ -1336,7 +1424,7 @@ function* meshRegionG(rx, rz) {
   if (cmeshes.length) AF.world.coarse.set(k, cmeshes); else AF.world.coarse.delete(k);
   const RL = AF.world.regLod || (AF.world.regLod = new Map());
   const cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
-  RL.set(k, { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: meshes, coarse: cmeshes, lvl: -1, hid: cl.lvl === 1, q: cmeshes.length ? nC : nO });
+  RL.set(k, { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: meshes, coarse: cmeshes, lvl: -1, hid: cl.lvl === 1 && !cl.part, q: cmeshes.length ? nC : nO });
   const props = AF.world.propsByRegion.get(k) || [];
   let farQ = 0;
   if (props.length) {
@@ -1358,15 +1446,27 @@ function* meshRegionG(rx, rz) {
 const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, done: 0, unloaded: 0, t: 0, maxStep: 0 };
 const regionCluster = (k) => CLS.get(((k >> 6) >> 2) * 64 + ((k & 63) >> 2));
 const clDist = (cl, c, vy) => Math.hypot(Math.max(cl.x0 - c.x, 0, c.x - cl.x1), Math.max(cl.z0 - c.z, 0, c.z - cl.z1), vy);
-AF.onTick('region-stream', 878, (dt) => {
-  if (!STR.on || !AF.ready) return;
+// Priority (PERF.md §5): the nearer of the camera and a 1.5 s velocity-predicted point (fast planes load ahead of the nose).
+// Work runs a little every frame plus in the idle slots of the fps cap (AF.onIdle), where it costs the rendered frames nothing.
+const LA = { x: 0, z: 0, px: 0, pz: 0, vx: 0, vz: 0, init: false };
+AF.onTick('stream-look', 877, (dt) => {
+  const c = AF.camera.position;
+  if (!LA.init || dt <= 0) { LA.px = c.x; LA.pz = c.z; LA.init = true; }
+  const k = Math.min(1, dt * 3), vx = (c.x - LA.px) / Math.max(dt, 1e-3), vz = (c.z - LA.pz) / Math.max(dt, 1e-3);
+  if (Math.hypot(vx, vz) < 400) { LA.vx += (vx - LA.vx) * k; LA.vz += (vz - LA.vz) * k; }     // ignore teleports
+  LA.px = c.x; LA.pz = c.z;
+  const s = Math.min(1, 250 / (Math.hypot(LA.vx, LA.vz) * 1.5 + 1e-3));
+  LA.x = c.x + LA.vx * 1.5 * s; LA.z = c.z + LA.vz * 1.5 * s;
+});
+const streamWork = (budget) => {
+  if (!STR.on || !AF.ready) return false;
   const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, FD = AF.FAR_LOD || 1e9;
-  const t0 = performance.now(), budget = AF.MOBILE ? 3 : AF.mode === 'cine' ? 9 : 5;
+  const t0 = performance.now();
   while (performance.now() - t0 < budget) {
     if (!STR.gen) {
       let best = null, bd = FD + 48;
-      for (const cl of CLS.values()) if (cl.pending > 0) { const d = clDist(cl, c, vy); if (d < bd) { bd = d; best = cl; } }
-      if (!best) break;
+      for (const cl of CLS.values()) if (cl.pending > 0) { const d = Math.min(clDist(cl, c, vy), clDist(cl, LA, vy) + 24); if (d < bd) { bd = d; best = cl; } }
+      if (!best) return false;
       let bk = -1, bkd = 1e18;
       for (const k of best.regs) if (STR.pending.has(k)) { const x = X0 + ((k >> 6) + 0.5) * REG * VS, z = Z0 + ((k & 63) + 0.5) * REG * VS, d = (x - c.x) ** 2 + (z - c.z) ** 2; if (d < bkd) { bkd = d; bk = k; } }
       if (bk < 0) { best.pending = 0; continue; }
@@ -1376,16 +1476,54 @@ AF.onTick('region-stream', 878, (dt) => {
     if (st > STR.maxStep) STR.maxStep = st;
     if (fin) { STR.gen = null; STR.pending.delete(STR.key); const cl = regionCluster(STR.key); if (cl) cl.pending = Math.max(0, cl.pending - 1); STR.done++; coarseCache.clear(); }
   }
+  return true;
+};
+AF.onIdle('region-stream', (ms) => streamWork(ms));
+AF.onTick('region-stream', 878, (dt) => {
+  if (!STR.on || !AF.ready) return;
+  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, FD = AF.FAR_LOD || 1e9;
+  // idle slots ran recently (fps cap on): a token slice here; otherwise the old per-frame budget
+  const idle = AF.frameStats && AF.frameStats.idleT > AF.clock.t - 0.25;
+  streamWork(idle ? 1.5 : AF.MOBILE ? 3 : AF.mode === 'cine' ? 9 : 5);
   if ((STR.t += dt) > 2) {
     STR.t = 0;
     const cur = STR.gen ? regionCluster(STR.key) : null;
     for (const cl of CLS.values()) {
-      if (cl.pending > 0 || !cl.built || cl === cur || clDist(cl, c, vy) < FD + (AF.MOBILE ? 140 : 220)) continue;
+      if (cl.pending > 0 || !cl.built || cl === cur || clDist(cl, c, vy) < FD + (AF.MOBILE ? 140 : 420)) continue;
       for (const k of cl.regs) { dropRegion(k); STR.pending.add(k); }
       cl.pending = cl.regs.length; STR.unloaded++;
     }
   }
 });
+const HIDDEN_MAT = new THREE.MeshBasicMaterial({ visible: false });
+function setPartial(cl, on, RL, keepRegions) {
+  cl.part = on; cl.partN = -1;
+  const O = cl.farO, G = cl.farG;
+  O.geometry.clearGroups(); if (G) G.geometry.clearGroups();
+  if (on) {
+    for (const r of cl.ranges) { if (r.oc) O.geometry.addGroup(r.os, r.oc, 0); if (G && r.gc) G.geometry.addGroup(r.gs, r.gc, 0); }
+    O.material = [AF.mat.voxel, HIDDEN_MAT]; if (G) G.material = [AF.mat.glass, HIDDEN_MAT];
+    return;
+  }
+  O.material = AF.mat.voxel; if (G) G.material = AF.mat.glass;
+  if (keepRegions) return;
+  for (const k of cl.regs) {
+    const r = RL.get(k); if (!r || r.hid) continue;
+    FADE.cancel(r); r.hid = true; r.lvl = 3;
+    for (const m of r.full) m.visible = false;
+    for (const m of r.coarse) m.visible = false;
+  }
+}
+function updatePartial(cl, RL) {
+  cl.partN = cl.pending;
+  const O = cl.farO, G = cl.farG; let oi = 0, gi = 0;
+  for (const rg of cl.ranges) {
+    const r = RL.get(rg.k), ready = !!r;
+    if (rg.oc) O.geometry.groups[oi++].materialIndex = ready ? 1 : 0;
+    if (G && rg.gc) G.geometry.groups[gi++].materialIndex = ready ? 1 : 0;
+    if (ready && r.hid) { r.hid = false; r.lvl = -1; }
+  }
+}
 AF.onTick('prop-lod', 880, () => {
   if (!AF.world.group) return;
   const c = AF.camera.position, D = AF.LOD_DIST;
@@ -1394,23 +1532,70 @@ AF.onTick('prop-lod', 880, () => {
   const RL = AF.world.regLod;
   if (RL) {
     const RD = AF.REGION_LOD, FD = AF.FAR_LOD || 1e9, vy = Math.max(0, c.y - 12) * 0.7;
+    const regWant = (r) => r.coarse.length && Math.hypot(r.cx - c.x, r.cz - c.z, vy) > RD + (r.lvl === 1 ? -12 : 12) ? 1 : 0;
     for (const cl of CLS.values()) {
       if (!cl.built) continue;
       const dx = Math.max(cl.x0 - c.x, 0, c.x - cl.x1), dz = Math.max(cl.z0 - c.z, 0, c.z - cl.z1);
-      const want = cl.pending > 0 || Math.hypot(dx, dz, vy) > FD + (cl.lvl ? -16 : 16) ? 1 : 0;
+      const near = Math.hypot(dx, dz, vy) <= FD + (cl.lvl ? -16 : 16);
+      const want = cl.pending > 0 || !near ? 1 : 0;
+      // PARTIAL REVEAL (PERF.md §5): a streaming cluster in view range shows each region as soon as it is meshed and hides that
+      // region's slice of the 1 m copy (geometry groups, one extra draw per slice only while half-loaded)
+      const part = cl.pending > 0 && near && !!cl.ranges && cl.farO && !!STR.on;
+      if (part !== !!cl.part) setPartial(cl, part, RL);
+      if (part && cl.partN !== cl.pending) updatePartial(cl, RL);
       if (want === cl.lvl) continue;
-      cl.lvl = want;
-      for (const m of cl.far) m.visible = !!want;
-      for (const k of cl.regs) { const r = RL.get(k); if (r) { r.hid = !!want; r.lvl = -1; } }
+      cl.lvl = want; FADE.cancel(cl);
+      for (const k of cl.regs) { const r = RL.get(k); if (r) FADE.cancel(r); }
+      if (!want && cl.part) {
+        // the last slices just finished: everything else is already on screen
+        setPartial(cl, false, RL, true);
+        for (const m of cl.far) m.visible = false;
+        for (const k of cl.regs) { const r = RL.get(k); if (r && r.hid) { r.hid = false; r.lvl = -1; } }
+        continue;
+      }
+      if (want && cl.part) {
+        // went back to streaming while revealing (boot, unload): keep the revealed regions, show the rest of the 1 m copy
+        for (const m of cl.far) { m.visible = true; m.layers.set(0); }
+        cl.partN = -1; updatePartial(cl, RL);
+        continue;
+      }
+      if (want) {
+        // regions -> the cluster's 1 m copy: what is on screen now fades out; shadow-only stand-ins go at once
+        const outs = [];
+        for (const k of cl.regs) {
+          const r = RL.get(k); if (!r) continue;
+          r.hid = true; r.lvl = 3;
+          for (const m of r.full) if (seenByCam(m)) outs.push(m); else m.visible = false;
+          for (const m of r.coarse) if (seenByCam(m)) outs.push(m); else m.visible = false;
+        }
+        FADE.swap(cl, outs, cl.far);
+      } else {
+        // 1 m copy -> regions, each straight at its own level (full or 0.5 m)
+        const ins = [];
+        for (const k of cl.regs) {
+          const r = RL.get(k); if (!r) continue;
+          r.hid = false; r.lvl = -1; r.lvl = regWant(r); r.sh = false;
+          for (const m of r.full) { if (m.material === AF.mat.voxel) m.castShadow = true; if (r.lvl === 0) ins.push(m); else m.visible = false; }
+          for (const m of r.coarse) { if (r.lvl === 1) ins.push(m); else { m.visible = false; m.layers.set(0); } }
+        }
+        FADE.swap(cl, cl.far, ins);
+      }
     }
     for (const r of RL.values()) {
-      let want = 3;
-      if (!r.hid) { const d = Math.hypot(r.cx - c.x, r.cz - c.z, vy); want = r.coarse.length && d > RD + (r.lvl === 1 ? -12 : 12) ? 1 : 0; }
+      if (r.fadeE) continue;
+      const want = r.hid ? 3 : regWant(r);
       if (want !== r.lvl) {
-        r.lvl = want; r.sh = false;
-        for (const m of r.full) { m.visible = want === 0; if (m.material === AF.mat.voxel) m.castShadow = true; }
-        for (const m of r.coarse) { m.visible = want === 1; m.layers.set(0); }
+        const prev = r.lvl; r.lvl = want; r.sh = false;
+        if ((prev === 0 || prev === 1) && want < 2) {
+          // full <-> 0.5 m: fade the copy on screen out, the other in (the coarse copy may be a shadow stand-in on layer 1)
+          for (const m of r.full) if (m.material === AF.mat.voxel) m.castShadow = true;
+          FADE.swap(r, prev === 0 ? r.full : r.coarse, want === 0 ? r.full : r.coarse, () => { for (const m of r.coarse) if (!m.visible) m.layers.set(0); });
+        } else {
+          for (const m of r.full) { m.visible = want === 0; if (m.material === AF.mat.voxel) m.castShadow = true; }
+          for (const m of r.coarse) { m.visible = want === 1; m.layers.set(0); }
+        }
       }
+      if (r.fadeE) continue;
       // full-detail regions away from the near shadow cascade cast through their 0.5 m copy (layer 1 = shadow pass only):
       // a tower 60 m up the sun line still shadows the street, at a fraction of the depth-pass triangles
       // (phones keep no 0.5 m copy: their far regions simply stop casting)
@@ -1426,29 +1611,58 @@ AF.onTick('prop-lod', 880, () => {
     }
   }
   let budget = AF.SHOT || AF.TEST ? 1e9 : 10, best = null, bestD = 1e9;
-  const t0 = performance.now(), SN = AF.shadowNear;
+  const t0 = performance.now(), SN = AF.shadowNear, PC = AF.PROP_CULL || 900;
   for (const [k, r] of AF.world.lod) {
-    const rl = RL && RL.get(k);
-    if (rl && rl.hid) {
-      if (r.nearBuilt) freeNear(r);
-      if (r.far) { r.far.visible = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7) < (AF.PROP_CULL || 900); r.far.layers.set(0); }
-      continue;
-    }
+    const rl = RL && RL.get(k), hid = !!(rl && rl.hid);
     const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
-    if (!r.nearBuilt && d < D) {
+    if (hid) { if (r.nearBuilt) { FADE.cancel(r); freeNear(r); } }
+    else if (!r.nearBuilt && d < D) {
       if (budget > 1e8) buildNear(r);
       else if (d < bestD) { bestD = d; best = r; }
-    } else if (r.nearBuilt && d > D + 70) freeNear(r);
-    const showNear = r.nearBuilt && d < D + 25;
+    } else if (r.nearBuilt && d > D + 70) { FADE.cancel(r); freeNear(r); }
+    const showNear = !hid && r.nearBuilt && d < D + 25, farSeen = !!r.far && !showNear && d < PC;
+    // near <-> far props and the far-prop cull cross-fade (PERF.md §4); the first decision for a region just sets the state
+    if (!r.fadeE && r.showNear !== undefined && (r.showNear !== showNear || r.farSeen !== farSeen)) {
+      const outs = [], ins = [];
+      if (r.showNear && !showNear) outs.push(r.near, r.nearGlass); else if (!r.showNear && showNear) ins.push(r.near, r.nearGlass);
+      if (r.farSeen && !farSeen) outs.push(r.far); else if (!r.farSeen && farSeen) ins.push(r.far);
+      FADE.swap(r, outs, ins);
+    }
+    r.showNear = showNear; r.farSeen = farSeen;
+    if (r.fadeE) continue;
     if (r.near) r.near.visible = showNear;
     if (r.nearGlass) r.nearGlass.visible = showNear;
     // full-detail props cast only right around the shadow focus; further out their LOD copy casts instead (shadow pass only, layer 1)
     const proxy = showNear && !!r.far && Math.hypot(r.cx - SN.cx, r.cz - SN.cz) > 26;
     if (r.near && r.near.castShadow === proxy) r.near.castShadow = !proxy;
-    if (r.far) { r.far.visible = showNear ? proxy : d < (AF.PROP_CULL || 900); r.far.layers.set(showNear ? 1 : 0); }
+    if (r.far) { r.far.visible = showNear ? proxy : farSeen; r.far.layers.set(showNear ? 1 : 0); }
     if (AF.MOBILE && r.far) r.far.castShadow = Math.hypot(r.cx - SN.cx, r.cz - SN.cz) < SN.r + 24;
   }
   if (best && performance.now() - t0 < budget) buildNear(best);
+});
+// PERF.md §4/§5 guard: whatever the camera does, each region shows exactly one copy (full, 0.5 m or its cluster's 1 m slice)
+AF.test('voxel: one LOD copy per region on screen', () => {
+  const RL = AF.world.regLod; if (!RL) return { ok: false, info: 'no region LOD table' };
+  const prev = AF.mode, P = { x: 0, y: 0, z: 0 };
+  AF.modes._lodtest = { enter() {}, exit() {}, update() { AF.camera.position.set(P.x, P.y, P.z); AF.camTarget.set(P.x + 40, 0, P.z - 40); AF.camera.lookAt(AF.camTarget); } };
+  const on = (m) => m.visible && (m.layers.mask & 1) && m.material !== AF.mat.glass && !!m.parent;
+  let bad = 0, checked = 0;
+  try {
+    AF.setMode('_lodtest');
+    for (const [x, y, z] of [[0, 2, -40], [-300, 180, 250], [-550, 40, -150], [0, 2, -40]]) {
+      P.x = x; P.y = y; P.z = z; AF.step(3);
+      for (const cl of CLS.values()) {
+        if (!cl.built) continue;
+        const farOn = cl.far.some(on);
+        for (const k of cl.regs) {
+          const r = RL.get(k); if (!r) continue; checked++;
+          const n = (farOn && !(cl.part && !r.hid) ? 1 : 0) + (r.full.some(on) ? 1 : 0) + (r.coarse.some(on) ? 1 : 0);
+          if (n !== 1 && !(n === 0 && cl.lvl === 1 && !cl.far.length)) bad++;
+        }
+      }
+    }
+  } finally { delete AF.modes._lodtest; if (prev && AF.modes[prev]) AF.setMode(prev); }
+  return { ok: bad === 0 && checked > 0, info: checked + ' region checks, ' + bad + ' with zero or two copies' };
 });
 AF.meshWorld = async (progress) => {
   AF.stats = AF.stats || {}; AF.stats.meshT = null;

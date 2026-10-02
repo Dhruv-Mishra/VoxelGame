@@ -144,6 +144,12 @@ try {
       for (let z = b + 1; z < d - 1; z += 0.5) { const q = AF.hash2((z * 4) | 0, (ox * 4) | 0), ci = W.col(ox + 0.25, z + 0.25); if (ci < 0 || isPave.has(W.C[ci])) continue; if (q < 0.55) W.fill(ox, 0.25, z, ox + 0.5, 0.5 + (q < 0.2 ? 0.25 : 0), z + 0.5, hed[q < 0.12 ? 2 : q < 0.2 ? 3 : q < 0.4 ? 0 : 1]); }
     }
     // ---- water: ponds per habitat
+    const pondGeos = new Map();
+    const collectPond = (geo) => {
+      const y = geo.userData.waterY;
+      if (!pondGeos.has(y)) pondGeos.set(y, []);
+      pondGeos.get(y).push(geo);
+    };
     const pool = (cx, cz, rx, rz, deep, wy, hab) => {
       const bed = col(0x4a4034, { jitter: 0.7 }), shore = col(0x7a6a4a, { jitter: 0.8 });
       W.eachCol(cx - rx - 2, cz - rz - 2, cx + rx + 2, cz + rz + 2, (bx, bz, i, x, z) => {
@@ -163,7 +169,7 @@ try {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((v, i) => (i % 3 === 1 ? 1 : 0)), 3));
       geo.setIndex(idx); geo.computeBoundingSphere(); geo.userData.kind = 'pond'; geo.userData.waterY = wy;
-      AF.addWater(geo);
+      collectPond(geo);
       POOLS.push({ cx, cz, rx, rz, y: wy, hab });
       P.pools.push({ x0: cx - rx, z0: cz - rz, x1: cx + rx, z1: cz + rz, y: wy });
     };
@@ -184,14 +190,12 @@ try {
     for (const H of HAB) {
       H.pool = POOLS.find((p) => p.hab === H.id) || null;
       const [a, b, c, d] = H.rect;
-      H.browse = [a + 7, b + 11]; H.rest = H.id === 'lions' ? [-526, -111] : [c - 8, d - 9];
-      H.entry = H.id === 'lions' ? [-526, -104] : H.rest;
+      H.browse = [a + 7, b + 11]; H.rest = H.id === 'lions' ? [-524, -111] : [c - 8, d - 9];
+      H.entry = H.id === 'lions' ? [-524, -105] : H.rest;
       H.frames = [[a + 9, b + 15, 3.25], [c - 10, b + 27, 4.5], [a + 11, d - 13, 3.75]];
     }
     const timber = col(0x886944), rope = col(0xc7b287), ice = col(0xdcebf0), mud = col(0x665043);
     W.eachCol(-636, -111, -628, -100, (bx, bz, i) => { W.C[i] = mud; });
-    W.fill(-524, 0.25, -130, -510, 4, -124, stoneW); W.clear(-520, 0.25, -125, -514, 2.5, -122);
-    W.fill(-520, 2.5, -126, -514, 3, -121, cap);
     for (const [x, z, height] of HAB.find((h) => h.id === 'primates').frames) {
       for (const dx of [-2, 2]) for (const dz of [-2, 2]) W.fill(x + dx, 0.25, z + dz, x + dx + 0.5, height, z + dz + 0.5, timber);
       W.fill(x - 2.5, height, z - 2.5, x + 3, height + 0.25, z + 3, timber);
@@ -211,7 +215,22 @@ try {
     const bay = new THREE.BufferGeometry();
     bay.setAttribute('position', new THREE.Float32BufferAttribute([-594.25, 0, -208, -594.25, 0, -184, -585, 0, -184, -585, 0, -208], 3));
     bay.setAttribute('normal', new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], 3));
-    bay.setIndex([0, 1, 2, 0, 2, 3]); bay.computeBoundingSphere(); bay.userData.kind = 'pond'; bay.userData.waterY = 0; AF.addWater(bay);
+    bay.setIndex([0, 1, 2, 0, 2, 3]); bay.computeBoundingSphere(); bay.userData.kind = 'pond'; bay.userData.waterY = 0; collectPond(bay);
+    for (const [y, geos] of pondGeos) {
+      let vertices = 0, indices = 0;
+      for (const geo of geos) { vertices += geo.attributes.position.count; indices += geo.index.count; }
+      const positions = new Float32Array(vertices * 3), normals = new Float32Array(vertices * 3), index = new Uint32Array(indices);
+      let vertexOffset = 0, indexOffset = 0;
+      for (const geo of geos) {
+        positions.set(geo.attributes.position.array, vertexOffset * 3); normals.set(geo.attributes.normal.array, vertexOffset * 3);
+        for (const value of geo.index.array) index[indexOffset++] = value + vertexOffset;
+        vertexOffset += geo.attributes.position.count; geo.dispose();
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+      geo.setIndex(new THREE.BufferAttribute(index, 1)); geo.computeBoundingSphere(); geo.userData.kind = 'pond'; geo.userData.waterY = y;
+      AF.addWater(geo);
+    }
     P.pools.push({ x0: -594.25, z0: -208, x1: -585, z1: -184, y: 0 });
     for (let k = 0; k < 8; k++) {
       W.eachCol(-601, -211 - k * 0.5, -595, -210.5 - k * 0.5, (bx, bz, i) => { W.H[i] = -7 + k; W.C[i] = pave; });
@@ -226,12 +245,10 @@ try {
     // ---- features
     const rock = [col(0x8a847c, { jitter: 0.6 }), col(0x9a9288, { jitter: 0.6 }), col(0x7a746c, { jitter: 0.6 })];
     const boulder = (x, z, r, h) => { for (let y = 0; y < h; y += 0.5) { const rr = r * Math.sqrt(1 - (y / h) * 0.8); W.eachCol(x - rr, z - rr, x + rr, z + rr, (bx, bz, i, px, pz) => { if (Math.hypot(px - x, pz - z) < rr - AF.hash2(bx, bz) * 0.4) W.fill(px - 0.125, 0.25 + y, pz - 0.125, px + 0.125, 0.75 + y, pz + 0.125, rock[(bx + bz + y * 2) % 3 | 0]); }); } };
-    // Pride Rock: stepped ledges up to a jutting lip
     boulder(-516, -118, 9, 3); boulder(-512, -122, 6, 5.5); boulder(-509, -125, 3.5, 7);
-    W.fill(-514, 6.75, -128, -504, 7.25, -121, rock[1]);
-    W.clear(-520, 0.25, -126, -514, 2.5, -108);
-    W.fill(-529, 0.25, -114, -523, 1, -108, rock[1]);
-    for (let step = 0; step < 3; step++) W.fill(-528, 0.25, -108 + step, -524, 1 - step * 0.25, -107 + step, rock[1]);
+    boulder(-507.5, -125, 3, 6.5);
+    W.clear(-520, 0.25, -126, -514, 2.5, -120);
+    boulder(-524, -111, 5, 1.5); boulder(-524, -106.5, 3, 0.75);
     // savannah: acacias (a thin trunk + a flat umbrella crown), termite mounds, rocks
     const bark = col(0x5a4632, { jitter: 0.5 }), leafA = col(0x6a8a2e, { jitter: 0.7 }), leafB = col(0x7a9a3a, { jitter: 0.7 });
     const acacia = (x, z, s) => { W.fill(x - 0.25, 0.25, z - 0.25, x + 0.25, 4.5 * s, z + 0.25, bark); W.fill(x - 1.5, 4 * s, z - 0.25, x + 1.5, 4.25 * s, z + 0.25, bark); for (const [r, y] of [[3.8 * s, 4.5 * s], [4.6 * s, 4.75 * s], [3.2 * s, 5 * s]]) W.eachCol(x - r, z - r, x + r, z + r, (bx, bz, i, px, pz) => { if (Math.hypot(px - x, pz - z) < r - AF.hash2(bx, bz) * 0.8) W.fill(px - 0.125, y, pz - 0.125, px + 0.125, y + 0.25, pz + 0.125, AF.hash2(bx * 3, bz) < 0.5 ? leafA : leafB); }); };
@@ -358,7 +375,6 @@ try {
       W.fill(x - 1.25, 0.25, z + 2.25, x + 1.25, 1.0, z + 2.75, wt); W.fill(x - 1.0, 1.25, z + 2.5, x + 1.0, 2.0, z + 2.75, col(stripe, { emit: stripe, emitK: 0.5, jitter: 0 }));
       AF.placeStatic(fitText(name, 0xffffff, 3.0, 'deco'), x, 2.85, z - 0.4, 2, { collide: false });
       W.fill(x - 1.75, 2.75, z + 1.25, x + 1.75, 3.25, z + 1.5, st);
-      AF.addLight({ x, y: 2.2, z: z + 0.2, color: 0xffe0b0, intensity: 0.6, range: 7, kind: 'shop' });
       if (AF.addSpot) { AF.addSpot({ building: 'zoo-kiosk', x, y: 0.25, z: z + 1.4, yaw: PI, kind: 'counter' }); AF.addSpot({ building: 'zoo', x: x - 0.6, y: 0.25, z: z - 1.6, yaw: 0, kind: 'queue' }); AF.addSpot({ building: 'zoo', x: x + 0.7, y: 0.25, z: z - 2.4, yaw: 0.2, kind: 'queue' }); }
     };
     kiosk(-578, -144.5, 'ICE CREAM', 0xe86a9a, 0xf6e8d8); kiosk(-520, -144.5, 'SNACKS', 0xd8502a, 0xf2e2c0); kiosk(-470, -144.5, 'GIFTS', 0x2f6a8a, 0xe8eef2);
@@ -528,7 +544,9 @@ try {
         }
         if (id === 'lion' || id === 'lioness' || id === 'tiger') refined.box(Math.floor(refined.w * 0.38), noseY + 1, noseZ, Math.ceil(refined.w * 0.62), noseY + 3, noseZ + 1, c.dark);
       }
-      return AF.meshModel(refined, { vs: 1 / 16, anchor });
+      const geo = AF.meshModel(refined, { vs: 1 / 16, anchor });
+      geo.userData.farGeo = AF.meshModel(m, { vs: VS, anchor });
+      return geo;
     };
     const add = (name, dims, position, parent, anchor = [0.5, 0, 0.5], color = c.body, kind = name, rotation = 0, side = 0) => {
       const part = { name, geo: shape(dims, kind, color, anchor), x: position[0], y: position[1], z: position[2], parent, rotation, side, matrix: new THREE.Matrix4(), mesh: null };
@@ -607,6 +625,57 @@ try {
     }
     an.tx = boundX(an, an.rect[2] - an.pad); an.tz = boundZ(an, an.rect[3] - an.pad);
   };
+  const mergeAnimal = (G) => {
+    const parts = G.parts.filter((part) => part.name !== 'spray' && part.name !== 'droplet');
+    let vertices = 0, indices = 0;
+    for (const part of parts) { const geo = part.geo.userData.farGeo; vertices += geo.attributes.position.count; indices += geo.index.count; }
+    const positions = new Float32Array(vertices * 3), uv = new Int16Array(vertices * 2), palette = new Uint16Array(vertices), normals = new Uint8Array(vertices), index = new Uint32Array(indices);
+    let vertexOffset = 0, indexOffset = 0;
+    const point = new THREE.Vector3(), normal = new THREE.Vector3();
+    for (const part of G.parts) {
+      tmpE.set(part.name === 'tail' ? -0.95 : part.name === 'tailTip' ? -0.15 : part.rotation, 0, 0); tmpQ.setFromEuler(tmpE);
+      part.matrix.compose(tmpV.set(part.x, part.y, part.z), tmpQ, one.set(1, 1, 1));
+      if (part.parent >= 0) part.matrix.premultiply(G.parts[part.parent].matrix);
+      const geo = part.geo.userData.farGeo;
+      if (parts.includes(part)) {
+        for (let vertex = 0; vertex < geo.attributes.position.count; vertex++) {
+          point.fromBufferAttribute(geo.attributes.position, vertex).applyMatrix4(part.matrix); point.toArray(positions, (vertexOffset + vertex) * 3);
+          const packed = geo.attributes.aAN.array[vertex], axis = packed % 8;
+          normal.set(axis === 0 ? 1 : axis === 1 ? -1 : 0, axis === 2 ? 1 : axis === 3 ? -1 : 0, axis === 4 ? 1 : axis === 5 ? -1 : 0).transformDirection(part.matrix);
+          const ax = Math.abs(normal.x), ay = Math.abs(normal.y), az = Math.abs(normal.z);
+          const remapped = ax > ay && ax > az ? (normal.x > 0 ? 0 : 1) : ay > az ? (normal.y > 0 ? 2 : 3) : (normal.z > 0 ? 4 : 5);
+          normals[vertexOffset + vertex] = packed - axis + remapped;
+        }
+        uv.set(geo.attributes.aBU.array, vertexOffset * 2); palette.set(geo.attributes.aPal.array, vertexOffset);
+        for (const value of geo.index.array) index[indexOffset++] = value + vertexOffset;
+        vertexOffset += geo.attributes.position.count;
+      }
+      geo.dispose(); delete part.geo.userData.farGeo;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3)); geo.setAttribute('aBU', new THREE.BufferAttribute(uv, 2));
+    geo.setAttribute('aPal', new THREE.BufferAttribute(palette, 1)); geo.setAttribute('aAN', new THREE.BufferAttribute(normals, 1));
+    geo.setIndex(new THREE.BufferAttribute(index, 1)); geo.computeBoundingSphere(); return geo;
+  };
+  let fadeMaterial;
+  const zooFadeMaterial = () => {
+    if (fadeMaterial) return fadeMaterial;
+    fadeMaterial = AF.mat.voxel.clone();
+    const patch = AF.mat.voxel.onBeforeCompile;
+    fadeMaterial.onBeforeCompile = (shader, renderer) => {
+      patch.call(fadeMaterial, shader, renderer);
+      shader.vertexShader = 'attribute float aZooFade; varying float vZooFade;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvZooFade = aZooFade;');
+      shader.fragmentShader = 'varying float vZooFade;\n' + shader.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nfloat zooDither = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715))));\nif (vZooFade < 0.0 ? zooDither < -vZooFade - 1.0 : zooDither >= vZooFade) discard;');
+    };
+    fadeMaterial.customProgramCacheKey = () => AF.mat.voxel.customProgramCacheKey() + '-zoo-fade';
+    return fadeMaterial;
+  };
+  const appendInstance = (mesh, matrix, fade) => {
+    const instance = mesh.count++;
+    mesh.setMatrixAt(instance, matrix);
+    mesh.geometry.attributes.aZooFade.array[instance] = fade;
+    if (fade > -2 && fade < -1 || fade > 0 && fade < 1) mesh.material = zooFadeMaterial();
+  };
   const decide = (an, hours) => {
     const id = an.sp.id, H = an.H, roll = random(an), night = hours >= 20 || hours < 6;
     an.elapsed = 0; an.timer = 5 + random(an) * 10; an.next = '';
@@ -643,11 +712,17 @@ try {
       if (!sp) {
         const G = makeGeo(id);
         sp = Z.species[id] = { id, G, meshes: [], list: [] };
+        const farGeo = mergeAnimal(G);
+        farGeo.setAttribute('aZooFade', new THREE.InstancedBufferAttribute(new Float32Array(128), 1).setUsage(THREE.DynamicDrawUsage));
+        sp.far = new THREE.InstancedMesh(farGeo, AF.mat.voxel, 128);
+        sp.far.name = 'zoo:' + id + ':far'; sp.far.count = 0; sp.far.frustumCulled = false; sp.far.receiveShadow = true;
+        sp.far.instanceMatrix.setUsage(THREE.DynamicDrawUsage); sp.meshes.push(sp.far); AF.scene.add(sp.far);
         const cache = new Map();
         for (const part of G.parts) {
           const key = part.name + ':' + part.geo.boundingBox.min.toArray().join(',') + ':' + part.geo.boundingBox.max.toArray().join(',');
           let mesh = cache.get(key);
           if (!mesh) {
+            part.geo.setAttribute('aZooFade', new THREE.InstancedBufferAttribute(new Float32Array(128), 1).setUsage(THREE.DynamicDrawUsage));
             mesh = new THREE.InstancedMesh(part.geo, AF.mat.voxel, 128);
             mesh.castShadow = true; mesh.receiveShadow = true; mesh.frustumCulled = false; mesh.count = 0;
             mesh.name = 'zoo:' + id + ':' + part.name; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -665,15 +740,20 @@ try {
           phase: R() * 6, clock: R() * 20, v: 0, scale: id === 'giraffe' ? 0.94 + R() * 0.06 : 0.92 + R() * 0.08,
           state: 'wander', next: 'graze', timer: 25, elapsed: 0, seed: (R() * 4294967296) >>> 0, leader,
           fl: (k % 2 ? -1 : 1) * (2 + k * 0.6), fb: -2 - k * 1.5, frame: k % H.frames.length,
-          elevation: 0, sx: x, sz: z, sy: 0, acc: 0, floorAcc: 0, cooldown: 5 + k, attention: 0, pose: 0, wet: false };
+          elevation: 0, sx: x, sz: z, sy: 0, acc: 0, floorAcc: 0, cooldown: 5 + k, attention: 0, pose: 0, wet: false, far: false, fade: 0 };
         if (!leader) leader = an;
         dryTarget(an); an.x = an.tx; an.z = an.tz; an.y = W.groundY(an.x, an.z);
         if (id === 'penguin') { an.x = a + pad + k * 2.4; an.z = d - pad - 3; }
         if (id === 'giraffe' && k === 0) { an.x = H.browse[0] + 1.5; an.z = H.browse[1]; an.state = 'browse'; an.timer = 8; }
-        if (id === 'lion' || id === 'lioness') { an.x = H.rest[0] + (k - 0.5) * 1.5; an.z = H.rest[1]; an.y = 1; an.state = 'rest'; an.timer = 8 + k * 5; }
+        if (id === 'lion' || id === 'lioness') { an.x = H.rest[0] + (id === 'lion' ? -1.5 : k * 1.5); an.z = H.rest[1]; an.y = AF.surfaceBelow(an.x, an.z, 4, 4); an.state = 'rest'; an.timer = 8 + k * 5; }
         sp.list.push(an); Z.list.push(an);
       }
     }
+    AF.on('ready', () => {
+      for (const id in Z.species) for (const mesh of Z.species[id].meshes) mesh.material = zooFadeMaterial();
+      AF.renderer.compile(AF.scene, AF.camera);
+      for (const id in Z.species) for (const mesh of Z.species[id].meshes) mesh.material = AF.mat.voxelInst;
+    });
   });
   const stepAnimal = Z.stepAnimal = (an, dt, hours, player) => {
     const id = an.sp.id, S = an.sp.G.S, H = an.H, night = hours >= 20 || hours < 6;
@@ -734,7 +814,7 @@ try {
     if (an.state === 'ascend') target(an, H.rest[0], H.rest[1], 'wander', 'rest', 15);
     an.phase += dt * an.v * (4.5 / Math.max(0.5, an.sp.G.lift));
     const wet = inPool(an.hab, an.x, an.z); an.wet = !!wet;
-    if (an.floorAcc >= 0.3) {
+    if (an.floorAcc >= (an.far ? 0.9 : 0.3)) {
       an.floorAcc = 0;
       an.y = wet ? wet.y : H.id === 'primates' ? W.groundY(an.x, an.z) : AF.surfaceBelow(an.x, an.z, Math.max(W.groundY(an.x, an.z) + 1.2, an.y + 0.75), 3);
       if (!Number.isFinite(an.y)) an.y = W.groundY(an.x, an.z);
@@ -802,7 +882,7 @@ try {
       part.matrix.premultiply(part.parent < 0 ? tmpM : G.parts[part.parent].matrix);
       if ((name === 'spray' || name === 'droplet') && state !== 'spray') continue;
       if (!detail && (name === 'jaw' || name === 'ear' || name === 'antler' || name === 'droplet' || name === 'finger' || name === 'scute' || name === 'fold')) continue;
-      const mesh = part.mesh; mesh.setMatrixAt(mesh.count++, part.matrix);
+      appendInstance(part.mesh, part.matrix, -1 - an.fade);
     }
   };
   AF.onTick('zoo', 430, (dt) => {
@@ -810,17 +890,28 @@ try {
     const cp = AF.camera.position, low = AF.GFX && AF.GFX.tier === 'low', limit = low ? 120 : 150;
     viewMatrix.multiplyMatrices(AF.camera.projectionMatrix, AF.camera.matrixWorldInverse); frustum.setFromProjectionMatrix(viewMatrix);
     Z.near = false;
-    for (const id in Z.species) for (const mesh of Z.species[id].meshes) mesh.count = 0;
+    for (const id in Z.species) for (const mesh of Z.species[id].meshes) { mesh.count = 0; mesh.material = AF.mat.voxelInst; }
     for (const an of Z.list) {
-      const dx = cp.x - an.x, dz = cp.z - an.z, distance = dx * dx + dz * dz;
+      const dx = cp.x - an.x, dy = cp.y - an.y, dz = cp.z - an.z, distance = dx * dx + dy * dy + dz * dz;
       sphere.center.set(an.x, an.y + an.elevation + an.sp.G.height * 0.5, an.z); sphere.radius = Math.max(2.5, an.sp.G.height);
       if (distance > limit * limit || !frustum.intersectsSphere(sphere)) { an.acc = 0; continue; }
       Z.near = true; an.acc += dt;
-      const interval = distance < 2500 ? 0 : distance < 10000 ? 0.2 : 0.5;
+      if (distance > 62 * 62) an.far = true;
+      else if (distance < 52 * 52) an.far = false;
+      an.fade = Math.max(0, Math.min(1, an.fade + (an.far ? dt : -dt) / 0.3));
+      const interval = distance < 80 * 80 ? 0 : 0.1;
       if (an.acc >= interval) { stepAnimal(an, Math.min(an.acc, 0.5), AF.time ? AF.time.hours : 12, cp); an.acc = 0; }
-      renderAnimal(an, distance < (low ? 1600 : 5625));
+      if (an.fade < 1) renderAnimal(an, true);
+      if (an.fade > 0) {
+        const G = an.sp.G;
+        tmpE.set(an.state === 'swim' && an.sp.id === 'penguin' ? PI / 2 : 0, an.yaw, 0); tmpQ.setFromEuler(tmpE);
+        tmpM.compose(tmpV.set(an.x, an.y + an.elevation + (G.lift + an.pose) * an.scale, an.z), tmpQ, one.set(an.scale, an.scale, an.scale));
+        appendInstance(an.sp.far, tmpM, an.fade);
+      }
     }
-    for (const id in Z.species) for (const mesh of Z.species[id].meshes) { mesh.visible = mesh.count > 0; if (mesh.visible) mesh.instanceMatrix.needsUpdate = true; }
+    for (const id in Z.species) for (const mesh of Z.species[id].meshes) {
+      if (mesh.count) { mesh.layers.set(0); mesh.instanceMatrix.needsUpdate = true; mesh.geometry.attributes.aZooFade.needsUpdate = true; }
+    }
   });
   AF.test('zoo: giraffes stand at least 4.5 metres tall', () => {
     const sp = Z.species.giraffe;
@@ -831,6 +922,29 @@ try {
     ok: HAB.every((H) => Z.list.some((an) => an.hab === H.id) && H.rect[0] > ZOO.x0 && H.rect[2] < ZOO.x1 && H.rect[1] > ZOO.z0 && H.rect[3] < ZOO.z1),
     info: HAB.length + ' habitats, ' + Z.list.length + ' animals'
   }));
+  AF.test('zoo: merged far species preserve voxel attributes and reduce triangles', () => {
+    let ok = true, near = 0, far = 0;
+    for (const id in Z.species) {
+      const sp = Z.species[id], geo = sp.far.geometry, attributes = geo.attributes;
+      const full = sp.G.parts.reduce((total, part) => total + part.geo.index.count, 0);
+      near += full; far += geo.index.count;
+      ok = ok && geo.index.count < full * 0.5 && attributes.position.count === attributes.aPal.count
+        && attributes.position.count === attributes.aAN.count && attributes.position.count === attributes.aBU.count
+        && attributes.aZooFade.count >= sp.list.length && !sp.far.castShadow && [AF.mat.voxel, AF.mat.voxelInst].includes(sp.far.material);
+      for (const value of attributes.position.array) if (!Number.isFinite(value)) ok = false;
+      for (const value of geo.index.array) if (value >= attributes.position.count) ok = false;
+    }
+    return { ok, info: 'standing triangles ' + near / 3 + ' near, ' + far / 3 + ' far' };
+  });
+  AF.test('zoo: lion resting ledge has grounded natural rock', () => {
+    const H = HAB.find((habitat) => habitat.id === 'lions');
+    let ok = true;
+    for (const offset of [-1.5, 0, 1.5]) {
+      const x = H.rest[0] + offset, z = H.rest[1], y = AF.surfaceBelow(x, z, 4, 4);
+      ok = ok && y >= 1 && y <= 2 && AF.solidAt(x, y - 0.125, z);
+    }
+    return { ok, info: 'three supported rest positions; no rectangular upper lip' };
+  });
   AF.test('zoo: simulated herds move and stay inside their habitat bounds', () => {
     let moved = 0, inside = true;
     for (const original of Z.list) {

@@ -47,6 +47,14 @@ try {
         return { m, prop: [cx - 22, cy - 2, 66.5], prop2: [cx + 22, cy - 2, 66.5], blade: 6, pc: K }; } },
   };
   const geoCache = {};
+  PL.trafficGeometry = () => {
+    const B = TYPES.airliner.build(), red = C(0xff3040, { emit: 0xff2030, emitK: 2, mode: 'always' }), green = C(0x30ff80, { emit: 0x20ff60, emitK: 2, mode: 'always' }), white = C(0xffffff, { emit: 0xffffff, emitK: 2, mode: 'always' });
+    const gear = new AF.Model(B.m.w, B.m.h, B.m.d);
+    for (let x = 0; x < B.m.w; x++) for (let y = 0; y < 6; y++) for (let z = 0; z < B.m.d; z++) { const value = B.m.get(x, y, z); if (value && (Math.abs(x - 59) >= 20 && Math.abs(x - 59) <= 24)) { gear.set(x, y, z, value); B.m.set(x, y, z, 0); } }
+    B.m.box(0, 7, 55, 2, 9, 57, red); B.m.box(116, 7, 55, 118, 9, 57, green); B.m.box(58, 20, 2, 60, 22, 4, white);
+    const options = { vs: 0.25, anchor: [0.5, 0, 0.5] }, shared = planeGeo('airliner');
+    return { body: AF.meshModel(B.m, options), gear: AF.meshModel(gear, options), prop: shared.pgeo, props: shared.props };
+  };
   const planeGeo = (id) => {
     if (geoCache[id]) return geoCache[id];
     const T = TYPES[id], B = T.build();

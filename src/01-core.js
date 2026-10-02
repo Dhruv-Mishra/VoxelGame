@@ -38,9 +38,14 @@ AF.GFX = {
 // ---------------------------------------------------------------- hooks
 // Build stages run once at boot, sorted by order (see CONTRACT.md for the order table).
 // Ticks run every frame sorted by order: fn(dt, t). Errors are caught, logged once per hook, and the hook keeps running.
-AF.hooks = { build: [], tick: [], tests: [] };
+AF.hooks = { build: [], tick: [], tests: [], idle: [] };
 AF.onBuild = (name, order, fn) => { AF.hooks.build.push({ name, order, fn }); };
 AF.onTick = (name, order, fn) => { AF.hooks.tick.push({ name, order, fn, errs: 0 }); AF.hooks.tick.sort((a, b) => a.order - b.order); };
+// idle work: fn(budgetMs) -> true when it still has work. Runs in the rAF slots the fps cap skips (PERF.md §2), never in a rendered frame.
+AF.onIdle = (name, fn) => { AF.hooks.idle.push({ name, fn, errs: 0 }); };
+// frame cap (PERF.md §2, locked): 30 by default, 60 or 0 (= display rate) from the menu; saved per browser
+AF.fpsCap = (() => { try { const s = localStorage.getItem('portSolace.fps'); if (s !== null && [0, 30, 60].includes(+s)) return +s; } catch (e) { /* storage blocked */ } return 30; })();
+AF.setFpsCap = (v) => { AF.fpsCap = [0, 30, 60].includes(+v) ? +v : 30; try { localStorage.setItem('portSolace.fps', String(AF.fpsCap)); } catch (e) { /* storage blocked */ } };
 AF.test = (name, fn) => { AF.hooks.tests.push({ name, fn }); };
 AF.warnOnce = (() => { const seen = new Set(); return (k, ...a) => { if (!seen.has(k)) { seen.add(k); console.warn('[af]', k, ...a); } }; })();
 

@@ -3,13 +3,14 @@ try {
 // ===== 03-render: renderer, scene, camera, baseline lights, loop, debug handle  (OWNER: coordinator) =====
 {
   const cv = document.getElementById('cv');
-  const R = AF.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: !AF.MOBILE, preserveDrawingBuffer: AF.SHOT || AF.TEST, powerPreference: AF.MOBILE ? 'default' : 'high-performance' });
+  // phones keep MSAA: resolving on tile-based GPUs is nearly free and it beats rendering more pixels (PERF.md §6)
+  const R = AF.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: AF.SHOT || AF.TEST, powerPreference: AF.MOBILE ? 'default' : 'high-performance' });
   // base pixel ratio in CSS px: the menu's Resolution (AF.GFX.res 0.75/0.9/1) or the tier default (Low 0.8 · Laptop/Balanced 1 · High 1.25),
   // never above devicePixelRatio. Below 1 the browser upscales the canvas (soft + shimmering edges), so Balanced renders at 1 CSS px.
   // ?shot renders at 1 (or ?dpr=N)
   AF.basePR = () => {
     const dpr = devicePixelRatio || 1, G = AF.GFX;
-    if (AF.MOBILE) return 0.75 * Math.min(dpr, 1);
+    if (AF.MOBILE) return Math.min(dpr, 1);
     if (AF.SHOT) return AF.clamp(+AF.Q.get('dpr') || 1, 0.5, 3);
     return Math.min(dpr, G.res > 0 ? G.res : G.tier === 'low' ? 0.8 : G.tier === 'high' ? 1 : 1.25);
   };
@@ -70,6 +71,20 @@ try {
     sun.position.copy(sun.target.position).addScaledVector(d, 400);
   });
   const _lx = new THREE.Vector3(), _ly = new THREE.Vector3(), _lz = new THREE.Vector3();
+
+  // dynamic near plane (PERF.md §3, locked): 24-bit depth precision is ~ d^2 / (near * 2^24), so a fixed 0.08 m near plane
+  // z-fights from ~150 m on Windows (ANGLE / D3D11). On foot / driving 0.1 m; from the air it grows with altitude and the
+  // distance to the followed target (plane, orbit centre) up to 6 m.
+  const HIGH_MODES = new Set(['fly', 'skydive', 'aerial', 'cine', 'probe']);
+  AF.onTick('cam-near', 886, () => {
+    let n = 0.1;
+    if (HIGH_MODES.has(AF.mode)) {
+      const cp = cam.position; let gy = 0; try { gy = AF.W ? Math.max(0, AF.W.groundY(cp.x, cp.z) || 0) : 0; } catch (e) { gy = 0; }
+      const alt = cp.y - gy, dT = cp.distanceTo(AF.camTarget);
+      n = AF.clamp(Math.min(alt * 0.04, dT > 0.5 ? dT * 0.15 : 6), 0.1, 6);
+    }
+    if (Math.abs(cam.near - n) > cam.near * 0.04) { cam.near = n; cam.updateProjectionMatrix(); }
+  });
 
   // fallback time-of-day (the atmosphere part replaces AF.timeTick)
   AF.timeTick = (dt) => {
@@ -159,16 +174,42 @@ try {
       try { h.fn(dt, AF.clock.t); }
       catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (AF.MOBILE) AF.reportError(e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
     }
-    const every = AF.SHOT || AF.TEST ? 1 : (AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' && !AF.GFX.lite ? 2 : 3) * (AF.shadowNear.k > 0.8 ? 2 : 1);
+    // near map refresh in Hz, not frames: at the 30 fps cap High + Balanced refresh every frame, Standard + Low every 2nd
+    const base = AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' && !AF.GFX.lite ? 2 : 3;
+    const every = AF.SHOT || AF.TEST ? 1 : (AF.frameStats && AF.frameStats.capped && AF.fpsCap <= 30 ? Math.ceil(base / 2) : base) * (AF.shadowNear.k > 0.8 ? 2 : 1);
     if (AF.clock.frame % every === 0 || AF.shadowDirty) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
     try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
   };
   AF.frame = frame;
-  let lastTick = 0;
+  let lastTick = 0, slot = 0, rafEma = 16.7, rafLast = 0;
+  // idle work (PERF.md §2): rAF slots skipped by the fps cap run AF.onIdle hooks (streaming, far builds) for ~60 % of a display
+  // interval, so the rendered frames never pay for them
+  const FS = AF.frameStats = { idleT: -1, idleMs: 0, capped: false };
+  const runIdle = () => {
+    const L = AF.hooks.idle; if (!L.length) return;
+    const t0 = performance.now(), end = t0 + Math.min(AF.MOBILE ? 6 : 10, rafEma * 0.6);
+    for (let pass = 0; pass < 4 && performance.now() < end - 0.5; pass++) {
+      let busy = false;
+      for (const h of L) {
+        const left = end - performance.now(); if (left < 0.5) break;
+        try { if (h.fn(left)) busy = true; }
+        catch (e) { if (h.errs++ < 3) console.error('[af] idle ' + h.name + ' threw:', e); }
+      }
+      if (!busy) break;
+    }
+    FS.idleT = AF.clock.t; FS.idleMs = performance.now() - t0;
+  };
   const loop = (now) => {
     requestAnimationFrame(loop);
-    if (!AF.ready || AF.paused || graphicsReset || (AF.MOBILE && document.hidden)) { last = now; return; }
+    if (rafLast) rafEma += (Math.min(50, now - rafLast) - rafEma) * 0.05; rafLast = now;
+    if (!AF.ready || AF.paused || graphicsReset || (AF.MOBILE && document.hidden)) { last = now; slot = now; return; }
+    const cap = AF.SHOT || AF.TEST ? 0 : AF.fpsCap; FS.capped = cap > 0;
+    if (cap > 0) {
+      const iv = 1000 / cap;
+      if (now - slot < iv - Math.min(4, rafEma * 0.4)) { runIdle(); return; }
+      slot = now - slot > iv * 2 ? now : slot + iv;
+    }
     const dt = Math.min(0.1, (now - last) / 1000); last = now; lastTick = now;
     fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { AF.fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
     frame(dt);
@@ -211,6 +252,7 @@ try {
     for (const top of AF.scene.children) {
       if (skipNames.has(top.name) || top.isLight || top.isCamera) continue;
       top.traverse((o) => {
+        if (o.isInstancedMesh && AF.mat.splitInstanced) AF.mat.splitInstanced(o);
         if (o.isInstancedMesh && (o.layers.mask === 1 || o.userData.afEmpty)) { C.inst.push(o); return; }
         if (!(o.isMesh) || o.isInstancedMesh || o.frustumCulled === false || !o.geometry) return;
         const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere();
@@ -296,7 +338,7 @@ try {
     cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
-  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 0, regLod: 45, farLod: 110, lod: 40, propCull: 160 };
+  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 50, farLod: 125, lod: 40, propCull: 180 };
   if (AF.MOBILE) TIER.low = mobileTier;
   const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : G.lite && G.tier === 'high' ? TIER.lite : (TIER[G.tier] || TIER.ultra);
   const texSeen = new WeakSet();
@@ -331,25 +373,29 @@ try {
   };
   G.onChange(applyTier);
   // ---------------------------------------------------------------- auto tier (only while G.auto: no saved/forced choice; never in ?shot / ?test)
-  // Down one step after 3 s of > 22 ms frames; never up (higher tiers are opt-in from the menu).
+  // Down one step after 3 s of frames 32 % over the frame target (the fps cap interval, 16.7 ms uncapped); never up.
+  // Phones: adaptive resolution (0.8..1 of the base pixel ratio, checked every 4 s) holds the 30 fps target.
   {
     const base = AF.basePR, LADDER = ['low', 'lite', 'high', 'ultra'];
-    let ema = 16.7, slowT = 0, adjT = 0, grace = 2, vsync = 16.7;
-    G.onChange(() => { ema = vsync; slowT = 0; grace = 2; });
+    const target = () => (AF.fpsCap > 0 ? 1000 / AF.fpsCap : 16.7);
+    let ema = target(), slowT = 0, adjT = 0, grace = 2;
+    G.onChange(() => { ema = target(); slowT = 0; grace = 2; });
     AF.onTick('gfx-adapt', 960, (dt) => {
       if (AF.SHOT || AF.TEST || !AF.ready || AF.paused || document.hidden || G.cinema) return;   // cinema: fixed full resolution, never downgrade
       const ms = dt * 1000; if (ms <= 0 || ms > 250) return;
       if (grace > 0) { grace -= dt; return; }                 // tier switches reallocate targets and recompile: ignore that hitch
-      ema += (ms - ema) * 0.08; adjT += dt; vsync = Math.min(vsync + dt * 0.02, Math.max(6, ms));
-      // dynamic resolution (?dynres): 0.7..1.0 of the base pixel ratio
-      if (adjT > 1.0) {
+      const tg = target();
+      ema += (ms - ema) * 0.08; adjT += dt;
+      // dynamic resolution (phones by default, ?dynres on desktop): every change reallocates the canvas, so it moves rarely
+      const dyn = AF.MOBILE || AF.Q.has('dynres');
+      if (dyn && adjT > (AF.MOBILE ? 4 : 1)) {
         adjT = 0; const T = cur(); let s = G.scale;
-        if (ema > 19) s = Math.max(T.dynMin, s - 0.05); else if (ema < 14.5) s = Math.min(1, s + 0.05);
-        if (s !== G.scale && AF.Q.has('dynres')) { G.scale = s; R.setPixelRatio(base() * s); AF.resize(); }   // off by default: every change reallocates the render targets and stutters
+        if (ema > tg * 1.14) s = Math.max(T.dynMin, s - (AF.MOBILE ? 0.1 : 0.05)); else if (ema < tg * 1.04) s = Math.min(1, s + 0.05);
+        if (Math.abs(s - G.scale) > 1e-3) { G.scale = s; R.setPixelRatio(base() * s); AF.resize(); }
       }
       if (!G.auto) return;
       const i = LADDER.indexOf(G.name);
-      if (ema > 22) slowT += dt; else slowT = Math.max(0, slowT - dt);
+      if (ema > tg * 1.32) slowT += dt; else slowT = Math.max(0, slowT - dt);
       if (slowT > 3 && i > 0) { G.set(LADDER[i - 1], 'slow frames'); return; }
     });
   }
@@ -446,7 +492,7 @@ try {
       const rt = pmrem.fromScene(src, 0, 0.1, 5000);
       R.setRenderTarget(prevRT);
       const old = E.rt; E.rt = rt;
-      for (const m of [AF.mat.voxel, AF.mat.glass]) { const had = !!m.envMap; m.envMap = rt.texture; if (!had) m.needsUpdate = true; }
+      for (const m of [AF.mat.voxel, AF.mat.glass, AF.mat.voxelInst, AF.mat.voxelInstC]) { if (!m) continue; const had = !!m.envMap; m.envMap = rt.texture; if (!had) m.needsUpdate = true; }
       if (old) old.dispose();
       E.n++; E.ms = Math.round((performance.now() - t0) * 10) / 10;
     };
@@ -459,7 +505,8 @@ try {
       const ind = (AF.atmos && AF.atmos.indoor) || 0;
       const k = T.env * (1 - 0.75 * ind);
       AF.mat.voxel.envMapIntensity = k; AF.mat.glass.envMapIntensity = k * 1.2;
-      if (T.env <= 0) { if (AF.mat.voxel.envMap) { AF.mat.voxel.envMapIntensity = 0; AF.mat.glass.envMapIntensity = 0; } return; }
+      if (AF.mat.voxelInst) AF.mat.voxelInst.envMapIntensity = AF.mat.voxelInstC.envMapIntensity = k;
+      if (T.env <= 0) { if (AF.mat.voxel.envMap) { AF.mat.voxel.envMapIntensity = 0; AF.mat.glass.envMapIntensity = 0; if (AF.mat.voxelInst) AF.mat.voxelInst.envMapIntensity = AF.mat.voxelInstC.envMapIntensity = 0; } return; }
       if (AF.gfx.far && AF.gfx.far.frameN === 0) return;      // never on the same frame as a far-shadow refresh
       let need = !E.rt;
       if (sky && ver !== undefined) need = need || (ver !== E.ver && acc > 0.5);
@@ -488,6 +535,10 @@ try {
   });
   // expose for tests / debugging
   AF.gfx.stats = () => ({ tier: G.name, lod: AF.LOD_DIST, pr: R.getPixelRatio(), render: R.domElement.width + 'x' + R.domElement.height, scale: G.scale, res: G.res, near: AF.sun.shadow.mapSize.x, nearR: AF.shadowNear.r, far: AF.gfx.far && { on: AF.gfx.far.on, size: AF.gfx.far.size, R: AF.gfx.far.R, renders: AF.gfx.far.renders, ms: AF.gfx.far.ms }, env: AF.gfx.env && { src: AF.gfx.env.src, n: AF.gfx.env.n, ms: AF.gfx.env.ms }, farLod: AF.world.farStats, autoSurf: AF.PAL.autoCount });
+  AF.test('renderer: fps cap, idle streaming and dynamic near plane stay wired (PERF.md)', () => {
+    const near = AF.hooks.tick.some((x) => x.name === 'cam-near'), idle = AF.hooks.idle.some((x) => x.name === 'region-stream');
+    return { ok: near && idle && [0, 30, 60].includes(AF.fpsCap) && AF.camera.near >= 0.1 - 1e-6, info: 'cap ' + AF.fpsCap + ', near ' + AF.camera.near.toFixed(2) + ', idle hooks ' + AF.hooks.idle.length };
+  });
   AF.test('renderer: laptop profile + resolution setting', () => {
     if (AF.MOBILE) return { ok: true, info: 'mobile profile' };
     const was = G.name, wasAuto = G.auto, wasRes = G.res;
@@ -503,8 +554,8 @@ try {
   AF.test('renderer: mobile GPU budgets stay bounded', () => {
     if (!AF.MOBILE) return { ok: true, info: 'desktop profile' };
     const cfg = cur(), context = R.getContext().getContextAttributes();
-    const ok = !context.antialias && R.getPixelRatio() <= 0.75 * Math.min(devicePixelRatio || 1, 2) && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools === 0 && AF.LOD_DIST === 40 && AF.REGION_LOD === 45 && AF.PROP_CULL === 160 && (!AF.atmos.pool || AF.atmos.pool.length === 0);
-    return { ok, info: 'pr ' + R.getPixelRatio() + ', near ' + sunSize() + ', direct renderer, no far/env/AO/light pools' };
+    const ok = R.getPixelRatio() <= Math.min(devicePixelRatio || 1, 1) + 1e-3 && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools <= 6 && AF.LOD_DIST === 40 && AF.REGION_LOD === 50 && AF.PROP_CULL === 180 && (!AF.atmos.pool || AF.atmos.pool.length === 0);
+    return { ok, info: 'pr ' + R.getPixelRatio() + ', msaa ' + context.antialias + ', near ' + sunSize() + ', direct renderer, no far/env/AO/point lights, ' + cfg.pools + ' shader pools' };
   });
   function sunSize() { return AF.sun.shadow.mapSize.x; }
 }

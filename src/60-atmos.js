@@ -7,9 +7,10 @@ try {
   const T = AF.time, W = AF.W;
   const V3 = THREE.Vector3;
   const clamp = AF.clamp, lerp = AF.lerp, smooth = AF.smooth;
-  // player brightness (exposure multiplier, saved per browser); phones default brighter
-  AF.brightness = (() => { try { const v = parseFloat(localStorage.getItem('portSolace.bright')); if (v >= 0.6 && v <= 2) return v; } catch (e) { /* storage blocked */ } return AF.MOBILE ? 1.3 : 1.0; })();
-  AF.setBrightness = (v) => { AF.brightness = clamp(+v || 1, 0.6, 2); try { localStorage.setItem('portSolace.bright', String(AF.brightness)); } catch (e) { /* storage blocked */ } };
+  // player brightness (exposure multiplier, saved per browser). Default = the slider's maximum (owner request, Oct 2026); the key
+  // was bumped to '.bright2' so earlier saved values don't hide the new default. ?shot / ?test keep 1.0 for comparable captures.
+  AF.brightness = (() => { try { const v = parseFloat(localStorage.getItem('portSolace.bright2')); if (v >= 0.6 && v <= 2) return v; } catch (e) { /* storage blocked */ } return AF.SHOT || AF.TEST ? 1.0 : 2.0; })();
+  AF.setBrightness = (v) => { AF.brightness = clamp(+v || 1, 0.6, 2); try { localStorage.setItem('portSolace.bright2', String(AF.brightness)); } catch (e) { /* storage blocked */ } };
   if (AF.Q.has('hour')) T.hours = ((+AF.Q.get('hour') % 24) + 24) % 24;
   else T.hours = 20.6;   // boot at night: the lit city, neon and light pools are the best first look
   if (AF.Q.has('speed')) T.speed = +AF.Q.get('speed');

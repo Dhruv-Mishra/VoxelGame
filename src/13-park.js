@@ -39,6 +39,120 @@ try {
   };
   const hasKit = () => !!(AF.peopleKit && typeof AF.peopleKit.buildPerson === 'function' && typeof AF.peopleKit.makeLook === 'function');
   const inPark = (x, z, m = 0) => x > PK.x0 + m && x < PK.x1 - m && z > PK.z0 + m && z < PK.z1 - m;
+  const parkDirection = new THREE.Vector3();
+  const movers = [];
+  const moving = (object, kind) => {
+    movers.push({ geometry: object.geometry, material: object.material, matrix: object.matrixWorld, object, kind, visible: true, shadow: false });
+    object.visible = false; object.castShadow = false; object.frustumCulled = false; return object;
+  };
+  const parkTick = (name, order, fn) => {
+    let frame = 0, elapsed = 0, hidden = true;
+    AF.onTick(name, order, (dt, time) => {
+      const distance = parkDistance();
+      if (!Number.isFinite(distance)) { hidden = true; elapsed = 0; return; }
+      elapsed += dt;
+      if (!hidden && distance > 60 && ++frame % 3 !== 0) return;
+      hidden = false; fn(elapsed, time); elapsed = 0;
+    });
+  };
+  const parkDistance = () => {
+    const camera = AF.camera; if (!camera) return Infinity;
+    const pos = camera.position, dx = Math.max(PK.x0 - pos.x, 0, pos.x - PK.x1), dz = Math.max(PK.z0 - pos.z, 0, pos.z - PK.z1);
+    const distance = Math.hypot(dx, dz, Math.max(0, pos.y - 30));
+    if (distance > 150) return Infinity;
+    camera.getWorldDirection(parkDirection);
+    const cx = (PK.x0 + PK.x1) * 0.5 - pos.x, cz = (PK.z0 + PK.z1) * 0.5 - pos.z;
+    const extent = Math.abs(parkDirection.x) * (PK.x1 - PK.x0) * 0.5 + Math.abs(parkDirection.z) * (PK.z1 - PK.z0) * 0.5 + Math.abs(parkDirection.y) * 15;
+    return cx * parkDirection.x + (15 - pos.y) * parkDirection.y + cz * parkDirection.z + extent < -10 ? Infinity : distance;
+  };
+  const parkBatches = (entries, parent, name, shadows = false) => {
+    if (!entries.length) return null;
+    const groups = new Map(), data = new Float32Array(entries.length * 20);
+    const texture = new THREE.DataTexture(data, 5, entries.length, THREE.RGBAFormat, THREE.FloatType);
+    texture.minFilter = texture.magFilter = THREE.NearestFilter; texture.generateMipmaps = false;
+    const head = `uniform sampler2D uParkPose; attribute float aParkSlot; varying float vParkFade;
+      mat4 parkMatrix() { float row = (aParkSlot + 0.5) / ${entries.length.toFixed(1)};
+        return mat4(texture2D(uParkPose, vec2(0.1,row)), texture2D(uParkPose, vec2(0.3,row)),
+          texture2D(uParkPose, vec2(0.5,row)), texture2D(uParkPose, vec2(0.7,row))); }\n`;
+    const patch = (shader, depth) => {
+      shader.uniforms.uParkPose = { value: texture };
+      shader.vertexShader = head + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('void main() {', `void main() { mat4 parkPose = parkMatrix();
+        vParkFade = texture2D(uParkPose, vec2(0.9,(aParkSlot+0.5)/${entries.length.toFixed(1)})).y;`);
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `vec3 transformed = (parkPose * vec4(position,1.0)).xyz;
+        ${depth ? `if (texture2D(uParkPose, vec2(0.9,(aParkSlot+0.5)/${entries.length.toFixed(1)})).x < 0.5) transformed = vec3(0.0);` : ''}`);
+      shader.vertexShader = shader.vertexShader.replace('#include <defaultnormal_vertex>', `mat3 parkNormal = mat3(parkPose);
+        objectNormal /= max(vec3(dot(parkNormal[0],parkNormal[0]),dot(parkNormal[1],parkNormal[1]),dot(parkNormal[2],parkNormal[2])),vec3(0.000001));
+        objectNormal = parkNormal * objectNormal;
+        #include <defaultnormal_vertex>`);
+      shader.fragmentShader = 'varying float vParkFade;\n' + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace('void main() {', `void main() {
+        float parkDither = fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233))) * 43758.5453);
+        if (${name === 'park-life-far' ? 'parkDither < 1.0 - vParkFade' : 'parkDither >= vParkFade'}) discard;`);
+    };
+    for (let index = 0; index < entries.length; index++) {
+      const entry = entries[index], geometry = entry.geometry.clone();
+      geometry.setAttribute('aParkSlot', new THREE.BufferAttribute(new Float32Array(geometry.attributes.position.count).fill(index), 1));
+      const key = (name === 'park-moving-parts' ? 'rigid' : entry.kind) + ':' + entry.material.uuid;
+      if (!groups.has(key)) groups.set(key, { material: entry.material, geometries: [], entries: [] });
+      groups.get(key).geometries.push(geometry);
+      groups.get(key).entries.push(entry);
+    }
+    const meshes = [];
+    for (const group of groups.values()) {
+      const geometry = AF.addons.BGU.mergeGeometries(group.geometries, false), material = group.material.clone();
+      group.index = geometry.index.array.slice(); group.ranges = [];
+      let indexStart = 0;
+      for (let index = 0; index < group.entries.length; index++) {
+        const count = group.geometries[index].index.count;
+        group.ranges.push({ entry: group.entries[index], start: indexStart, count, active: null }); indexStart += count;
+      }
+      geometry.index.setUsage(THREE.DynamicDrawUsage);
+      const baseCompile = group.material.onBeforeCompile;
+      material.onBeforeCompile = (shader, renderer) => { baseCompile.call(material, shader, renderer); patch(shader, false); };
+      material.customProgramCacheKey = () => name + ':' + entries.length + ':' + group.material.uuid;
+      const mesh = new THREE.InstancedMesh(geometry, material, 1);
+      mesh.setMatrixAt(0, new THREE.Matrix4()); mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.castShadow = shadows;
+      mesh.name = name; parent.add(mesh); meshes.push(mesh);
+      group.mesh = mesh;
+      if (shadows) {
+        const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+        depth.onBeforeCompile = (shader) => patch(shader, true); depth.customProgramCacheKey = () => name + ':depth:' + entries.length;
+        mesh.customDepthMaterial = depth;
+      }
+      for (const source of group.geometries) source.dispose();
+    }
+    const update = () => {
+      for (let index = 0; index < entries.length; index++) {
+        const entry = entries[index], offset = index * 20;
+        if (entry.visible === false) { data.fill(0, offset, offset + 16); data[offset + 15] = 1; }
+        else for (let component = 0; component < 16; component++) data[offset + component] = entry.matrix.elements[component];
+        data[offset + 16] = entry.shadow ? 1 : 0;
+        data[offset + 17] = entry.visible === false ? 0 : entry.fade ?? 1;
+      }
+      for (const group of groups.values()) {
+        let visible = false, shadow = false, changed = false;
+        for (const range of group.ranges) {
+          const entry = range.entry, active = entry.visible !== false && (entry.fade ?? 1) > 0;
+          if (active) visible = true; if (entry.shadow) shadow = true;
+          if (active !== range.active) { range.active = active; changed = true; }
+        }
+        if (changed) {
+          let count = 0; const indexArray = group.mesh.geometry.index.array;
+          for (const range of group.ranges) if (range.active) {
+            for (let index = range.start; index < range.start + range.count; index++) indexArray[count++] = group.index[index];
+          }
+          group.mesh.geometry.setDrawRange(0, count); group.mesh.geometry.index.needsUpdate = true;
+        }
+        group.mesh.count = visible ? 1 : 0; group.mesh.castShadow = shadows && shadow;
+        const material = group.mesh.material, source = group.material;
+        if (material.envMap !== source.envMap) { material.envMap = source.envMap; material.needsUpdate = true; }
+        material.envMapIntensity = source.envMapIntensity;
+      }
+      texture.needsUpdate = true;
+    };
+    return { entries, meshes, update };
+  };
 
   // ------------------------------------------------------------ PATH network (polylines, painted with a round brush)
   const PATHS = [
@@ -396,18 +510,19 @@ try {
         if (d > 0.8 && d < 6.2 && (ribA < 0.035 || ribA > 0.965) && (Math.floor(d * 2.5) & 1)) cm.set(x, 30 + Math.floor((6.4 - d) * 1.4), z, bulbC);
         if (d >= 0.45 && d < 1.45) for (let y = 4; y < 26; y++) { const panel = Math.floor((ang + Math.PI) / (Math.PI * 2) * 12) & 1; cm.set(x, y, z, y < 6 || y > 23 || y === 14 ? k.gold : d < 1.3 ? k.redD : panel ? mirror : k.canvasW); }
       }
-      const canopy = AF.modelMesh(AF.meshModel(cm, { vs: 1 / 8, anchor: [0.5, 0, 0.5] })); grp.add(canopy);
+      const canopy = AF.modelMesh(AF.meshModel(cm, { vs: 1 / 8, anchor: [0.5, 0, 0.5] })); grp.add(canopy); moving(canopy, 'canopy');
       const horses = [];
+      const poleGeometry = new THREE.CylinderGeometry(0.04, 0.04, 3.4, 5);
+      const poleMaterial = new THREE.MeshStandardMaterial({ color: 0xd4a83e, metalness: 0.6, roughness: 0.35 });
       for (let i = 0; i < 12; i++) {
         const a = i / 12 * Math.PI * 2, r = i & 1 ? 4.4 : 3.3;
         const h = AF.modelMesh(horseGeo(i % 3)); h.position.set(Math.cos(a) * r, 0.6, Math.sin(a) * r); h.rotation.y = -a; h.castShadow = false;
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 3.4, 5), new THREE.MeshStandardMaterial({ color: 0xd4a83e, metalness: 0.6, roughness: 0.35 }));
+        const pole = new THREE.Mesh(poleGeometry, poleMaterial);
         pole.position.set(Math.cos(a) * r, 1.9, Math.sin(a) * r);
-        grp.add(h, pole); horses.push({ h, ph: i * 1.3 });
+        grp.add(h, pole); moving(h, 'horse'); moving(pole, 'pole'); horses.push({ h, ph: i * 1.3 });
       }
       PKS.carouselHorses = horses.map((o) => o.h);
-      AF.onTick('park-carousel', 330, (dt, t) => {
-        const c = AF.camera; if (c && Math.hypot(c.position.x - cx, c.position.z - cz) > 170) return;
+      parkTick('park-carousel', 330, (dt, t) => {
         grp.rotation.y = -t * 0.45;
         for (const o of horses) o.h.position.y = 0.6 + Math.sin(t * 2.2 + o.ph) * 0.28;
       });
@@ -486,8 +601,7 @@ try {
       W.clear(rcx - 1.5, 0.25, rcz + rrz - 0.8, rcx + 1.5, 1.25, rcz + rrz + 1.5);
       const figs = [];
       for (let i = 0; i < (hasKit() ? 0 : 8); i++) { const m = AF.modelMesh(figureGeo(i)); m.castShadow = true; AF.scene.add(m); figs.push({ m, ph: i / 8 * Math.PI * 2, sp: 0.35 + (i % 3) * 0.04, r: 0.72 + (i % 3) * 0.1 }); }
-      AF.onTick('park-skaters', 331, (dt, t) => {
-        const c = AF.camera; if (c && Math.hypot(c.position.x - rcx, c.position.z - rcz) > 170) return;
+      parkTick('park-skaters', 331, (dt, t) => {
         for (const f of figs) { const a = f.ph + t * f.sp; f.m.position.set(rcx + Math.cos(a) * rrx * f.r, 0.25 + Math.abs(Math.sin(t * 3 + f.ph)) * 0.05, rcz + Math.sin(a) * rrz * f.r); f.m.rotation.set(0, Math.atan2(-Math.sin(a) * rrx, Math.cos(a) * rrz), 0.12 * Math.sin(t * 3 + f.ph)); }
       });
       AF.addLabel('Roller Rink', rcx, rcz, 'place'); AF.addLabel('Skating Pond', PD.cx, PD.cz, 'place');
@@ -507,7 +621,9 @@ try {
       const im = new THREE.InstancedMesh(dg, dmat, N), dm = new THREE.Object3D();
       im.frustumCulled = false; AF.scene.add(im);
       AF.onTick('park-fountain', 332, (dt, t) => {
-        const c = AF.camera; if (c && Math.hypot(c.position.x - fx, c.position.z - fz) > 140) { im.visible = false; return; } im.visible = true;
+        const c = AF.camera, distance = c ? Math.hypot(c.position.x - fx, c.position.y - 2, c.position.z - fz) : Infinity;
+        im.visible = Number.isFinite(parkDistance()) && distance < 140; if (!im.visible) return;
+        if (distance > 60 && Math.floor(t * 10) === fountainFrame) return; fountainFrame = Math.floor(t * 10);
         let n = 0;
         for (let s = 0; s < 9; s++) for (let j = 0; j < 14; j++) {
           const u = ((t * 0.8 + j / 14) % 1);
@@ -517,6 +633,7 @@ try {
         }
         im.instanceMatrix.needsUpdate = true;
       });
+      let fountainFrame = -1;
       // flower beds round the fountain plaza
       for (let q = 0; q < 4; q++) {
         const a = q * Math.PI / 2 + Math.PI / 4, bx = fx + Math.cos(a) * 11.5, bz = fz + Math.sin(a) * 11.5;
@@ -533,8 +650,8 @@ try {
       const seatM = new AF.Model(6, 42, 3); seatM.box(0, 0, 0, 6, 1, 3, k.woodD); seatM.box(0, 1, 1, 1, 42, 2, k.iron); seatM.box(5, 1, 1, 6, 42, 2, k.iron);
       const sg = AF.meshModel(seatM, { vs: 1 / 8, anchor: [0.5, 1, 0.5] });
       const swings = [];
-      for (let i = 0; i < 3; i++) { const m = AF.modelMesh(sg); m.position.set(x0 + 1 + 2.5 + i * 3.5, 0.25 + 21.5 * 0.25, z0 + 2 + 1.5); AF.scene.add(m); swings.push({ m, ph: i * 1.7, amp: 0.3 + i * 0.12 }); }
-      AF.onTick('park-swings', 333, (dt, t) => { const c = AF.camera; if (c && Math.hypot(c.position.x - x0, c.position.z - z0) > 140) return; for (const s of swings) s.m.rotation.x = Math.sin(t * 2.1 + s.ph) * s.amp; });
+      for (let i = 0; i < 3; i++) { const m = AF.modelMesh(sg); m.position.set(x0 + 1 + 2.5 + i * 3.5, 0.25 + 21.5 * 0.25, z0 + 2 + 1.5); AF.scene.add(m); moving(m, 'swing'); swings.push({ m, ph: i * 1.7, amp: 0.3 + i * 0.12 }); }
+      parkTick('park-swings', 333, (dt, t) => { for (const s of swings) s.m.rotation.x = Math.sin(t * 2.1 + s.ph) * s.amp; });
       for (let i = 0; i < 3; i++) AF.addSpot({ building: 'park-playground', x: x0 + 3.5 + i * 3.5, y: 0.25, z: z0 + 6, yaw: Math.PI, kind: 'play' });
       // slide: ladder + ramp
       const sx = x0 + 14, sz = z0 + 4;
@@ -572,12 +689,13 @@ try {
         for (let i = 0; i < NB; i++) {
           const a = i / NB * Math.PI * 2, x = hx + Math.cos(a) * 0.45 + Math.sin(t * 1.3 + i) * 0.08, y = 2.9 + (i % 3) * 0.3 + Math.sin(t * 1.7 + i * 0.9) * 0.1, z = hz + Math.sin(a) * 0.45 + Math.cos(t * 1.1 + i) * 0.08;
           dm.position.set(x, y, z); dm.updateMatrix(); bim.setMatrixAt(i, dm.matrix);
-          sp.set([hx, hy, hz, x, y - 0.3, z], i * 6);
+          const offset = i * 6; sp[offset] = hx; sp[offset + 1] = hy; sp[offset + 2] = hz; sp[offset + 3] = x; sp[offset + 4] = y - 0.3; sp[offset + 5] = z;
         }
         bim.instanceMatrix.needsUpdate = true; sgeo.attributes.position.needsUpdate = true;
       };
       upd(0);
-      AF.onTick('park-balloons', 334, (dt, t) => { const c = AF.camera; if (c && Math.hypot(c.position.x - bx, c.position.z - bz) > 130) return; upd(t); });
+      parkTick('park-balloons', 334, (dt, t) => upd(t));
+      AF.onTick('park-balloons-visible', 334, () => { bim.visible = strings.visible = Number.isFinite(parkDistance()); });
       // statues: the Grand Ave gate lawn + the lake loop
       put(statueGeo(0), -4, 0.25, -184, 0, true); put(statueGeo(1), -60, 0.25, -212, 1, true);
       // KITE flying high over the bandshell lawn (dynamic), string to a kid
@@ -592,11 +710,12 @@ try {
       const kupd = (t) => {
         const X = kx - 14 + Math.sin(t * 0.37) * 4, Y = 26 + Math.sin(t * 0.53) * 2.5, Z = kz - 22 + Math.cos(t * 0.29) * 3;
         kite.position.set(X, Y, Z); kite.rotation.set(0.3, 0.6 + Math.sin(t * 0.7) * 0.2, Math.sin(t * 1.1) * 0.35);
-        for (let i = 0; i < 9; i++) { const u0 = i / 9, u1 = (i + 1) / 9, sag = (u) => -Math.sin(u * Math.PI) * 2.2; kp.set([kx + (X - kx) * u0, 1.3 + (Y - 1.3) * u0 + sag(u0), kz + (Z - kz) * u0, kx + (X - kx) * u1, 1.3 + (Y - 1.3) * u1 + sag(u1), kz + (Z - kz) * u1], i * 6); }
+        for (let i = 0; i < 9; i++) { const u0 = i / 9, u1 = (i + 1) / 9, offset = i * 6; kp[offset] = kx + (X - kx) * u0; kp[offset + 1] = 1.3 + (Y - 1.3) * u0 - Math.sin(u0 * Math.PI) * 2.2; kp[offset + 2] = kz + (Z - kz) * u0; kp[offset + 3] = kx + (X - kx) * u1; kp[offset + 4] = 1.3 + (Y - 1.3) * u1 - Math.sin(u1 * Math.PI) * 2.2; kp[offset + 5] = kz + (Z - kz) * u1; }
         kl.attributes.position.needsUpdate = true;
       };
       kupd(0);
-      AF.onTick('park-kite', 335, (dt, t) => kupd(t));
+      parkTick('park-kite', 335, (dt, t) => kupd(t));
+      AF.onTick('park-kite-visible', 335, () => { kite.visible = kline.visible = Number.isFinite(parkDistance()); });
     }
 
     // ---- ROWBOATS on Swan Lake: 5 moored at the jetty bobbing, 3 rowed slowly round the lake
@@ -605,15 +724,14 @@ try {
       // nested 3 deep so 62-water's lake-floater scan (depth <= 2) skips them: its square hull-foam ring is far too big for 3 m rowboats
       const hold = new THREE.Group(), hold1 = new THREE.Group(), hold2 = new THREE.Group(); hold.add(hold1); hold1.add(hold2); AF.scene.add(hold);
       const moor = [[-110.5, -229, 0], [-103.5, -229, 0], [-110.5, -232.5, 0], [-103.5, -232.5, 0], [-111.8, -237.6, 1]];
-      for (const [x, z, r] of moor) { const m = AF.modelMesh(bg); m.position.set(x, lakeY - 0.12, z); m.rotation.y = r ? 0 : Math.PI / 2; hold2.add(m); boats.push({ m, ph: x * 0.7 + z, moving: false, y0: lakeY - 0.12, yaw: m.rotation.y }); }
+      for (const [x, z, r] of moor) { const m = AF.modelMesh(bg); m.position.set(x, lakeY - 0.12, z); m.rotation.y = r ? 0 : Math.PI / 2; hold2.add(m); moving(m, 'hull'); boats.push({ m, ph: x * 0.7 + z, moving: false, y0: lakeY - 0.12, yaw: m.rotation.y }); }
       const rg = rowerGeo();
       for (let i = 0; i < 0; i++) {
         const g = new THREE.Group(), m = AF.modelMesh(bg), r = AF.modelMesh(rg); r.rotation.y = Math.PI / 2; r.position.y = 0.3; m.add(r);
         g.add(m); AF.scene.add(g); boats.push({ m: g, ph: i * 2.1, moving: true, rr: 0.45 + i * 0.12, sp: 0.018 + i * 0.004, dir: i === 1 ? -1 : 1 });
       }
       cnt.boats = boats.length;
-      AF.onTick('park-boats', 336, (dt, t) => {
-        const c = AF.camera; if (c && Math.hypot(c.position.x - LK.cx, c.position.z - LK.cz) > 200) return;
+      parkTick('park-boats', 336, (dt, t) => {
         for (const b of boats) {
           if (!b.moving) { b.m.position.y = b.y0 + Math.sin(t * 1.3 + b.ph) * 0.05; b.m.rotation.z = Math.sin(t * 0.9 + b.ph) * 0.03; continue; }
           const a = b.ph + t * b.sp * b.dir, x = LK.cx + Math.cos(a) * LK.rx * b.rr, z = LK.cz + Math.sin(a) * LK.rz * b.rr;
@@ -717,8 +835,8 @@ try {
       W.eachCol(px - pr - 0.5, pz - pr - 0.5, px + pr + 0.5, pz + pr + 0.5, (bx, bz, i, x, z) => { const d = Math.hypot(x - px, z - pz); if (d < pr) W.C[i] = k.sand; else if (d < pr + 0.25 && !(Math.abs(z - pz) < 0.8 && x < px)) W.fill(x - 0.125, 0.25, z - 0.125, x + 0.125, (bx + bz) % 5 === 0 ? 1.25 : 1.0, z + 0.125, (bx + bz) % 5 === 0 ? k.white : k.woodL); });
       block(px - pr - 1, pz - pr - 1, px + pr + 1, pz + pr + 1);
       const ponies = [];
-      for (let i = 0; i < 2; i++) { const m = AF.modelMesh(horseGeo(i + 2)); m.scale.set(1.1, 1.1, 1.1); AF.scene.add(m); ponies.push({ m, ph: i * Math.PI }); } PKS.ponies = ponies.map((o) => o.m);
-      AF.onTick('park-ponies', 337, (dt, t) => { const cam = AF.camera; if (cam && Math.hypot(cam.position.x - px, cam.position.z - pz) > 150) return; for (const o of ponies) { const a = o.ph + t * 0.25; o.m.position.set(px + Math.cos(a) * 2.6, 0.25 + Math.abs(Math.sin(t * 4 + o.ph)) * 0.04, pz + Math.sin(a) * 2.6); o.m.rotation.y = -a - Math.PI / 2; } });
+      for (let i = 0; i < 2; i++) { const m = AF.modelMesh(horseGeo(i + 2)); m.scale.set(1.1, 1.1, 1.1); AF.scene.add(m); moving(m, 'horse'); ponies.push({ m, ph: i * Math.PI }); } PKS.ponies = ponies.map((o) => o.m);
+      parkTick('park-ponies', 337, (dt, t) => { for (const o of ponies) { const a = o.ph + t * 0.25; o.m.position.set(px + Math.cos(a) * 2.6, 0.25 + Math.abs(Math.sin(t * 4 + o.ph)) * 0.04, pz + Math.sin(a) * 2.6); o.m.rotation.y = -a - Math.PI / 2; } });
       AF.addSpot({ building: 'park-ponies', x: px, y: 0.25, z: pz, yaw: 0, kind: 'work' }); AF.addLabel('Pony Rides', px, pz, 'place');
       for (let i = 0; i < 3; i++) AF.addSpot({ building: 'park-ponies', x: px - pr - 1.2, y: 0.25, z: pz - 1 + i, yaw: Math.PI / 2, kind: 'stand' });
       // lamp standards round the lake shore
@@ -815,20 +933,20 @@ try {
     PKS.ms = Math.round(performance.now() - t0);
   });
 
-  // ------------------------------------------------------------ PARK LIFE (order 655): a band that plays, rowers pulling oars,
+  // ------------------------------------------------------------ PARK LIFE (before region meshing): a band that plays, rowers pulling oars,
   // skaters, nannies with prams, keepers raking, a kid leaping into a leaf pile, the swan feeder, couples strolling, kite kids,
   // carousel + pony riders (animated, AF.peopleKit), and a seated/standing crowd baked into the static world (free to draw).
-  AF.onBuild('park-life', 655, () => {
+  AF.onBuild('park-life', 490, () => {
     const k = pal(), K2 = AF.peopleKit, lakeY = (AF.land && AF.land.LAKE_Y) ?? LK.waterY ?? -0.75;
     const life = PKS.life = { actors: 0, baked: 0, boats: 0 };
     const root = new THREE.Group(); root.name = 'park-life'; AF.scene.add(root);
     const rnd = AF.rng(1936);
     const BGU = AF.addons && AF.addons.BGU;
     const look = (role, g, age, fix) => { try { const L = K2.makeLook(role, g, age, rnd); if (fix) fix(L); return L; } catch (e) { return null; } };
-    const actor = (L, x, y, z, yaw, par) => { if (!hasKit() || !L) return null; try { const p = K2.buildPerson(L); p.root.position.set(x, y, z); p.root.rotation.y = yaw; (par || root).add(p.root); life.actors++; return p; } catch (e) { return null; } };
+    const actors = [];
+    const actor = (L, x, y, z, yaw, par) => { if (!hasKit() || !L) return null; try { const p = K2.buildPerson(L); p.root.position.set(x, y, z); p.root.rotation.y = yaw; (par || root).add(p.root); actors.push(p); life.actors++; return p; } catch (e) { return null; } };
     const seat = (p) => { if (p && p.legBG) { p.legL.geometry = p.legBG; p.legR.geometry = p.legBG; } return p; };
-    // bake a posed person into ONE static voxel geometry (merged into the region meshes at build 500 is too early, so
-    // placeStatic here would miss it; instead we collect the baked people into one shared mesh per ~40 m cell below)
+    // Bake static spectators before region meshing, collecting nearby figures into shared props.
     const bakeList = [];
     const bake = (L, x, y, z, yaw, pose) => {
       if (!hasKit() || !L || !BGU) return;
@@ -913,9 +1031,9 @@ try {
     const orbits = [[-92, -240, 14, 9, 0.05, 1], [-79, -240, 9, 7, 0.07, -1], [-104, -249, 9, 4.5, 0.06, 1], [-90, -236, 18, 12, 0.035, -1], [-90, -232, 7, 4.5, 0.08, 1], [-76, -231, 6.5, 3.8, 0.075, -1], [-112, -245, 5.5, 5.5, 0.07, 1]];
     const boats = [];
     orbits.forEach(([ocx, ocz, orx, orz, sp, dir], i) => {
-      const g = new THREE.Group(), hull = AF.modelMesh(bg); g.add(hull); boatHold.add(g);
+      const g = new THREE.Group(), hull = AF.modelMesh(bg); g.add(hull); boatHold.add(g); moving(hull, 'hull');
       const oars = [];
-      for (const s of [-1, 1]) { const piv = new THREE.Group(); piv.position.set(0.15, 0.58, s * 0.62); g.add(piv); const o = im(inst.oar, piv, 0, 0, 0); o.rotation.y = s > 0 ? 0 : Math.PI; o.position.z = -s * 0.45; oars.push({ piv, s }); }
+      for (const s of [-1, 1]) { const piv = new THREE.Group(); piv.position.set(0.15, 0.58, s * 0.62); g.add(piv); const o = im(inst.oar, piv, 0, 0, 0); o.rotation.y = s > 0 ? 0 : Math.PI; o.position.z = -s * 0.45; moving(o, 'oar'); oars.push({ piv, s }); }
       const rower = actor(look(i % 3 === 1 ? 'boatman' : 'citizen', i === 4 ? 'f' : 'm', i === 2 ? 'teen' : 'adult'), 0.35, 0, 0, -Math.PI / 2, g);
       if (rower) { seat(rower); rower.root.position.y = SEATY(rower, 0.52); }
       let pass = null;
@@ -935,7 +1053,7 @@ try {
     // ---- walkers on the lake loop: nannies pushing prams, two couples arm in arm
     const pramG = G('pram', () => null);
     const loopRX = LK.rx * 1.3, loopRZ = LK.rz * 1.38, walkers = [];
-    const walker = (L, ph, dir, off, pram) => { const p = actor(L, 0, 0.25, 0, 0); if (!p) return; let pm = null; if (pram && pramG) { pm = AF.modelMesh(pramG); root.add(pm); } walkers.push({ p, ph, dir, off, pm, sp: pram ? 0.018 : 0.015 }); };
+    const walker = (L, ph, dir, off, pram) => { const p = actor(L, 0, 0.25, 0, 0); if (!p) return; let pm = null; if (pram && pramG) { pm = AF.modelMesh(pramG); root.add(pm); moving(pm, 'pram'); } walkers.push({ p, ph, dir, off, pm, sp: pram ? 0.018 : 0.015 }); };
     walker(look('nurse', 'f', 'adult'), 0.4, 1, 0, true); walker(look('nurse', 'f', 'adult'), 3.3, -1, 0, true); walker(look('grandma', 'f', 'elder'), 4.9, 1, 0, true);
     walker(look('citizen', 'm', 'adult'), 1.8, -1, -0.28, false); walker(look('citizen', 'f', 'adult'), 1.8, -1, 0.28, false);
     walker(look('citizen', 'm', 'elder'), 5.6, 1, -0.28, false); walker(look('grandma', 'f', 'elder'), 5.6, 1, 0.28, false);
@@ -991,7 +1109,7 @@ try {
           m.box(2, 0, 0, 11, 2, 3, hull); m.box(1, 1, 0, 2, 2, 3, hull); m.box(11, 1, 1, 12, 2, 2, hull); m.box(2, 2, 0, 11, 3, 3, k.woodL); m.box(2, 1, 0, 11, 2, 1, stripe); m.box(2, 1, 2, 11, 2, 3, stripe);
           m.box(6, 3, 1, 7, 16, 2, k.woodD); for (let y = 4; y < 15; y++) { const w = Math.ceil((15 - y) * 0.45); m.box(7, y, 1, 7 + w, y + 1, 2, sail); } for (let y = 4; y < 12; y++) { const w = Math.ceil((12 - y) * 0.45); m.box(6 - w, y, 1, 6, y + 1, 2, sail); }
           m.set(6, 15, 1, k.red); return AF.meshModel(m, { vs: 1 / 16, anchor: [0.5, 0, 0.5] }); });
-        const me = AF.modelMesh(g); me.castShadow = false; me.scale.setScalar(1.5); root.add(me); extras.yachts.push({ m: me, ph: i * 1.7, w: 0.05 + i * 0.008, rx: PD.r * (0.35 + (i % 3) * 0.17), rz: PD.r * (0.3 + ((i + 1) % 3) * 0.16), y: pondY - 0.04 });
+        const me = AF.modelMesh(g); me.castShadow = false; me.scale.setScalar(1.5); root.add(me); moving(me, 'yacht'); extras.yachts.push({ m: me, ph: i * 1.7, w: 0.05 + i * 0.008, rx: PD.r * (0.35 + (i % 3) * 0.17), rz: PD.r * (0.3 + ((i + 1) % 3) * 0.16), y: pondY - 0.04 });
       });
       // kids with sticks at the rim, one crouched launching a boat; a mother on the rim bench
       [[2.25, 'm'], [2.7, 'f'], [0.55, 'm']].forEach(([a, gg], i) => { const x = PD.cx + Math.cos(a) * (PD.r + 0.95), z = PD.cz + Math.sin(a) * (PD.r + 0.95); const p = actor(look('kid', gg, 'kid'), x, 0.25, z, Math.atan2(PD.cx - x, PD.cz - z)); if (p) { const st = im(inst.stick, p.armR, 0, -p.B.ah / 16, 0.1); st.scale.set(1, 1, 3.2); st.rotation.x = 0.6; extras.kids.push({ p, ph: i * 2.1, crouch: i === 1 }); } });
@@ -1003,7 +1121,7 @@ try {
         m.box(0, 2, 0, 3, 8, 3, tl); m.box(1, 8, 0, 4, 9, 3, tl); m.box(0, 3 + f, 1, 1, 7, 2, bl); return AF.meshModel(m, { vs: 1 / 20, anchor: [0.5, 0, 0.5] }); }));
       const tr = (PKS.trees || []).filter((q) => q.kind !== 'fail' && q.kind !== 'pine');
       const pick = [0, 3, 6, 9, 13, 18, 24, 31, 40, 52].map((i) => tr[i]).filter(Boolean);
-      pick.forEach((q, i) => { const me = new THREE.Mesh(sqG[0], AF.mat.voxel); me.castShadow = false; root.add(me); extras.squirrels.push({ m: me, q, ph: i * 3.7, ang: i * 1.3, r: Math.max(0.35, Math.min(0.9, (q.trunkR || 0.5))) + 0.08 }); });
+      pick.forEach((q, i) => { const me = new THREE.Mesh(sqG[0], AF.mat.voxel); me.castShadow = false; root.add(me); moving(me, 'squirrel'); extras.squirrels.push({ m: me, q, ph: i * 3.7, ang: i * 1.3, r: Math.max(0.35, Math.min(0.9, (q.trunkR || 0.5))) + 0.08 }); });
       life.squirrels = extras.squirrels.length; extras.sqG = sqG;
       // hot-chestnut cart just inside Merchants' Gate: glowing brazier + steam
       const chG = G('chestnut', () => { const m = new AF.Model(16, 24, 9), rd = c(0x8e2a21, { jitter: 0.15, edge: 0.3 }), coal = c(0xff7a30, { emit: 0xff5a1a, emitK: 2.6, mode: 'always', jitter: 0.2, edge: 0 });
@@ -1022,26 +1140,66 @@ try {
       (PKS.cafe || []).forEach(([x, z], i) => { bake(look('citizen', i ? 'm' : 'f', 'adult'), x - 0.75, 0.5 + 4 / 8, z, Math.PI / 2, { sit: true, arms: [-1.2, -0.4] }); bake(look(i ? 'kid' : 'grandma', 'f', i ? 'kid' : 'elder'), x + 0.75, 0.5 + 4 / 8, z, -Math.PI / 2, { sit: true, arms: [-0.9, -0.5] }); });
       bake(look('kid', 'm', 'kid'), 30.75, 0.5 + 0.5, -245.6, 0, { sit: true, arms: [-1.3, -1.3] });
     }
-    // ---- bake: one static mesh per ~48 m cell (free to animate, frustum-culled per cell)
+    // ---- bake: static props merged into the world regions
     if (bakeList.length && BGU) {
       const cells = new Map();
       for (const g of bakeList) { g.computeBoundingBox(); const c = g.boundingBox.getCenter(new THREE.Vector3()), key = Math.floor(c.x / 48) + ',' + Math.floor(c.z / 48); if (!cells.has(key)) cells.set(key, []); cells.get(key).push(g); }
       for (const list of cells.values()) {
-        try { const mg = BGU.mergeGeometries(list, false); if (!mg) continue; mg.computeBoundingSphere(); const me = new THREE.Mesh(mg, AF.mat.voxel); me.castShadow = true; me.receiveShadow = true; me.matrixAutoUpdate = false; me.updateMatrix(); root.add(me); } catch (e) { }
+        try { const mg = BGU.mergeGeometries(list, false); if (!mg) continue; mg.computeBoundingBox(); const center = mg.boundingBox.getCenter(new THREE.Vector3()); mg.translate(-center.x, 0, -center.z); put(mg, center.x, 0, center.z, 0, false); for (const source of list) source.dispose(); } catch (e) { }
       }
     }
     life.dyn = A.length + boats.length + skaters.length + walkers.length + rakers.length;
+
+    for (const animated of A) animated.fn(0);
+    root.updateMatrixWorld(true);
+    const partEntries = [], farEntries = [], inverse = new THREE.Matrix4(), relative = new THREE.Matrix4();
+    const partNames = ['torso', 'head', 'armL', 'armR', 'legL', 'legR'];
+    for (const person of actors) {
+      person.root.updateWorldMatrix(true, true); inverse.copy(person.root.matrixWorld).invert();
+      const farGeometry = [], nearParts = [];
+      person.root.traverse((object) => {
+        if (!object.isMesh) return;
+        const kind = partNames.find((part) => person[part] === object) || 'accessory';
+        const entry = { geometry: object.geometry, material: object.material, kind, matrix: object.matrixWorld, visible: true, shadow: false, object };
+        partEntries.push(entry); nearParts.push(entry);
+        if (object.geometry.attributes.aPal) {
+          relative.multiplyMatrices(inverse, object.matrixWorld);
+          const geometry = object.geometry.clone(); geometry.applyMatrix4(relative);
+          const normals = geometry.attributes.aAN.array, map = remapN(relative);
+          for (let index = 0; index < normals.length; index++) { const normal = normals[index] % 8; normals[index] = normals[index] - normal + map[normal]; }
+          farGeometry.push(geometry);
+        }
+        object.visible = false; object.castShadow = false; object.frustumCulled = false;
+      });
+      const geometry = BGU.mergeGeometries(farGeometry, false);
+      const far = { geometry, material: AF.mat.voxel, kind: 'pose', matrix: person.root.matrixWorld, visible: false };
+      farEntries.push(far); person.parkParts = nearParts; person.parkFar = far; person.parkFade = 1;
+      for (const source of farGeometry) source.dispose();
+    }
+    const nearBatch = parkBatches(partEntries, root, 'park-life-parts', true);
+    const farBatch = parkBatches(farEntries, root, 'park-life-far');
+    life.partBatches = nearBatch ? nearBatch.meshes.length : 0; life.farBatches = farBatch ? farBatch.meshes.length : 0;
+    const actorPosition = new THREE.Vector3();
+    let lifeFrame = 0, lifeElapsed = 0, lifeHidden = true;
 
     // ---- one tick for all park life
     const nightGlow = [];
     AF.onTick('park-life', 338, (dt, t) => {
       const c = AF.camera; if (!c) return;
-      const dc = Math.hypot(c.position.x + 37, c.position.z + 232);
-      const on = dc < 280; if (root.visible !== on) root.visible = on; if (!on) return;
-      const near = dc < 190;
-      if (!near) return;
-      for (const a of A) a.fn(t, dt, a);
+      const distance = parkDistance(), on = Number.isFinite(distance);
+      root.visible = on; if (!on) { lifeHidden = true; lifeElapsed = 0; return; }
+      lifeElapsed += dt;
+      lifeFrame++;
+      if (!lifeHidden && distance > 60 && lifeFrame % 3 !== 0) return;
+      dt = lifeElapsed; lifeElapsed = 0; lifeHidden = false;
+      for (const person of actors) {
+        person.root.updateWorldMatrix(true, false); actorPosition.setFromMatrixPosition(person.root.matrixWorld);
+        person.parkAnimate = !person.parkInitialized || actorPosition.distanceTo(c.position) < 60 || lifeFrame % 3 === 0;
+        person.parkInitialized = true;
+      }
+      for (const a of A) if (a.p.parkAnimate) a.fn(t, dt, a);
       for (const b of boats) {
+        if (b.rower && !b.rower.parkAnimate) continue;
         const a = b.ph + t * b.sp * b.dir, x = b.ocx + Math.cos(a) * b.orx, z = b.ocz + Math.sin(a) * b.orz;
         const dx = -Math.sin(a) * b.orx * b.dir, dz = Math.cos(a) * b.orz * b.dir;
         const st = t * 2.6 + b.ph * 3, s = Math.sin(st), cc = Math.cos(st);
@@ -1050,6 +1208,7 @@ try {
         if (b.rower) { const r = b.rower; r.hips.rotation.x = -0.1 - s * 0.28; r.armR.rotation.x = r.armL.rotation.x = -1.2 + s * 0.45; r.armR.rotation.z = 0.25; r.armL.rotation.z = -0.25; }
       }
       for (const k2 of skaters) {
+        if (!k2.p.parkAnimate) continue;
         const a = k2.ph + t * k2.sp, x = rcx + Math.cos(a) * rrx * k2.r, z = rcz + Math.sin(a) * rrz * k2.r, p = k2.p;
         const dx = -Math.sin(a) * rrx, dz = Math.cos(a) * rrz, st = t * (k2.kid ? 4.2 : 3.2) + k2.ph * 5, s = Math.sin(st);
         p.root.position.set(x, 0.25, z); p.root.rotation.y = Math.atan2(dx, dz);
@@ -1057,6 +1216,7 @@ try {
         p.armL.rotation.x = s * 0.7; p.armR.rotation.x = -s * 0.7; p.hips.rotation.x = 0.22; p.hips.rotation.z = 0.12 + (k2.kid ? Math.sin(t * 7) * 0.1 : 0); p.body.position.y = Math.abs(s) * 0.02;
       }
       for (const w of walkers) {
+        if (!w.p.parkAnimate) continue;
         if (w.mall) {   // promenade up and down the Mall (lane by direction), turn at each end
           const Lm = 42, sm = (t * 1.05 + w.ph) % (2 * Lm), fwd = sm < Lm, zz = fwd ? -208 - sm : -208 - (2 * Lm - sm), xx = -40 + (fwd ? -1.1 : 1.1) + w.off;
           const p = w.p, st = t * 5.2 + w.ph * 3, sn = Math.sin(st);
@@ -1073,7 +1233,7 @@ try {
         if (w.pm) { p.armL.rotation.x = p.armR.rotation.x = -0.95; w.pm.position.set(x + dx * 1.05, 0.25, z + dz * 1.05); w.pm.rotation.y = Math.atan2(dz, -dx); }
         else { p.armL.rotation.x = -s * 0.35; p.armR.rotation.x = s * 0.35; if (w.off < 0) p.armL.rotation.x = -0.35; else p.armR.rotation.x = -0.35; }
       }
-      for (const r of rakers) { const s = Math.sin(t * 2.2 + r.ph); r.p.hips.rotation.y = s * 0.4; r.p.hips.rotation.x = 0.3; r.p.armR.rotation.x = -1.0 + s * 0.15; r.p.armL.rotation.x = -0.8 - s * 0.15; r.p.armR.rotation.z = 0.2; }
+      for (const r of rakers) { if (!r.p.parkAnimate) continue; const s = Math.sin(t * 2.2 + r.ph); r.p.hips.rotation.y = s * 0.4; r.p.hips.rotation.x = 0.3; r.p.armR.rotation.x = -1.0 + s * 0.15; r.p.armL.rotation.x = -0.8 - s * 0.15; r.p.armR.rotation.z = 0.2; }
       if (jumper) {
         const p = jumper.p, q = jumper.q, cyc = (t % 9) / 9, x0 = q.x - 7;
         let x = x0, y = 0.25, lie = 0;
@@ -1083,18 +1243,18 @@ try {
         else { const u = (cyc - 0.8) / 0.2; x = q.x - u * 7; lie = 0; const s = Math.sin(t * 7); p.legL.rotation.x = s * 0.4; p.legR.rotation.x = -s * 0.4; p.armL.rotation.x = -s * 0.2; p.armR.rotation.x = s * 0.2; }
         p.root.position.set(x, y, q.z); p.root.rotation.set(lie ? -1.3 : 0, cyc < 0.8 ? Math.PI / 2 : -Math.PI / 2, 0, 'YXZ');
         if (lie) { p.armL.rotation.x = p.armR.rotation.x = -2.9 + Math.sin(t * 6) * 0.3; p.legL.rotation.x = Math.sin(t * 8) * 0.3; p.legR.rotation.x = -Math.sin(t * 8) * 0.3; }
-        if (burstT === 0) for (let i = 0; i < NL; i++) { const a = i * 2.4, sp = 1.2 + (i % 5) * 0.4; leafV.set([q.x + Math.cos(a) * 0.3, 0.25 + q.h, q.z + Math.sin(a) * 0.3, Math.cos(a) * sp, 2.2 + (i % 7) * 0.35, Math.sin(a) * sp], i * 6); }
+        if (burstT === 0) for (let i = 0; i < NL; i++) { const a = i * 2.4, sp = 1.2 + (i % 5) * 0.4, offset = i * 6; leafV[offset] = q.x + Math.cos(a) * 0.3; leafV[offset + 1] = 0.25 + q.h; leafV[offset + 2] = q.z + Math.sin(a) * 0.3; leafV[offset + 3] = Math.cos(a) * sp; leafV[offset + 4] = 2.2 + (i % 7) * 0.35; leafV[offset + 5] = Math.sin(a) * sp; }
         if (burstT >= 0) {
           burstT += dt;
-          for (let i = 0; i < NL; i++) { const o = i * 6; if (burstT > 0 && leafV[o + 1] > 0.27) { leafV[o + 4] -= 3.2 * dt; if (leafV[o + 4] < -0.6) leafV[o + 4] = -0.6; leafV[o] += (leafV[o + 3] + Math.sin(t * 3 + i) * 0.4) * dt; leafV[o + 1] += leafV[o + 4] * dt; leafV[o + 2] += (leafV[o + 5] + Math.cos(t * 2.6 + i) * 0.4) * dt; leafV[o + 3] *= 0.985; leafV[o + 5] *= 0.985; } dm.position.set(leafV[o], Math.max(0.27, leafV[o + 1]), leafV[o + 2]); dm.rotation.set(t * 3 + i, t * 2 + i * 0.7, 0); dm.updateMatrix(); leafIM.setMatrixAt(i, dm.matrix); }
+          for (let i = 0; i < NL; i++) { const o = i * 6; if (burstT > 0 && leafV[o + 1] > 0.27) { leafV[o + 4] -= 3.2 * dt; if (leafV[o + 4] < -0.6) leafV[o + 4] = -0.6; leafV[o] += (leafV[o + 3] + Math.sin(t * 3 + i) * 0.4) * dt; leafV[o + 1] += leafV[o + 4] * dt; leafV[o + 2] += (leafV[o + 5] + Math.cos(t * 2.6 + i) * 0.4) * dt; leafV[o + 3] *= Math.exp(-0.907 * dt); leafV[o + 5] *= Math.exp(-0.907 * dt); } dm.position.set(leafV[o], Math.max(0.27, leafV[o + 1]), leafV[o + 2]); dm.rotation.set(t * 3 + i, t * 2 + i * 0.7, 0); dm.updateMatrix(); leafIM.setMatrixAt(i, dm.matrix); }
           leafIM.instanceMatrix.needsUpdate = true; leafIM.visible = true; if (burstT > 4.5) { burstT = -1; leafIM.visible = false; }
         } else leafIM.visible = false;
       }
-      if (feeder) { const u = (t % 3.2) / 3.2, s = u < 0.25 ? Math.sin(u / 0.25 * Math.PI) : 0; feeder.armR.rotation.x = -0.5 - s * 1.2; feeder.hips.rotation.x = 0.15 + s * 0.08; feeder.armL.rotation.x = -0.6; }
-      if (kiteKid) { kiteKid.armR.rotation.x = -2.3 + Math.sin(t * 0.9) * 0.15; kiteKid.armL.rotation.x = -1.9 + Math.sin(t * 0.9 + 0.4) * 0.15; }
-      for (const p of riders) p.armR.rotation.x = -0.5 + Math.sin(t * 2) * 0.3;
+      if (feeder && feeder.parkAnimate) { const u = (t % 3.2) / 3.2, s = u < 0.25 ? Math.sin(u / 0.25 * Math.PI) : 0; feeder.armR.rotation.x = -0.5 - s * 1.2; feeder.hips.rotation.x = 0.15 + s * 0.08; feeder.armL.rotation.x = -0.6; }
+      if (kiteKid && kiteKid.parkAnimate) { kiteKid.armR.rotation.x = -2.3 + Math.sin(t * 0.9) * 0.15; kiteKid.armL.rotation.x = -1.9 + Math.sin(t * 0.9 + 0.4) * 0.15; }
+      for (const p of riders) if (p.parkAnimate) p.armR.rotation.x = -0.5 + Math.sin(t * 2) * 0.3;
       for (let i = 0; i < extras.yachts.length; i++) { const y = extras.yachts[i], a = t * y.w * 6.283 + y.ph, x = PD.cx + Math.cos(a) * y.rx, z = PD.cz + Math.sin(a * 1.3) * y.rz, vx = -Math.sin(a) * y.rx, vz = Math.cos(a * 1.3) * 1.3 * y.rz; y.m.position.set(x, y.y + Math.sin(t * 2.2 + i) * 0.015, z); y.m.rotation.set(0, Math.atan2(-vz, vx), 0.12 + Math.sin(t * 1.1 + i) * 0.06, 'YXZ'); }
-      for (const q of extras.kids) { const s = Math.sin(t * 1.3 + q.ph); q.p.armR.rotation.x = -1.2 + s * 0.35; q.p.armL.rotation.x = -0.3 + s * 0.1; if (q.crouch) { q.p.hips.rotation.x = 0.5; q.p.legL.rotation.x = -1.0; q.p.legR.rotation.x = -1.0; q.p.root.position.y = 0.05; } }
+      for (const q of extras.kids) { if (!q.p.parkAnimate) continue; const s = Math.sin(t * 1.3 + q.ph); q.p.armR.rotation.x = -1.2 + s * 0.35; q.p.armL.rotation.x = -0.3 + s * 0.1; if (q.crouch) { q.p.hips.rotation.x = 0.5; q.p.legL.rotation.x = -1.0; q.p.legR.rotation.x = -1.0; q.p.root.position.y = 0.05; } }
       for (const s of extras.squirrels) {
         const u = t + s.ph, cyc = (u % 16) / 16, q = s.q; let h = 0, r = s.r, pitch = 0, ya;
         if (cyc < 0.4 || cyc >= 0.92) { const hop = Math.sin(u * 8) > 0; s.ang += hop ? dt * 0.8 : 0; const e = cyc < 0.4 ? Math.min(1, (0.4 - cyc) / 0.05) : Math.min(1, (cyc - 0.92) / 0.05); r = s.r + (0.6 + Math.sin(u * 0.7) * 0.35) * e; h = hop ? Math.abs(Math.sin(u * 8)) * 0.1 : 0; ya = s.ang + Math.PI / 2; }
@@ -1104,6 +1264,35 @@ try {
         s.m.position.set(q.x + Math.cos(s.ang) * r, 0.25 + h, q.z + Math.sin(s.ang) * r); s.m.rotation.set(0, -ya, pitch, 'YXZ'); s.m.geometry = extras.sqG[Math.floor(u * 4) % 2];
       }
       for (let i = 0; i < pieces.length; i++) { const pc = pieces[i], cyc = ((t + i * 7) % 14) / 14, sq = Math.floor((t + i * 7) / 14); const hx = ((sq * 5 + i * 3) % 6) - 2.5, hz = ((sq * 3 + i) % 6) - 2.5, px = ((sq * 5 + i * 3 + 5) % 6) - 2.5, pz = ((sq * 3 + i + 2) % 6) - 2.5; const u = Math.min(1, Math.max(0, (cyc - 0.9) / 0.1)); pc.m.position.set(pc.x + (px + (hx - px) * u) / 8, 1.0 + Math.sin(u * Math.PI) * 0.12, pc.z + (pz + (hz - pz) * u) / 8); }
+      for (const person of actors) {
+        person.root.updateWorldMatrix(true, false); actorPosition.setFromMatrixPosition(person.root.matrixWorld);
+        const distance = actorPosition.distanceTo(c.position);
+        const forward = (actorPosition.x - c.position.x) * parkDirection.x + (actorPosition.y + 1 - c.position.y) * parkDirection.y + (actorPosition.z - c.position.z) * parkDirection.z;
+        const visible = distance < 150 && forward > -3;
+        const near = distance < 45;
+        person.parkFade = AF.clamp(person.parkFade + (near ? 1 : -1) * dt / 0.3, 0, 1);
+        person.parkFar.visible = visible && person.parkFade < 1; person.parkFar.fade = 1 - person.parkFade;
+        if (person.parkFade > 0) person.root.updateWorldMatrix(false, true);
+        for (const part of person.parkParts) { part.visible = visible && person.parkFade > 0; part.fade = person.parkFade; part.shadow = part.kind !== 'accessory' && part.visible && distance < 40 && person.B.lh / 16 + person.B.th / 16 > 1; }
+      }
+      if (nearBatch) nearBatch.update(); if (farBatch) farBatch.update();
+    });
+    const moverRoot = new THREE.Group(); moverRoot.name = 'park-movers'; AF.scene.add(moverRoot);
+    const moverBatch = parkBatches(movers, moverRoot, 'park-moving-parts');
+    life.moverBatches = moverBatch ? moverBatch.meshes.length : 0;
+    let moverFrame = 0, moversHidden = true;
+    AF.onTick('park-movers', 339, () => {
+      const on = Number.isFinite(parkDistance()); moverRoot.visible = on; if (!on || !moverBatch) { moversHidden = true; return; }
+      moverFrame++;
+      for (const entry of movers) {
+        actorPosition.setFromMatrixPosition(entry.matrix);
+        const distance = actorPosition.distanceTo(AF.camera.position);
+        if (!moversHidden && distance > 60 && moverFrame % 3 !== 0) continue;
+        entry.object.updateWorldMatrix(true, false);
+        entry.visible = distance < 150;
+      }
+      moversHidden = false;
+      moverBatch.update();
     });
   });
 
