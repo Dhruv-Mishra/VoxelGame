@@ -127,7 +127,7 @@ function aiStep(car, dt, near = false) {
   pieceAt(pc, A.s, PP); const yaw = Math.atan2(PP.dx, PP.dz), turn = AF.angDiff(car.yaw, yaw); car.steer = AF.clamp(Math.atan(car.wheelbase * turn / Math.max(0.1, travel)), -0.6, 0.6); car.yaw = yaw;
   if (Math.abs(A.offsetX || 0) + Math.abs(A.offsetZ || 0) > 0.01) { const decay = Math.exp(-dt * 0.75), x = PP.x + A.offsetX * decay, z = PP.z + A.offsetZ * decay; if (!VV.worldHits(car, x, z, yaw)) { car.x = x; car.z = z; } A.offsetX = car.x - PP.x; A.offsetZ = car.z - PP.z; }
   else { car.x = PP.x; car.z = PP.z; }
-  VV.stepPush(car, dt); if (changed) car.y = AF.surfaceBelow(car.x, car.z, car.y + 2.5, 6); else if (car.renderNear && (frame + car.id) % 4 === 0) car.y += (AF.surfaceBelow(car.x, car.z, car.y + 1.2, 2.5) - car.y) * 0.5;
+  VV.stepPush(car, dt); if (pc.route && pc.route.yAt) car.y = pc.route.yAt(car.x, car.z); else if (changed) car.y = AF.surfaceBelow(car.x, car.z, car.y + 2.5, 6); else if (car.renderNear && (frame + car.id) % 4 === 0) car.y += (AF.surfaceBelow(car.x, car.z, car.y + 1.2, 2.5) - car.y) * 0.5;
 }
 function riders(car, stop) {
   const walkers = AF.rail?.walkers, cam = AF.camera.position; if (!walkers?.spawn || (car.x - cam.x) ** 2 + (car.z - cam.z) ** 2 > 62500) return;
@@ -158,15 +158,15 @@ VV.buildTraffic = () => {
     const type = VV.TYPES.find(type => type.id === tid), car = VV.makeCar(type.id, VV.pickPaint(type, spawnRnd), PP.x, PP.z, Math.atan2(PP.dx, PP.dz)); attach(car, lane, s, type.horse ? 2.8 : type.big ? 8 : 8.5 + spawnRnd() * 3.5); car.driver = type.kind === 'bike' ? -1 : Math.floor(spawnRnd() * 3); if (type.horse) horses++; if (type.kind === 'bike') bikes++;
   }
 };
-VV.addRoute = (name, points, { count = 3, loop = true, types = ['sedan', 'taxi'], stops = [], activeRadius = 240 } = {}) => {
+VV.addRoute = (name, points, { count = 3, loop = true, types = ['sedan', 'taxi'], stops = [], activeRadius = 240, yAt = null } = {}) => {
   if (points.length < 2 || !types.length || types.some(tid => !VV.TYPES.some(type => type.id === tid)) || !Number.isFinite(activeRadius) || activeRadius < 0 || !Number.isFinite(count)) throw new Error('Invalid traffic route');
   const pts = []; let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
   for (const point of points) { const x = point[0] ?? point.x, z = point[1] ?? point.z; if (!Number.isFinite(x) || !Number.isFinite(z)) throw new Error('Invalid traffic route point'); if (pts.length && pts[pts.length - 2] === x && pts[pts.length - 1] === z) continue; pts.push(x, z); minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }
   if (pts.length < 4 || stops.some(stop => !Number.isFinite(stop.s) || !Number.isFinite(stop.dwell) || stop.s < 0 || stop.dwell < 0)) throw new Error('Invalid traffic route stops or length');
   if (loop && (pts[0] !== pts[pts.length - 2] || pts[1] !== pts[pts.length - 1])) pts.push(pts[0], pts[1]);
-  const route = { name, cars: [], x: 0, z: 0, minX, maxX, minZ, maxZ, activeRadius, loop }, pc = piece(pts, { kind: 'route', route, name, stops: stops.map(stop => ({ s: stop.s, dwell: stop.dwell, kind: 'route' })).sort((first, second) => first.s - second.s) }); if (loop) pc.next.push(pc);
+  const route = { name, cars: [], x: 0, z: 0, minX, maxX, minZ, maxZ, activeRadius, loop, yAt }, pc = piece(pts, { kind: 'route', route, name, stops: stops.map(stop => ({ s: stop.s, dwell: stop.dwell, kind: 'route' })).sort((first, second) => first.s - second.s) }); if (loop) pc.next.push(pc);
   for (const point of points) { route.x += (point[0] ?? point.x) / points.length; route.z += (point[1] ?? point.z) / points.length; } count = Math.min(Math.max(0, count | 0), Math.floor(pc.len / 14));
-  for (let index = 0; index < count; index++) { const s = (index + 0.5) * pc.len / count; pieceAt(pc, s, PP); const type = VV.TYPES.find(type => type.id === types[index % types.length]); if (!type) throw new Error('Unknown traffic route vehicle'); const car = VV.makeCar(type.id, 0, PP.x, PP.z, Math.atan2(PP.dx, PP.dz)); attach(car, pc, s, type.horse ? 2.8 : 8); car.driver = type.kind === 'bike' ? -1 : index % 3; route.cars.push(car); }
+  for (let index = 0; index < count; index++) { const s = (index + 0.5) * pc.len / count; pieceAt(pc, s, PP); const type = VV.TYPES.find(type => type.id === types[index % types.length]); if (!type) throw new Error('Unknown traffic route vehicle'); const car = VV.makeCar(type.id, 0, PP.x, PP.z, Math.atan2(PP.dx, PP.dz)); attach(car, pc, s, type.horse ? 2.8 : 8); if (yAt) car.y = yAt(car.x, car.z); car.driver = type.kind === 'bike' ? -1 : index % 3; route.cars.push(car); }
   route.piece = pc; routes.push(route); return route;
 };
 function crossingCase(check) {

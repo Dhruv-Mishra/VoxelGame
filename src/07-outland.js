@@ -1,12 +1,18 @@
 // ================================================================ 07-outland.js
 try {
 const W = AF.W, P = AF.PLAN.world, smooth = AF.smooth, clamp = AF.clamp, noise = AF.noise2;
-const O = AF.outland = { bounds: P.bounds, play: P.play, props: [], pads: [], edgeReady: false };
-const tiles = new Map(), edges = new Map(), segments = [], roadGrid = new Map();
+const O = AF.outland = { bounds: P.bounds, play: P.play, props: [], pads: [], edgeReady: false, rivers: [], wayside: [], TUNNEL_H: 6.5 };
+const tiles = new Map(), edges = new Map(), segments = [], roadGrid = new Map(), riverSegs = [], riverGrid = new Map();
+// 34-38 = the city street asphalt + gutter (same AF.col keys as 11-streets, so the outland roads share the city's surface), 39 centre line,
+// 40 jungle floor, 41 forest floor, 42 river shingle, 43 river bed, 44 dirt trail, 45 meadow, 46 olive scrub
 const hex = [AF.PAL.hex[AF.col('grass')], 0x5d8a37, 0x6f797c, 0xf5f8f9, 0xcabe9f, 0xa19b70, 0x85916b, 0x929078, 0x807363, 0x48573d, 0x4a4a4f, 0xe8dfb5, 0xada084, 0x948166, 0x536455,
   0x88a049, 0x7da646, 0x566467, 0x807e73, 0x414d51, 0x5e574c, 0xb9ae91, 0xd4c5a6, 0x557a34, 0x7a745e, 0x8b816b, 0x8e8862, 0x747e5c, 0x867c6b,
-  0xc8ac72, 0xd9bf87, 0xb29668, 0xc9a64c, 0xb18e3c];
-const pal = hex.map((value) => AF.col(value, { jitter: 0.9, edge: 0, pat: 'none' }));
+  0xc8ac72, 0xd9bf87, 0xb29668, 0xc9a64c, 0xb18e3c, 0x67625b, 0x625d56, 0x6c675f, 0x726c63, 0x46423d, 0xcfa640, 0x3f6a2c, 0x4b6b2e, 0x8a8270, 0x5a5a48, 0x9a8462, 0x7d8f4a, 0x6a7a3a];
+const GRASS = new Set([0, 1, 9, 15, 16, 23, 40, 41, 45, 46]), ROCK = new Set([2, 8, 17, 18, 19, 20]);
+const pal = O.pal = hex.map((value, index) => index >= 34 && index <= 38 ? AF.col(value, { jitter: 0.2, edge: 0.02, pat: 'asphalt' }) : index === 39 ? AF.col(value, { jitter: 0.35, edge: 0.03 })
+  : AF.col(value, { jitter: 0.9, edge: 0, pat: ROCK.has(index) ? 'stone' : 'none', patTop: GRASS.has(index) ? 'grass' : ROCK.has(index) ? 'stone' : 'none' }));
+const farmW = (x, z) => 1 - smooth(-700, -620, x + (noise(x * 0.004 + 3, z * 0.004 - 8) - 0.5) * 110);
+O.jungle = (x, z) => smooth(175, 95, Math.hypot(x - 715, (z + 375) * 1.3) + (noise(x * 0.02 + 61, z * 0.02) - 0.5) * 60);
 const waters = O.waters = [P.lake, { name: 'Mirror Lake', cx: 828, cz: -198, rx: 64, rz: 35, waterY: 13 }, { name: 'Westmoor Pond', cx: -1040, cz: -178, rx: 17, rz: 12, waterY: 8 }, { name: 'Mill Pond', cx: -912, cz: 92, rx: 23, rz: 14, waterY: 6 }];
 function waterE(x, z, lake) { return Math.hypot((x - lake.cx) / lake.rx, (z - lake.cz) / lake.rz) + (noise(x * 0.045 + 2, z * 0.045) - 0.5) * 0.08; }
 let fieldD = 0, fieldId = 0, fieldRow = 0, laneD = 0;
@@ -15,7 +21,7 @@ function farmAt(x, z) {
   const row = Math.floor(uz / 83), width = 65 + AF.hash2(row, 91) * 58, fx = (ux + AF.hash2(row, 7) * 80) / width;
   const phase = fx - Math.floor(fx), strip = uz - row * 83;
   fieldD = Math.min(phase * width, (1 - phase) * width, strip, 83 - strip);
-  fieldId = AF.hash2(Math.floor(fx), row); fieldRow = Math.floor(ux * (fieldId > 0.5 ? 1 : 0.3) + uz * (fieldId > 0.5 ? 0.2 : 0.95)) & 1;
+  fieldId = AF.hash2(Math.floor(fx), row); fieldRow = Math.floor((ux * (fieldId > 0.5 ? 1 : 0.3) + uz * (fieldId > 0.5 ? 0.2 : 0.95)) / 2.5) & 1;
   laneD = Math.min(Math.abs(z + 64 + Math.sin(x * 0.008) * 17), Math.abs(x + 990 + Math.sin(z * 0.013) * 24));
 }
 function ridges(x, z) {
@@ -53,16 +59,19 @@ function raw(x, z) {
   }
   const coast = O.coastZ(x), westInland = x - O.coastX(z), eastInland = O.coastX(z, true) - x, inland = Math.min(coast - z, westInland, eastInland);
   if (inland < -32) return -4;
-  let height = x < -660 ? 0.25 + smooth(-660, -1050, x) * (5 + noise(x * 0.006, z * 0.006) * 7 + noise(x * 0.02, z * 0.02) * 2)
-    : 2 + noise(x * 0.009 + 7, z * 0.009) * 26 + noise(x * 0.021, z * 0.021) * 7;
+  // one continuous field: rolling hills east of Westmoor, gentle swells under the fields, blended along a noisy seam (no straight biome edges)
+  const fw = farmW(x, z);
+  const hills = 2 + noise(x * 0.009 + 7, z * 0.009) * 26 + noise(x * 0.021, z * 0.021) * 7 + (noise(x * 0.0045 + 40, z * 0.0045 - 3) - 0.45) * 14;
+  const farm = 0.25 + smooth(-660, -1050, x) * (5 + noise(x * 0.006, z * 0.006) * 7 + noise(x * 0.02, z * 0.02) * 2) + smooth(-680, -860, x) * (noise(x * 0.0035 + 12, z * 0.0035 + 4) - 0.5) * 8;
+  let height = fw <= 0 ? hills : fw >= 1 ? farm : AF.lerp(hills, farm, fw);
   if (z < -300) {
     const north = smooth(-300, -880, z), wx = x + (noise(x * 0.003 + 8, z * 0.003) - 0.5) * 95, wz = z + (noise(x * 0.003 - 17, z * 0.003 + 23) - 0.5) * 85;
     const ridge = ridges(wx * 0.006 + 14, wz * 0.006 - 12), spurs = ridges(wx * 0.017 - 2, wz * 0.011 + 5);
-    height = AF.lerp(height, 26 + north * (62 + 170 * ridge) + spurs * 26 * smooth(-340, -650, z), smooth(-300, -420, z));
+    height = AF.lerp(height, 26 + north * (62 + 140 * ridge) + spurs * 26 * smooth(-340, -650, z), smooth(-300, -420, z));
     const valley = Math.exp(-(((x + 40) / (105 + Math.max(0, -z - 300) * 0.09)) ** 4)) * (1 - smooth(-700, -850, z));
     height = AF.lerp(height, 0.25 + smooth(-300, -610, z) * 25, valley);
-  } else if (x < -690) {
-    farmAt(x, z); height += (1 - smooth(0.7, 2.4, fieldD)) * 0.75;
+  } else if (fw > 0.5) {
+    farmAt(x, z); height += (1 - smooth(0.6, 1.6, fieldD)) * 0.25;
     if (laneD < 3.5) height -= (1 - smooth(2, 3.5, laneD)) * 0.35;
   }
   if (x > 610 && z > -100) {
@@ -73,6 +82,7 @@ function raw(x, z) {
     if (Math.abs(x - lake.cx) > lake.rx * 1.4 || Math.abs(z - lake.cz) > lake.rz * 1.4) continue;
     const radius = waterE(x, z, lake);
     height = AF.lerp(lake.waterY - 3 + radius * 1.4, height, smooth(0.87, 1.3, radius));
+    if (radius >= 1 && radius < 1.35) height = Math.max(height, lake.waterY + 0.3);
   }
   if (inland < 35) {
     const beach = x < -660, shore = -1.25 + inland * (beach ? 0.16 : 0.8);
@@ -104,17 +114,42 @@ function edge(x, z) {
   if (O.edgeReady) edges.set(key, height);
   return height;
 }
-let roadD = Infinity, roadY = 0, roadS = 0, roadKind = 0;
+// nearest road segment (any: decks, traffic) and nearest ground-bearing segment (t*: bridges excluded) through a 64 m bucket grid
+let roadD = Infinity, roadY = 0, roadS = 0, roadKind = 0, roadHW = 5, roadFlag = 0, roadDeck = false;
+let tD = Infinity, tY = 0, tS = 0, tKind = 0, tHW = 5, tFlag = 0;
+const key64 = (x, z) => Math.floor(x / 64) * 10000 + Math.floor(z / 64);
 function roadAt(x, z, brute = false) {
-  roadD = Infinity; let nearest = Infinity;
-  const candidates = brute ? segments : roadGrid.get(Math.floor(x / 64) * 10000 + Math.floor(z / 64));
+  roadD = tD = Infinity; let nearest = Infinity, ground = Infinity;
+  const candidates = brute ? segments : roadGrid.get(key64(x, z));
   if (!candidates) return;
   for (const segment of candidates) {
     const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1);
     const dx = x - segment.x - segment.dx * along, dz = z - segment.z - segment.dz * along, distance = dx * dx + dz * dz;
-    if (distance < nearest) { nearest = distance; roadY = AF.lerp(segment.y0, segment.y1, along); roadS = segment.acc + segment.length * along; roadKind = segment.kind; }
+    if (distance < nearest) { nearest = distance; roadY = AF.lerp(segment.y0, segment.y1, along); roadS = segment.acc + segment.length * along; roadKind = segment.kind; roadHW = segment.hw; roadFlag = segment.flag; roadDeck = segment.deck; }
+    if (distance < ground && segment.flag !== 1) { ground = distance; tY = AF.lerp(segment.y0, segment.y1, along); tS = segment.acc + segment.length * along; tKind = segment.kind; tHW = segment.hw; tFlag = segment.flag; }
   }
-  roadD = Math.sqrt(nearest);
+  roadD = Math.sqrt(nearest); tD = Math.sqrt(ground);
+}
+// rivers: channel + banks carved into the terrain (after the city-edge blend), levels fall monotonically to the sea / the city falls
+let rivD = Infinity, rivY = 0, rivHW = 0, riverReady = false;
+function riverAt(x, z) {
+  rivD = Infinity; if (!riverReady) return;
+  const list = riverGrid.get(key64(x, z)); if (!list) return;
+  let best = Infinity;
+  for (const segment of list) {
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1);
+    const dx = x - segment.x - segment.dx * along, dz = z - segment.z - segment.dz * along, distance = dx * dx + dz * dz;
+    if (distance < best) { best = distance; rivY = AF.lerp(segment.y0, segment.y1, along); rivHW = segment.hw; }
+  }
+  rivD = Math.sqrt(best);
+}
+function carve(x, z, height) {
+  riverAt(x, z); if (rivD === Infinity) return height;
+  if (rivD < rivHW) return Math.min(height, rivY - 0.6 - 1.4 * (1 - (rivD / rivHW) ** 2));
+  const slope = Math.min(1.6, 0.45 + Math.max(0, height - rivY) * 0.02);
+  let out = Math.min(height, rivY + 0.35 + (rivD - rivHW) * slope);
+  if (rivD < rivHW + 2.5) out = Math.max(out, rivY + 0.35);
+  return out;
 }
 O.h = (x, z) => {
   if (W.col(x, z) >= 0) return W.H[W.col(x, z)] * 0.25;
@@ -125,7 +160,15 @@ O.h = (x, z) => {
     const margin = Math.max(Math.abs(x - pad.x) - pad.rx, Math.abs(z - pad.z) - pad.rz);
     if (margin < pad.bank) height = AF.lerp(pad.y, height, smooth(0, pad.bank, margin));
   }
-  if (z <= 300) { roadAt(x, z); if (roadD < 10) height = AF.lerp(roadY, height, smooth(5, 10, roadD)); }
+  if (z <= 300) {
+    if (riverReady) height = carve(x, z, height);
+    roadAt(x, z);
+    if (tD < tHW + 40) {
+      // asphalt sits 0.2 m under its smooth ribbon (49-roads); cuts and fills widen with their depth, tunnels keep sheer walls
+      const core = tHW + (tKind === 0 ? 0.6 : 0.3), outer = core + (tFlag === 2 ? 1 : Math.min(36, 2.5 + Math.abs(height - tY) * 0.9));
+      if (tD < outer) height = AF.lerp(tY - (tKind === 0 ? 0.2 : 0), height, smooth(core, outer, tD));
+    }
+  }
   return height;
 };
 O.hB = (bx, bz) => {
@@ -140,44 +183,67 @@ O.hB = (bx, bz) => {
 };
 O.groundY = (x, z) => O.hB(W.bx(x), W.bz(z)) * 0.25;
 function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
-  if (z <= 300) { roadAt(x, z); if (roadD < 5) return roadKind ? 12 : roadD < 0.35 && roadS % 10 < 4 ? 11 : 10; }
+  if (z <= 300) {
+    roadAt(x, z);
+    if (tD < tHW + (tKind === 0 ? 0.6 : 0.25)) return tKind === 1 ? 12 : tKind === 2 ? 44 : tD > tHW - 0.5 ? 38 : 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3);
+    riverAt(x, z); if (rivD < rivHW + 3.5 && height < rivY + 1.5) return rivD < rivHW ? 43 : 42;
+  }
   const patch = noise(x * 0.035 + 11, z * 0.035 - 4), tone = patch < 0.38 ? 0 : patch < 0.66 ? 1 : 2;
   if (height < -1.25) return 14;
   for (const pad of O.pads) if (pad.kind === 'hamlet' && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) {
     if (Math.abs(x - pad.x) < 2 || Math.abs(z - pad.z) < 2) return 12;
     return O.dryWeight(x, z) > 0.5 ? [29, 30, 31][tone] : patch < 0.55 ? 23 : 15;
-  }
+  } else if (pad.face && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) return (x - pad.x) * pad.face[0] + (z - pad.z) * pad.face[1] > -1 ? 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3) : [23, 15, 45][tone];
   if (z > 300) { const strip = P.island.airstrip; if (x >= strip.x0 && x <= strip.x1 && Math.abs(z - strip.z) < strip.w / 2) return 6; return islandE(x, z) > 0.78 ? 4 : height > 28 ? 2 : 0; }
   const inland = Math.min(O.coastZ(x) - z, x - O.coastX(z), O.coastX(z, true) - x);
   if (inland < 19) return x < -660 ? [21, 4, 22][tone] : [17, 2, 18][tone];
   if (x > 610 && z > -100 && patch < O.dryWeight(x, z)) return [29, 30, 31][tone];
-  if (z < -300) {
+  const zr = z + (noise(x * 0.011 + 5, z * 0.011) - 0.5) * 70;
+  if (zr < -300) {
     const snowline = 185 + (noise(x * 0.017 - 9, z * 0.017) - 0.5) * 24;
     if (height > snowline && slope < 0.28 && patch > 0.45) return 3;
-    if (slope > 0.48 && height > 55 || height > 124) return [17, 2, 18][(Math.floor(height / 12 + patch * 2) % 3 + 3) % 3];
-    if (height > 72 && slope > 0.3) return tone === 0 ? 20 : tone === 1 ? 18 : 8;
-    if (height > 78) return [15, 0, 23][tone];
-    return patch < 0.4 + smooth(55, 110, height) * 0.35 ? [1, 23, 15][tone] : [15, 0, 16][tone];
+    if (slope > 0.62 && height > 70 || height > 150) return [17, 2, 18][(Math.floor(height / 12 + patch * 2) % 3 + 3) % 3];
+    if (height > 72 && slope > 0.34) return tone === 0 ? 20 : tone === 1 ? 46 : 8;
+    if (height > 78) return [15, 46, 23][tone];
+    const jungle = O.jungle(x, z);
+    if (jungle > patch * 0.6 + 0.2) return [40, 41, 1][tone];
+    return patch < 0.4 + smooth(55, 110, height) * 0.35 ? [1, 23, 41][tone] : [15, 45, 16][tone];
   }
-  if (x < -660) {
+  if (slope > 0.85 && height > 4) return [20, 18, 8][tone];
+  if (farmW(x, z) > 0.5) {
     farmAt(x, z);
     if (laneD < 2.3) return 12;
     if (fieldD < 1.6) return 9;
-    return fieldId < 0.3 ? step > 1 ? 32 : fieldRow ? 32 : 33 : fieldId < 0.58 ? step > 1 ? 5 : fieldRow ? 5 : 26 : fieldId < 0.8 ? step > 1 ? 6 : fieldRow ? 6 : 27 : [15, 0, 16][tone];
+    return fieldId < 0.3 ? step > 1 ? 32 : fieldRow ? 32 : 33 : fieldId < 0.58 ? step > 1 ? 5 : fieldRow ? 5 : 26 : fieldId < 0.8 ? step > 1 ? 6 : fieldRow ? 6 : 27 : [15, 45, 16][tone];
   }
-  return noise(x * 0.012 + 31, z * 0.012) > 0.6 ? [15, 0, 16][tone] : [24, 13, 25][tone];
+  const meadow = noise(x * 0.012 + 31, z * 0.012);
+  return meadow > 0.6 ? [15, 45, 16][tone] : meadow > 0.42 ? [41, 46, 23][tone] : [24, 41, 25][tone];
 }
 O.colTop = (x, z, height, slope, step) => pal[colorIndex(x, z, height, slope, step)];
 O.colSide = (x, z, height = O.h(x, z)) => pal[height > 70 ? ((Math.floor(height / 12 + noise(x * 0.04, z * 0.04)) % 3 + 3) % 3 === 0 ? 19 : 20) : 8];
 O.colorAt = (x, z) => hex[colorIndex(x, z)];
-O.biome = (x, z) => O.h(x, z) < -1.25 ? 'sea' : z > 300 ? 'island' : z < -300 ? Math.abs(x + 40) < 110 && z > -710 ? 'valley' : 'range' : x < -660 ? 'farmland' : O.dryWeight(x, z) > 0.5 ? 'desert' : 'forest';
-O.waterY = (x, z) => { for (const lake of waters) if (Math.abs(x - lake.cx) <= lake.rx * 1.08 && Math.abs(z - lake.cz) <= lake.rz * 1.08 && waterE(x, z, lake) <= 1.04) return lake.waterY; return O.h(x, z) < -1.25 ? -1.25 : null; };
+O.biome = (x, z) => O.h(x, z) < -1.25 ? 'sea' : z > 300 ? 'island' : z < -300 ? Math.abs(x + 40) < 110 && z > -710 ? 'valley' : O.jungle(x, z) > 0.5 ? 'jungle' : 'range' : x < -660 ? 'farmland' : O.dryWeight(x, z) > 0.5 ? 'desert' : 'forest';
+O.waterY = (x, z) => {
+  for (const lake of waters) if (Math.abs(x - lake.cx) <= lake.rx * 1.08 && Math.abs(z - lake.cz) <= lake.rz * 1.08 && waterE(x, z, lake) <= 1.04) return lake.waterY;
+  if (z <= 300) { riverAt(x, z); if (rivD < rivHW + 0.4) return rivY; }
+  return O.h(x, z) < -1.25 ? -1.25 : null;
+};
 O.forestDensity = (x, z) => {
   if (z > 300 || O.h(x, z) < 3 || O.h(x, z) > 120 || x < -660 && z > -300) return 0;
-  roadAt(x, z); if (roadD < 14 || O.waterY(x, z) !== null) return 0;
-  return smooth(0.25, 0.8, noise(x * 0.015 + 30, z * 0.015)) * (1 - smooth(78, 118, O.h(x, z))) * 0.85 * (1 - O.dryWeight(x, z));
+  if (O.roadDistance(x, z) < 14 || O.waterY(x, z) !== null) return 0;
+  return Math.min(0.95, smooth(0.25, 0.8, noise(x * 0.015 + 30, z * 0.015)) * (1 - smooth(78, 118, O.h(x, z))) * 0.85 * (1 - O.dryWeight(x, z)) + O.jungle(x, z) * 0.55);
 };
-O.roadDistance = (x, z) => { roadAt(x, z); return roadD; };
+// distance past a road's edge + 5 (so a 10 m lane keeps its old meaning; trails let the trees come close)
+O.roadDistance = (x, z) => { roadAt(x, z); return roadD === Infinity ? Infinity : Math.min(roadD - roadHW, tD - tHW) + 5; };
+// drivable surface of a road ribbon / bridge deck at (x,z) (-Infinity off the ribbon); y above a tunnel roof stands on the roof
+O.deckY = (x, z, y) => {
+  if (z > 300) return -Infinity;
+  roadAt(x, z); if (!roadDeck || roadD > roadHW + 0.15) return -Infinity;
+  return roadFlag === 2 && y !== undefined && y > roadY + O.TUNNEL_H ? roadY + O.TUNNEL_H + 0.6 : roadY;
+};
+O.roadY = (x, z) => { roadAt(x, z); return roadD === Infinity ? O.h(x, z) : roadY; };
+O.roadInfo = (x, z) => { roadAt(x, z); return { d: roadD, y: roadY, s: roadS, kind: roadKind, hw: roadHW, flag: roadFlag, deck: roadDeck }; };
+O.riverInfo = (x, z) => { riverAt(x, z); return { d: rivD, y: rivY, hw: rivHW }; };
 O.fieldEdge = (x, z) => { farmAt(x, z); return fieldD; };
 O.fieldMeadow = (x, z) => { farmAt(x, z); return fieldId >= 0.8; };
 O.fieldWheat = (x, z) => { farmAt(x, z); return x < -660 && z > -300 && z < O.coastZ(x) - 30 && fieldId < 0.3 && fieldD > 7 && laneD > 7; };
@@ -198,14 +264,34 @@ AF.test('outland: dry scrub blends continuously into Eastwood', () => {
   for (let x = 600; x < 1080; x += 2) for (let z = -100; z < 250; z += 10) jump = Math.max(jump, Math.abs(O.dryWeight(x, z) - O.dryWeight(x + 0.25, z)));
   return { ok: O.biome(940, 80) === 'desert' && O.biome(700, -150) === 'forest' && jump < 0.02, info: 'maximum blend step ' + jump };
 });
-AF.test('outland: new lanes avoid water and retain bounded grades', () => {
-  let water = 0, city = 0, grade = 0, checked = 0;
-  for (const road of P.roads.slice(3)) for (let index = 1; index < road.points.length; index++) {
-    const start = road.points[index - 1], end = road.points[index], length = Math.hypot(end[0] - start[0], end[1] - start[1]), steps = Math.ceil(length / 8);
-    grade = Math.max(grade, Math.abs(road.heights[index] - road.heights[index - 1]) / length);
-    for (let sample = 0; sample <= steps; sample++) { const x = AF.lerp(start[0], end[0], sample / steps), z = AF.lerp(start[1], end[1], sample / steps); checked++; if (O.waterY(x, z) !== null) water++; if (W.col(x, z) >= 0) city++; }
+AF.test('outland: roads stay dry off their bridges and keep bounded grades', () => {
+  let water = 0, grade = 0, checked = 0, worst = '';
+  for (const road of P.roads) for (let index = 1; index < road.points.length; index++) {
+    const start = road.points[index - 1], end = road.points[index], length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    if (W.col(start[0], start[1]) >= 0 || W.col(end[0], end[1]) >= 0) continue;
+    const g = Math.abs(road.heights[index] - road.heights[index - 1]) / length / road.grade; if (g > grade) { grade = g; worst = road.name; }
+    if (road.flags[index] || road.flags[index - 1]) continue;
+    checked++; if (O.waterY((start[0] + end[0]) / 2, (start[1] + end[1]) / 2) !== null) water++;
   }
-  return { ok: !water && !city && grade <= 0.120001, info: checked + ' samples, water/city ' + water + '/' + city + ', grade ' + grade };
+  return { ok: checked > 500 && !water && grade <= 1.02, info: checked + ' samples, wet ' + water + ', worst grade/limit ' + grade.toFixed(3) + ' (' + worst + ')' };
+});
+AF.test('outland: ring road loops the range with bridges, tunnels and wayside stops', () => {
+  const ring = P.roads.find((road) => road.ring);
+  let length = 0, bridges = 0, tunnels = 0, deckOk = true;
+  for (let index = 1; index < ring.points.length; index++) length += Math.hypot(ring.points[index][0] - ring.points[index - 1][0], ring.points[index][1] - ring.points[index - 1][1]);
+  for (let index = 1; index < ring.flags.length; index++) if (ring.flags[index] !== ring.flags[index - 1]) { if (ring.flags[index] === 1) bridges++; if (ring.flags[index] === 2) tunnels++; }
+  for (let index = 0; index < ring.points.length; index += 7) { const [x, z] = ring.points[index], deck = O.deckY(x, z, ring.heights[index] + 0.5); if (Math.abs(deck - ring.heights[index]) > 0.05) deckOk = false; }
+  return { ok: length > 2000 && bridges >= 2 && tunnels >= 1 && deckOk && O.wayside.length >= 6, info: Math.round(length) + ' m, ' + bridges + ' bridges, ' + tunnels + ' tunnels, ' + O.wayside.length + ' stops, deck ' + deckOk };
+});
+AF.test('outland: rivers run downhill to the sea or the Solace falls, bridged where roads cross', () => {
+  let uphill = 0, dry = 0, unbridged = 0, ends = [];
+  for (const river of O.rivers) {
+    for (let index = 1; index < river.levels.length; index++) if (river.levels[index] > river.levels[index - 1] + 1e-6) uphill++;
+    for (let index = 4; index < river.pts.length - 4; index += 9) { const [x, z] = river.pts[index]; if (W.col(x, z) < 0 && O.waterY(x, z) === null) dry++; }
+    ends.push(river.levels[river.levels.length - 1].toFixed(1));
+  }
+  for (const segment of segments) if (segment.flag !== 1) { const x = segment.x + segment.dx / 2, z = segment.z + segment.dz / 2; riverAt(x, z); if (rivD < rivHW) unbridged++; }
+  return { ok: O.rivers.length >= 3 && !uphill && !dry && !unbridged, info: O.rivers.length + ' rivers, ends ' + ends.join('/') + ', uphill ' + uphill + ', dry ' + dry + ', unbridged ' + unbridged };
 });
 AF.test('outland: south coast has coves and anchored city joins', () => {
   let lo = Infinity, hi = -Infinity;
@@ -214,25 +300,158 @@ AF.test('outland: south coast has coves and anchored city joins', () => {
   return { ok: hi - lo > 35 && west < 0.01 && east < 0.01, info: 'coast range ' + (hi - lo).toFixed(1) + ', joins ' + west + '/' + east };
 });
 O.cacheStats = () => ({ tiles: tiles.size, bytes: tiles.size * 2048, edges: edges.size });
-AF.onBuild('outland-boundary', 496, () => {
-  O.edgeReady = true; tiles.clear(); edges.clear(); segments.length = 0; roadGrid.clear();
-  for (const road of P.roads) {
-    let acc = 0;
-    if (W.col(road.points[0][0], road.points[0][1]) >= 0) road.heights[0] = W.groundY(road.points[0][0], road.points[0][1]);
-    for (let index = 1; index < road.points.length; index++) {
-      const start = road.points[index - 1], end = road.points[index], dx = end[0] - start[0], dz = end[1] - start[1], len2 = dx * dx + dz * dz;
-      road.heights[index] = clamp(road.heights[index], road.heights[index - 1] - Math.sqrt(len2) * 0.12, road.heights[index - 1] + Math.sqrt(len2) * 0.12);
-      segments.push({ x: start[0], z: start[1], dx, dz, len2, length: Math.sqrt(len2), y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.surface === 'gravel' ? 1 : 0 }); acc += Math.sqrt(len2);
+// ---------------------------------------------------------------- network generation (build 496): rivers, then road profiles, wayside stops
+function catmull(ctrl, spacing) {
+  const out = [];
+  for (let index = 0; index < ctrl.length - 1; index++) {
+    const p0 = ctrl[Math.max(0, index - 1)], p1 = ctrl[index], p2 = ctrl[index + 1], p3 = ctrl[Math.min(ctrl.length - 1, index + 2)];
+    const steps = Math.max(1, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / spacing));
+    for (let step = 0; step < steps; step++) {
+      const t = step / steps, t2 = t * t, t3 = t2 * t, at = (axis) => 0.5 * (2 * p1[axis] + (p2[axis] - p0[axis]) * t + (2 * p0[axis] - 5 * p1[axis] + 4 * p2[axis] - p3[axis]) * t2 + (3 * p1[axis] - p0[axis] - 3 * p2[axis] + p3[axis]) * t3);
+      out.push([at(0), at(1)]);
     }
   }
-  for (const segment of segments) {
-    const x0 = Math.floor((Math.min(segment.x, segment.x + segment.dx) - 16) / 64), x1 = Math.floor((Math.max(segment.x, segment.x + segment.dx) + 16) / 64);
-    const z0 = Math.floor((Math.min(segment.z, segment.z + segment.dz) - 16) / 64), z1 = Math.floor((Math.max(segment.z, segment.z + segment.dz) + 16) / 64);
+  out.push([ctrl[ctrl.length - 1][0], ctrl[ctrl.length - 1][1]]);
+  return out;
+}
+const RIVERS = [
+  { name: 'Upper Solace', w: 9, endY: AF.PLAN.river.headY, pts: [[318, -905], [340, -820], [372, -735], [392, -640], [402, -560], [396, -470], [390, -440], [388, -390], [386, -330], [AF.PLAN.river.x(-300), -300]] },
+  { name: 'Tamsin River', w: 10, startY: P.lake.waterY, pts: [[-112, -648], [-150, -640], [-220, -625], [-330, -600], [-450, -575], [-570, -535], [-660, -490], [-705, -455], [-735, -380], [-745, -290], [-752, -200], [-748, -110], [-742, -30], [-748, 40], [-758, 110], [-752, 190], [-750, 300]] },
+  { name: 'Ochre River', w: 8, startY: waters[1].waterY, pts: [[840, -170], [846, -150], [862, -110], [892, -50], [928, 10], [938, 70], [944, 130], [948, 200], [950, 310]] },
+];
+function buildRivers() {
+  riverReady = false; riverSegs.length = 0; riverGrid.clear(); O.rivers.length = 0;
+  for (const spec of RIVERS) {
+    const pts = catmull(spec.pts, 8), raw = [];
+    let level = spec.startY ?? Infinity;
+    for (const [x, z] of pts) {
+      let lake = false; for (const entry of waters) if (waterE(x, z, entry) < 1.25) lake = true;
+      if (!lake) level = Math.min(level, (W.col(x, z) >= 0 ? W.groundY(x, z) : O.h(x, z)) - 1.6);
+      raw.push(Math.max(level, spec.endY ?? -1.25, -1.25));
+    }
+    if (spec.endY !== undefined) raw[raw.length - 1] = spec.endY;
+    const levels = raw.map((value, index) => { let sum = 0, count = 0; for (let k = Math.max(0, index - 2); k <= Math.min(raw.length - 1, index + 2); k++) { sum += raw[k]; count++; } return sum / count; });
+    for (let index = 1; index < levels.length; index++) levels[index] = Math.min(levels[index], levels[index - 1]);
+    if (spec.endY !== undefined) levels[levels.length - 1] = Math.min(levels[levels.length - 2], spec.endY);
+    const river = { name: spec.name, pts, levels, hw: spec.w / 2 }; O.rivers.push(river);
+    for (let index = 1; index < pts.length; index++) {
+      const a = pts[index - 1], b = pts[index], dx = b[0] - a[0], dz = b[1] - a[1], segment = { x: a[0], z: a[1], dx, dz, len2: dx * dx + dz * dz || 1, y0: levels[index - 1], y1: levels[index], hw: river.hw };
+      riverSegs.push(segment);
+      for (let ix = Math.floor((Math.min(a[0], b[0]) - 100) / 64); ix <= Math.floor((Math.max(a[0], b[0]) + 100) / 64); ix++) for (let iz = Math.floor((Math.min(a[1], b[1]) - 100) / 64); iz <= Math.floor((Math.max(a[1], b[1]) + 100) / 64); iz++) {
+        const key = ix * 10000 + iz; let bucket = riverGrid.get(key); if (!bucket) { bucket = []; riverGrid.set(key, bucket); } bucket.push(segment);
+      }
+    }
+    const middle = pts[Math.floor(pts.length / 2)]; AF.addLabel(spec.name, middle[0], middle[1], 'place');
+  }
+  riverReady = true;
+}
+function nearestOn(road, x, z) {
+  let best = Infinity, y = 0, flag = 0;
+  for (let index = 1; index < road.points.length; index++) {
+    const a = road.points[index - 1], b = road.points[index], dx = b[0] - a[0], dz = b[1] - a[1], t = clamp(((x - a[0]) * dx + (z - a[1]) * dz) / (dx * dx + dz * dz || 1), 0, 1);
+    const distance = (x - a[0] - dx * t) ** 2 + (z - a[1] - dz * t) ** 2;
+    if (distance < best) { best = distance; y = AF.lerp(road.heights[index - 1], road.heights[index], t); flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0; }
+  }
+  return { d: Math.sqrt(best), y, flag };
+}
+// dense centreline + height profile: smoothed terrain, grade-limited, anchored to the city and to roads already profiled;
+// flags 1 = bridge (over water or > 7 m above ground), 2 = tunnel (ring only, > 12 m under ground)
+function profile(road, done) {
+  const kind = road.kind, pts = catmull(road.ctrl, kind === 2 ? 5 : 6), n = pts.length;
+  const base = new Float64Array(n), lo = new Float64Array(n).fill(-Infinity), anchor = new Float64Array(n).fill(NaN), water = new Uint8Array(n), step = new Float64Array(n);
+  for (let index = 0; index < n; index++) {
+    const x = pts[index][0], z = pts[index][1];
+    if (index) step[index] = Math.hypot(x - pts[index - 1][0], z - pts[index - 1][1]);
+    if (W.col(x, z) >= 0) { base[index] = anchor[index] = W.groundY(x, z); continue; }
+    base[index] = O.h(x, z);
+    const gx = clamp(x, W.X0 + 0.01, W.x1 - 0.01), gz = clamp(z, W.Z0 + 0.01, W.z1 - 0.01);
+    if (Math.hypot(x - gx, z - gz) < 1.5) anchor[index] = W.groundY(gx, gz);
+    riverAt(x, z); if (rivD < rivHW + 5) { lo[index] = rivY + (kind === 2 ? 1.8 : 3.4); water[index] = 1; }
+    for (const lake of waters) if (waterE(x, z, lake) < 1.1) { lo[index] = Math.max(lo[index], lake.waterY + 3); water[index] = 1; }
+    if (base[index] < 0) { lo[index] = Math.max(lo[index], 2.5); water[index] = 1; }
+    const end = index === 0 || index === n - 1;
+    for (const other of done) { const hit = nearestOn(other, x, z); if (hit.d < (end ? 8 : 3.5) && hit.flag === 0) anchor[index] = hit.y; }
+  }
+  const radius = road.ring ? 6 : kind === 1 ? 4 : kind === 2 ? 1 : 5;
+  let current = base.map((value, index) => Math.max(value, lo[index]));
+  for (let pass = 0; pass < 2; pass++) current = current.map((_, index) => { let sum = 0, count = 0; for (let k = Math.max(0, index - radius); k <= Math.min(n - 1, index + radius); k++) { sum += current[k]; count++; } return sum / count; });
+  const y = current, grade = road.grade;
+  for (let iteration = 0; iteration < 4; iteration++) {
+    for (let index = 0; index < n; index++) y[index] = Number.isNaN(anchor[index]) ? Math.max(y[index], lo[index]) : anchor[index];
+    for (let index = 1; index < n; index++) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index - 1] - grade * step[index], y[index - 1] + grade * step[index]);
+    for (let index = n - 2; index >= 0; index--) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index + 1] - grade * step[index + 1], y[index + 1] + grade * step[index + 1]);
+  }
+  const raw = new Uint8Array(n), flags = new Uint8Array(n);
+  for (let index = 0; index < n; index++) if (Number.isNaN(anchor[index]) || W.col(pts[index][0], pts[index][1]) < 0) {
+    if (water[index] || kind !== 2 && y[index] - base[index] > 7) raw[index] = 1; else if (road.ring && base[index] - y[index] > 12) raw[index] = 2;
+  }
+  for (let index = 0; index < n; index++) flags[index] = raw[index] || (raw[index - 1] === 1 || raw[index + 1] === 1 ? 1 : 0);
+  for (let index = 0; index < n;) { if (flags[index] !== 2) { index++; continue; } let end = index; while (end < n && flags[end] === 2) end++; if (end - index < 4) flags.fill(0, index, end); index = end; }
+  for (let index = 0; index < n; index++) if (W.col(pts[index][0], pts[index][1]) >= 0) flags[index] = 0;
+  road.points = pts; road.heights = Array.from(y); road.flags = flags; road.base = base;
+}
+const STOPS = [['kiosk', 'Wayside Kiosk', 7], ['houses', 'Roadside Cottages', 17], ['fuel', 'Ring Road Fuel', 14], ['supermarket', 'Ridgeway Market', 19], ['diner', 'Summit Diner', 12], ['houses', 'Pine Row', 17],
+  ['mall', 'Range Shopping Centre', 26], ['motel', 'Lookout Motel', 16], ['kiosk', 'Farm Stall', 7], ['houses', 'Hilltop Homes', 17], ['diner', 'Valley View Cafe', 12], ['supermarket', 'Westmoor Co-op', 19]];
+function wayside(ring, done) {
+  const pts = ring.points, n = pts.length, cum = [0];
+  for (let index = 1; index < n; index++) cum.push(cum[index - 1] + Math.hypot(pts[index][0] - pts[index - 1][0], pts[index][1] - pts[index - 1][1]));
+  const drives = [];
+  let s = 160, count = 0;
+  while (s < cum[n - 1] - 120 && count < STOPS.length) {
+    const [kind, name, R] = STOPS[count];
+    let placed = null;
+    for (let attempt = 0; attempt < 6 && !placed; attempt++) {
+      const at = s + attempt * 45; let index = 1; while (index < n - 2 && cum[index] < at) index++;
+      let clear = true; for (let k = Math.max(0, index - 7); k <= Math.min(n - 1, index + 7); k++) if (ring.flags[k]) clear = false;
+      if (!clear) continue;
+      const tx = pts[index + 1][0] - pts[index - 1][0], tz = pts[index + 1][1] - pts[index - 1][1], tl = Math.hypot(tx, tz);
+      for (const side of count % 2 ? [1, -1] : [-1, 1]) {
+        const nx = -tz / tl * side, nz = tx / tl * side, offset = ring.w / 2 + 5 + R * 1.42, cx = pts[index][0] + nx * offset, cz = pts[index][1] + nz * offset, y = ring.heights[index];
+        if (W.col(cx, cz) >= 0 || cx < P.play.x0 + R || cx > P.play.x1 - R || cz < P.play.z0 + R) continue;
+        let bad = false;
+        for (const [dx, dz] of [[0, 0], [-R, -R], [R, -R], [-R, R], [R, R]]) { const h = O.h(cx + dx, cz + dz); if (O.waterY(cx + dx, cz + dz) !== null || Math.abs(h - y) > 10) bad = true; riverAt(cx + dx, cz + dz); if (rivD < rivHW + 14) bad = true; }
+        for (const pad of O.pads) if (Math.abs(pad.x - cx) < pad.rx + R + 24 && Math.abs(pad.z - cz) < pad.rz + R + 24) bad = true;
+        for (const other of done) if (other !== ring && nearestOn(other, cx, cz).d < R * 1.42 + other.w / 2 + 8) bad = true;
+        if (bad) continue;
+        const face = Math.abs(nx) > Math.abs(nz) ? [-Math.sign(nx), 0] : [0, -Math.sign(nz)];
+        placed = { name, kind, x: Math.round(cx), z: Math.round(cz), rx: R, rz: R, y: Math.round(y * 4) / 4, bank: 12, props: [], face, rot: face[1] > 0 ? 0 : face[0] < 0 ? 1 : face[1] < 0 ? 2 : 3, ringS: cum[index], roadX: pts[index][0], roadZ: pts[index][1] };
+        drives.push({ name: name + ' drive', w: 6, surface: 'asphalt', kind: 0, grade: 0.1, driveway: true, ctrl: [[pts[index][0] + nx * (ring.w / 2 - 0.5), pts[index][1] + nz * (ring.w / 2 - 0.5)], [placed.x, placed.z]], points: [[pts[index][0] + nx * (ring.w / 2 - 0.5), pts[index][1] + nz * (ring.w / 2 - 0.5)], [placed.x, placed.z]], heights: [y, placed.y], flags: new Uint8Array(2) });
+        break;
+      }
+    }
+    if (placed) { O.wayside.push(placed); O.pads.push(placed); AF.addLabel(name, placed.x, placed.z, 'place'); AF.addLight({ x: placed.x, y: placed.y + 5, z: placed.z, color: 0xffd08a, intensity: 1, range: 14, kind: 'street' }); count++; }
+    s += placed ? 230 + AF.hash2(count, 17) * 120 : 90;
+  }
+  return drives;
+}
+function register(road) {
+  let acc = 0;
+  for (let index = 1; index < road.points.length; index++) {
+    const start = road.points[index - 1], end = road.points[index], dx = end[0] - start[0], dz = end[1] - start[1], len2 = dx * dx + dz * dz || 1e-6;
+    const flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0;
+    const segment = { x: start[0], z: start[1], dx, dz, len2, length: Math.sqrt(len2), y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.kind, hw: road.w / 2, flag, deck: road.kind === 0 || flag === 1, road };
+    segments.push(segment); acc += segment.length;
+    const x0 = Math.floor((Math.min(segment.x, segment.x + segment.dx) - 44) / 64), x1 = Math.floor((Math.max(segment.x, segment.x + segment.dx) + 44) / 64);
+    const z0 = Math.floor((Math.min(segment.z, segment.z + segment.dz) - 44) / 64), z1 = Math.floor((Math.max(segment.z, segment.z + segment.dz) + 44) / 64);
     for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) { const key = ix * 10000 + iz; let bucket = roadGrid.get(key); if (!bucket) { bucket = []; roadGrid.set(key, bucket); } bucket.push(segment); }
   }
+}
+AF.onBuild('outland-boundary', 496, () => {
+  O.edgeReady = false; tiles.clear(); edges.clear(); segments.length = 0; roadGrid.clear(); O.wayside.length = 0;
+  buildRivers();
+  const done = [], order = [...P.roads.filter((road) => road.ring), ...P.roads.filter((road) => !road.ring)];
+  for (const road of order) { profile(road, done); done.push(road); }
+  for (const road of P.roads) register(road);
+  O.edgeReady = true; tiles.clear();
+});
+// after the rural site pads (44-sites, 496.2): stops along the ring keep clear of them
+AF.onBuild('outland-wayside', 496.25, () => {
+  const drives = wayside(P.roads.find((road) => road.ring), P.roads.slice());
+  for (const road of drives) { P.roads.push(road); register(road); }
   tiles.clear();
 });
-for (const entry of [['Solace Range', 220, -780], ['Park Valley', -40, -440], ['Lake Tamsin', -40, -650], ['Westmoor', -1000, -100], ['Eastwood', 800, -160], ['Serena Isle', -60, 600]]) AF.addLabel(entry[0], entry[1], entry[2]);
+for (const road of P.roads) { road.ctrl = road.points.map((point) => [point[0], point[1]]); road.kind = road.surface === 'gravel' ? 1 : road.surface === 'trail' ? 2 : 0; road.grade = road.ring ? 0.07 : road.kind === 2 ? 0.3 : 0.1; road.flags = new Uint8Array(road.points.length); }
+for (const entry of [['Solace Range', 220, -780], ['Park Valley', -40, -440], ['Lake Tamsin', -40, -650], ['Westmoor', -1000, -100], ['Eastwood', 800, -160], ['Serena Isle', -60, 600], ['Tamsin Jungle', 715, -375]]) AF.addLabel(entry[0], entry[1], entry[2]);
 AF.addLabel('Mirror Lake', 828, -198);
 AF.addLabel('Ochre Flats', 930, 70);
 for (const road of P.roads) { const point = road.points[1]; AF.addLabel(road.name, point[0], point[1], 'street'); }

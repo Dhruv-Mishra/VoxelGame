@@ -1882,6 +1882,8 @@ AF.surfaceBelow = (x, z, y, maxDrop = 60) => {
   let best = g;
   const a = AF.colliders.get(Math.floor(x / 8) * 100000 + Math.floor(z / 8));
   if (a) for (const b of a) if (x >= b.x0 && x < b.x1 && z >= b.z0 && z < b.z1 && b.y1 <= y + 1e-3 && b.y1 > best) best = b.y1;
+  // outland road ribbons / bridge decks are smooth surfaces above the stepped terrain (step-up tolerance 0.3 m)
+  if ((bx < 0 || bz < 0 || bx >= NX || bz >= NZ) && AF.outland && AF.outland.deckY) { const d = AF.outland.deckY(x, z, y); if (d > best && d <= y + 0.3) best = d; }
   return best;
 };
 // Kinematic body mover with step-up. body = {x,y,z, vy, r, h, onGround}; wish = desired horizontal displacement (dx,dz).

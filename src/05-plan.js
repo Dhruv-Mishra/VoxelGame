@@ -123,7 +123,7 @@ AF.PLAN = (() => {
       { id: 'ferry', name: 'Ferry Pier', x0: -6, x1: 6, z1: 262 },
       { id: 'cargo', name: 'Pier 9 (cargo)', x0: 110, x1: 150, z1: 270 },
     ] };
-  P.river = { width: 13, bedY: -3.5, waterY: -1.25, name: 'Solace River', x: (z) => 384 + 5 * Math.sin((z + 240) * 0.011) + 2 * Math.sin((z + 240) * 0.037), z0: -252, z1: 214 };   // Eastport's river: the Heights to the harbour
+  P.river = { width: 13, bedY: -3.5, waterY: -1.25, headY: 38, name: 'Solace River', x: (z) => 384 + 5 * Math.sin((z + 240) * 0.011) + 2 * Math.sin((z + 240) * 0.037), z0: -252, z1: 214 };   // Eastport's river: the Heights to the harbour
   P.falls = { x: -990, z: -990, top: 0, pool: [-990, -990] };                             // PARKED off-map
   P.ridge = { z0: -999, crest: -999, height: 0, name: '', spur: { x0: 0, x1: 0, z0: -999 } }; // PARKED
   P.heights = { z1: -250, height: 40, name: 'Solace Heights' };   // v2: 12 -> 40 m so the Heights read from the air (land reshapes the slope + backdrop)   // wooded hills along the north edge OUTSIDE Central Park (z < -250, rising to the map edge)
@@ -227,7 +227,13 @@ AF.PLAN = (() => {
       { name: 'Eastwood Loop', w: 10, surface: 'asphalt', points: [[700, -40], [720, 10], [820, 20], [970, 0], [1020, -60], [980, -120]], heights: [10, 15, 17, 14, 17, 19] },
       { name: 'Mirror Lane', w: 10, surface: 'gravel', points: [[700, -40], [730, -90], [750, -130], [800, -120], [920, -115]], heights: [10, 14, 15, 14, 16] },
       { name: 'Ochre Trail', w: 10, surface: 'gravel', points: [[820, 20], [840, 80], [920, 110], [990, 150]], heights: [17, 16, 15, 13] },
-      { name: 'Birch Lane', w: 10, surface: 'gravel', points: [[920, -115], [940, -180], [960, -250]], heights: [16, 19, 18] },
+      // the ring: Eastwood -> over the Solace Range foothills (viaduct over Park Valley, tunnels through the spurs) -> Westmoor.
+      // Heights are generated at build (07-outland profile: smoothed terrain, 7 % grade, bridges over rivers/valleys).
+      { name: 'Solace Ring Road', w: 11, surface: 'asphalt', ring: true, points: [[980, -120], [950, -165], [944, -240], [952, -320], [905, -410], [820, -455], [700, -400], [600, -430], [490, -445], [392, -440], [300, -452], [180, -470], [60, -492], [-40, -505], [-140, -495], [-260, -470], [-400, -445], [-540, -420], [-650, -395], [-760, -350], [-880, -300], [-1000, -282], [-1100, -300], [-1180, -280]] },
+      { name: 'Summit Trail', w: 3, surface: 'trail', points: [[300, -458], [310, -560], [290, -660], [300, -760], [290, -872]] },
+      { name: 'Tamsin Gorge Trail', w: 3, surface: 'trail', points: [[-262, -476], [-250, -560], [-270, -640], [-245, -720], [-232, -780]] },
+      { name: 'Eastwood Ridge Trail', w: 3, surface: 'trail', points: [[600, -436], [580, -540], [530, -630], [478, -708]] },
+      { name: 'Westmoor Hill Trail', w: 3, surface: 'trail', points: [[-652, -400], [-640, -500], [-600, -600], [-560, -700]] },
     ],
   };
   P.west = {

@@ -39,6 +39,12 @@ try {
       if (H[i] >= 1 && H[i] <= 2) { H[i] = 1; C[i] = lawn[AF.noise2(x * 0.1, z * 0.1) < 0.5 ? 0 : 1]; }
     });
     W.tDirty = true;
+    // the Upper Solace (07-outland) reaches the grid edge at headY: a rocky cascade channel down the Heights to the falls
+    if (RV.headY) W.eachCol(300, W.Z0, 460, Z0 - 14, (bx, bz, i, x, z) => {
+      const dx = Math.abs(x - RX(z)), surf = AF.lerp(RV.headY, 16, (z - W.Z0) / (Z0 - 14 - W.Z0));
+      if (dx < 4.5) { H[i] = Math.min(H[i], Math.round((surf - 0.75 - (1 - dx / 4.5) * 0.75) * 4)); C[i] = bedD; S[i] = rock[1]; }
+      else if (dx < 7) { H[i] = Math.min(H[i], Math.round((surf + 0.25 + (dx - 4.5) * 0.8) * 4)); C[i] = rock[(bx >> 1 ^ bz >> 1) & 1]; S[i] = rock[1]; }
+    });
     // bridge decks: the road surface (its own colours) as a 2-block slab, stone parapets where the deck meets open water
     const onDeck = new Set(deck.map((d) => d[0]));
     const para = col(0xa8a092, { pat: 'stone', edge: 0.9 }), paraCap = col(0xc8bfae, { edge: 0.8 });

@@ -96,6 +96,7 @@ function* generate(){
   if(beach){if(rnd<0.45)F.add('palm',px,pz,{scale:0.7+hash(x,z+83)*0.3,biome:'beach'});else if(rnd>0.8)F.add('shrub',px,pz,{scale:0.65,biome:'beach'});continue;}
   if(biome==='desert'){if(rnd<0.13&&slope<0.6)F.add('cactus',px,pz,{scale:0.85+hash(x+4,z)*0.45,biome});else if(rnd<0.42)F.add('dry-bush',px,pz,{scale:0.6+hash(x,z+98)*0.7,biome});else if(rnd>0.91)F.add('rock',px,pz,{scale:0.35+hash(x,z+98)*0.5,biome});continue;}
   const density=biome==='farmland'?(O.fieldEdge(px,pz)<4.5?0.68:0):O.forestDensity(px,pz)*0.9+(height<78?0.035:0);
+  if(biome==='jungle'){if(height<110&&slope<1.1&&rnd<density)F.add(hash(x+17,z)<0.45?'palm':'elm-green',px,pz,{scale:0.95+hash(x+4,z)*0.55,biome});else if(slope<0.9&&rnd<density+0.3)F.add('shrub',px,pz,{scale:0.8+hash(x,z+39)*0.5,biome});continue;}
   if(biome==='farmland'&&O.fieldMeadow(px,pz)&&rnd<0.035&&slope<0.5){F.add('shrub',px,pz,{scale:0.6,biome});continue;}
   if(height<118&&slope<1.1&&rnd<density){const conifer=biome==='range'&&hash(x+91,z)>0.18;F.add(biome==='farmland'&&rnd>0.32?'shrub':conifer?'pine':choices[Math.floor(hash(x,z+55)*choices.length)],px,pz,{scale:0.8+hash(x+4,z)*0.45,biome});}
   else if(height<100&&slope<0.7&&biome!=='farmland'&&rnd<density+0.13)F.add('shrub',px,pz,{scale:0.65+hash(x,z+39)*0.4,biome});
@@ -117,7 +118,7 @@ function put(batch,entry){
 function upload(attr,count){attr.clearUpdateRanges();attr.addUpdateRange(0,Math.max(1,count)*attr.itemSize);attr.needsUpdate=true;}
 function* select(){
  F.stats.phase='select';
- const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,near=AF.MOBILE||AF.GFX.tier==='low'?80:AF.GFX.lite?125:190,far=AF.MOBILE||AF.GFX.tier==='low'?480:AF.GFX.lite?720:880;
+ const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,view=AF.lodScale||1,near=Math.min(320,(AF.MOBILE||AF.GFX.tier==='low'?80:AF.GFX.lite?125:190)*view),far=Math.min(1600,(AF.MOBILE||AF.GFX.tier==='low'?480:AF.GFX.lite?720:880)*view);
  uniforms.floraNear.value=near;uniforms.floraFar.value=far;uniforms.floraShadow.value=AF.MOBILE?25:55;
  AF.camera.updateMatrixWorld();projection.multiplyMatrices(AF.camera.projectionMatrix,AF.camera.matrixWorldInverse);frustum.setFromProjectionMatrix(projection);
  for(const batch of batches)batch.write=0;
@@ -143,6 +144,7 @@ const work=F.work=ms=>{
  const elapsed=performance.now()-start;F.stats.workMs+=elapsed;F.stats.maxWorkMs=Math.max(F.stats.maxWorkMs??0,elapsed);return !ready||!!selection||selected!==revision;
 };
 F.settle=()=>{if(AF.outlandSites)AF.outlandSites.settle();while(work(6));};
+F.refresh=()=>{revision++;};
 AF.onIdle('flora-build',work);
 AF.test('flora: biome populations and reusable palm/shrub API',()=>{
  F.settle();const counts={range:0,forest:0,farmland:0,valley:0};for(const entry of F.records)if(entry.kind!=='rock'&&counts[entry.biome]!==undefined)counts[entry.biome]++;

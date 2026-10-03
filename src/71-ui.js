@@ -178,7 +178,8 @@ try {
   const bubbleEl = h('div', 'bubble', ''); bubbleEl.style.display = 'none';
   const menu = h('div', 'sheet pe', `<div class="panel"><h2>PAUSED</h2>
     <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="lite" title="Default: Balanced without AO, god rays and MSAA">Standard</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
-    <div class="row"><label>Resolution</label><div class="seg" data-k="res"><button data-v="0">Auto</button><button data-v="0.75">75%</button><button data-v="0.9">90%</button><button data-v="1">100%</button></div></div>
+    <div class="row"><label>Resolution <small class="rv"></small></label><input data-k="resH" type="range" min="360" max="2160" step="60" title="Render height in device pixels (default 720p)"></div>
+    <div class="row"><label>View distance <small class="lv"></small></label><input data-k="lod" type="range" min="0.6" max="2.5" step="0.1" title="How far full-detail terrain, buildings and trees reach before the lower LODs"></div>
     <div class="row"><label>Shadows</label><div class="seg" data-k="shadows"><button data-v="off">Off</button><button data-v="low" title="Near shadows only (default on phones)">Low</button><button data-v="high">High</button></div></div>
     <div class="row"><label></label><small class="rr" style="opacity:.75"></small></div>
     <div class="row"><label>Time of day</label><input data-k="hour" type="range" min="0" max="23.95" step="0.05"></div>
@@ -418,6 +419,11 @@ try {
     menu.querySelectorAll('[data-k=gfx] button').forEach((b) => b.classList.toggle('on', b.dataset.v === G.name));
     menu.querySelectorAll('[data-k=res] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === G.res));
     menu.querySelectorAll('[data-k=shadows] button').forEach((b) => b.classList.toggle('on', b.dataset.v === AF.shadowQ));
+    const resH = menu.querySelector('[data-k=resH]'), native = Math.max(360, Math.ceil((innerHeight || 720) * (devicePixelRatio || 1) / 60) * 60), rv = String(Math.min(native, G.resH || native));
+    if (resH.max !== String(native)) resH.max = String(native); if (document.activeElement !== resH && resH.value !== rv) resH.value = rv;
+    text(menu.querySelector('.rv'), (G.resH ? Math.min(native, G.resH) + 'p' : 'native'));
+    const lod = menu.querySelector('[data-k=lod]'), lv = String(AF.lodScale || 1); if (AF.MOBILE && lod.max !== '1.5') lod.max = '1.5'; if (document.activeElement !== lod && lod.value !== lv) lod.value = lv;
+    text(menu.querySelector('.lv'), '\u00d7' + (+lv).toFixed(1));
     const cv = AF.renderer.domElement, pr = AF.renderer.getPixelRatio();
     text(menu.querySelector('.rr'), `Render ${cv.width}\u00d7${cv.height} (${pr.toFixed(2)}\u00d7 CSS px${devicePixelRatio > pr + 0.01 ? ', ' + Math.round(pr / devicePixelRatio * 100) + '% of display' : ''})${G.auto ? ' \u00b7 auto ' + G.name : ''}`);
     menu.querySelectorAll('[data-k=clock] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'stop') === !!AF.time.paused));
@@ -458,6 +464,10 @@ try {
   menu.querySelector('[data-k=hour]').addEventListener('input', (e) => { AF.time.hours = +e.target.value; });
   menu.querySelector('[data-k=sens]').addEventListener('input', (e) => AF.setLookSens(e.target.value));
   menu.querySelector('[data-k=bright]').addEventListener('input', (e) => AF.setBrightness && AF.setBrightness(e.target.value));
+  menu.querySelector('[data-k=resH]').addEventListener('change', (e) => { AF.gfx.setResH(e.target.value); syncMenu(); });
+  menu.querySelector('[data-k=resH]').addEventListener('input', (e) => text(menu.querySelector('.rv'), e.target.value + 'p'));
+  menu.querySelector('[data-k=lod]').addEventListener('change', (e) => { AF.gfx.setView(e.target.value); syncMenu(); });
+  menu.querySelector('[data-k=lod]').addEventListener('input', (e) => text(menu.querySelector('.lv'), '\u00d7' + (+e.target.value).toFixed(1)));
   help.addEventListener('click', (e) => { if (e.target === help || e.target.closest('[data-k=closehelp]')) toggleHelp(false); });
   right.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); else if (b.dataset.k === 'full') goFull(!isFull()); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
   prompt.addEventListener('click', () => AF.input.tap(AF.mode==='ferry-ride'?'Space':'KeyE'));

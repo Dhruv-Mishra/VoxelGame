@@ -103,6 +103,17 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
   passenger/staff paths gate at 350 m; the busy 600 s timetable (4 flights) runs only within 900 m, else the light
   480 s timetable. Airport hooks ≈ 0.17 ms near, < 0.02 ms elsewhere.
 
+## 5e. Outland network (Oct 2026)
+- Roads in `AF.PLAN.world.roads` are control points; `07-outland` (build 496) densifies them (Catmull-Rom, 5-6 m), profiles heights
+  from smoothed terrain with a grade limit (ring 7 %, lanes 10 %, trails 30 %), anchors junctions/city joins and flags spans
+  (1 bridge: over water or > 7 m fill; 2 tunnel: ring only, > 12 m cut). Rivers (`O.rivers`) carve channels after the city-edge
+  blend; levels never rise downstream. Everything is looked up through 64 m bucket grids (roads +44 m, rivers +100 m).
+- `49-roads`: all asphalt ribbons + bridge decks = **one** receive-only mesh, bridges/tunnels/piers = **one** shadow-casting mesh
+  (~8 k + 1 k quads), built in idle slots. Ribbons use the city street palette (same `AF.col` keys). Physics reads
+  `AF.outland.deckY` from `AF.surfaceBelow`; route cars use `addRoute(..., { yAt })`. Rural traffic is 14 cars on five loops.
+- Measured (Standard, `perf-areas`): draws flat (-48..+10), GPU ms flat; triangles +40..115 k in city/aerial poses (ribbons +
+  finer terrain colour runs). Boot +~110 ms (`outland-boundary` + roots).
+
 ## 5d. UI / map
 - `74-map.js` rasterises the whole world (0.1 px/m) and the city (1.5 px/m) in idle slots (≤ 1.5 ms slices) after
   `ready`; canvases total ≈ 10–15 MB. Minimap redraws ≤ 10 Hz and only when the view changed. HUD text updates on
@@ -119,7 +130,11 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
 - Self-test `voxel: one LOD copy per region on screen` guards §4/§5; `tools/lod-check.js` (`afLodCheck`) checks a live page.
 
 ## 6. Phone profile (`AF.MOBILE`)
-- 30 fps cap, MSAA on (cheap on tile GPUs), render at 1 CSS px (was 0.75), adaptive resolution 0.8–1.0 holds 30 fps.
+- 30 fps cap, MSAA on (cheap on tile GPUs), adaptive resolution 0.55-1.0 of the base holds 30 fps.
+- Render resolution (all devices, menu slider, `localStorage['portSolace.resH']`): target height in device pixels, default
+  **720p** in the screen's aspect ratio (`AF.basePR`); `?test`/`?shot` keep the tier defaults. View distance (`portSolace.lod`,
+  `AF.lodScale` 0.6-2.5, phones <= 1.5) multiplies region/cluster/prop ranges, the outland quadtree split distance and flora
+  near/far (`AF.gfx.setView`). Outland props carry three LODs (full / 2x / 4x at quadtree level >= 3; props < 3 m drop there).
 - Night light pools (6) on; no PMREM, no far cascade, no post chain, near-only shadows (unchanged memory rules).
 
 ## 7. Content rules (all parts, locked)

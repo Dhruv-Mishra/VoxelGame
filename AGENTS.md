@@ -24,7 +24,7 @@ Single-page three.js (r160, CDN importmap) voxel city game. **Edit `src/`, never
 
 ## Parts map
 - Engine: 00 prologue, 01 core/input/pointer lock, 02 voxel + region LOD, 03 renderer + tiers, 60 atmosphere/fog, 61 post, 62 water, 63 sky.
-- World: 07 outland height/colour fn (`AF.outland`, everything outside the `AF.W` grid), 10 terrain/coast (`AF.land.coastS(x,z)` = m inland, < 0 sea), 11 streets, 12 nature + ground cover, 13–43 districts, 44-flora (outland vegetation: trees, palms, cacti, shrubs, rocks; instanced), 44-island (Serena Isle + ferry), 44-sites (farms, villages, hamlets, wheat patches), 45 friends colony/homes, 46 zoo, 47 airfield (fenced perimeter; security at x -490/-484 z 56 is the only walk-in route; parked cars, drop-off routes, passengers/staff; jet bridges to stands x -450/-360), 48 sea, 49 outland quadtree mesher (`AF.outland.addProp`, `renderer.diagnose()`).
+- World: 07 outland height/colour fn (`AF.outland`, everything outside the `AF.W` grid), 10 terrain/coast (`AF.land.coastS(x,z)` = m inland, < 0 sea), 11 streets, 12 nature + ground cover, 13–43 districts, 44-flora (outland vegetation: trees, palms, cacti, shrubs, rocks; instanced), 44-island (Serena Isle + ferry), 44-sites (farms, villages, hamlets, wheat patches; `S.lib` geometry helpers with 3 LODs), 44-wayside (ring road stops), 45 friends colony/homes, 46 zoo, 47 airfield (fenced perimeter; security at x -490/-484 z 56 is the only walk-in route; parked cars, drop-off routes, passengers/staff; jet bridges to stands x -450/-360), 48 sea, 49 outland quadtree mesher (`AF.outland.addProp`, `renderer.diagnose()`), 49-roads (road ribbons, bridges, tunnels, rural traffic, hikers; see PERF.md §5e).
 - Actors: 50 vehicle models/player driving/parking (`AF.vehicles.placeParked`), 51 traffic sim (lane graph, 15 Hz, `AF.vehicles.addRoute`), 52 planes, 53 AI airliners (`AF.airTraffic`; busy 600 s timetable within 900 m of the airport, else 480 s), 54 path walkers (`AF.walkers.addPath`, 4 shared draws), 55 pedestrians/crowd, 56 animals, 57 friends (cast, dialogue, NPCs; `visual:false` reuses walkers).
 - Player/UI: 70 avatar + walk/aerial, 71 UI (title, HUD, menu, dialogue), 72 touch, 74 map (whole-world raster in idle slots, minimap, `AF.ui.toggleMap`), 98 tests, 99 boot.
 - Title avatar turntable is drawn by the main renderer (viewport + scissor); never add a second WebGLRenderer.
@@ -32,7 +32,8 @@ Single-page three.js (r160, CDN importmap) voxel city game. **Edit `src/`, never
 
 ## Performance rules
 - Tiers in `03-render.js` (`TIER`): `low` / Laptop (`high` + `AF.GFX.lite`) / `high` = Balanced / `ultra` = High. Choice saved in `localStorage['portSolace.gfx']`; auto-tier only when unset.
-- Prefer lighter effects over lower resolution (sub-1.0 scales look soft).
+- Prefer lighter effects over lower resolution (sub-1.0 scales look soft). Render resolution is a menu slider (target height,
+  default 720p by owner request, `portSolace.resH`); view distance scales every LOD range (`AF.lodScale`, `portSolace.lod`).
 - Region LOD (02): 0.25 m → 0.5 m beyond `AF.REGION_LOD` → 1 m far copy beyond `AF.FAR_LOD`, built lazily (`AF.world.buildFarAll()` for shots). Swaps cross-fade (0.3 s, `?nofade` off); a half-streamed cluster reveals ready regions per slice.
 - Streaming (02, `AF.world.stream`): normal boots mesh only regions near `AF.PLAN.bootFocus` + all 1 m clusters; full regions stream in per cluster (`cl.pending`) nearest/look-ahead first, mostly in idle slots of the fps cap; far clusters unload. Off in `?test`/`?shot`/`?near`/`?nostream`.
 - Far work must stay cheap: instanced meshes, reduced update rates at range, no per-frame allocations, tier-bounded light pools. City-spanning instanced meshes stay `frustumCulled=false`.

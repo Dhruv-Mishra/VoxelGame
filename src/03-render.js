@@ -10,8 +10,10 @@ try {
   // ?shot renders at 1 (or ?dpr=N)
   AF.basePR = () => {
     const dpr = devicePixelRatio || 1, G = AF.GFX;
-    if (AF.MOBILE) return Math.min(dpr, 1);
     if (AF.SHOT) return AF.clamp(+AF.Q.get('dpr') || 1, 0.5, 3);
+    // menu slider: G.resH device pixels tall in the screen's aspect ratio (default 720p), never above the display
+    if (G.resH > 0) return AF.clamp(G.resH / Math.max(1, innerHeight || 720), 0.3, Math.max(1, dpr));
+    if (AF.MOBILE) return Math.min(dpr, 1);
     return Math.min(dpr, G.res > 0 ? G.res : G.tier === 'low' ? 0.8 : G.tier === 'high' ? 1 : 1.25);
   };
   R.setPixelRatio(AF.basePR());
@@ -107,6 +109,7 @@ try {
   // resize
   AF.resize = () => {
     const w = AF.SHOT ? (+AF.Q.get('w') || 1280) : (innerWidth || 1280), h = AF.SHOT ? (+AF.Q.get('h') || 720) : (innerHeight || 720);
+    if (AF.GFX.resH > 0 && !AF.SHOT) { const pr = AF.basePR() * AF.GFX.scale; if (Math.abs(R.getPixelRatio() - pr) > 1e-3) R.setPixelRatio(pr); }
     R.setSize(w, h, !AF.SHOT); cam.aspect = w / h; cam.updateProjectionMatrix();
     AF.emit('resize', w, h);
   };
@@ -365,7 +368,7 @@ try {
     cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
-  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 50, farLod: 125, lod: 40, propCull: 180 };
+  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 50, farLod: 125, lod: 40, propCull: 180, dynMin: 0.55 };
   if (AF.MOBILE) TIER.low = mobileTier;
   const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : G.lite && G.tier === 'high' ? TIER.lite : (TIER[G.tier] || TIER.ultra);
   const texSeen = new WeakSet();
@@ -383,11 +386,11 @@ try {
   AF.gfx.sharpenTextures = sharpenTextures;
   const applyTier = () => {
     if (AF.MOBILE) { G.tier = 'low'; G.cinema = false; G.auto = false; G.scale = Math.min(1, G.scale); }
-    const T = cur(), sun = AF.sun;
-    AF.LOD_DIST = T.lod || 110;
-    AF.REGION_LOD = T.regLod || 130;
-    AF.FAR_LOD = T.farLod || 1e9;
-    AF.PROP_CULL = T.propCull || 900;
+    const T = cur(), sun = AF.sun, view = AF.lodScale || 1;
+    AF.LOD_DIST = (T.lod || 110) * view;
+    AF.REGION_LOD = (T.regLod || 130) * view;
+    AF.FAR_LOD = (T.farLod || 1e9) * view;
+    AF.PROP_CULL = (T.propCull || 900) * view;
     if (AF.gfx.pools) AF.gfx.pools.max = T.pools;
     if (AF.atmos && AF.atmos.setLights) AF.atmos.setLights(T.lights);
     AF.shadowDirty = true;
@@ -401,6 +404,17 @@ try {
     if (AF.gfx.far) AF.gfx.far.resize(T.far, T.farR);
   };
   G.onChange(applyTier);
+  // view distance (menu slider, 0.6..2.5 desktop / 1.5 phones): scales region, cluster, prop, outland and flora LOD ranges together
+  AF.gfx.setView = (s) => {
+    AF.lodScale = AF.clamp(+s || 1, 0.6, AF.MOBILE ? 1.5 : 2.5);
+    try { localStorage.setItem('portSolace.lod', String(AF.lodScale)); } catch (e) {}
+    applyTier(); if (AF.flora && AF.flora.refresh) AF.flora.refresh();
+  };
+  AF.gfx.setResH = (h) => {
+    G.resH = Math.max(0, Math.round(+h || 0));
+    try { localStorage.setItem('portSolace.resH', String(G.resH)); } catch (e) {}
+    R.setPixelRatio(AF.basePR() * G.scale); AF.resize();
+  };
   // ---------------------------------------------------------------- auto tier (only while G.auto: no saved/forced choice; never in ?shot / ?test)
   // Down one step after 3 s of frames 32 % over the frame target (the fps cap interval, 16.7 ms uncapped); never up.
   // Phones: adaptive resolution (0.8..1 of the base pixel ratio, checked every 4 s) holds the 30 fps target.

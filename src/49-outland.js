@@ -154,9 +154,9 @@ function* build(entry) {
   if (O.props.length) {
     const props = [];
     if (geo) props.push({ geo, x: 0, y: 0, z: 0, rot: 0 });
-    for (const prop of O.props) if (prop.x >= entry.x && prop.x < entry.x + entry.size && prop.z >= entry.z && prop.z < entry.z + entry.size) props.push(prop);
+    for (const prop of O.props) if (prop.x >= entry.x && prop.x < entry.x + entry.size && prop.z >= entry.z && prop.z < entry.z + entry.size && !(entry.level >= 3 && prop.geo.userData.small)) props.push(prop);
     if (props.length > (geo ? 1 : 0)) {
-      const pick = (prop) => entry.level > 0 && prop.geo.userData.lod ? prop.geo.userData.lod : prop.geo;
+      const pick = (prop) => entry.level >= 3 && prop.geo.userData.lod2 ? prop.geo.userData.lod2 : entry.level > 0 && prop.geo.userData.lod ? prop.geo.userData.lod : prop.geo;
       const merged = yield* AF.world.mergePropsG(props, pick, true);
       if (geo) geo.dispose(); geo = merged;
     }
@@ -199,7 +199,7 @@ function update(entry, cp, inherited) {
   if (!entry.ready || entry.fadeE || entry.busy || inherited) return;
   const dist = distance(entry, cp.x, cp.y, cp.z), ahead = distance(entry, aheadX, cp.y, aheadZ);
   entry.used = stamp;
-  const k = AF.MOBILE || AF.GFX.tier === 'low' ? 0.38 : AF.GFX.lite ? 0.48 : 0.7;
+  const k = (AF.MOBILE || AF.GFX.tier === 'low' ? 0.38 : AF.GFX.lite ? 0.48 : 0.7) * (AF.lodScale || 1);
   const threshold = entry.level === 1 ? 40 : entry.size * k;
   const horizon = entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > 800;
   const refine = entry.level > 0 && !horizon && Math.min(dist, ahead + 24) < threshold * (entry.split ? 1.25 : 1);
@@ -251,7 +251,8 @@ function work(ms) {
   return !!generator || queue.length > 0;
 }
 function scan() {
-  const cp = AF.camera.position; stamp++;
+  const cp = AF.camera.position, reach = Math.max(1, (AF.lodScale || 1) ** 2); stamp++;
+  R.maxNodes = Math.round(220 * reach); R.maxBytes = Math.min(AF.MOBILE ? 64 : 128, 48 * reach) * 1048576;
   for (const entry of nodes) if (entry.dirty && entry.ready && !entry.fadeE && !entry.busy) {
     let parent = entry.parent, blocked = false;
     while (parent) { if (parent.fadeE || parent.busy) { blocked = true; break; } parent = parent.parent; }
@@ -341,6 +342,17 @@ AF.onBuild('outland-lake', 498, () => {
     const start = points.length / 3; points.push(lake.cx, lake.waterY, lake.cz);
     for (let index = 0; index <= 64; index++) { const angle = index / 64 * Math.PI * 2; points.push(lake.cx + Math.cos(angle) * lake.rx * 1.04, lake.waterY, lake.cz + Math.sin(angle) * lake.rz * 1.04); if (index) indices.push(start, start + index + 1, start + index); }
   }
+  // rivers: one sloped ribbon each (rapids where the level steps down), merged into the same water draw
+  const ribbon = (pts, levels, half) => {
+    for (let index = 0; index < pts.length; index++) {
+      const before = pts[Math.max(0, index - 1)], after = pts[Math.min(pts.length - 1, index + 1)], tx = after[0] - before[0], tz = after[1] - before[1], length = Math.hypot(tx, tz) || 1;
+      const base = points.length / 3; points.push(pts[index][0] - tz / length * half, levels[index], pts[index][1] + tx / length * half, pts[index][0] + tz / length * half, levels[index], pts[index][1] - tx / length * half);
+      if (index) indices.push(base - 2, base, base - 1, base - 1, base, base + 1);
+    }
+  };
+  for (const river of O.rivers) ribbon(river.pts, river.levels, river.hw + 1.2);
+  const RV = AF.PLAN.river;
+  if (RV.headY) { const pts = [], levels = []; for (let z = W.Z0; z <= RV.z0 - 14; z += 2) { pts.push([RV.x(z), z]); levels.push(AF.lerp(RV.headY, 16, (z - W.Z0) / (RV.z0 - 14 - W.Z0))); } ribbon(pts, levels, 5); }
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(points, 3)); geo.setIndex(indices); geo.computeVertexNormals(); geo.computeBoundingBox(); geo.computeBoundingSphere();
   geo.userData.kind = 'lake'; geo.userData.waterY = plan.lake.waterY; geo.userData.outland = true; AF.addWater(geo);
 });

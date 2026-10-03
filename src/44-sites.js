@@ -24,7 +24,9 @@ AF.onBuild('outland-site-pads',496.2,()=>{
  const lamps={church:[10,12],fuel:[11,8],pub:[12,8]};
  for(const site of S.sites){const at=lamps[site.kind]??(site.kind==='hamlet'&&['Reedwick','Dune End','Ochre Wells','Saltbush'].includes(site.name)?[0,0]:null);if(at)AF.addLight({x:site.x+at[0],y:site.y+5,z:site.z+at[1],color:0xffc878,intensity:1,range:12,kind:'street'});}
 });
-function* geometry(key,build){let geo=cache.get(key);if(geo)return geo;const model=build();yield;geo=yield* AF.meshModelG(model,{vs:0.5,flat:true});const coarse=new AF.Model(Math.ceil(model.w/2),Math.ceil(model.h/2),Math.ceil(model.d/2));for(let x=0;x<coarse.w;x++){for(let y=0;y<coarse.h;y++)for(let z=0;z<coarse.d;z++){let value=0;for(let dx=0;dx<2&&!value;dx++)for(let dy=0;dy<2&&!value;dy++)for(let dz=0;dz<2&&!value;dz++)value=model.get(x*2+dx,y*2+dy,z*2+dz);if(value)coarse.set(x,y,z,value);}yield;}geo.userData.lod=yield* AF.meshModelG(coarse,{vs:1,flat:true});cache.set(key,geo);return geo;}
+function downsample(model){const coarse=new AF.Model(Math.ceil(model.w/2),Math.ceil(model.h/2),Math.ceil(model.d/2));for(let x=0;x<coarse.w;x++)for(let y=0;y<coarse.h;y++)for(let z=0;z<coarse.d;z++){let value=0;for(let dx=0;dx<2&&!value;dx++)for(let dy=0;dy<2&&!value;dy++)for(let dz=0;dz<2&&!value;dz++)value=model.get(x*2+dx,y*2+dy,z*2+dz);if(value)coarse.set(x,y,z,value);}return coarse;}
+// three LODs per prop: full, 2x (outland level 1-2) and 4x (level >= 3, large props only; small ones drop out there)
+function* geometry(key,build,vs=0.5){let geo=cache.get(key);if(geo)return geo;const model=build();yield;geo=yield* AF.meshModelG(model,{vs,flat:true});const coarse=downsample(model);yield;geo.userData.lod=yield* AF.meshModelG(coarse,{vs:vs*2,flat:true});const size=Math.max(model.w,model.h,model.d)*vs;geo.userData.small=size<3;if(size>=8){yield;geo.userData.lod2=yield* AF.meshModelG(downsample(coarse),{vs:vs*4,flat:true});}cache.set(key,geo);return geo;}
 function* house(key,width,depth,height,wall=trim,roof=slate){return yield* geometry(key,()=>{
  const m=new AF.Model(width+4,height+10,depth+6);m.box(2,0,2,width+2,1,depth+2,stone);m.box(2,1,2,width+2,height,depth+2,wall);
  for(let level=0;level<Math.min(width/2,depth/2);level++)m.box(1+level,height+level,1,width+3-level,height+level+1,depth+3,roof);
@@ -84,6 +86,7 @@ function* wheat(){
  }
  S.stats.wheatTriangles=geo.index.count/3;S.stats.wheatFarTriangles=geo.userData.lod.index.count/3;
 }
+S.lib={geometry,house,prop,lamp,picnic,fence,color,palette:{wood,trim,stone,red,slate,gold,dark,pane,grass,glow,adobe,clay}};
 function* build(){
  for(const site of S.sites){
     if(site.kind==='farm')yield* farm(site);
@@ -99,7 +102,7 @@ function* build(){
   yield;
  }
  for(const [x,z]of [[-230,-785],[290,-880],[475,-715],[-1180,225],[930,235]]){O.addProp(yield* box('cairn',3,4,3,stone),x,O.h(x,z),z,0,{tag:'outland-cairn'});yield;}
- const sign=yield* geometry('signpost',()=>{const m=new AF.Model(8,7,2);m.box(3,0,0,4,7,1,wood);m.box(0,5,0,8,7,2,trim);return m;});for(const road of AF.PLAN.world.roads)for(let index=1;index<road.points.length;index+=2){const [x,z]=road.points[index];O.addProp(sign,x+9,O.h(x+9,z),z,0,{tag:'outland-signpost'});yield;}
+ const sign=yield* geometry('signpost',()=>{const m=new AF.Model(8,7,2);m.box(3,0,0,4,7,1,wood);m.box(0,5,0,8,7,2,trim);return m;});for(const road of AF.PLAN.world.roads){if(road.driveway)continue;const ctrl=road.ctrl??road.points;for(let index=1;index<ctrl.length;index+=2){const [x,z]=ctrl[index],next=ctrl[Math.min(ctrl.length-1,index+1)],prev=ctrl[index-1],tx=next[0]-prev[0],tz=next[1]-prev[1],length=Math.hypot(tx,tz)||1,offset=road.w/2+3,sx=x-tz/length*offset,sz=z+tx/length*offset;if(O.roadInfo(x,z).flag||O.roadDistance(sx,sz)<6||O.waterY(sx,sz)!==null)continue;O.addProp(sign,sx,O.h(sx,sz),sz,0,{tag:'outland-signpost'});yield;}}
  yield* wheat();
  const sailGeo=(yield* geometry('windmill-sails',()=>{const m=new AF.Model(30,30,1);m.box(13,0,0,16,30,1,trim);m.box(0,13,0,30,16,1,trim);for(let index=0;index<30;index+=3){m.box(12,index,0,17,index+1,1,wood);m.box(index,12,0,index+1,17,1,wood);}return m;})).clone().translate(0,-7.5,0);
  sails=new THREE.InstancedMesh(sailGeo,AF.mat.voxelInst,2);sails.name='outland-windmill-sails';sails.count=0;sails.frustumCulled=false;sails.castShadow=false;sails.customDepthMaterial=AF.mat.depthInst;AF.scene.add(sails);

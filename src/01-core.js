@@ -34,6 +34,14 @@ AF.GFX = {
 };
 { const g = AF.Q.get('gfx'); if (g && ['ultra', 'high', 'lite', 'low', 'cinema'].includes(g)) { AF.GFX.tier = g === 'cinema' ? 'ultra' : g === 'lite' ? 'high' : g; AF.GFX.cinema = g === 'cinema'; AF.GFX.lite = g === 'lite'; AF.GFX.forced = true; AF.GFX.auto = false; } }
 { const r = +(() => { try { return localStorage.getItem('portSolace.res'); } catch (e) { return 0; } })(); if ([0.75, 0.9, 1].includes(r)) AF.GFX.res = r; }
+// render resolution as a target height in device pixels (default 720p in the screen's aspect ratio; 0 = tier default) and the
+// view-distance multiplier on every LOD range (menu sliders; ?test/?shot keep the tier defaults)
+{
+  const read = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const h = +read('portSolace.resH'), s = +read('portSolace.lod');
+  AF.GFX.resH = AF.TEST || AF.SHOT ? 0 : h >= 240 && h <= 4320 ? h : 720;
+  AF.lodScale = AF.TEST || AF.SHOT ? 1 : s >= 0.5 && s <= 3 ? s : 1;
+}
 
 // ---------------------------------------------------------------- hooks
 // Build stages run once at boot, sorted by order (see CONTRACT.md for the order table).

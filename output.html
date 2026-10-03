@@ -30,7 +30,7 @@
 </script>
 <script type="module">
 // Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.
-// Parts: 00-prologue, 01-core, 02-voxel, 03-render, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-flora, 44-island, 44-sites, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 98-tests, 99-boot
+// Parts: 00-prologue, 01-core, 02-voxel, 03-render, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 98-tests, 99-boot
 // ===== prologue: module scope shared by every part (only THREE + ADDONS live here) =====
 window.AF = window.AF || {};
 {
@@ -113,6 +113,14 @@ AF.GFX = {
 };
 { const g = AF.Q.get('gfx'); if (g && ['ultra', 'high', 'lite', 'low', 'cinema'].includes(g)) { AF.GFX.tier = g === 'cinema' ? 'ultra' : g === 'lite' ? 'high' : g; AF.GFX.cinema = g === 'cinema'; AF.GFX.lite = g === 'lite'; AF.GFX.forced = true; AF.GFX.auto = false; } }
 { const r = +(() => { try { return localStorage.getItem('portSolace.res'); } catch (e) { return 0; } })(); if ([0.75, 0.9, 1].includes(r)) AF.GFX.res = r; }
+// render resolution as a target height in device pixels (default 720p in the screen's aspect ratio; 0 = tier default) and the
+// view-distance multiplier on every LOD range (menu sliders; ?test/?shot keep the tier defaults)
+{
+  const read = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const h = +read('portSolace.resH'), s = +read('portSolace.lod');
+  AF.GFX.resH = AF.TEST || AF.SHOT ? 0 : h >= 240 && h <= 4320 ? h : 720;
+  AF.lodScale = AF.TEST || AF.SHOT ? 1 : s >= 0.5 && s <= 3 ? s : 1;
+}
 
 // ---------------------------------------------------------------- hooks
 // Build stages run once at boot, sorted by order (see CONTRACT.md for the order table).
@@ -2286,6 +2294,8 @@ AF.surfaceBelow = (x, z, y, maxDrop = 60) => {
   let best = g;
   const a = AF.colliders.get(Math.floor(x / 8) * 100000 + Math.floor(z / 8));
   if (a) for (const b of a) if (x >= b.x0 && x < b.x1 && z >= b.z0 && z < b.z1 && b.y1 <= y + 1e-3 && b.y1 > best) best = b.y1;
+  // outland road ribbons / bridge decks are smooth surfaces above the stepped terrain (step-up tolerance 0.3 m)
+  if ((bx < 0 || bz < 0 || bx >= NX || bz >= NZ) && AF.outland && AF.outland.deckY) { const d = AF.outland.deckY(x, z, y); if (d > best && d <= y + 0.3) best = d; }
   return best;
 };
 // Kinematic body mover with step-up. body = {x,y,z, vy, r, h, onGround}; wish = desired horizontal displacement (dx,dz).
@@ -2510,8 +2520,10 @@ try {
   // ?shot renders at 1 (or ?dpr=N)
   AF.basePR = () => {
     const dpr = devicePixelRatio || 1, G = AF.GFX;
-    if (AF.MOBILE) return Math.min(dpr, 1);
     if (AF.SHOT) return AF.clamp(+AF.Q.get('dpr') || 1, 0.5, 3);
+    // menu slider: G.resH device pixels tall in the screen's aspect ratio (default 720p), never above the display
+    if (G.resH > 0) return AF.clamp(G.resH / Math.max(1, innerHeight || 720), 0.3, Math.max(1, dpr));
+    if (AF.MOBILE) return Math.min(dpr, 1);
     return Math.min(dpr, G.res > 0 ? G.res : G.tier === 'low' ? 0.8 : G.tier === 'high' ? 1 : 1.25);
   };
   R.setPixelRatio(AF.basePR());
@@ -2607,6 +2619,7 @@ try {
   // resize
   AF.resize = () => {
     const w = AF.SHOT ? (+AF.Q.get('w') || 1280) : (innerWidth || 1280), h = AF.SHOT ? (+AF.Q.get('h') || 720) : (innerHeight || 720);
+    if (AF.GFX.resH > 0 && !AF.SHOT) { const pr = AF.basePR() * AF.GFX.scale; if (Math.abs(R.getPixelRatio() - pr) > 1e-3) R.setPixelRatio(pr); }
     R.setSize(w, h, !AF.SHOT); cam.aspect = w / h; cam.updateProjectionMatrix();
     AF.emit('resize', w, h);
   };
@@ -2865,7 +2878,7 @@ try {
     cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
   };
   AF.gfx.TIER = TIER;
-  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 50, farLod: 125, lod: 40, propCull: 180 };
+  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 50, farLod: 125, lod: 40, propCull: 180, dynMin: 0.55 };
   if (AF.MOBILE) TIER.low = mobileTier;
   const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : G.lite && G.tier === 'high' ? TIER.lite : (TIER[G.tier] || TIER.ultra);
   const texSeen = new WeakSet();
@@ -2883,11 +2896,11 @@ try {
   AF.gfx.sharpenTextures = sharpenTextures;
   const applyTier = () => {
     if (AF.MOBILE) { G.tier = 'low'; G.cinema = false; G.auto = false; G.scale = Math.min(1, G.scale); }
-    const T = cur(), sun = AF.sun;
-    AF.LOD_DIST = T.lod || 110;
-    AF.REGION_LOD = T.regLod || 130;
-    AF.FAR_LOD = T.farLod || 1e9;
-    AF.PROP_CULL = T.propCull || 900;
+    const T = cur(), sun = AF.sun, view = AF.lodScale || 1;
+    AF.LOD_DIST = (T.lod || 110) * view;
+    AF.REGION_LOD = (T.regLod || 130) * view;
+    AF.FAR_LOD = (T.farLod || 1e9) * view;
+    AF.PROP_CULL = (T.propCull || 900) * view;
     if (AF.gfx.pools) AF.gfx.pools.max = T.pools;
     if (AF.atmos && AF.atmos.setLights) AF.atmos.setLights(T.lights);
     AF.shadowDirty = true;
@@ -2901,6 +2914,17 @@ try {
     if (AF.gfx.far) AF.gfx.far.resize(T.far, T.farR);
   };
   G.onChange(applyTier);
+  // view distance (menu slider, 0.6..2.5 desktop / 1.5 phones): scales region, cluster, prop, outland and flora LOD ranges together
+  AF.gfx.setView = (s) => {
+    AF.lodScale = AF.clamp(+s || 1, 0.6, AF.MOBILE ? 1.5 : 2.5);
+    try { localStorage.setItem('portSolace.lod', String(AF.lodScale)); } catch (e) {}
+    applyTier(); if (AF.flora && AF.flora.refresh) AF.flora.refresh();
+  };
+  AF.gfx.setResH = (h) => {
+    G.resH = Math.max(0, Math.round(+h || 0));
+    try { localStorage.setItem('portSolace.resH', String(G.resH)); } catch (e) {}
+    R.setPixelRatio(AF.basePR() * G.scale); AF.resize();
+  };
   // ---------------------------------------------------------------- auto tier (only while G.auto: no saved/forced choice; never in ?shot / ?test)
   // Down one step after 3 s of frames 32 % over the frame target (the fps cap interval, 16.7 ms uncapped); never up.
   // Phones: adaptive resolution (0.8..1 of the base pixel ratio, checked every 4 s) holds the 30 fps target.
@@ -3462,7 +3486,7 @@ AF.PLAN = (() => {
       { id: 'ferry', name: 'Ferry Pier', x0: -6, x1: 6, z1: 262 },
       { id: 'cargo', name: 'Pier 9 (cargo)', x0: 110, x1: 150, z1: 270 },
     ] };
-  P.river = { width: 13, bedY: -3.5, waterY: -1.25, name: 'Solace River', x: (z) => 384 + 5 * Math.sin((z + 240) * 0.011) + 2 * Math.sin((z + 240) * 0.037), z0: -252, z1: 214 };   // Eastport's river: the Heights to the harbour
+  P.river = { width: 13, bedY: -3.5, waterY: -1.25, headY: 38, name: 'Solace River', x: (z) => 384 + 5 * Math.sin((z + 240) * 0.011) + 2 * Math.sin((z + 240) * 0.037), z0: -252, z1: 214 };   // Eastport's river: the Heights to the harbour
   P.falls = { x: -990, z: -990, top: 0, pool: [-990, -990] };                             // PARKED off-map
   P.ridge = { z0: -999, crest: -999, height: 0, name: '', spur: { x0: 0, x1: 0, z0: -999 } }; // PARKED
   P.heights = { z1: -250, height: 40, name: 'Solace Heights' };   // v2: 12 -> 40 m so the Heights read from the air (land reshapes the slope + backdrop)   // wooded hills along the north edge OUTSIDE Central Park (z < -250, rising to the map edge)
@@ -3566,7 +3590,13 @@ AF.PLAN = (() => {
       { name: 'Eastwood Loop', w: 10, surface: 'asphalt', points: [[700, -40], [720, 10], [820, 20], [970, 0], [1020, -60], [980, -120]], heights: [10, 15, 17, 14, 17, 19] },
       { name: 'Mirror Lane', w: 10, surface: 'gravel', points: [[700, -40], [730, -90], [750, -130], [800, -120], [920, -115]], heights: [10, 14, 15, 14, 16] },
       { name: 'Ochre Trail', w: 10, surface: 'gravel', points: [[820, 20], [840, 80], [920, 110], [990, 150]], heights: [17, 16, 15, 13] },
-      { name: 'Birch Lane', w: 10, surface: 'gravel', points: [[920, -115], [940, -180], [960, -250]], heights: [16, 19, 18] },
+      // the ring: Eastwood -> over the Solace Range foothills (viaduct over Park Valley, tunnels through the spurs) -> Westmoor.
+      // Heights are generated at build (07-outland profile: smoothed terrain, 7 % grade, bridges over rivers/valleys).
+      { name: 'Solace Ring Road', w: 11, surface: 'asphalt', ring: true, points: [[980, -120], [950, -165], [944, -240], [952, -320], [905, -410], [820, -455], [700, -400], [600, -430], [490, -445], [392, -440], [300, -452], [180, -470], [60, -492], [-40, -505], [-140, -495], [-260, -470], [-400, -445], [-540, -420], [-650, -395], [-760, -350], [-880, -300], [-1000, -282], [-1100, -300], [-1180, -280]] },
+      { name: 'Summit Trail', w: 3, surface: 'trail', points: [[300, -458], [310, -560], [290, -660], [300, -760], [290, -872]] },
+      { name: 'Tamsin Gorge Trail', w: 3, surface: 'trail', points: [[-262, -476], [-250, -560], [-270, -640], [-245, -720], [-232, -780]] },
+      { name: 'Eastwood Ridge Trail', w: 3, surface: 'trail', points: [[600, -436], [580, -540], [530, -630], [478, -708]] },
+      { name: 'Westmoor Hill Trail', w: 3, surface: 'trail', points: [[-652, -400], [-640, -500], [-600, -600], [-560, -700]] },
     ],
   };
   P.west = {
@@ -3620,12 +3650,18 @@ AF.PLAN = (() => {
 // ================================================================ 07-outland.js
 try {
 const W = AF.W, P = AF.PLAN.world, smooth = AF.smooth, clamp = AF.clamp, noise = AF.noise2;
-const O = AF.outland = { bounds: P.bounds, play: P.play, props: [], pads: [], edgeReady: false };
-const tiles = new Map(), edges = new Map(), segments = [], roadGrid = new Map();
+const O = AF.outland = { bounds: P.bounds, play: P.play, props: [], pads: [], edgeReady: false, rivers: [], wayside: [], TUNNEL_H: 6.5 };
+const tiles = new Map(), edges = new Map(), segments = [], roadGrid = new Map(), riverSegs = [], riverGrid = new Map();
+// 34-38 = the city street asphalt + gutter (same AF.col keys as 11-streets, so the outland roads share the city's surface), 39 centre line,
+// 40 jungle floor, 41 forest floor, 42 river shingle, 43 river bed, 44 dirt trail, 45 meadow, 46 olive scrub
 const hex = [AF.PAL.hex[AF.col('grass')], 0x5d8a37, 0x6f797c, 0xf5f8f9, 0xcabe9f, 0xa19b70, 0x85916b, 0x929078, 0x807363, 0x48573d, 0x4a4a4f, 0xe8dfb5, 0xada084, 0x948166, 0x536455,
   0x88a049, 0x7da646, 0x566467, 0x807e73, 0x414d51, 0x5e574c, 0xb9ae91, 0xd4c5a6, 0x557a34, 0x7a745e, 0x8b816b, 0x8e8862, 0x747e5c, 0x867c6b,
-  0xc8ac72, 0xd9bf87, 0xb29668, 0xc9a64c, 0xb18e3c];
-const pal = hex.map((value) => AF.col(value, { jitter: 0.9, edge: 0, pat: 'none' }));
+  0xc8ac72, 0xd9bf87, 0xb29668, 0xc9a64c, 0xb18e3c, 0x67625b, 0x625d56, 0x6c675f, 0x726c63, 0x46423d, 0xcfa640, 0x3f6a2c, 0x4b6b2e, 0x8a8270, 0x5a5a48, 0x9a8462, 0x7d8f4a, 0x6a7a3a];
+const GRASS = new Set([0, 1, 9, 15, 16, 23, 40, 41, 45, 46]), ROCK = new Set([2, 8, 17, 18, 19, 20]);
+const pal = O.pal = hex.map((value, index) => index >= 34 && index <= 38 ? AF.col(value, { jitter: 0.2, edge: 0.02, pat: 'asphalt' }) : index === 39 ? AF.col(value, { jitter: 0.35, edge: 0.03 })
+  : AF.col(value, { jitter: 0.9, edge: 0, pat: ROCK.has(index) ? 'stone' : 'none', patTop: GRASS.has(index) ? 'grass' : ROCK.has(index) ? 'stone' : 'none' }));
+const farmW = (x, z) => 1 - smooth(-700, -620, x + (noise(x * 0.004 + 3, z * 0.004 - 8) - 0.5) * 110);
+O.jungle = (x, z) => smooth(175, 95, Math.hypot(x - 715, (z + 375) * 1.3) + (noise(x * 0.02 + 61, z * 0.02) - 0.5) * 60);
 const waters = O.waters = [P.lake, { name: 'Mirror Lake', cx: 828, cz: -198, rx: 64, rz: 35, waterY: 13 }, { name: 'Westmoor Pond', cx: -1040, cz: -178, rx: 17, rz: 12, waterY: 8 }, { name: 'Mill Pond', cx: -912, cz: 92, rx: 23, rz: 14, waterY: 6 }];
 function waterE(x, z, lake) { return Math.hypot((x - lake.cx) / lake.rx, (z - lake.cz) / lake.rz) + (noise(x * 0.045 + 2, z * 0.045) - 0.5) * 0.08; }
 let fieldD = 0, fieldId = 0, fieldRow = 0, laneD = 0;
@@ -3634,7 +3670,7 @@ function farmAt(x, z) {
   const row = Math.floor(uz / 83), width = 65 + AF.hash2(row, 91) * 58, fx = (ux + AF.hash2(row, 7) * 80) / width;
   const phase = fx - Math.floor(fx), strip = uz - row * 83;
   fieldD = Math.min(phase * width, (1 - phase) * width, strip, 83 - strip);
-  fieldId = AF.hash2(Math.floor(fx), row); fieldRow = Math.floor(ux * (fieldId > 0.5 ? 1 : 0.3) + uz * (fieldId > 0.5 ? 0.2 : 0.95)) & 1;
+  fieldId = AF.hash2(Math.floor(fx), row); fieldRow = Math.floor((ux * (fieldId > 0.5 ? 1 : 0.3) + uz * (fieldId > 0.5 ? 0.2 : 0.95)) / 2.5) & 1;
   laneD = Math.min(Math.abs(z + 64 + Math.sin(x * 0.008) * 17), Math.abs(x + 990 + Math.sin(z * 0.013) * 24));
 }
 function ridges(x, z) {
@@ -3672,16 +3708,19 @@ function raw(x, z) {
   }
   const coast = O.coastZ(x), westInland = x - O.coastX(z), eastInland = O.coastX(z, true) - x, inland = Math.min(coast - z, westInland, eastInland);
   if (inland < -32) return -4;
-  let height = x < -660 ? 0.25 + smooth(-660, -1050, x) * (5 + noise(x * 0.006, z * 0.006) * 7 + noise(x * 0.02, z * 0.02) * 2)
-    : 2 + noise(x * 0.009 + 7, z * 0.009) * 26 + noise(x * 0.021, z * 0.021) * 7;
+  // one continuous field: rolling hills east of Westmoor, gentle swells under the fields, blended along a noisy seam (no straight biome edges)
+  const fw = farmW(x, z);
+  const hills = 2 + noise(x * 0.009 + 7, z * 0.009) * 26 + noise(x * 0.021, z * 0.021) * 7 + (noise(x * 0.0045 + 40, z * 0.0045 - 3) - 0.45) * 14;
+  const farm = 0.25 + smooth(-660, -1050, x) * (5 + noise(x * 0.006, z * 0.006) * 7 + noise(x * 0.02, z * 0.02) * 2) + smooth(-680, -860, x) * (noise(x * 0.0035 + 12, z * 0.0035 + 4) - 0.5) * 8;
+  let height = fw <= 0 ? hills : fw >= 1 ? farm : AF.lerp(hills, farm, fw);
   if (z < -300) {
     const north = smooth(-300, -880, z), wx = x + (noise(x * 0.003 + 8, z * 0.003) - 0.5) * 95, wz = z + (noise(x * 0.003 - 17, z * 0.003 + 23) - 0.5) * 85;
     const ridge = ridges(wx * 0.006 + 14, wz * 0.006 - 12), spurs = ridges(wx * 0.017 - 2, wz * 0.011 + 5);
-    height = AF.lerp(height, 26 + north * (62 + 170 * ridge) + spurs * 26 * smooth(-340, -650, z), smooth(-300, -420, z));
+    height = AF.lerp(height, 26 + north * (62 + 140 * ridge) + spurs * 26 * smooth(-340, -650, z), smooth(-300, -420, z));
     const valley = Math.exp(-(((x + 40) / (105 + Math.max(0, -z - 300) * 0.09)) ** 4)) * (1 - smooth(-700, -850, z));
     height = AF.lerp(height, 0.25 + smooth(-300, -610, z) * 25, valley);
-  } else if (x < -690) {
-    farmAt(x, z); height += (1 - smooth(0.7, 2.4, fieldD)) * 0.75;
+  } else if (fw > 0.5) {
+    farmAt(x, z); height += (1 - smooth(0.6, 1.6, fieldD)) * 0.25;
     if (laneD < 3.5) height -= (1 - smooth(2, 3.5, laneD)) * 0.35;
   }
   if (x > 610 && z > -100) {
@@ -3692,6 +3731,7 @@ function raw(x, z) {
     if (Math.abs(x - lake.cx) > lake.rx * 1.4 || Math.abs(z - lake.cz) > lake.rz * 1.4) continue;
     const radius = waterE(x, z, lake);
     height = AF.lerp(lake.waterY - 3 + radius * 1.4, height, smooth(0.87, 1.3, radius));
+    if (radius >= 1 && radius < 1.35) height = Math.max(height, lake.waterY + 0.3);
   }
   if (inland < 35) {
     const beach = x < -660, shore = -1.25 + inland * (beach ? 0.16 : 0.8);
@@ -3723,17 +3763,42 @@ function edge(x, z) {
   if (O.edgeReady) edges.set(key, height);
   return height;
 }
-let roadD = Infinity, roadY = 0, roadS = 0, roadKind = 0;
+// nearest road segment (any: decks, traffic) and nearest ground-bearing segment (t*: bridges excluded) through a 64 m bucket grid
+let roadD = Infinity, roadY = 0, roadS = 0, roadKind = 0, roadHW = 5, roadFlag = 0, roadDeck = false;
+let tD = Infinity, tY = 0, tS = 0, tKind = 0, tHW = 5, tFlag = 0;
+const key64 = (x, z) => Math.floor(x / 64) * 10000 + Math.floor(z / 64);
 function roadAt(x, z, brute = false) {
-  roadD = Infinity; let nearest = Infinity;
-  const candidates = brute ? segments : roadGrid.get(Math.floor(x / 64) * 10000 + Math.floor(z / 64));
+  roadD = tD = Infinity; let nearest = Infinity, ground = Infinity;
+  const candidates = brute ? segments : roadGrid.get(key64(x, z));
   if (!candidates) return;
   for (const segment of candidates) {
     const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1);
     const dx = x - segment.x - segment.dx * along, dz = z - segment.z - segment.dz * along, distance = dx * dx + dz * dz;
-    if (distance < nearest) { nearest = distance; roadY = AF.lerp(segment.y0, segment.y1, along); roadS = segment.acc + segment.length * along; roadKind = segment.kind; }
+    if (distance < nearest) { nearest = distance; roadY = AF.lerp(segment.y0, segment.y1, along); roadS = segment.acc + segment.length * along; roadKind = segment.kind; roadHW = segment.hw; roadFlag = segment.flag; roadDeck = segment.deck; }
+    if (distance < ground && segment.flag !== 1) { ground = distance; tY = AF.lerp(segment.y0, segment.y1, along); tS = segment.acc + segment.length * along; tKind = segment.kind; tHW = segment.hw; tFlag = segment.flag; }
   }
-  roadD = Math.sqrt(nearest);
+  roadD = Math.sqrt(nearest); tD = Math.sqrt(ground);
+}
+// rivers: channel + banks carved into the terrain (after the city-edge blend), levels fall monotonically to the sea / the city falls
+let rivD = Infinity, rivY = 0, rivHW = 0, riverReady = false;
+function riverAt(x, z) {
+  rivD = Infinity; if (!riverReady) return;
+  const list = riverGrid.get(key64(x, z)); if (!list) return;
+  let best = Infinity;
+  for (const segment of list) {
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1);
+    const dx = x - segment.x - segment.dx * along, dz = z - segment.z - segment.dz * along, distance = dx * dx + dz * dz;
+    if (distance < best) { best = distance; rivY = AF.lerp(segment.y0, segment.y1, along); rivHW = segment.hw; }
+  }
+  rivD = Math.sqrt(best);
+}
+function carve(x, z, height) {
+  riverAt(x, z); if (rivD === Infinity) return height;
+  if (rivD < rivHW) return Math.min(height, rivY - 0.6 - 1.4 * (1 - (rivD / rivHW) ** 2));
+  const slope = Math.min(1.6, 0.45 + Math.max(0, height - rivY) * 0.02);
+  let out = Math.min(height, rivY + 0.35 + (rivD - rivHW) * slope);
+  if (rivD < rivHW + 2.5) out = Math.max(out, rivY + 0.35);
+  return out;
 }
 O.h = (x, z) => {
   if (W.col(x, z) >= 0) return W.H[W.col(x, z)] * 0.25;
@@ -3744,7 +3809,15 @@ O.h = (x, z) => {
     const margin = Math.max(Math.abs(x - pad.x) - pad.rx, Math.abs(z - pad.z) - pad.rz);
     if (margin < pad.bank) height = AF.lerp(pad.y, height, smooth(0, pad.bank, margin));
   }
-  if (z <= 300) { roadAt(x, z); if (roadD < 10) height = AF.lerp(roadY, height, smooth(5, 10, roadD)); }
+  if (z <= 300) {
+    if (riverReady) height = carve(x, z, height);
+    roadAt(x, z);
+    if (tD < tHW + 40) {
+      // asphalt sits 0.2 m under its smooth ribbon (49-roads); cuts and fills widen with their depth, tunnels keep sheer walls
+      const core = tHW + (tKind === 0 ? 0.6 : 0.3), outer = core + (tFlag === 2 ? 1 : Math.min(36, 2.5 + Math.abs(height - tY) * 0.9));
+      if (tD < outer) height = AF.lerp(tY - (tKind === 0 ? 0.2 : 0), height, smooth(core, outer, tD));
+    }
+  }
   return height;
 };
 O.hB = (bx, bz) => {
@@ -3759,44 +3832,67 @@ O.hB = (bx, bz) => {
 };
 O.groundY = (x, z) => O.hB(W.bx(x), W.bz(z)) * 0.25;
 function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
-  if (z <= 300) { roadAt(x, z); if (roadD < 5) return roadKind ? 12 : roadD < 0.35 && roadS % 10 < 4 ? 11 : 10; }
+  if (z <= 300) {
+    roadAt(x, z);
+    if (tD < tHW + (tKind === 0 ? 0.6 : 0.25)) return tKind === 1 ? 12 : tKind === 2 ? 44 : tD > tHW - 0.5 ? 38 : 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3);
+    riverAt(x, z); if (rivD < rivHW + 3.5 && height < rivY + 1.5) return rivD < rivHW ? 43 : 42;
+  }
   const patch = noise(x * 0.035 + 11, z * 0.035 - 4), tone = patch < 0.38 ? 0 : patch < 0.66 ? 1 : 2;
   if (height < -1.25) return 14;
   for (const pad of O.pads) if (pad.kind === 'hamlet' && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) {
     if (Math.abs(x - pad.x) < 2 || Math.abs(z - pad.z) < 2) return 12;
     return O.dryWeight(x, z) > 0.5 ? [29, 30, 31][tone] : patch < 0.55 ? 23 : 15;
-  }
+  } else if (pad.face && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) return (x - pad.x) * pad.face[0] + (z - pad.z) * pad.face[1] > -1 ? 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3) : [23, 15, 45][tone];
   if (z > 300) { const strip = P.island.airstrip; if (x >= strip.x0 && x <= strip.x1 && Math.abs(z - strip.z) < strip.w / 2) return 6; return islandE(x, z) > 0.78 ? 4 : height > 28 ? 2 : 0; }
   const inland = Math.min(O.coastZ(x) - z, x - O.coastX(z), O.coastX(z, true) - x);
   if (inland < 19) return x < -660 ? [21, 4, 22][tone] : [17, 2, 18][tone];
   if (x > 610 && z > -100 && patch < O.dryWeight(x, z)) return [29, 30, 31][tone];
-  if (z < -300) {
+  const zr = z + (noise(x * 0.011 + 5, z * 0.011) - 0.5) * 70;
+  if (zr < -300) {
     const snowline = 185 + (noise(x * 0.017 - 9, z * 0.017) - 0.5) * 24;
     if (height > snowline && slope < 0.28 && patch > 0.45) return 3;
-    if (slope > 0.48 && height > 55 || height > 124) return [17, 2, 18][(Math.floor(height / 12 + patch * 2) % 3 + 3) % 3];
-    if (height > 72 && slope > 0.3) return tone === 0 ? 20 : tone === 1 ? 18 : 8;
-    if (height > 78) return [15, 0, 23][tone];
-    return patch < 0.4 + smooth(55, 110, height) * 0.35 ? [1, 23, 15][tone] : [15, 0, 16][tone];
+    if (slope > 0.62 && height > 70 || height > 150) return [17, 2, 18][(Math.floor(height / 12 + patch * 2) % 3 + 3) % 3];
+    if (height > 72 && slope > 0.34) return tone === 0 ? 20 : tone === 1 ? 46 : 8;
+    if (height > 78) return [15, 46, 23][tone];
+    const jungle = O.jungle(x, z);
+    if (jungle > patch * 0.6 + 0.2) return [40, 41, 1][tone];
+    return patch < 0.4 + smooth(55, 110, height) * 0.35 ? [1, 23, 41][tone] : [15, 45, 16][tone];
   }
-  if (x < -660) {
+  if (slope > 0.85 && height > 4) return [20, 18, 8][tone];
+  if (farmW(x, z) > 0.5) {
     farmAt(x, z);
     if (laneD < 2.3) return 12;
     if (fieldD < 1.6) return 9;
-    return fieldId < 0.3 ? step > 1 ? 32 : fieldRow ? 32 : 33 : fieldId < 0.58 ? step > 1 ? 5 : fieldRow ? 5 : 26 : fieldId < 0.8 ? step > 1 ? 6 : fieldRow ? 6 : 27 : [15, 0, 16][tone];
+    return fieldId < 0.3 ? step > 1 ? 32 : fieldRow ? 32 : 33 : fieldId < 0.58 ? step > 1 ? 5 : fieldRow ? 5 : 26 : fieldId < 0.8 ? step > 1 ? 6 : fieldRow ? 6 : 27 : [15, 45, 16][tone];
   }
-  return noise(x * 0.012 + 31, z * 0.012) > 0.6 ? [15, 0, 16][tone] : [24, 13, 25][tone];
+  const meadow = noise(x * 0.012 + 31, z * 0.012);
+  return meadow > 0.6 ? [15, 45, 16][tone] : meadow > 0.42 ? [41, 46, 23][tone] : [24, 41, 25][tone];
 }
 O.colTop = (x, z, height, slope, step) => pal[colorIndex(x, z, height, slope, step)];
 O.colSide = (x, z, height = O.h(x, z)) => pal[height > 70 ? ((Math.floor(height / 12 + noise(x * 0.04, z * 0.04)) % 3 + 3) % 3 === 0 ? 19 : 20) : 8];
 O.colorAt = (x, z) => hex[colorIndex(x, z)];
-O.biome = (x, z) => O.h(x, z) < -1.25 ? 'sea' : z > 300 ? 'island' : z < -300 ? Math.abs(x + 40) < 110 && z > -710 ? 'valley' : 'range' : x < -660 ? 'farmland' : O.dryWeight(x, z) > 0.5 ? 'desert' : 'forest';
-O.waterY = (x, z) => { for (const lake of waters) if (Math.abs(x - lake.cx) <= lake.rx * 1.08 && Math.abs(z - lake.cz) <= lake.rz * 1.08 && waterE(x, z, lake) <= 1.04) return lake.waterY; return O.h(x, z) < -1.25 ? -1.25 : null; };
+O.biome = (x, z) => O.h(x, z) < -1.25 ? 'sea' : z > 300 ? 'island' : z < -300 ? Math.abs(x + 40) < 110 && z > -710 ? 'valley' : O.jungle(x, z) > 0.5 ? 'jungle' : 'range' : x < -660 ? 'farmland' : O.dryWeight(x, z) > 0.5 ? 'desert' : 'forest';
+O.waterY = (x, z) => {
+  for (const lake of waters) if (Math.abs(x - lake.cx) <= lake.rx * 1.08 && Math.abs(z - lake.cz) <= lake.rz * 1.08 && waterE(x, z, lake) <= 1.04) return lake.waterY;
+  if (z <= 300) { riverAt(x, z); if (rivD < rivHW + 0.4) return rivY; }
+  return O.h(x, z) < -1.25 ? -1.25 : null;
+};
 O.forestDensity = (x, z) => {
   if (z > 300 || O.h(x, z) < 3 || O.h(x, z) > 120 || x < -660 && z > -300) return 0;
-  roadAt(x, z); if (roadD < 14 || O.waterY(x, z) !== null) return 0;
-  return smooth(0.25, 0.8, noise(x * 0.015 + 30, z * 0.015)) * (1 - smooth(78, 118, O.h(x, z))) * 0.85 * (1 - O.dryWeight(x, z));
+  if (O.roadDistance(x, z) < 14 || O.waterY(x, z) !== null) return 0;
+  return Math.min(0.95, smooth(0.25, 0.8, noise(x * 0.015 + 30, z * 0.015)) * (1 - smooth(78, 118, O.h(x, z))) * 0.85 * (1 - O.dryWeight(x, z)) + O.jungle(x, z) * 0.55);
 };
-O.roadDistance = (x, z) => { roadAt(x, z); return roadD; };
+// distance past a road's edge + 5 (so a 10 m lane keeps its old meaning; trails let the trees come close)
+O.roadDistance = (x, z) => { roadAt(x, z); return roadD === Infinity ? Infinity : Math.min(roadD - roadHW, tD - tHW) + 5; };
+// drivable surface of a road ribbon / bridge deck at (x,z) (-Infinity off the ribbon); y above a tunnel roof stands on the roof
+O.deckY = (x, z, y) => {
+  if (z > 300) return -Infinity;
+  roadAt(x, z); if (!roadDeck || roadD > roadHW + 0.15) return -Infinity;
+  return roadFlag === 2 && y !== undefined && y > roadY + O.TUNNEL_H ? roadY + O.TUNNEL_H + 0.6 : roadY;
+};
+O.roadY = (x, z) => { roadAt(x, z); return roadD === Infinity ? O.h(x, z) : roadY; };
+O.roadInfo = (x, z) => { roadAt(x, z); return { d: roadD, y: roadY, s: roadS, kind: roadKind, hw: roadHW, flag: roadFlag, deck: roadDeck }; };
+O.riverInfo = (x, z) => { riverAt(x, z); return { d: rivD, y: rivY, hw: rivHW }; };
 O.fieldEdge = (x, z) => { farmAt(x, z); return fieldD; };
 O.fieldMeadow = (x, z) => { farmAt(x, z); return fieldId >= 0.8; };
 O.fieldWheat = (x, z) => { farmAt(x, z); return x < -660 && z > -300 && z < O.coastZ(x) - 30 && fieldId < 0.3 && fieldD > 7 && laneD > 7; };
@@ -3817,14 +3913,34 @@ AF.test('outland: dry scrub blends continuously into Eastwood', () => {
   for (let x = 600; x < 1080; x += 2) for (let z = -100; z < 250; z += 10) jump = Math.max(jump, Math.abs(O.dryWeight(x, z) - O.dryWeight(x + 0.25, z)));
   return { ok: O.biome(940, 80) === 'desert' && O.biome(700, -150) === 'forest' && jump < 0.02, info: 'maximum blend step ' + jump };
 });
-AF.test('outland: new lanes avoid water and retain bounded grades', () => {
-  let water = 0, city = 0, grade = 0, checked = 0;
-  for (const road of P.roads.slice(3)) for (let index = 1; index < road.points.length; index++) {
-    const start = road.points[index - 1], end = road.points[index], length = Math.hypot(end[0] - start[0], end[1] - start[1]), steps = Math.ceil(length / 8);
-    grade = Math.max(grade, Math.abs(road.heights[index] - road.heights[index - 1]) / length);
-    for (let sample = 0; sample <= steps; sample++) { const x = AF.lerp(start[0], end[0], sample / steps), z = AF.lerp(start[1], end[1], sample / steps); checked++; if (O.waterY(x, z) !== null) water++; if (W.col(x, z) >= 0) city++; }
+AF.test('outland: roads stay dry off their bridges and keep bounded grades', () => {
+  let water = 0, grade = 0, checked = 0, worst = '';
+  for (const road of P.roads) for (let index = 1; index < road.points.length; index++) {
+    const start = road.points[index - 1], end = road.points[index], length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    if (W.col(start[0], start[1]) >= 0 || W.col(end[0], end[1]) >= 0) continue;
+    const g = Math.abs(road.heights[index] - road.heights[index - 1]) / length / road.grade; if (g > grade) { grade = g; worst = road.name; }
+    if (road.flags[index] || road.flags[index - 1]) continue;
+    checked++; if (O.waterY((start[0] + end[0]) / 2, (start[1] + end[1]) / 2) !== null) water++;
   }
-  return { ok: !water && !city && grade <= 0.120001, info: checked + ' samples, water/city ' + water + '/' + city + ', grade ' + grade };
+  return { ok: checked > 500 && !water && grade <= 1.02, info: checked + ' samples, wet ' + water + ', worst grade/limit ' + grade.toFixed(3) + ' (' + worst + ')' };
+});
+AF.test('outland: ring road loops the range with bridges, tunnels and wayside stops', () => {
+  const ring = P.roads.find((road) => road.ring);
+  let length = 0, bridges = 0, tunnels = 0, deckOk = true;
+  for (let index = 1; index < ring.points.length; index++) length += Math.hypot(ring.points[index][0] - ring.points[index - 1][0], ring.points[index][1] - ring.points[index - 1][1]);
+  for (let index = 1; index < ring.flags.length; index++) if (ring.flags[index] !== ring.flags[index - 1]) { if (ring.flags[index] === 1) bridges++; if (ring.flags[index] === 2) tunnels++; }
+  for (let index = 0; index < ring.points.length; index += 7) { const [x, z] = ring.points[index], deck = O.deckY(x, z, ring.heights[index] + 0.5); if (Math.abs(deck - ring.heights[index]) > 0.05) deckOk = false; }
+  return { ok: length > 2000 && bridges >= 2 && tunnels >= 1 && deckOk && O.wayside.length >= 6, info: Math.round(length) + ' m, ' + bridges + ' bridges, ' + tunnels + ' tunnels, ' + O.wayside.length + ' stops, deck ' + deckOk };
+});
+AF.test('outland: rivers run downhill to the sea or the Solace falls, bridged where roads cross', () => {
+  let uphill = 0, dry = 0, unbridged = 0, ends = [];
+  for (const river of O.rivers) {
+    for (let index = 1; index < river.levels.length; index++) if (river.levels[index] > river.levels[index - 1] + 1e-6) uphill++;
+    for (let index = 4; index < river.pts.length - 4; index += 9) { const [x, z] = river.pts[index]; if (W.col(x, z) < 0 && O.waterY(x, z) === null) dry++; }
+    ends.push(river.levels[river.levels.length - 1].toFixed(1));
+  }
+  for (const segment of segments) if (segment.flag !== 1) { const x = segment.x + segment.dx / 2, z = segment.z + segment.dz / 2; riverAt(x, z); if (rivD < rivHW) unbridged++; }
+  return { ok: O.rivers.length >= 3 && !uphill && !dry && !unbridged, info: O.rivers.length + ' rivers, ends ' + ends.join('/') + ', uphill ' + uphill + ', dry ' + dry + ', unbridged ' + unbridged };
 });
 AF.test('outland: south coast has coves and anchored city joins', () => {
   let lo = Infinity, hi = -Infinity;
@@ -3833,25 +3949,158 @@ AF.test('outland: south coast has coves and anchored city joins', () => {
   return { ok: hi - lo > 35 && west < 0.01 && east < 0.01, info: 'coast range ' + (hi - lo).toFixed(1) + ', joins ' + west + '/' + east };
 });
 O.cacheStats = () => ({ tiles: tiles.size, bytes: tiles.size * 2048, edges: edges.size });
-AF.onBuild('outland-boundary', 496, () => {
-  O.edgeReady = true; tiles.clear(); edges.clear(); segments.length = 0; roadGrid.clear();
-  for (const road of P.roads) {
-    let acc = 0;
-    if (W.col(road.points[0][0], road.points[0][1]) >= 0) road.heights[0] = W.groundY(road.points[0][0], road.points[0][1]);
-    for (let index = 1; index < road.points.length; index++) {
-      const start = road.points[index - 1], end = road.points[index], dx = end[0] - start[0], dz = end[1] - start[1], len2 = dx * dx + dz * dz;
-      road.heights[index] = clamp(road.heights[index], road.heights[index - 1] - Math.sqrt(len2) * 0.12, road.heights[index - 1] + Math.sqrt(len2) * 0.12);
-      segments.push({ x: start[0], z: start[1], dx, dz, len2, length: Math.sqrt(len2), y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.surface === 'gravel' ? 1 : 0 }); acc += Math.sqrt(len2);
+// ---------------------------------------------------------------- network generation (build 496): rivers, then road profiles, wayside stops
+function catmull(ctrl, spacing) {
+  const out = [];
+  for (let index = 0; index < ctrl.length - 1; index++) {
+    const p0 = ctrl[Math.max(0, index - 1)], p1 = ctrl[index], p2 = ctrl[index + 1], p3 = ctrl[Math.min(ctrl.length - 1, index + 2)];
+    const steps = Math.max(1, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / spacing));
+    for (let step = 0; step < steps; step++) {
+      const t = step / steps, t2 = t * t, t3 = t2 * t, at = (axis) => 0.5 * (2 * p1[axis] + (p2[axis] - p0[axis]) * t + (2 * p0[axis] - 5 * p1[axis] + 4 * p2[axis] - p3[axis]) * t2 + (3 * p1[axis] - p0[axis] - 3 * p2[axis] + p3[axis]) * t3);
+      out.push([at(0), at(1)]);
     }
   }
-  for (const segment of segments) {
-    const x0 = Math.floor((Math.min(segment.x, segment.x + segment.dx) - 16) / 64), x1 = Math.floor((Math.max(segment.x, segment.x + segment.dx) + 16) / 64);
-    const z0 = Math.floor((Math.min(segment.z, segment.z + segment.dz) - 16) / 64), z1 = Math.floor((Math.max(segment.z, segment.z + segment.dz) + 16) / 64);
+  out.push([ctrl[ctrl.length - 1][0], ctrl[ctrl.length - 1][1]]);
+  return out;
+}
+const RIVERS = [
+  { name: 'Upper Solace', w: 9, endY: AF.PLAN.river.headY, pts: [[318, -905], [340, -820], [372, -735], [392, -640], [402, -560], [396, -470], [390, -440], [388, -390], [386, -330], [AF.PLAN.river.x(-300), -300]] },
+  { name: 'Tamsin River', w: 10, startY: P.lake.waterY, pts: [[-112, -648], [-150, -640], [-220, -625], [-330, -600], [-450, -575], [-570, -535], [-660, -490], [-705, -455], [-735, -380], [-745, -290], [-752, -200], [-748, -110], [-742, -30], [-748, 40], [-758, 110], [-752, 190], [-750, 300]] },
+  { name: 'Ochre River', w: 8, startY: waters[1].waterY, pts: [[840, -170], [846, -150], [862, -110], [892, -50], [928, 10], [938, 70], [944, 130], [948, 200], [950, 310]] },
+];
+function buildRivers() {
+  riverReady = false; riverSegs.length = 0; riverGrid.clear(); O.rivers.length = 0;
+  for (const spec of RIVERS) {
+    const pts = catmull(spec.pts, 8), raw = [];
+    let level = spec.startY ?? Infinity;
+    for (const [x, z] of pts) {
+      let lake = false; for (const entry of waters) if (waterE(x, z, entry) < 1.25) lake = true;
+      if (!lake) level = Math.min(level, (W.col(x, z) >= 0 ? W.groundY(x, z) : O.h(x, z)) - 1.6);
+      raw.push(Math.max(level, spec.endY ?? -1.25, -1.25));
+    }
+    if (spec.endY !== undefined) raw[raw.length - 1] = spec.endY;
+    const levels = raw.map((value, index) => { let sum = 0, count = 0; for (let k = Math.max(0, index - 2); k <= Math.min(raw.length - 1, index + 2); k++) { sum += raw[k]; count++; } return sum / count; });
+    for (let index = 1; index < levels.length; index++) levels[index] = Math.min(levels[index], levels[index - 1]);
+    if (spec.endY !== undefined) levels[levels.length - 1] = Math.min(levels[levels.length - 2], spec.endY);
+    const river = { name: spec.name, pts, levels, hw: spec.w / 2 }; O.rivers.push(river);
+    for (let index = 1; index < pts.length; index++) {
+      const a = pts[index - 1], b = pts[index], dx = b[0] - a[0], dz = b[1] - a[1], segment = { x: a[0], z: a[1], dx, dz, len2: dx * dx + dz * dz || 1, y0: levels[index - 1], y1: levels[index], hw: river.hw };
+      riverSegs.push(segment);
+      for (let ix = Math.floor((Math.min(a[0], b[0]) - 100) / 64); ix <= Math.floor((Math.max(a[0], b[0]) + 100) / 64); ix++) for (let iz = Math.floor((Math.min(a[1], b[1]) - 100) / 64); iz <= Math.floor((Math.max(a[1], b[1]) + 100) / 64); iz++) {
+        const key = ix * 10000 + iz; let bucket = riverGrid.get(key); if (!bucket) { bucket = []; riverGrid.set(key, bucket); } bucket.push(segment);
+      }
+    }
+    const middle = pts[Math.floor(pts.length / 2)]; AF.addLabel(spec.name, middle[0], middle[1], 'place');
+  }
+  riverReady = true;
+}
+function nearestOn(road, x, z) {
+  let best = Infinity, y = 0, flag = 0;
+  for (let index = 1; index < road.points.length; index++) {
+    const a = road.points[index - 1], b = road.points[index], dx = b[0] - a[0], dz = b[1] - a[1], t = clamp(((x - a[0]) * dx + (z - a[1]) * dz) / (dx * dx + dz * dz || 1), 0, 1);
+    const distance = (x - a[0] - dx * t) ** 2 + (z - a[1] - dz * t) ** 2;
+    if (distance < best) { best = distance; y = AF.lerp(road.heights[index - 1], road.heights[index], t); flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0; }
+  }
+  return { d: Math.sqrt(best), y, flag };
+}
+// dense centreline + height profile: smoothed terrain, grade-limited, anchored to the city and to roads already profiled;
+// flags 1 = bridge (over water or > 7 m above ground), 2 = tunnel (ring only, > 12 m under ground)
+function profile(road, done) {
+  const kind = road.kind, pts = catmull(road.ctrl, kind === 2 ? 5 : 6), n = pts.length;
+  const base = new Float64Array(n), lo = new Float64Array(n).fill(-Infinity), anchor = new Float64Array(n).fill(NaN), water = new Uint8Array(n), step = new Float64Array(n);
+  for (let index = 0; index < n; index++) {
+    const x = pts[index][0], z = pts[index][1];
+    if (index) step[index] = Math.hypot(x - pts[index - 1][0], z - pts[index - 1][1]);
+    if (W.col(x, z) >= 0) { base[index] = anchor[index] = W.groundY(x, z); continue; }
+    base[index] = O.h(x, z);
+    const gx = clamp(x, W.X0 + 0.01, W.x1 - 0.01), gz = clamp(z, W.Z0 + 0.01, W.z1 - 0.01);
+    if (Math.hypot(x - gx, z - gz) < 1.5) anchor[index] = W.groundY(gx, gz);
+    riverAt(x, z); if (rivD < rivHW + 5) { lo[index] = rivY + (kind === 2 ? 1.8 : 3.4); water[index] = 1; }
+    for (const lake of waters) if (waterE(x, z, lake) < 1.1) { lo[index] = Math.max(lo[index], lake.waterY + 3); water[index] = 1; }
+    if (base[index] < 0) { lo[index] = Math.max(lo[index], 2.5); water[index] = 1; }
+    const end = index === 0 || index === n - 1;
+    for (const other of done) { const hit = nearestOn(other, x, z); if (hit.d < (end ? 8 : 3.5) && hit.flag === 0) anchor[index] = hit.y; }
+  }
+  const radius = road.ring ? 6 : kind === 1 ? 4 : kind === 2 ? 1 : 5;
+  let current = base.map((value, index) => Math.max(value, lo[index]));
+  for (let pass = 0; pass < 2; pass++) current = current.map((_, index) => { let sum = 0, count = 0; for (let k = Math.max(0, index - radius); k <= Math.min(n - 1, index + radius); k++) { sum += current[k]; count++; } return sum / count; });
+  const y = current, grade = road.grade;
+  for (let iteration = 0; iteration < 4; iteration++) {
+    for (let index = 0; index < n; index++) y[index] = Number.isNaN(anchor[index]) ? Math.max(y[index], lo[index]) : anchor[index];
+    for (let index = 1; index < n; index++) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index - 1] - grade * step[index], y[index - 1] + grade * step[index]);
+    for (let index = n - 2; index >= 0; index--) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index + 1] - grade * step[index + 1], y[index + 1] + grade * step[index + 1]);
+  }
+  const raw = new Uint8Array(n), flags = new Uint8Array(n);
+  for (let index = 0; index < n; index++) if (Number.isNaN(anchor[index]) || W.col(pts[index][0], pts[index][1]) < 0) {
+    if (water[index] || kind !== 2 && y[index] - base[index] > 7) raw[index] = 1; else if (road.ring && base[index] - y[index] > 12) raw[index] = 2;
+  }
+  for (let index = 0; index < n; index++) flags[index] = raw[index] || (raw[index - 1] === 1 || raw[index + 1] === 1 ? 1 : 0);
+  for (let index = 0; index < n;) { if (flags[index] !== 2) { index++; continue; } let end = index; while (end < n && flags[end] === 2) end++; if (end - index < 4) flags.fill(0, index, end); index = end; }
+  for (let index = 0; index < n; index++) if (W.col(pts[index][0], pts[index][1]) >= 0) flags[index] = 0;
+  road.points = pts; road.heights = Array.from(y); road.flags = flags; road.base = base;
+}
+const STOPS = [['kiosk', 'Wayside Kiosk', 7], ['houses', 'Roadside Cottages', 17], ['fuel', 'Ring Road Fuel', 14], ['supermarket', 'Ridgeway Market', 19], ['diner', 'Summit Diner', 12], ['houses', 'Pine Row', 17],
+  ['mall', 'Range Shopping Centre', 26], ['motel', 'Lookout Motel', 16], ['kiosk', 'Farm Stall', 7], ['houses', 'Hilltop Homes', 17], ['diner', 'Valley View Cafe', 12], ['supermarket', 'Westmoor Co-op', 19]];
+function wayside(ring, done) {
+  const pts = ring.points, n = pts.length, cum = [0];
+  for (let index = 1; index < n; index++) cum.push(cum[index - 1] + Math.hypot(pts[index][0] - pts[index - 1][0], pts[index][1] - pts[index - 1][1]));
+  const drives = [];
+  let s = 160, count = 0;
+  while (s < cum[n - 1] - 120 && count < STOPS.length) {
+    const [kind, name, R] = STOPS[count];
+    let placed = null;
+    for (let attempt = 0; attempt < 6 && !placed; attempt++) {
+      const at = s + attempt * 45; let index = 1; while (index < n - 2 && cum[index] < at) index++;
+      let clear = true; for (let k = Math.max(0, index - 7); k <= Math.min(n - 1, index + 7); k++) if (ring.flags[k]) clear = false;
+      if (!clear) continue;
+      const tx = pts[index + 1][0] - pts[index - 1][0], tz = pts[index + 1][1] - pts[index - 1][1], tl = Math.hypot(tx, tz);
+      for (const side of count % 2 ? [1, -1] : [-1, 1]) {
+        const nx = -tz / tl * side, nz = tx / tl * side, offset = ring.w / 2 + 5 + R * 1.42, cx = pts[index][0] + nx * offset, cz = pts[index][1] + nz * offset, y = ring.heights[index];
+        if (W.col(cx, cz) >= 0 || cx < P.play.x0 + R || cx > P.play.x1 - R || cz < P.play.z0 + R) continue;
+        let bad = false;
+        for (const [dx, dz] of [[0, 0], [-R, -R], [R, -R], [-R, R], [R, R]]) { const h = O.h(cx + dx, cz + dz); if (O.waterY(cx + dx, cz + dz) !== null || Math.abs(h - y) > 10) bad = true; riverAt(cx + dx, cz + dz); if (rivD < rivHW + 14) bad = true; }
+        for (const pad of O.pads) if (Math.abs(pad.x - cx) < pad.rx + R + 24 && Math.abs(pad.z - cz) < pad.rz + R + 24) bad = true;
+        for (const other of done) if (other !== ring && nearestOn(other, cx, cz).d < R * 1.42 + other.w / 2 + 8) bad = true;
+        if (bad) continue;
+        const face = Math.abs(nx) > Math.abs(nz) ? [-Math.sign(nx), 0] : [0, -Math.sign(nz)];
+        placed = { name, kind, x: Math.round(cx), z: Math.round(cz), rx: R, rz: R, y: Math.round(y * 4) / 4, bank: 12, props: [], face, rot: face[1] > 0 ? 0 : face[0] < 0 ? 1 : face[1] < 0 ? 2 : 3, ringS: cum[index], roadX: pts[index][0], roadZ: pts[index][1] };
+        drives.push({ name: name + ' drive', w: 6, surface: 'asphalt', kind: 0, grade: 0.1, driveway: true, ctrl: [[pts[index][0] + nx * (ring.w / 2 - 0.5), pts[index][1] + nz * (ring.w / 2 - 0.5)], [placed.x, placed.z]], points: [[pts[index][0] + nx * (ring.w / 2 - 0.5), pts[index][1] + nz * (ring.w / 2 - 0.5)], [placed.x, placed.z]], heights: [y, placed.y], flags: new Uint8Array(2) });
+        break;
+      }
+    }
+    if (placed) { O.wayside.push(placed); O.pads.push(placed); AF.addLabel(name, placed.x, placed.z, 'place'); AF.addLight({ x: placed.x, y: placed.y + 5, z: placed.z, color: 0xffd08a, intensity: 1, range: 14, kind: 'street' }); count++; }
+    s += placed ? 230 + AF.hash2(count, 17) * 120 : 90;
+  }
+  return drives;
+}
+function register(road) {
+  let acc = 0;
+  for (let index = 1; index < road.points.length; index++) {
+    const start = road.points[index - 1], end = road.points[index], dx = end[0] - start[0], dz = end[1] - start[1], len2 = dx * dx + dz * dz || 1e-6;
+    const flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0;
+    const segment = { x: start[0], z: start[1], dx, dz, len2, length: Math.sqrt(len2), y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.kind, hw: road.w / 2, flag, deck: road.kind === 0 || flag === 1, road };
+    segments.push(segment); acc += segment.length;
+    const x0 = Math.floor((Math.min(segment.x, segment.x + segment.dx) - 44) / 64), x1 = Math.floor((Math.max(segment.x, segment.x + segment.dx) + 44) / 64);
+    const z0 = Math.floor((Math.min(segment.z, segment.z + segment.dz) - 44) / 64), z1 = Math.floor((Math.max(segment.z, segment.z + segment.dz) + 44) / 64);
     for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) { const key = ix * 10000 + iz; let bucket = roadGrid.get(key); if (!bucket) { bucket = []; roadGrid.set(key, bucket); } bucket.push(segment); }
   }
+}
+AF.onBuild('outland-boundary', 496, () => {
+  O.edgeReady = false; tiles.clear(); edges.clear(); segments.length = 0; roadGrid.clear(); O.wayside.length = 0;
+  buildRivers();
+  const done = [], order = [...P.roads.filter((road) => road.ring), ...P.roads.filter((road) => !road.ring)];
+  for (const road of order) { profile(road, done); done.push(road); }
+  for (const road of P.roads) register(road);
+  O.edgeReady = true; tiles.clear();
+});
+// after the rural site pads (44-sites, 496.2): stops along the ring keep clear of them
+AF.onBuild('outland-wayside', 496.25, () => {
+  const drives = wayside(P.roads.find((road) => road.ring), P.roads.slice());
+  for (const road of drives) { P.roads.push(road); register(road); }
   tiles.clear();
 });
-for (const entry of [['Solace Range', 220, -780], ['Park Valley', -40, -440], ['Lake Tamsin', -40, -650], ['Westmoor', -1000, -100], ['Eastwood', 800, -160], ['Serena Isle', -60, 600]]) AF.addLabel(entry[0], entry[1], entry[2]);
+for (const road of P.roads) { road.ctrl = road.points.map((point) => [point[0], point[1]]); road.kind = road.surface === 'gravel' ? 1 : road.surface === 'trail' ? 2 : 0; road.grade = road.ring ? 0.07 : road.kind === 2 ? 0.3 : 0.1; road.flags = new Uint8Array(road.points.length); }
+for (const entry of [['Solace Range', 220, -780], ['Park Valley', -40, -440], ['Lake Tamsin', -40, -650], ['Westmoor', -1000, -100], ['Eastwood', 800, -160], ['Serena Isle', -60, 600], ['Tamsin Jungle', 715, -375]]) AF.addLabel(entry[0], entry[1], entry[2]);
 AF.addLabel('Mirror Lake', 828, -198);
 AF.addLabel('Ochre Flats', 930, 70);
 for (const road of P.roads) { const point = road.points[1]; AF.addLabel(road.name, point[0], point[1], 'street'); }
@@ -18332,6 +18581,12 @@ try {
       if (H[i] >= 1 && H[i] <= 2) { H[i] = 1; C[i] = lawn[AF.noise2(x * 0.1, z * 0.1) < 0.5 ? 0 : 1]; }
     });
     W.tDirty = true;
+    // the Upper Solace (07-outland) reaches the grid edge at headY: a rocky cascade channel down the Heights to the falls
+    if (RV.headY) W.eachCol(300, W.Z0, 460, Z0 - 14, (bx, bz, i, x, z) => {
+      const dx = Math.abs(x - RX(z)), surf = AF.lerp(RV.headY, 16, (z - W.Z0) / (Z0 - 14 - W.Z0));
+      if (dx < 4.5) { H[i] = Math.min(H[i], Math.round((surf - 0.75 - (1 - dx / 4.5) * 0.75) * 4)); C[i] = bedD; S[i] = rock[1]; }
+      else if (dx < 7) { H[i] = Math.min(H[i], Math.round((surf + 0.25 + (dx - 4.5) * 0.8) * 4)); C[i] = rock[(bx >> 1 ^ bz >> 1) & 1]; S[i] = rock[1]; }
+    });
     // bridge decks: the road surface (its own colours) as a 2-block slab, stone parapets where the deck meets open water
     const onDeck = new Set(deck.map((d) => d[0]));
     const para = col(0xa8a092, { pat: 'stone', edge: 0.9 }), paraCap = col(0xc8bfae, { edge: 0.8 });
@@ -18633,6 +18888,7 @@ function* generate(){
   if(beach){if(rnd<0.45)F.add('palm',px,pz,{scale:0.7+hash(x,z+83)*0.3,biome:'beach'});else if(rnd>0.8)F.add('shrub',px,pz,{scale:0.65,biome:'beach'});continue;}
   if(biome==='desert'){if(rnd<0.13&&slope<0.6)F.add('cactus',px,pz,{scale:0.85+hash(x+4,z)*0.45,biome});else if(rnd<0.42)F.add('dry-bush',px,pz,{scale:0.6+hash(x,z+98)*0.7,biome});else if(rnd>0.91)F.add('rock',px,pz,{scale:0.35+hash(x,z+98)*0.5,biome});continue;}
   const density=biome==='farmland'?(O.fieldEdge(px,pz)<4.5?0.68:0):O.forestDensity(px,pz)*0.9+(height<78?0.035:0);
+  if(biome==='jungle'){if(height<110&&slope<1.1&&rnd<density)F.add(hash(x+17,z)<0.45?'palm':'elm-green',px,pz,{scale:0.95+hash(x+4,z)*0.55,biome});else if(slope<0.9&&rnd<density+0.3)F.add('shrub',px,pz,{scale:0.8+hash(x,z+39)*0.5,biome});continue;}
   if(biome==='farmland'&&O.fieldMeadow(px,pz)&&rnd<0.035&&slope<0.5){F.add('shrub',px,pz,{scale:0.6,biome});continue;}
   if(height<118&&slope<1.1&&rnd<density){const conifer=biome==='range'&&hash(x+91,z)>0.18;F.add(biome==='farmland'&&rnd>0.32?'shrub':conifer?'pine':choices[Math.floor(hash(x,z+55)*choices.length)],px,pz,{scale:0.8+hash(x+4,z)*0.45,biome});}
   else if(height<100&&slope<0.7&&biome!=='farmland'&&rnd<density+0.13)F.add('shrub',px,pz,{scale:0.65+hash(x,z+39)*0.4,biome});
@@ -18654,7 +18910,7 @@ function put(batch,entry){
 function upload(attr,count){attr.clearUpdateRanges();attr.addUpdateRange(0,Math.max(1,count)*attr.itemSize);attr.needsUpdate=true;}
 function* select(){
  F.stats.phase='select';
- const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,near=AF.MOBILE||AF.GFX.tier==='low'?80:AF.GFX.lite?125:190,far=AF.MOBILE||AF.GFX.tier==='low'?480:AF.GFX.lite?720:880;
+ const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,view=AF.lodScale||1,near=Math.min(320,(AF.MOBILE||AF.GFX.tier==='low'?80:AF.GFX.lite?125:190)*view),far=Math.min(1600,(AF.MOBILE||AF.GFX.tier==='low'?480:AF.GFX.lite?720:880)*view);
  uniforms.floraNear.value=near;uniforms.floraFar.value=far;uniforms.floraShadow.value=AF.MOBILE?25:55;
  AF.camera.updateMatrixWorld();projection.multiplyMatrices(AF.camera.projectionMatrix,AF.camera.matrixWorldInverse);frustum.setFromProjectionMatrix(projection);
  for(const batch of batches)batch.write=0;
@@ -18680,6 +18936,7 @@ const work=F.work=ms=>{
  const elapsed=performance.now()-start;F.stats.workMs+=elapsed;F.stats.maxWorkMs=Math.max(F.stats.maxWorkMs??0,elapsed);return !ready||!!selection||selected!==revision;
 };
 F.settle=()=>{if(AF.outlandSites)AF.outlandSites.settle();while(work(6));};
+F.refresh=()=>{revision++;};
 AF.onIdle('flora-build',work);
 AF.test('flora: biome populations and reusable palm/shrub API',()=>{
  F.settle();const counts={range:0,forest:0,farmland:0,valley:0};for(const entry of F.records)if(entry.kind!=='rock'&&counts[entry.biome]!==undefined)counts[entry.biome]++;
@@ -18833,7 +19090,9 @@ AF.onBuild('outland-site-pads',496.2,()=>{
  const lamps={church:[10,12],fuel:[11,8],pub:[12,8]};
  for(const site of S.sites){const at=lamps[site.kind]??(site.kind==='hamlet'&&['Reedwick','Dune End','Ochre Wells','Saltbush'].includes(site.name)?[0,0]:null);if(at)AF.addLight({x:site.x+at[0],y:site.y+5,z:site.z+at[1],color:0xffc878,intensity:1,range:12,kind:'street'});}
 });
-function* geometry(key,build){let geo=cache.get(key);if(geo)return geo;const model=build();yield;geo=yield* AF.meshModelG(model,{vs:0.5,flat:true});const coarse=new AF.Model(Math.ceil(model.w/2),Math.ceil(model.h/2),Math.ceil(model.d/2));for(let x=0;x<coarse.w;x++){for(let y=0;y<coarse.h;y++)for(let z=0;z<coarse.d;z++){let value=0;for(let dx=0;dx<2&&!value;dx++)for(let dy=0;dy<2&&!value;dy++)for(let dz=0;dz<2&&!value;dz++)value=model.get(x*2+dx,y*2+dy,z*2+dz);if(value)coarse.set(x,y,z,value);}yield;}geo.userData.lod=yield* AF.meshModelG(coarse,{vs:1,flat:true});cache.set(key,geo);return geo;}
+function downsample(model){const coarse=new AF.Model(Math.ceil(model.w/2),Math.ceil(model.h/2),Math.ceil(model.d/2));for(let x=0;x<coarse.w;x++)for(let y=0;y<coarse.h;y++)for(let z=0;z<coarse.d;z++){let value=0;for(let dx=0;dx<2&&!value;dx++)for(let dy=0;dy<2&&!value;dy++)for(let dz=0;dz<2&&!value;dz++)value=model.get(x*2+dx,y*2+dy,z*2+dz);if(value)coarse.set(x,y,z,value);}return coarse;}
+// three LODs per prop: full, 2x (outland level 1-2) and 4x (level >= 3, large props only; small ones drop out there)
+function* geometry(key,build,vs=0.5){let geo=cache.get(key);if(geo)return geo;const model=build();yield;geo=yield* AF.meshModelG(model,{vs,flat:true});const coarse=downsample(model);yield;geo.userData.lod=yield* AF.meshModelG(coarse,{vs:vs*2,flat:true});const size=Math.max(model.w,model.h,model.d)*vs;geo.userData.small=size<3;if(size>=8){yield;geo.userData.lod2=yield* AF.meshModelG(downsample(coarse),{vs:vs*4,flat:true});}cache.set(key,geo);return geo;}
 function* house(key,width,depth,height,wall=trim,roof=slate){return yield* geometry(key,()=>{
  const m=new AF.Model(width+4,height+10,depth+6);m.box(2,0,2,width+2,1,depth+2,stone);m.box(2,1,2,width+2,height,depth+2,wall);
  for(let level=0;level<Math.min(width/2,depth/2);level++)m.box(1+level,height+level,1,width+3-level,height+level+1,depth+3,roof);
@@ -18893,6 +19152,7 @@ function* wheat(){
  }
  S.stats.wheatTriangles=geo.index.count/3;S.stats.wheatFarTriangles=geo.userData.lod.index.count/3;
 }
+S.lib={geometry,house,prop,lamp,picnic,fence,color,palette:{wood,trim,stone,red,slate,gold,dark,pane,grass,glow,adobe,clay}};
 function* build(){
  for(const site of S.sites){
     if(site.kind==='farm')yield* farm(site);
@@ -18908,7 +19168,7 @@ function* build(){
   yield;
  }
  for(const [x,z]of [[-230,-785],[290,-880],[475,-715],[-1180,225],[930,235]]){O.addProp(yield* box('cairn',3,4,3,stone),x,O.h(x,z),z,0,{tag:'outland-cairn'});yield;}
- const sign=yield* geometry('signpost',()=>{const m=new AF.Model(8,7,2);m.box(3,0,0,4,7,1,wood);m.box(0,5,0,8,7,2,trim);return m;});for(const road of AF.PLAN.world.roads)for(let index=1;index<road.points.length;index+=2){const [x,z]=road.points[index];O.addProp(sign,x+9,O.h(x+9,z),z,0,{tag:'outland-signpost'});yield;}
+ const sign=yield* geometry('signpost',()=>{const m=new AF.Model(8,7,2);m.box(3,0,0,4,7,1,wood);m.box(0,5,0,8,7,2,trim);return m;});for(const road of AF.PLAN.world.roads){if(road.driveway)continue;const ctrl=road.ctrl??road.points;for(let index=1;index<ctrl.length;index+=2){const [x,z]=ctrl[index],next=ctrl[Math.min(ctrl.length-1,index+1)],prev=ctrl[index-1],tx=next[0]-prev[0],tz=next[1]-prev[1],length=Math.hypot(tx,tz)||1,offset=road.w/2+3,sx=x-tz/length*offset,sz=z+tx/length*offset;if(O.roadInfo(x,z).flag||O.roadDistance(sx,sz)<6||O.waterY(sx,sz)!==null)continue;O.addProp(sign,sx,O.h(sx,sz),sz,0,{tag:'outland-signpost'});yield;}}
  yield* wheat();
  const sailGeo=(yield* geometry('windmill-sails',()=>{const m=new AF.Model(30,30,1);m.box(13,0,0,16,30,1,trim);m.box(0,13,0,30,16,1,trim);for(let index=0;index<30;index+=3){m.box(12,index,0,17,index+1,1,wood);m.box(index,12,0,index+1,17,1,wood);}return m;})).clone().translate(0,-7.5,0);
  sails=new THREE.InstancedMesh(sailGeo,AF.mat.voxelInst,2);sails.name='outland-windmill-sails';sails.count=0;sails.frustumCulled=false;sails.castShadow=false;sails.customDepthMaterial=AF.mat.depthInst;AF.scene.add(sails);
@@ -18939,6 +19199,98 @@ AF.test('outland-sites: hikers and villagers leave island walker capacity',()=>{
  return{ok:S.stats.walkers===22&&used<=212&&!blocked,info:used+'/'+AF.walkers.capacity+', outland '+S.stats.walkers+', path obstructions '+blocked+'/'+samples+' '+JSON.stringify(hits)};
 });
 }catch(e){AF.partError('44-sites.js',e);}
+
+// ================================================================ 44-wayside.js
+try {
+// ===== 44-wayside: roadside stops along the Solace Ring Road (pads + driveways chosen in 07-outland 'outland-wayside'):
+//       kiosks, cottages, fuel, supermarkets, a diner, a motel and a shopping centre. Merged outland props with 3 LODs
+//       (44-sites geometry), parked cars as merged proxies, a few shoppers on the shared walker batches.
+const O = AF.outland, WS = AF.wayside = { stats: { ready: false, props: 0, cars: 0, walkers: 0, workMs: 0 } };
+let generator = null;
+const face = (poi, along, across) => [poi.x + poi.face[0] * along + poi.face[1] * across, poi.z + poi.face[1] * along + poi.face[0] * across];
+AF.onBuild('wayside-parking', 496.3, () => {
+  const VV = AF.vehicles; if (!VV || !VV.placeParked) return;
+  const bays = { fuel: 2, supermarket: 4, mall: 6, diner: 3, motel: 3, kiosk: 1, houses: 2 };
+  for (const poi of O.wayside) {
+    const n = bays[poi.kind] || 0, yaw = Math.atan2(poi.face[0], poi.face[1]);
+    for (let index = 0; index < n; index++) {
+      const across = (index % 2 ? 1 : -1) * (5 + Math.floor(index / 2) * 3.2), [x, z] = face(poi, poi.kind === 'houses' ? poi.rx * 0.55 : poi.rx * 0.5, across);
+      try { VV.placeParked(null, x, z, yaw, { y: poi.y, seed: index * 31 + poi.x }); WS.stats.cars++; } catch (e) { AF.warnOnce('wayside parking', e); }
+    }
+  }
+});
+AF.onBuild('wayside-shoppers', 667, () => {
+  if (!AF.walkers || !AF.walkers.addPath) return;
+  for (const poi of O.wayside) {
+    if (!['supermarket', 'mall', 'diner', 'kiosk'].includes(poi.kind)) continue;
+    const y = poi.y + 0.25, points = [face(poi, -2, -8), face(poi, poi.rx * 0.7, -8), face(poi, poi.rx * 0.7, 8), face(poi, -2, 8)].map(([x, z]) => [x, y, z]);
+    const count = poi.kind === 'mall' ? 4 : poi.kind === 'supermarket' ? 3 : 2;
+    AF.walkers.addPath(poi.name + ' shoppers', points, { count, mode: 'loop', speed: 0.9, activeRadius: 120, luggage: 0 }); WS.stats.walkers += count;
+  }
+});
+function* build() {
+  const L = AF.outlandSites.lib, { geometry, house, prop, lamp, picnic, color } = L, C = L.palette;
+  const steel = color(0xd8dcdf, { metal: 0.6, rough: 0.3 }), glass = color(0x9fc3cf, { rough: 0.1 }), cream = color(0xefe6cf, { pat: 'stucco' }), brick = color(0x9a5440, { pat: 'brick' });
+  const blue = color(0x2d5f8a), green = color(0x3f7a52), teal = color(0x2e8a7a), orange = color(0xd9772b), signW = color(0xf2efe4), roofG = color(0x5a5f63);
+  const walls = [C.trim, cream, color(0xd9c7a0), color(0xc9d3cf), color(0xe2c4b0)], roofs = [C.slate, C.red, color(0x6a4a3a), roofG];
+  const sign = function* (word, fg, bg) { return yield* geometry('sign-' + word, () => AF.textModel(word, fg, { bg, pad: 1, depth: 1 }), 0.25); };
+  const shop = function* (key, w, h, d, wall, band, roof) {
+    return yield* geometry(key, () => {
+      const m = new AF.Model(w, h + 2, d);
+      m.box(0, 0, 0, w, 1, d, C.stone); m.box(0, 1, 0, w, h, d, wall); m.box(0, h, 0, w, h + 1, d, roof); m.box(0, h + 1, 0, w, h + 2, 1, wall);
+      m.box(1, 1, d - 1, w - 1, Math.min(h - 3, 6), d, glass); m.box(0, h - 3, d - 1, w, h - 1, d, band);
+      const door = (w / 2) | 0; m.box(door - 2, 1, d - 1, door + 2, 5, d, C.dark);
+      for (let x = 4; x < w - 4; x += 9) m.box(x, h + 1, 4, x + 3, h + 3, 7, roofG);
+      return m;
+    });
+  };
+  for (const poi of O.wayside) {
+    const rot = poi.rot, back = -poi.rx * 0.35, [bx, bz] = face(poi, back, 0), y = poi.y, v = Math.floor(AF.hash2(poi.x, poi.z) * 4);
+    const at = (along, across, geo, opts = {}) => { const [x, z] = face(poi, along, across); const placed = O.addProp(geo, x, opts.y ?? y, z, rot, { tag: 'wayside:' + poi.name, ...opts }); poi.props.push(placed); WS.stats.props++; return placed; };
+    if (poi.kind === 'kiosk') {
+      at(back, 0, yield* geometry('wayside-kiosk', () => { const m = new AF.Model(12, 10, 10); m.box(0, 0, 0, 12, 1, 10, C.stone); m.box(1, 1, 1, 11, 6, 8, C.wood); m.box(1, 3, 8, 11, 4, 9, C.trim); m.box(2, 4, 8, 10, 6, 9, C.pane); for (let x = 0; x < 12; x += 2) m.box(x, 7, 7, x + 1, 8, 10, C.red), m.box(x + 1, 7, 7, x + 2, 8, 10, C.trim); m.box(0, 8, 0, 12, 9, 8, C.slate); return m; }));
+      const [px, pz] = face(poi, poi.rx * 0.2, 7); yield* picnic({ x: px, y, z: pz, props: poi.props, name: poi.name });
+    } else if (poi.kind === 'houses') {
+      for (let index = 0; index < 3; index++) { at(back, (index - 1) * 11, yield* house('wayside-house-' + ((v + index) % 4), 14, 12, 8 + (index % 2) * 2, walls[(v + index) % walls.length], roofs[(v + index * 3) % roofs.length])); yield; }
+    } else if (poi.kind === 'fuel') {
+      at(back - 2, -5, yield* house('fuel-office', 12, 8, 7, C.trim, C.red));
+      at(poi.rx * 0.15, 3, yield* geometry('wayside-canopy', () => { const m = new AF.Model(24, 12, 16); m.box(0, 10, 0, 24, 12, 16, C.red); for (const x of [1, 22]) for (const z of [1, 14]) m.box(x, 0, z, x + 1, 10, z + 1, C.trim); for (const x of [8, 15]) { m.box(x, 0, 7, x + 2, 5, 9, C.trim); m.box(x, 3, 9, x + 2, 4, 10, C.dark); } return m; }), { collide: false });
+      yield* lamp({ x: bx, y, z: bz, props: poi.props, name: poi.name }, 8, 6);
+    } else if (poi.kind === 'supermarket') {
+      at(back, 0, yield* shop('wayside-market', 40, 12, 26, cream, [green, blue, orange][v % 3], roofG));
+      at(back + 6.6, 0, yield* sign('MARKET', signW, [green, blue, orange][v % 3]), { y: y + 6.6, collide: false });
+    } else if (poi.kind === 'mall') {
+      at(back, -6, yield* shop('wayside-mall-a', 56, 16, 30, brick, teal, roofG)); yield;
+      at(back - 2, 16, yield* shop('wayside-mall-b', 26, 12, 40, cream, orange, roofG)); yield;
+      at(back + 4, -22, yield* geometry('wayside-mall-tower', () => { const m = new AF.Model(10, 30, 10); m.box(0, 0, 0, 10, 28, 10, cream); m.box(1, 20, 9, 9, 26, 10, glass); m.box(0, 28, 0, 10, 30, 10, teal); return m; }));
+      at(back + 7.6, -6, yield* sign('SHOPPING CENTRE', signW, teal), { y: y + 8.6, collide: false });
+    } else if (poi.kind === 'diner') {
+      at(back, 0, yield* shop('wayside-diner', 26, 9, 14, steel, C.red, steel));
+      at(back + 3.6, 0, yield* sign('DINER', C.red, signW), { y: y + 5.1, collide: false });
+    } else if (poi.kind === 'motel') {
+      at(back, 0, yield* geometry('wayside-motel', () => { const m = new AF.Model(56, 9, 14); m.box(0, 0, 0, 56, 1, 14, C.stone); m.box(0, 1, 0, 56, 7, 10, cream); m.box(0, 7, 0, 56, 8, 14, C.red); for (let x = 2; x < 54; x += 6) { m.box(x, 1, 10 - 1, x + 2, 5, 10, [blue, green, orange][(x / 6 | 0) % 3]); m.box(x + 3, 3, 9, x + 5, 5, 10, C.pane); } for (const x of [0, 55]) m.box(x, 1, 10, x + 1, 7, 14, C.trim); return m; }));
+      at(poi.rx * 0.6, poi.rx * 0.6, yield* geometry('wayside-motel-sign', () => { const m = new AF.Model(4, 22, 2); m.box(1, 0, 0, 3, 16, 2, C.dark); m.box(0, 16, 0, 4, 22, 2, C.red); m.box(0, 17, 0, 4, 18, 2, C.glow); return m; }));
+      at(poi.rx * 0.6, poi.rx * 0.6, yield* sign('MOTEL', signW, C.red), { y: y + 7.4, collide: false });
+    }
+    yield;
+  }
+  WS.stats.ready = true;
+}
+const work = WS.work = (ms) => {
+  if (!AF.ready || WS.stats.ready || !AF.outlandSites || !AF.outlandSites.lib) return false;
+  const start = performance.now(), end = start + Math.min(ms, AF.MOBILE ? 2 : 3);
+  if (!generator) generator = build();
+  while (performance.now() < end && !WS.stats.ready) generator.next();
+  WS.stats.workMs += performance.now() - start; return !WS.stats.ready;
+};
+WS.settle = () => { while (work(6)); };
+AF.onIdle('outland-wayside', work);
+AF.test('wayside: ring road stops are furnished and parked', () => {
+  WS.settle();
+  const kinds = new Set(O.wayside.map((poi) => poi.kind));
+  return { ok: O.wayside.length >= 6 && O.wayside.every((poi) => poi.props.length) && kinds.has('supermarket') && kinds.has('mall') && WS.stats.cars >= 8, info: O.wayside.length + ' stops (' + [...kinds].join(',') + '), ' + WS.stats.props + ' props, ' + WS.stats.cars + ' parked, ' + WS.stats.walkers + ' shoppers' };
+});
+} catch (e) { AF.partError('44-wayside.js', e); }
 
 // ================================================================ 45-west.js
 try {
@@ -21678,9 +22030,9 @@ function* build(entry) {
   if (O.props.length) {
     const props = [];
     if (geo) props.push({ geo, x: 0, y: 0, z: 0, rot: 0 });
-    for (const prop of O.props) if (prop.x >= entry.x && prop.x < entry.x + entry.size && prop.z >= entry.z && prop.z < entry.z + entry.size) props.push(prop);
+    for (const prop of O.props) if (prop.x >= entry.x && prop.x < entry.x + entry.size && prop.z >= entry.z && prop.z < entry.z + entry.size && !(entry.level >= 3 && prop.geo.userData.small)) props.push(prop);
     if (props.length > (geo ? 1 : 0)) {
-      const pick = (prop) => entry.level > 0 && prop.geo.userData.lod ? prop.geo.userData.lod : prop.geo;
+      const pick = (prop) => entry.level >= 3 && prop.geo.userData.lod2 ? prop.geo.userData.lod2 : entry.level > 0 && prop.geo.userData.lod ? prop.geo.userData.lod : prop.geo;
       const merged = yield* AF.world.mergePropsG(props, pick, true);
       if (geo) geo.dispose(); geo = merged;
     }
@@ -21723,7 +22075,7 @@ function update(entry, cp, inherited) {
   if (!entry.ready || entry.fadeE || entry.busy || inherited) return;
   const dist = distance(entry, cp.x, cp.y, cp.z), ahead = distance(entry, aheadX, cp.y, aheadZ);
   entry.used = stamp;
-  const k = AF.MOBILE || AF.GFX.tier === 'low' ? 0.38 : AF.GFX.lite ? 0.48 : 0.7;
+  const k = (AF.MOBILE || AF.GFX.tier === 'low' ? 0.38 : AF.GFX.lite ? 0.48 : 0.7) * (AF.lodScale || 1);
   const threshold = entry.level === 1 ? 40 : entry.size * k;
   const horizon = entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > 800;
   const refine = entry.level > 0 && !horizon && Math.min(dist, ahead + 24) < threshold * (entry.split ? 1.25 : 1);
@@ -21775,7 +22127,8 @@ function work(ms) {
   return !!generator || queue.length > 0;
 }
 function scan() {
-  const cp = AF.camera.position; stamp++;
+  const cp = AF.camera.position, reach = Math.max(1, (AF.lodScale || 1) ** 2); stamp++;
+  R.maxNodes = Math.round(220 * reach); R.maxBytes = Math.min(AF.MOBILE ? 64 : 128, 48 * reach) * 1048576;
   for (const entry of nodes) if (entry.dirty && entry.ready && !entry.fadeE && !entry.busy) {
     let parent = entry.parent, blocked = false;
     while (parent) { if (parent.fadeE || parent.busy) { blocked = true; break; } parent = parent.parent; }
@@ -21865,6 +22218,17 @@ AF.onBuild('outland-lake', 498, () => {
     const start = points.length / 3; points.push(lake.cx, lake.waterY, lake.cz);
     for (let index = 0; index <= 64; index++) { const angle = index / 64 * Math.PI * 2; points.push(lake.cx + Math.cos(angle) * lake.rx * 1.04, lake.waterY, lake.cz + Math.sin(angle) * lake.rz * 1.04); if (index) indices.push(start, start + index + 1, start + index); }
   }
+  // rivers: one sloped ribbon each (rapids where the level steps down), merged into the same water draw
+  const ribbon = (pts, levels, half) => {
+    for (let index = 0; index < pts.length; index++) {
+      const before = pts[Math.max(0, index - 1)], after = pts[Math.min(pts.length - 1, index + 1)], tx = after[0] - before[0], tz = after[1] - before[1], length = Math.hypot(tx, tz) || 1;
+      const base = points.length / 3; points.push(pts[index][0] - tz / length * half, levels[index], pts[index][1] + tx / length * half, pts[index][0] + tz / length * half, levels[index], pts[index][1] - tx / length * half);
+      if (index) indices.push(base - 2, base, base - 1, base - 1, base, base + 1);
+    }
+  };
+  for (const river of O.rivers) ribbon(river.pts, river.levels, river.hw + 1.2);
+  const RV = AF.PLAN.river;
+  if (RV.headY) { const pts = [], levels = []; for (let z = W.Z0; z <= RV.z0 - 14; z += 2) { pts.push([RV.x(z), z]); levels.push(AF.lerp(RV.headY, 16, (z - W.Z0) / (RV.z0 - 14 - W.Z0))); } ribbon(pts, levels, 5); }
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(points, 3)); geo.setIndex(indices); geo.computeVertexNormals(); geo.computeBoundingBox(); geo.computeBoundingSphere();
   geo.userData.kind = 'lake'; geo.userData.waterY = plan.lake.waterY; geo.userData.outland = true; AF.addWater(geo);
 });
@@ -21899,6 +22263,182 @@ AF.test('outland: shared LOD rims have no cracks or settled overlap', () => {
   const result = R.diagnose(); return { ok: result.edgePairs > 0 && result.maxGap < 0.001 && !result.overlaps && !result.holes, info: JSON.stringify(result) };
 });
 } catch (e) { AF.partError('49-outland.js', e); }
+
+// ================================================================ 49-roads.js
+try {
+// ===== 49-roads: smooth outland road ribbons in the city's own asphalt (markings, kerb skirts), bridges with parapets and piers,
+//       tunnel galleries with portals and lamps, sparse rural traffic on the ring and hikers on the trails. Two merged meshes
+//       (surface: receive only; structures: cast) built in idle slots; physics reads AF.outland.deckY (02 surfaceBelow).
+const O = AF.outland, W = AF.W, P = AF.PLAN.world, TH = O.TUNNEL_H;
+const RD = AF.outlandRoads = { stats: { ready: false, quads: 0, structQuads: 0, ms: 0, maxSliceMs: 0, bridges: 0, tunnels: 0 }, meshes: [] };
+let K = null, generator = null;
+function palette() {
+  if (K) return K;
+  const col = (hex, o) => AF.col(hex, Object.assign({ jitter: 0.25, edge: 0.3 }, o));
+  K = {
+    asph: [34, 35, 36, 37].map((index) => O.pal[index]), gutter: O.pal[38], yellow: O.pal[39], white: AF.col(0xdcd6c6, { jitter: 0.3, edge: 0.03 }),
+    gravel: O.pal[12], trail: O.pal[44], cover: O.pal[1], conc: col(0xb9b3a6, { pat: 'slab' }), concD: col(0x8f8a80, { pat: 'stone' }),
+    rail: col(0x8b9097, { metal: 0.6, rough: 0.45 }), plank: col(0x8a6a44, { pat: 'none', patTop: 'plank' }), tile: col(0xd8d2c2, { pat: 'tile' }),
+    lamp: AF.col(0xfff1c9, { emit: 0xffd48a, emitK: 2.4, mode: 'always', jitter: 0, edge: 0 }),
+  };
+  return K;
+}
+// one quad, wound to face `hint`; UVs in 0.25 m block units like the city voxels (geometryG(true) scales by 0.25)
+function quad(buf, a, b, c, d, color, hx, hy, hz) {
+  const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+  if ((uy * vz - uz * vy) * hx + (uz * vx - ux * vz) * hy + (ux * vy - uy * vx) * hz < 0) { const t = b; b = d; d = t; }
+  const ay = Math.abs(hy), ax = Math.abs(hx), az = Math.abs(hz), idx = ay >= ax && ay >= az ? (hy > 0 ? 2 : 3) : ax > az ? (hx > 0 ? 0 : 1) : (hz > 0 ? 4 : 5);
+  const uv = (p) => idx < 2 ? [p[2] * 16, p[1] * 16] : idx < 4 ? [p[0] * 16, p[2] * 16] : [p[0] * 16, p[1] * 16];
+  buf.quad(a, b, c, d, uv(a), uv(b), uv(c), uv(d), color, idx, [3, 3, 3, 3]);
+}
+const at = (frame, index, offset, lift) => [frame.x[index] + frame.nx[index] * offset, frame.y[index] + lift, frame.z[index] + frame.nz[index] * offset];
+// a strip between lateral offsets o1..o2 across segment (i-1, i), optionally only the part [t0, t1] along it
+function strip(buf, frame, i, o1, o2, lift, color, t0 = 0, t1 = 1) {
+  const a0 = at(frame, i - 1, o1, lift), a1 = at(frame, i, o1, lift), b0 = at(frame, i - 1, o2, lift), b1 = at(frame, i, o2, lift);
+  const mix = (p, q, t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
+  quad(buf, mix(a0, a1, t0), mix(a0, a1, t1), mix(b0, b1, t1), mix(b0, b1, t0), color, 0, 1, 0);
+}
+// vertical wall along the segment at lateral offset o, from lift y0 to y1, facing side (+1 = +normal)
+function wall(buf, frame, i, o, y0, y1, color, side) {
+  const nx = (frame.nx[i - 1] + frame.nx[i]) * side, nz = (frame.nz[i - 1] + frame.nz[i]) * side;
+  quad(buf, at(frame, i - 1, o, y0), at(frame, i, o, y0), at(frame, i, o, y1), at(frame, i - 1, o, y1), color, nx, 0, nz);
+}
+function box(buf, cx, cz, y0, y1, hx, hz, color) {
+  const c = [[cx - hx, cz - hz], [cx + hx, cz - hz], [cx + hx, cz + hz], [cx - hx, cz + hz]];
+  for (let side = 0; side < 4; side++) {
+    const p = c[side], q = c[(side + 1) % 4];
+    quad(buf, [p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]], color, (p[0] + q[0]) / 2 - cx, 0, (p[1] + q[1]) / 2 - cz);
+  }
+}
+function frameOf(road) {
+  const pts = road.points, n = pts.length, frame = { x: new Float64Array(n), z: new Float64Array(n), y: new Float64Array(n), nx: new Float64Array(n), nz: new Float64Array(n), s: new Float64Array(n) };
+  for (let index = 0; index < n; index++) {
+    const before = pts[Math.max(0, index - 1)], after = pts[Math.min(n - 1, index + 1)], tx = after[0] - before[0], tz = after[1] - before[1], length = Math.hypot(tx, tz) || 1;
+    frame.x[index] = pts[index][0]; frame.z[index] = pts[index][1]; frame.y[index] = road.heights[index]; frame.nx[index] = -tz / length; frame.nz[index] = tx / length;
+    if (index) frame.s[index] = frame.s[index - 1] + Math.hypot(pts[index][0] - pts[index - 1][0], pts[index][1] - pts[index - 1][1]);
+  }
+  return frame;
+}
+function* buildAll() {
+  const k = palette(), surf = new AF.GeoBuf(), struct = new AF.GeoBuf();
+  for (const road of P.roads) {
+    const frame = frameOf(road), n = road.points.length, hw = road.w / 2, flags = road.flags, asphalt = road.kind === 0, marked = asphalt && !road.driveway;
+    for (let i = 1; i < n; i++) {
+      if (W.col(frame.x[i - 1], frame.z[i - 1]) >= 0 || W.col(frame.x[i], frame.z[i]) >= 0) continue;
+      const flag = flags[i - 1] === flags[i] ? flags[i] : 0, bridge = flag === 1, tunnel = flag === 2;
+      if (!asphalt && !bridge) continue;
+      if (asphalt) {
+        const base = k.asph[Math.floor(AF.hash2(i, road.w * 7 + n) * 4)];
+        strip(surf, frame, i, -hw, -hw + 0.5, 0, k.gutter); strip(surf, frame, i, hw - 0.5, hw, 0, k.gutter);
+        if (marked) {
+          strip(surf, frame, i, -hw + 0.5, -hw + 0.65, 0, k.white); strip(surf, frame, i, hw - 0.65, hw - 0.5, 0, k.white);
+          strip(surf, frame, i, -hw + 0.65, -0.12, 0, base); strip(surf, frame, i, 0.12, hw - 0.65, 0, base);
+          const dash = Math.floor((frame.s[i - 1] + frame.s[i]) / 6) & 1;
+          strip(surf, frame, i, -0.12, 0.12, 0, dash ? k.yellow : base, 0, 0.5); strip(surf, frame, i, -0.12, 0.12, 0, dash ? base : k.yellow, 0.5, 1);
+        } else strip(surf, frame, i, -hw + 0.5, hw - 0.5, 0, base);
+      } else strip(surf, frame, i, -hw, hw, 0, road.kind === 2 ? k.plank : k.gravel);
+      if (bridge) {
+        wall(struct, frame, i, -hw - 0.3, -1.3, 0.95, k.conc, -1); wall(struct, frame, i, hw + 0.3, -1.3, 0.95, k.conc, 1);
+        wall(struct, frame, i, -hw, 0, 0.95, k.conc, 1); wall(struct, frame, i, hw, 0, 0.95, k.conc, -1);
+        strip(struct, frame, i, -hw - 0.3, -hw, 0.95, k.concD); strip(struct, frame, i, hw, hw + 0.3, 0.95, k.concD);
+        const a0 = at(frame, i - 1, -hw - 0.3, -1.3), a1 = at(frame, i, -hw - 0.3, -1.3), b0 = at(frame, i - 1, hw + 0.3, -1.3), b1 = at(frame, i, hw + 0.3, -1.3);
+        quad(struct, a0, a1, b1, b0, k.concD, 0, -1, 0);
+        if (i % 4 === 0) {
+          const ground = O.h(frame.x[i], frame.z[i]);
+          if (frame.y[i] - 1.3 - ground > 0.5) box(struct, frame.x[i], frame.z[i], Math.min(ground, O.waterY(frame.x[i], frame.z[i]) ?? ground) - 0.5, frame.y[i] - 1.3, road.kind === 2 ? 0.4 : 1.4, road.kind === 2 ? 0.4 : 1.4, k.concD);
+        }
+        if (flags[i - 2] !== 1) RD.stats.bridges++;
+      } else if (tunnel) {
+        const wx = hw + 0.4;
+        wall(struct, frame, i, -wx, -0.2, TH, k.tile, 1); wall(struct, frame, i, wx, -0.2, TH, k.tile, -1);
+        const r0 = at(frame, i - 1, -wx, TH), r1 = at(frame, i, -wx, TH), q0 = at(frame, i - 1, wx, TH), q1 = at(frame, i, wx, TH);
+        quad(struct, r0, r1, q1, q0, k.concD, 0, -1, 0);
+        strip(struct, frame, i, -wx - 1.2, wx + 1.2, TH + 0.6, k.cover);
+        wall(struct, frame, i, -wx - 1.2, TH - 0.2, TH + 0.6, k.concD, -1); wall(struct, frame, i, wx + 1.2, TH - 0.2, TH + 0.6, k.concD, 1);
+        if (i % 2 === 0) { const l0 = at(frame, i - 1, -0.4, TH - 0.06), l1 = at(frame, i, -0.4, TH - 0.06), m0 = at(frame, i - 1, 0.4, TH - 0.06), m1 = at(frame, i, 0.4, TH - 0.06), mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2]; quad(struct, mid(l0, l1), l1, m1, mid(m0, m1), k.lamp, 0, -1, 0); }
+        for (const [end, dir] of [[i - 1, -1], [i, 1]]) {
+          if (flags[end + dir] === 2) continue;
+          RD.stats.tunnels += dir < 0 ? 1 : 0;
+          const tx = -frame.nz[end] * dir, tz = frame.nx[end] * dir, ox = frame.x[end] + tx * 0.6, oz = frame.z[end] + tz * 0.6, y = frame.y[end];
+          const p = (o, h) => [ox + frame.nx[end] * o, y + h, oz + frame.nz[end] * o];
+          quad(struct, p(-wx - 3, TH), p(wx + 3, TH), p(wx + 3, TH + 3.2), p(-wx - 3, TH + 3.2), k.conc, tx, 0, tz);
+          quad(struct, p(-wx - 3, -0.4), p(-wx, -0.4), p(-wx, TH), p(-wx - 3, TH), k.conc, tx, 0, tz);
+          quad(struct, p(wx, -0.4), p(wx + 3, -0.4), p(wx + 3, TH), p(wx, TH), k.conc, tx, 0, tz);
+          quad(struct, p(-wx - 3, TH + 3.2), p(wx + 3, TH + 3.2), [p(wx + 3, 0)[0] - tx * 1.2, y + TH + 3.2, p(wx + 3, 0)[2] - tz * 1.2], [p(-wx - 3, 0)[0] - tx * 1.2, y + TH + 3.2, p(-wx - 3, 0)[2] - tz * 1.2], k.concD, 0, 1, 0);
+        }
+      }
+      if (!bridge && !tunnel && asphalt) { wall(surf, frame, i, -hw, -0.7, 0, k.gutter, -1); wall(surf, frame, i, hw, -0.7, 0, k.gutter, 1); }
+      else if (tunnel) { wall(surf, frame, i, -hw, -0.3, 0, k.gutter, -1); wall(surf, frame, i, hw, -0.3, 0, k.gutter, 1); }
+      if (i % 48 === 0) yield;
+    }
+    yield;
+  }
+  RD.stats.quads = surf.n / 4; RD.stats.structQuads = struct.n / 4;
+  for (const [buf, name, cast] of [[surf, 'outland-roads', false], [struct, 'outland-structures', true]]) {
+    if (!buf.n) continue;
+    const geo = yield* buf.geometryG(true), mesh = new THREE.Mesh(geo, AF.mat.voxel);
+    mesh.name = name; mesh.userData.owner = name; mesh.castShadow = cast; mesh.receiveShadow = true; mesh.matrixAutoUpdate = false; mesh.updateMatrix();
+    AF.scene.add(mesh); RD.meshes.push(mesh); if (AF.releaseStaticGeometry) AF.releaseStaticGeometry(geo);
+    yield;
+  }
+  RD.stats.ready = true;
+}
+const work = RD.work = (ms) => {
+  if (!AF.ready || RD.stats.ready) return false;
+  const start = performance.now(), end = start + Math.min(ms, AF.MOBILE ? 2 : 3);
+  if (!generator) generator = buildAll();
+  while (performance.now() < end && !RD.stats.ready) { const slice = performance.now(); generator.next(); RD.stats.maxSliceMs = Math.max(RD.stats.maxSliceMs, performance.now() - slice); }
+  RD.stats.ms += performance.now() - start; return !RD.stats.ready;
+};
+RD.settle = () => { while (work(8)); };
+AF.onIdle('outland-roads', work);
+
+// ---------------------------------------------------------------- rural traffic: two-way loops, sparse away from the city
+function lanes(road, from, to, offset) {
+  const frame = frameOf(road), points = [];
+  for (let index = from; index <= to; index += 2) points.push([frame.x[index] + frame.nx[index] * offset, frame.z[index] + frame.nz[index] * offset]);
+  for (let index = to; index >= from; index -= 2) points.push([frame.x[index] - frame.nx[index] * offset, frame.z[index] - frame.nz[index] * offset]);
+  return points;
+}
+AF.onBuild('outland-traffic', 661, () => {
+  const VV = AF.vehicles; if (!VV || !VV.addRoute) return;
+  const types = ['sedan', 'pickup', 'coupe', 'wagon', 'stream', 'convertible'].filter((id) => VV.TYPES.some((type) => type.id === id));
+  const yAt = (x, z) => O.roadY(x, z);
+  const outside = (road) => { let first = 0, last = road.points.length - 1; while (first < last && W.col(road.points[first][0], road.points[first][1]) >= 0) first++; while (last > first && W.col(road.points[last][0], road.points[last][1]) >= 0) last--; return [Math.min(first + 2, last), last]; };
+  RD.routes = [];
+  for (const [name, count, radius] of [['Solace Ring Road', 4, 1e9], ['Eastwood Road', 4, 700], ['Coast Road', 3, 700], ['West Coast Drive', 2, 600], ['Eastwood Loop', 1, 450]]) {
+    const road = P.roads.find((entry) => entry.name === name); if (!road || road.points.length < 4) continue;
+    const [from, to] = outside(road); if (to - from < 4) continue;
+    RD.routes.push(VV.addRoute(name + ' traffic', lanes(road, from, to, 2.6), { count, types, activeRadius: radius, yAt }));
+  }
+});
+// ---------------------------------------------------------------- hikers on the trails (shared walker batches)
+AF.onBuild('outland-hikers', 666, () => {
+  if (!AF.walkers || !AF.walkers.addPath) return;
+  RD.hikers = 0;
+  for (const road of P.roads) {
+    if (road.kind !== 2) continue;
+    const path = [];
+    for (let index = 0; index < road.points.length; index += 1) {
+      const [x, z] = road.points[index], deck = road.flags[index] === 1;
+      path.push([x, deck ? road.heights[index] + 0.25 : Math.ceil(Math.max(O.h(x - 0.35, z - 0.35), O.h(x + 0.35, z - 0.35), O.h(x - 0.35, z + 0.35), O.h(x + 0.35, z + 0.35)) * 4) / 4 + 0.25, z]);
+    }
+    AF.walkers.addPath(road.name + ' hikers', path, { count: 3, mode: 'pingpong', speed: 0.8, activeRadius: 160, luggage: 0 }); RD.hikers += 3;
+  }
+});
+AF.test('roads: outland ribbons match the deck surface, bridges and tunnels are built', () => {
+  RD.settle();
+  const ring = P.roads.find((road) => road.ring); let worst = 0;
+  for (let index = 3; index < ring.points.length; index += 11) { const [x, z] = ring.points[index], y = AF.surfaceBelow(x, z, ring.heights[index] + 0.5, 4); worst = Math.max(worst, Math.abs(y - ring.heights[index])); }
+  const s = RD.stats;
+  return { ok: s.ready && RD.meshes.length === 2 && s.bridges >= 2 && s.tunnels >= 1 && worst < 0.05 && s.quads + s.structQuads < 60000, info: JSON.stringify(s) + ', deck error ' + worst.toFixed(3) };
+});
+AF.test('roads: rural traffic stays sparse and on the road surface', () => {
+  const routes = RD.routes || []; let cars = 0, worst = 0;
+  for (const route of routes) for (const car of route.cars) { cars++; worst = Math.max(worst, Math.abs(car.y - O.roadY(car.x, car.z))); }
+  return { ok: routes.length >= 3 && cars >= 8 && cars <= 24 && worst < 0.6, info: routes.length + ' routes, ' + cars + ' cars, worst height error ' + worst.toFixed(2) };
+});
+} catch (e) { AF.partError('49-roads.js', e); }
 
 // ================================================================ 50-vehicles.js
 try {
@@ -23425,7 +23965,7 @@ function aiStep(car, dt, near = false) {
   pieceAt(pc, A.s, PP); const yaw = Math.atan2(PP.dx, PP.dz), turn = AF.angDiff(car.yaw, yaw); car.steer = AF.clamp(Math.atan(car.wheelbase * turn / Math.max(0.1, travel)), -0.6, 0.6); car.yaw = yaw;
   if (Math.abs(A.offsetX || 0) + Math.abs(A.offsetZ || 0) > 0.01) { const decay = Math.exp(-dt * 0.75), x = PP.x + A.offsetX * decay, z = PP.z + A.offsetZ * decay; if (!VV.worldHits(car, x, z, yaw)) { car.x = x; car.z = z; } A.offsetX = car.x - PP.x; A.offsetZ = car.z - PP.z; }
   else { car.x = PP.x; car.z = PP.z; }
-  VV.stepPush(car, dt); if (changed) car.y = AF.surfaceBelow(car.x, car.z, car.y + 2.5, 6); else if (car.renderNear && (frame + car.id) % 4 === 0) car.y += (AF.surfaceBelow(car.x, car.z, car.y + 1.2, 2.5) - car.y) * 0.5;
+  VV.stepPush(car, dt); if (pc.route && pc.route.yAt) car.y = pc.route.yAt(car.x, car.z); else if (changed) car.y = AF.surfaceBelow(car.x, car.z, car.y + 2.5, 6); else if (car.renderNear && (frame + car.id) % 4 === 0) car.y += (AF.surfaceBelow(car.x, car.z, car.y + 1.2, 2.5) - car.y) * 0.5;
 }
 function riders(car, stop) {
   const walkers = AF.rail?.walkers, cam = AF.camera.position; if (!walkers?.spawn || (car.x - cam.x) ** 2 + (car.z - cam.z) ** 2 > 62500) return;
@@ -23456,15 +23996,15 @@ VV.buildTraffic = () => {
     const type = VV.TYPES.find(type => type.id === tid), car = VV.makeCar(type.id, VV.pickPaint(type, spawnRnd), PP.x, PP.z, Math.atan2(PP.dx, PP.dz)); attach(car, lane, s, type.horse ? 2.8 : type.big ? 8 : 8.5 + spawnRnd() * 3.5); car.driver = type.kind === 'bike' ? -1 : Math.floor(spawnRnd() * 3); if (type.horse) horses++; if (type.kind === 'bike') bikes++;
   }
 };
-VV.addRoute = (name, points, { count = 3, loop = true, types = ['sedan', 'taxi'], stops = [], activeRadius = 240 } = {}) => {
+VV.addRoute = (name, points, { count = 3, loop = true, types = ['sedan', 'taxi'], stops = [], activeRadius = 240, yAt = null } = {}) => {
   if (points.length < 2 || !types.length || types.some(tid => !VV.TYPES.some(type => type.id === tid)) || !Number.isFinite(activeRadius) || activeRadius < 0 || !Number.isFinite(count)) throw new Error('Invalid traffic route');
   const pts = []; let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
   for (const point of points) { const x = point[0] ?? point.x, z = point[1] ?? point.z; if (!Number.isFinite(x) || !Number.isFinite(z)) throw new Error('Invalid traffic route point'); if (pts.length && pts[pts.length - 2] === x && pts[pts.length - 1] === z) continue; pts.push(x, z); minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }
   if (pts.length < 4 || stops.some(stop => !Number.isFinite(stop.s) || !Number.isFinite(stop.dwell) || stop.s < 0 || stop.dwell < 0)) throw new Error('Invalid traffic route stops or length');
   if (loop && (pts[0] !== pts[pts.length - 2] || pts[1] !== pts[pts.length - 1])) pts.push(pts[0], pts[1]);
-  const route = { name, cars: [], x: 0, z: 0, minX, maxX, minZ, maxZ, activeRadius, loop }, pc = piece(pts, { kind: 'route', route, name, stops: stops.map(stop => ({ s: stop.s, dwell: stop.dwell, kind: 'route' })).sort((first, second) => first.s - second.s) }); if (loop) pc.next.push(pc);
+  const route = { name, cars: [], x: 0, z: 0, minX, maxX, minZ, maxZ, activeRadius, loop, yAt }, pc = piece(pts, { kind: 'route', route, name, stops: stops.map(stop => ({ s: stop.s, dwell: stop.dwell, kind: 'route' })).sort((first, second) => first.s - second.s) }); if (loop) pc.next.push(pc);
   for (const point of points) { route.x += (point[0] ?? point.x) / points.length; route.z += (point[1] ?? point.z) / points.length; } count = Math.min(Math.max(0, count | 0), Math.floor(pc.len / 14));
-  for (let index = 0; index < count; index++) { const s = (index + 0.5) * pc.len / count; pieceAt(pc, s, PP); const type = VV.TYPES.find(type => type.id === types[index % types.length]); if (!type) throw new Error('Unknown traffic route vehicle'); const car = VV.makeCar(type.id, 0, PP.x, PP.z, Math.atan2(PP.dx, PP.dz)); attach(car, pc, s, type.horse ? 2.8 : 8); car.driver = type.kind === 'bike' ? -1 : index % 3; route.cars.push(car); }
+  for (let index = 0; index < count; index++) { const s = (index + 0.5) * pc.len / count; pieceAt(pc, s, PP); const type = VV.TYPES.find(type => type.id === types[index % types.length]); if (!type) throw new Error('Unknown traffic route vehicle'); const car = VV.makeCar(type.id, 0, PP.x, PP.z, Math.atan2(PP.dx, PP.dz)); attach(car, pc, s, type.horse ? 2.8 : 8); if (yAt) car.y = yAt(car.x, car.z); car.driver = type.kind === 'bike' ? -1 : index % 3; route.cars.push(car); }
   route.piece = pc; routes.push(route); return route;
 };
 function crossingCase(check) {
@@ -28665,7 +29205,7 @@ try {
         const lake = AF.PLAN.lake, pond = AF.PLAN.pond;
         if (Math.hypot((x - lake.cx) / lake.rx, (z - lake.cz) / lake.rz) < 1.15) level = AF.land.LAKE_Y ?? lake.waterY;
         else if (Math.hypot(x - pond.cx, z - pond.cz) < pond.r + 6) level = AF.land.POND_Y ?? -0.5;
-      } else for (const lake of O.waters) if (Math.abs(x - lake.cx) < lake.rx * 1.3 && Math.abs(z - lake.cz) < lake.rz * 1.3) { level = lake.waterY; break; }
+      } else if (height > seaY - 1) { const wet = O.waterY(x, z); if (wet !== null) level = wet; }
       dist[index] = height >= level ? 0 : 128;
       data[index * 4 + 1] = Math.min(255, Math.max(0, Math.round((level - height) / 4 * 255)));
       if ((index & 15) === 15) yield;
@@ -30381,7 +30921,8 @@ try {
   const bubbleEl = h('div', 'bubble', ''); bubbleEl.style.display = 'none';
   const menu = h('div', 'sheet pe', `<div class="panel"><h2>PAUSED</h2>
     <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="lite" title="Default: Balanced without AO, god rays and MSAA">Standard</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
-    <div class="row"><label>Resolution</label><div class="seg" data-k="res"><button data-v="0">Auto</button><button data-v="0.75">75%</button><button data-v="0.9">90%</button><button data-v="1">100%</button></div></div>
+    <div class="row"><label>Resolution <small class="rv"></small></label><input data-k="resH" type="range" min="360" max="2160" step="60" title="Render height in device pixels (default 720p)"></div>
+    <div class="row"><label>View distance <small class="lv"></small></label><input data-k="lod" type="range" min="0.6" max="2.5" step="0.1" title="How far full-detail terrain, buildings and trees reach before the lower LODs"></div>
     <div class="row"><label>Shadows</label><div class="seg" data-k="shadows"><button data-v="off">Off</button><button data-v="low" title="Near shadows only (default on phones)">Low</button><button data-v="high">High</button></div></div>
     <div class="row"><label></label><small class="rr" style="opacity:.75"></small></div>
     <div class="row"><label>Time of day</label><input data-k="hour" type="range" min="0" max="23.95" step="0.05"></div>
@@ -30621,6 +31162,11 @@ try {
     menu.querySelectorAll('[data-k=gfx] button').forEach((b) => b.classList.toggle('on', b.dataset.v === G.name));
     menu.querySelectorAll('[data-k=res] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === G.res));
     menu.querySelectorAll('[data-k=shadows] button').forEach((b) => b.classList.toggle('on', b.dataset.v === AF.shadowQ));
+    const resH = menu.querySelector('[data-k=resH]'), native = Math.max(360, Math.ceil((innerHeight || 720) * (devicePixelRatio || 1) / 60) * 60), rv = String(Math.min(native, G.resH || native));
+    if (resH.max !== String(native)) resH.max = String(native); if (document.activeElement !== resH && resH.value !== rv) resH.value = rv;
+    text(menu.querySelector('.rv'), (G.resH ? Math.min(native, G.resH) + 'p' : 'native'));
+    const lod = menu.querySelector('[data-k=lod]'), lv = String(AF.lodScale || 1); if (AF.MOBILE && lod.max !== '1.5') lod.max = '1.5'; if (document.activeElement !== lod && lod.value !== lv) lod.value = lv;
+    text(menu.querySelector('.lv'), '\u00d7' + (+lv).toFixed(1));
     const cv = AF.renderer.domElement, pr = AF.renderer.getPixelRatio();
     text(menu.querySelector('.rr'), `Render ${cv.width}\u00d7${cv.height} (${pr.toFixed(2)}\u00d7 CSS px${devicePixelRatio > pr + 0.01 ? ', ' + Math.round(pr / devicePixelRatio * 100) + '% of display' : ''})${G.auto ? ' \u00b7 auto ' + G.name : ''}`);
     menu.querySelectorAll('[data-k=clock] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'stop') === !!AF.time.paused));
@@ -30661,6 +31207,10 @@ try {
   menu.querySelector('[data-k=hour]').addEventListener('input', (e) => { AF.time.hours = +e.target.value; });
   menu.querySelector('[data-k=sens]').addEventListener('input', (e) => AF.setLookSens(e.target.value));
   menu.querySelector('[data-k=bright]').addEventListener('input', (e) => AF.setBrightness && AF.setBrightness(e.target.value));
+  menu.querySelector('[data-k=resH]').addEventListener('change', (e) => { AF.gfx.setResH(e.target.value); syncMenu(); });
+  menu.querySelector('[data-k=resH]').addEventListener('input', (e) => text(menu.querySelector('.rv'), e.target.value + 'p'));
+  menu.querySelector('[data-k=lod]').addEventListener('change', (e) => { AF.gfx.setView(e.target.value); syncMenu(); });
+  menu.querySelector('[data-k=lod]').addEventListener('input', (e) => text(menu.querySelector('.lv'), '\u00d7' + (+e.target.value).toFixed(1)));
   help.addEventListener('click', (e) => { if (e.target === help || e.target.closest('[data-k=closehelp]')) toggleHelp(false); });
   right.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); else if (b.dataset.k === 'full') goFull(!isFull()); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
   prompt.addEventListener('click', () => AF.input.tap(AF.mode==='ferry-ride'?'Space':'KeyE'));

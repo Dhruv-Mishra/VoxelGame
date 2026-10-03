@@ -46,7 +46,7 @@ try {
         const lake = AF.PLAN.lake, pond = AF.PLAN.pond;
         if (Math.hypot((x - lake.cx) / lake.rx, (z - lake.cz) / lake.rz) < 1.15) level = AF.land.LAKE_Y ?? lake.waterY;
         else if (Math.hypot(x - pond.cx, z - pond.cz) < pond.r + 6) level = AF.land.POND_Y ?? -0.5;
-      } else for (const lake of O.waters) if (Math.abs(x - lake.cx) < lake.rx * 1.3 && Math.abs(z - lake.cz) < lake.rz * 1.3) { level = lake.waterY; break; }
+      } else if (height > seaY - 1) { const wet = O.waterY(x, z); if (wet !== null) level = wet; }
       dist[index] = height >= level ? 0 : 128;
       data[index * 4 + 1] = Math.min(255, Math.max(0, Math.round((level - height) / 4 * 255)));
       if ((index & 15) === 15) yield;
