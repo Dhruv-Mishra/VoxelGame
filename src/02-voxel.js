@@ -169,49 +169,65 @@ W.stamp = (m, x, y, z, rot = 0, opts = {}) => {
 // Vertex layout: position(3) uv(2: block units, in-plane) aPal(1: palette index) aAN(1: riser*32 + ao*8 + normalIndex)
 // riser = low same-colour terrain step: its normal bends to +y with distance so hillside terraces don't alias into moire
 // normal index: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z
+// Typed arrays grown by doubling (JS number arrays cost ~68 bytes a vertex, garbage and a per-element conversion pass that was the
+// single largest streaming cost); the final geometry takes native copies.
 class GeoBuf {
-  constructor() { this.p = []; this.uv = []; this.pal = []; this.an = []; this.idx = []; this.n = 0; }
+  constructor() { this.n = 0; this.cap = 0; this.p = this.uv = this.pal = this.an = this.idx = null; }
+  grow(need) {
+    let cap = Math.max(1024, this.cap * 2); while (cap < need) cap *= 2;
+    const p = new Float32Array(cap * 3), uv = new Float32Array(cap * 2), pal = new Uint16Array(cap), an = new Uint8Array(cap), idx = new Uint32Array(cap / 4 * 6), n = this.n;
+    if (n) { p.set(this.p.subarray(0, n * 3)); uv.set(this.uv.subarray(0, n * 2)); pal.set(this.pal.subarray(0, n)); an.set(this.an.subarray(0, n)); idx.set(this.idx.subarray(0, n / 4 * 6)); }
+    this.p = p; this.uv = uv; this.pal = pal; this.an = an; this.idx = idx; this.cap = cap;
+  }
+  copyFrom(o) {
+    this.n = 0; if (!o.n) return;
+    this.grow(o.n); const n = o.n;
+    this.p.set(o.p.subarray(0, n * 3)); this.uv.set(o.uv.subarray(0, n * 2)); this.pal.set(o.pal.subarray(0, n)); this.an.set(o.an.subarray(0, n)); this.idx.set(o.idx.subarray(0, n / 4 * 6));
+    this.n = n;
+  }
   quad(v0, v1, v2, v3, uv0, uv1, uv2, uv3, pal, nIdx, ao, fl = 0) { // v* = [x,y,z], ao = [a0..a3] 0..3 ; CCW when seen from outside
-    const b = this.n;
-    this.p.push(v0[0], v0[1], v0[2], v1[0], v1[1], v1[2], v2[0], v2[1], v2[2], v3[0], v3[1], v3[2]);
-    this.uv.push(uv0[0], uv0[1], uv1[0], uv1[1], uv2[0], uv2[1], uv3[0], uv3[1]);
-    this.pal.push(pal, pal, pal, pal);
+    const b = this.n; if (b + 4 > this.cap) this.grow(b + 4);
+    const p = this.p, t = this.uv, an = this.an, o = b * 3, u = b * 2;
+    p[o] = v0[0]; p[o + 1] = v0[1]; p[o + 2] = v0[2]; p[o + 3] = v1[0]; p[o + 4] = v1[1]; p[o + 5] = v1[2];
+    p[o + 6] = v2[0]; p[o + 7] = v2[1]; p[o + 8] = v2[2]; p[o + 9] = v3[0]; p[o + 10] = v3[1]; p[o + 11] = v3[2];
+    t[u] = uv0[0]; t[u + 1] = uv0[1]; t[u + 2] = uv1[0]; t[u + 3] = uv1[1]; t[u + 4] = uv2[0]; t[u + 5] = uv2[1]; t[u + 6] = uv3[0]; t[u + 7] = uv3[1];
+    this.pal[b] = this.pal[b + 1] = this.pal[b + 2] = this.pal[b + 3] = pal;
     nIdx += fl;
-    this.an.push(ao[0] * 8 + nIdx, ao[1] * 8 + nIdx, ao[2] * 8 + nIdx, ao[3] * 8 + nIdx);
-    if (ao[0] + ao[2] < ao[1] + ao[3]) this.idx.push(b + 1, b + 2, b + 3, b + 1, b + 3, b);
-    else this.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
-    this.n += 4;
+    an[b] = ao[0] * 8 + nIdx; an[b + 1] = ao[1] * 8 + nIdx; an[b + 2] = ao[2] * 8 + nIdx; an[b + 3] = ao[3] * 8 + nIdx;
+    this.tri(b, ao[0] + ao[2] < ao[1] + ao[3]);
+  }
+  tri(b, flip) {
+    const ix = this.idx, i = b / 4 * 6;
+    if (flip) { ix[i] = b + 1; ix[i + 1] = b + 2; ix[i + 2] = b + 3; ix[i + 3] = b + 1; ix[i + 4] = b + 3; ix[i + 5] = b; }
+    else { ix[i] = b; ix[i + 1] = b + 1; ix[i + 2] = b + 2; ix[i + 3] = b; ix[i + 4] = b + 2; ix[i + 5] = b + 3; }
+    this.n = b + 4;
   }
   // allocation-free quad from scratch arrays: P (12 floats, corners 0..3), T (8 floats), order o0..o3 = corner indices, ao a0..a3 (coordinator perf)
   quadS(P, T, o0, o1, o2, o3, pal, nIdx, a0, a1, a2, a3) {
-    const b = this.n, p = this.p, uv = this.uv, an = this.an;
-    p.push(P[o0 * 3], P[o0 * 3 + 1], P[o0 * 3 + 2], P[o1 * 3], P[o1 * 3 + 1], P[o1 * 3 + 2], P[o2 * 3], P[o2 * 3 + 1], P[o2 * 3 + 2], P[o3 * 3], P[o3 * 3 + 1], P[o3 * 3 + 2]);
-    uv.push(T[o0 * 2], T[o0 * 2 + 1], T[o1 * 2], T[o1 * 2 + 1], T[o2 * 2], T[o2 * 2 + 1], T[o3 * 2], T[o3 * 2 + 1]);
-    this.pal.push(pal, pal, pal, pal);
-    an.push(a0 * 8 + nIdx, a1 * 8 + nIdx, a2 * 8 + nIdx, a3 * 8 + nIdx);
-    if (a0 + a2 < a1 + a3) this.idx.push(b + 1, b + 2, b + 3, b + 1, b + 3, b);
-    else this.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
-    this.n += 4;
+    const b = this.n; if (b + 4 > this.cap) this.grow(b + 4);
+    const p = this.p, t = this.uv, an = this.an, o = b * 3, u = b * 2;
+    p[o] = P[o0 * 3]; p[o + 1] = P[o0 * 3 + 1]; p[o + 2] = P[o0 * 3 + 2]; p[o + 3] = P[o1 * 3]; p[o + 4] = P[o1 * 3 + 1]; p[o + 5] = P[o1 * 3 + 2];
+    p[o + 6] = P[o2 * 3]; p[o + 7] = P[o2 * 3 + 1]; p[o + 8] = P[o2 * 3 + 2]; p[o + 9] = P[o3 * 3]; p[o + 10] = P[o3 * 3 + 1]; p[o + 11] = P[o3 * 3 + 2];
+    t[u] = T[o0 * 2]; t[u + 1] = T[o0 * 2 + 1]; t[u + 2] = T[o1 * 2]; t[u + 3] = T[o1 * 2 + 1]; t[u + 4] = T[o2 * 2]; t[u + 5] = T[o2 * 2 + 1]; t[u + 6] = T[o3 * 2]; t[u + 7] = T[o3 * 2 + 1];
+    this.pal[b] = this.pal[b + 1] = this.pal[b + 2] = this.pal[b + 3] = pal;
+    an[b] = a0 * 8 + nIdx; an[b + 1] = a1 * 8 + nIdx; an[b + 2] = a2 * 8 + nIdx; an[b + 3] = a3 * 8 + nIdx;
+    this.tri(b, a0 + a2 < a1 + a3);
   }
-  geometry() {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
-    // compact types (shader reads them as floats): 12 + 4 + 2 + 1 = 19 bytes per vertex
-    g.setAttribute('aBU', new THREE.BufferAttribute(new Int16Array(this.uv), 2));
-    g.setAttribute('aPal', new THREE.BufferAttribute(new Uint16Array(this.pal), 1));
-    g.setAttribute('aAN', new THREE.BufferAttribute(new Uint8Array(this.an), 1));
-    g.setIndex(this.n > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1));
-    g.computeBoundingSphere(); g.computeBoundingBox();
-    return g;
-  }
+  geometry() { const gen = this.geometryG(); let step; do step = gen.next(); while (!step.done); return step.value; }
+  // compact types (shader reads them as floats): 12 + 4 + 2 + 1 = 19 bytes per vertex (+ index). Also used by 49-outland on its own
+  // scratch buffers (typed arrays of exact length), so only n / p / uv / pal / an / idx are read here.
   *geometryG(floatUV = false) {
-    const geo = new THREE.BufferGeometry();
-    for (const [name, values, Type, size, factor] of [['position', this.p, Float32Array, 3, 1], ['aBU', this.uv, floatUV ? Float32Array : Int16Array, 2, floatUV ? 0.25 : 1], ['aPal', this.pal, Uint16Array, 1, 1], ['aAN', this.an, Uint8Array, 1, 1], ['index', this.idx, this.n > 65535 ? Uint32Array : Uint16Array, 1, 1]]) {
-      const array = new Type(values.length); yield;
-      for (let offset = 0; offset < values.length; offset += 2048) { const end = Math.min(values.length, offset + 2048); for (let index = offset; index < end; index++) array[index] = values[index] * factor; yield; }
-      const attr = new THREE.BufferAttribute(array, size);
-      if (name === 'index') geo.setIndex(attr); else geo.setAttribute(name, attr);
-    }
+    if (!this.p) this.grow(0);
+    const n = this.n, geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(this.p.slice(0, n * 3), 3)); yield;
+    let uv;
+    if (floatUV) { uv = this.uv.slice(0, n * 2); for (let i = 0; i < uv.length; i++) uv[i] *= 0.25; }
+    else uv = new Int16Array(this.uv.subarray(0, n * 2));
+    geo.setAttribute('aBU', new THREE.BufferAttribute(uv, 2));
+    geo.setAttribute('aPal', new THREE.BufferAttribute(this.pal.slice(0, n), 1));
+    geo.setAttribute('aAN', new THREE.BufferAttribute(this.an.slice(0, n), 1)); yield;
+    const ix = this.idx.subarray(0, n / 4 * 6);
+    geo.setIndex(new THREE.BufferAttribute(n > 65535 ? new Uint32Array(ix) : new Uint16Array(ix), 1)); yield;
     yield* geometryBoundsG(geo); return geo;
   }
 }
@@ -332,29 +348,36 @@ function greedy(sx, sy, sz, get, scale, origin, uvOff, out, flat) {
 }
 AF.greedy = greedy;
 
-// 2x downsampled, AO-free version of a model geometry (used for distant regions). Cached on the geometry.
-AF.lodOf = (g) => {
+// 2x downsampled, AO-free version of a model geometry (used for distant regions). Cached on the geometry. The generator form lets
+// the region streamer build a big model's LOD a slab at a time instead of in one long step.
+AF.lodOfG = function* (g) {
   if (g.userData.lod !== undefined) return g.userData.lod;
   const src = g.userData.src;
   if (!src || src.vs >= 0.45 || src.m.w * src.m.h * src.m.d > 4e6) { g.userData.lod = null; delete g.userData.src; return null; }   // already coarse: keep as is
   const m = src.m, F = src.vs >= 0.2 ? 2 : Math.max(2, Math.round(0.33 / src.vs)), w = Math.ceil(m.w / F), h = Math.ceil(m.h / F), d = Math.ceil(m.d / F);
   const L = new Model(w, h, d);
   const cnt = new Map();
-  for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) for (let z = 0; z < d; z++) {
-    cnt.clear(); let best = 0, bn = 0;
-    for (let a = 0; a < F; a++) for (let b = 0; b < F; b++) for (let c = 0; c < F; c++) {
-      const v = m.get(F * x + a, F * y + b, F * z + c); if (!v || AF.PAL.glass[v]) continue;
-      const k = (cnt.get(v) || 0) + 1; cnt.set(v, k); if (k > bn) { bn = k; best = v; }
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) for (let z = 0; z < d; z++) {
+      cnt.clear(); let best = 0, bn = 0;
+      for (let a = 0; a < F; a++) for (let b = 0; b < F; b++) for (let c = 0; c < F; c++) {
+        const v = m.get(F * x + a, F * y + b, F * z + c); if (!v || AF.PAL.glass[v]) continue;
+        const k = (cnt.get(v) || 0) + 1; cnt.set(v, k); if (k > bn) { bn = k; best = v; }
+      }
+      if (best) L.v[(x * h + y) * d + z] = best;
     }
-    if (best) L.v[(x * h + y) * d + z] = best;
+    yield;
   }
   const out = { opaque: new GeoBuf(), glass: new GeoBuf() };
   const vs2 = src.vs * F, an = src.anchor;
-  greedyPad(w, h, d, padModel(L), vs2, [-m.w * src.vs * an[0], -m.h * src.vs * an[1], -m.d * src.vs * an[2]], [0, 0, 0], out, true);
-  g.userData.lod = out.opaque.n ? out.opaque.geometry() : null;
+  yield* greedyPadG(w, h, d, padModel(L), vs2, [-m.w * src.vs * an[0], -m.h * src.vs * an[1], -m.d * src.vs * an[2]], [0, 0, 0], out, true);
+  const geo = out.opaque.n ? yield* out.opaque.geometryG() : null;
+  if (g.userData.lod !== undefined) { if (geo) geo.dispose(); return g.userData.lod; }   // a synchronous caller finished it meanwhile
+  g.userData.lod = geo;
   delete g.userData.src;
-  return g.userData.lod;
+  return geo;
 };
+AF.lodOf = (g) => { if (g.userData.lod !== undefined) return g.userData.lod; const gen = AF.lodOfG(g); let step; do step = gen.next(); while (!step.done); return step.value; };
 AF.meshModel = (m, o = {}) => {
   const vs = o.vs ?? 1 / 16, an = o.anchor ?? [0.5, 0, 0.5];
   const out = { opaque: new GeoBuf(), glass: new GeoBuf() };
@@ -1274,7 +1297,6 @@ AF.releaseStaticGeometry = (geo) => {
   AF.staticUploadQueue.push(geo);
 };
 const regMesh = (geo, mat, cast) => {
-  geo.computeBoundingBox();
   AF.releaseStaticGeometry(geo);
   const m = new THREE.Mesh(geo, mat); m.castShadow = cast; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); if (mat === AF.mat.glass) m.renderOrder = 2; AF.world.group.add(m); return m; };
 AF.test('voxel: uploaded region arrays are released', () => {
@@ -1415,24 +1437,30 @@ AF.onTick('far-lod-build', 879, () => {
 });
 // far prop meshes skip what can't be seen from a distance: furniture under a roof and tiny clutter
 const roofOver = (x, y, z) => { const bx = W.bx(x), bz = W.bz(z), OP = AF.PAL.opaque; for (let by = W.by(y), e = Math.min(NY - 1, W.by(y + 14)); by <= e; by++) { const c = W.get(bx, by, bz); if (c && OP[c]) return true; } return false; };
-function farPick(pr) {
+function farSkipOf(pr) {
   if (pr.farSkip === undefined) {
     const g = pr.geo, bb = g.boundingBox || (g.computeBoundingBox(), g.boundingBox);
     const big = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z);
     pr.farSkip = big < 0.7 || (big < 9 && roofOver(pr.x, pr.y + bb.max.y + 0.3, pr.z));
   }
-  return pr.farSkip ? null : (AF.lodOf(pr.geo) || pr.geo);
+  return pr.farSkip;
 }
-function buildNear(reg) {
-  const t = performance.now();
-  const g = mergeProps(reg.props, (pr) => pr.geo);
-  const gg = mergeProps(reg.props, (pr) => pr.geo.userData.glass || null);
+function farPick(pr) { return farSkipOf(pr) ? null : (AF.lodOf(pr.geo) || pr.geo); }
+function* buildNearG(reg) {
+  const g = yield* mergePropsG(reg.props, (pr) => pr.geo);
+  const gg = yield* mergePropsG(reg.props, (pr) => pr.geo.userData.glass || null);
+  // freed / rebuilt while this ran (streamed job): drop the result
+  if (reg.nearBuilt || AF.world.lod.get(reg.k) !== reg) { if (g) g.dispose(); if (gg) gg.dispose(); return; }
   reg.near = g ? regMesh(g, AF.mat.voxel, true) : null;
   reg.nearGlass = gg ? regMesh(gg, AF.mat.glass, false) : null;
   // hidden until prop-lod shows (or fades) them in
   if (reg.near) reg.near.visible = false;
   if (reg.nearGlass) reg.nearGlass.visible = false;
   reg.nearBuilt = true;
+}
+function buildNear(reg) {
+  const t = performance.now();
+  runSync(buildNearG(reg));
   AF.stats.nearMs = Math.round(performance.now() - t);
 }
 function freeNear(reg) { dropMesh(reg.near); dropMesh(reg.nearGlass); reg.near = reg.nearGlass = null; reg.nearBuilt = false; }
@@ -1442,15 +1470,23 @@ const dropRegion = (k) => {
   const oldC = AF.world.coarse.get(k); if (oldC) for (const m of oldC) dropMesh(m); AF.world.coarse.delete(k);
   const oldL = AF.world.lod.get(k); if (oldL) { freeNear(oldL); dropMesh(oldL.far); } AF.world.lod.delete(k);
   if (AF.world.regLod) AF.world.regLod.delete(k);
+  setMissing(k, true);
 };
-AF.meshRegion = (rx, rz) => runSync(meshRegionG(rx, rz));
+// full -> 0.5 m only (streaming budget): the region keeps showing its coarse copy, the full mesh is rebuilt on approach
+const demote = (k, r) => { for (const m of r.full) dropMesh(m); r.full = []; r.fullOk = false; r.bF = 0; AF.world.regions.delete(k); };
+const geoBytes = (g) => { let b = g.index.array.byteLength; for (const n in g.attributes) b += g.attributes[n].array.byteLength; return b; };
+AF.meshRegion = (rx, rz) => runSync(meshRegionG(rx, rz, 'both'));
 const COARSE_ON = !AF.Q.has('nocoarse');
-function* meshRegionG(rx, rz) {
-  const k = rx * 64 + rz;
-  dropRegion(k);
+// mode 'both' (boot, edits): full 0.25 m + 0.5 m copy from scratch. Streaming builds only what the distance asks for: 'full' near the
+// camera (no 0.5 m copy that the full mesh would replace at once), 'coarse' farther out; a full region moving away back-fills its
+// 0.5 m copy later. Nothing is attached before the last yield, so a streamed job can be abandoned at any step.
+function* meshRegionG(rx, rz, mode = 'both') {
+  const k = rx * 64 + rz, wantF = mode !== 'coarse', wantC = COARSE_ON && mode !== 'full';
+  if (mode === 'both') dropRegion(k);
+  const RL = AF.world.regLod || (AF.world.regLod = new Map()), old = RL.get(k);
   const out = { opaque: new GeoBuf(), glass: new GeoBuf() };
   const T = AF.stats.meshT || (AF.stats.meshT = { terrain: 0, voxel: 0, coarse: 0, far: 0, gpu: 0 });
-  let tt = performance.now();
+  let tt = performance.now(); STR.phase = 'terrain';
   yield* meshTerrainRegionG(rx, rz, out.opaque);
   const terrainQ = out.opaque.n;
   T.terrain += performance.now() - tt;
@@ -1458,54 +1494,89 @@ function* meshRegionG(rx, rz) {
   tt = performance.now();
   // coarse copy first (terrain quads are shared: copy them before the fine voxels are appended)
   const cout = { opaque: new GeoBuf(), glass: new GeoBuf() };
-  if (COARSE_ON && terrainQ) { const o = out.opaque, c = cout.opaque; c.p = o.p.slice(); c.uv = o.uv.slice(); c.pal = o.pal.slice(); c.an = o.an.slice(); c.idx = o.idx.slice(); c.n = o.n; }
-  yield* meshVoxelRegionG(rx, rz, out);
+  if (wantC && !wantF) cout.opaque = out.opaque;
+  else if (wantC && terrainQ) cout.opaque.copyFrom(out.opaque);
+  if (wantF) { STR.phase = 'voxel'; yield* meshVoxelRegionG(rx, rz, out); }
   T.voxel += performance.now() - tt; tt = performance.now();
-  for (let cx = (rx * REG) >> 4, e = Math.min(CX, (rx * REG + REG) >> 4); cx < e; cx++) for (let cz = (rz * REG) >> 4, f = Math.min(CZ, (rz * REG + REG) >> 4); cz < f; cz++) for (let cy = 0; cy < CY; cy++) coarseCache.delete((cx * CY + cy) * CZ + cz);
-  if (COARSE_ON) yield* meshVoxelRegionCoarseG(rx, rz, cout);
+  if (wantC) {
+    for (let cx = (rx * REG) >> 4, e = Math.min(CX, (rx * REG + REG) >> 4); cx < e; cx++) for (let cz = (rz * REG) >> 4, f = Math.min(CZ, (rz * REG + REG) >> 4); cz < f; cz++) for (let cy = 0; cy < CY; cy++) coarseCache.delete((cx * CY + cy) * CZ + cz);
+    STR.phase = 'coarse'; yield* meshVoxelRegionCoarseG(rx, rz, cout);
+  }
   T.coarse += performance.now() - tt;
   yield;
-  const meshes = [], cmeshes = [];
-  const keepC = COARSE_ON && out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8;
+  // only keep a coarse copy when it actually saves something (a coarse-first build keeps it: the full count is not known yet)
+  const nO = wantF ? out.opaque.n : 0, nC = cout.opaque.n, vq = wantF ? nO - terrainQ : old ? old.vq : -1, qF = wantF ? nO : old ? old.qF : 0;
+  const keepC = wantC && (vq < 0 || (vq > 400 && nC < qF * 0.8));
   // typed-array conversion happens here: one geometry per step so a dense block never costs a streamed frame much
-  const nO = out.opaque.n, nC = cout.opaque.n;
-  const gO = nO ? yield* out.opaque.geometryG() : null; out.opaque = null; yield;
-  const gG = out.glass.n ? yield* out.glass.geometryG() : null; yield;
-  const gCO = keepC && cout.opaque.n ? yield* cout.opaque.geometryG() : null; yield;
+  STR.phase = 'convert';
+  const gO = nO ? yield* out.opaque.geometryG() : null; yield;
+  const gG = wantF && out.glass.n ? yield* out.glass.geometryG() : null; yield;
+  const gCO = keepC && nC ? yield* cout.opaque.geometryG() : null; yield;
   const gCG = keepC && cout.glass.n ? yield* cout.glass.geometryG() : null;
-  if (gO) { const m = regMesh(gO, AF.mat.voxel, true); m.userData.region = k; meshes.push(m); }
-  if (gG) meshes.push(regMesh(gG, AF.mat.glass, false));
-  // only keep a coarse copy when it actually saves something
-  if (gCO) { const m = regMesh(gCO, AF.mat.voxel, true); m.userData.region = k; m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
-  if (gCG) { const m = regMesh(gCG, AF.mat.glass, false); m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
-  AF.world.regions.set(k, meshes);
-  if (cmeshes.length) AF.world.coarse.set(k, cmeshes); else AF.world.coarse.delete(k);
-  const RL = AF.world.regLod || (AF.world.regLod = new Map());
-  const cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
-  RL.set(k, { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: meshes, coarse: cmeshes, lvl: -1, hid: cl.lvl === 1 && !cl.part, q: cmeshes.length ? nC : nO });
   const props = AF.world.propsByRegion.get(k) || [];
-  let farQ = 0;
-  if (props.length) {
+  const mkReg = props.length && !AF.world.lod.has(k);
+  let farQ = 0, fg = null;
+  if (mkReg) {
     // warm the per-model far LODs a few ms at a time (AF.lodOf builds them lazily) so the merge below is just copying
-    let tw = performance.now();
-    for (const pr of props) { farPick(pr); if (performance.now() - tw > 3) { yield; tw = performance.now(); } }
-    const reg = { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, props, far: null, near: null, nearGlass: null, nearBuilt: false };
+    STR.phase = 'props'; let tw = performance.now();
+    for (const pr of props) {
+      if (!farSkipOf(pr) && pr.geo.userData.lod === undefined) yield* AF.lodOfG(pr.geo);
+      if (performance.now() - tw > 2) { yield; tw = performance.now(); }
+    }
     const tf = performance.now();
-    const fg = yield* mergePropsG(props, farPick);
+    fg = yield* mergePropsG(props, farPick);
     T.far += performance.now() - tf;
-    if (fg) { reg.far = regMesh(fg, AF.mat.voxel, true); farQ = fg.attributes.position.count / 4; }
-    AF.world.lod.set(k, reg);
-  } else AF.world.lod.delete(k);
+  }
+  // attach (no yields below)
+  STR.phase = 'attach';
+  const cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
+  let r = RL.get(k);
+  if (!r) { r = { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: [], coarse: [], fullOk: false, coarseOk: false, lvl: -1, hid: cl.lvl === 1 && !cl.part, q: 0, vq: -1, qF: 0, bF: 0, bC: 0 }; RL.set(k, r); setMissing(k, false); }
+  // new meshes start hidden: prop-lod shows them (straight away for a new region, else with a cross-fade from what is on screen);
+  // a level that got built meanwhile (runtime edit) is not added twice
+  const addF = wantF && !r.fullOk, addC = wantC && !r.coarseOk;
+  for (const g of [addF ? null : gO, addF ? null : gG, addC ? null : gCO, addC ? null : gCG]) if (g) g.dispose();
+  if (addF) {
+    if (gO) { r.bF += geoBytes(gO); const m = regMesh(gO, AF.mat.voxel, true); m.userData.region = k; m.visible = false; r.full.push(m); }
+    if (gG) { r.bF += geoBytes(gG); const m = regMesh(gG, AF.mat.glass, false); m.visible = false; r.full.push(m); }
+    r.fullOk = true; r.vq = vq; r.qF = qF; AF.world.regions.set(k, r.full);
+    if (!r.coarse.length) r.q = nO;
+    if (vq <= 400) r.coarseOk = true;   // the keep rule would drop a 0.5 m copy of this region anyway
+  }
+  if (addC) {
+    if (gCO) { r.bC += geoBytes(gCO); const m = regMesh(gCO, AF.mat.voxel, true); m.userData.region = k; m.userData.coarse = true; m.visible = false; r.coarse.push(m); }
+    if (gCG) { r.bC += geoBytes(gCG); const m = regMesh(gCG, AF.mat.glass, false); m.userData.coarse = true; m.visible = false; r.coarse.push(m); }
+    r.coarseOk = true; r.sh = undefined;
+    if (r.coarse.length) { AF.world.coarse.set(k, r.coarse); r.q = nC; } else AF.world.coarse.delete(k);
+  }
+  if (mkReg && AF.world.lod.has(k)) { if (fg) fg.dispose(); }
+  else if (mkReg) {
+    AF.world.lod.set(k, { k, cx: r.cx, cz: r.cz, props, far: fg ? regMesh(fg, AF.mat.voxel, true) : null, near: null, nearGlass: null, nearBuilt: false });
+    if (fg) farQ = fg.attributes.position.count / 4;
+  } else if (!props.length) AF.world.lod.delete(k);
   return nO / 4 + farQ;
 }
 // REGION STREAMING (not in ?test / ?shot / ?near / ?nostream): boot meshes only the regions around AF.PLAN.bootFocus plus the 1 m
-// clusters for the whole island; full regions stream in nearest-cluster-first a few ms per frame (a cluster swaps from its 1 m copy
-// only once all 16 of its regions are ready, so nothing overlaps or flickers) and whole clusters far behind the camera are unloaded.
-const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, done: 0, unloaded: 0, t: 0, maxStep: 0 };
+// clusters for the whole island. One scheduler (streamWork) then runs a single job at a time, always the best one over all regions:
+//   props  near props of a region within AF.LOD_DIST (score d - 8)
+//   full   0.25 m mesh for a region within REGION_LOD + 24 m of the camera or of the look-ahead point (score d)
+//   coarse 0.5 m copy for an empty region within FAR_LOD + 48 (score d + 32), back-fill for a full region moving away (score d)
+// Jobs near the camera are "urgent": they also get a slice of every rendered frame and preempt a running far job. Full meshes the
+// camera left behind stay resident until a byte budget is used up (zipping back is instant); then the farthest drop to their 0.5 m
+// copy, and whole clusters showing their 1 m copy unload farthest first (always beyond FAR_LOD + 600 m, phones + 300 m).
+const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, kind: '', phase: '', urgent: false, rest: 0, chk: 0, done: 0, unloaded: 0, demoted: 0, aborted: 0, t: 0, maxStep: 0, maxPhase: '', ms: {}, bytes: 0, fullBytes: 0, jobs: { full: 0, coarse: 0, props: 0 } };
+const BUDGET = AF.MOBILE ? { full: 48, all: 128, drop: 300 } : { full: 192, all: 448, drop: 600 };   // MB, MB, m beyond FAR_LOD
 const regionCluster = (k) => CLS.get(((k >> 6) >> 2) * 64 + ((k & 63) >> 2));
 const clDist = (cl, c, vy) => Math.hypot(Math.max(cl.x0 - c.x, 0, c.x - cl.x1), Math.max(cl.z0 - c.z, 0, c.z - cl.z1), vy);
-// Priority (PERF.md §5): the nearer of the camera and a 1.5 s velocity-predicted point (fast planes load ahead of the nose).
-// Work runs a little every frame plus in the idle slots of the fps cap (AF.onIdle), where it costs the rendered frames nothing.
+// STR.pending = regions with nothing resident; cl.pending counts them per cluster (partial reveal shows their 1 m slice)
+function setMissing(k, miss) {
+  if (!STR.on) return;
+  const cl = regionCluster(k); if (!cl) return;
+  if (miss) { if (!STR.pending.has(k)) { STR.pending.add(k); cl.pending = (cl.pending || 0) + 1; } }
+  else if (STR.pending.delete(k)) cl.pending = Math.max(0, cl.pending - 1);
+}
+const ALL = [];   // every region { k, x, z } (centre), filled by meshWorld
+// Look-ahead (PERF.md §5): a 1.5 s velocity-predicted point, so regions ahead of a car or plane load before it gets there.
 const LA = { x: 0, z: 0, px: 0, pz: 0, vx: 0, vz: 0, init: false };
 AF.onTick('stream-look', 877, (dt) => {
   const c = AF.camera.position;
@@ -1516,42 +1587,87 @@ AF.onTick('stream-look', 877, (dt) => {
   const s = Math.min(1, 250 / (Math.hypot(LA.vx, LA.vz) * 1.5 + 1e-3));
   LA.x = c.x + LA.vx * 1.5 * s; LA.z = c.z + LA.vz * 1.5 * s;
 });
+const PK = { k: -1, t: 0, s: 0, fresh: false };   // best job of the last scan: t 1 full, 2 coarse, 3 props
+function pickJob() {
+  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, LOD = AF.world.lod;
+  const RD = AF.REGION_LOD, FD = Math.min(AF.FAR_LOD || 1e9, 5000), D = AF.LOD_DIST;
+  PK.k = -1; PK.t = 0; PK.s = 1e9;
+  for (let i = 0; i < ALL.length; i++) {
+    const g = ALL[i], k = g.k, d = Math.hypot(g.x - c.x, g.z - c.z, vy), de = Math.min(d, Math.hypot(g.x - LA.x, g.z - LA.z, vy) + 16);
+    if (de - 8 >= PK.s || (k === STR.key && STR.gen)) continue;
+    const r = RL.get(k);
+    let s = 1e9, t = 0;
+    if (STR.on) {
+      if (!r || !r.fullOk) { if (de < RD + 24) { s = de; t = 1; } else if (!r && de < FD + 48) { s = de + 32; t = 2; } }
+      else if (!r.coarseOk && COARSE_ON && de > RD - 24 && de < FD + 48) { s = de; t = 2; }   // full mesh shown too far out: as urgent as its distance
+    }
+    const reg = LOD.get(k);
+    if (reg && !reg.nearBuilt && d < D && d - 8 < s && !(r && r.hid)) { s = d - 8; t = 3; }
+    if (s < PK.s) { PK.s = s; PK.k = k; PK.t = t; }
+  }
+  PK.fresh = PK.k >= 0;
+  if (!PK.fresh) STR.rest = AF.clock.t + 0.15;   // nothing to do: no rescans for a moment
+  return PK.fresh;
+}
+const isUrgent = () => PK.t === 3 || (PK.t === 1 && PK.s < AF.REGION_LOD);
 const streamWork = (budget) => {
-  if (!STR.on || !AF.ready) return false;
-  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, FD = AF.FAR_LOD || 1e9;
+  if (!AF.ready || !AF.world.regLod) return false;
   const t0 = performance.now();
   while (performance.now() - t0 < budget) {
     if (!STR.gen) {
-      let best = null, bd = FD + 48;
-      for (const cl of CLS.values()) if (cl.pending > 0) { const d = Math.min(clDist(cl, c, vy), clDist(cl, LA, vy) + 24); if (d < bd) { bd = d; best = cl; } }
-      if (!best) return false;
-      let bk = -1, bkd = 1e18;
-      for (const k of best.regs) if (STR.pending.has(k)) { const x = X0 + ((k >> 6) + 0.5) * REG * VS, z = Z0 + ((k & 63) + 0.5) * REG * VS, d = (x - c.x) ** 2 + (z - c.z) ** 2; if (d < bkd) { bkd = d; bk = k; } }
-      if (bk < 0) { best.pending = 0; continue; }
-      STR.key = bk; STR.gen = meshRegionG(bk >> 6, bk & 63);
+      if (!PK.fresh && (AF.clock.t < STR.rest || !pickJob())) return false;
+      PK.fresh = false;
+      const k = STR.key = PK.k, r = AF.world.regLod.get(k), reg = AF.world.lod.get(k);
+      if (PK.t === 3 ? !reg || reg.nearBuilt : PK.t === 1 ? r && r.fullOk : r && r.coarseOk) continue;   // stale pick: rescan
+      STR.urgent = isUrgent();
+      if (PK.t === 3) { STR.kind = 'props'; STR.phase = 'near'; STR.gen = buildNearG(reg); }
+      else { STR.kind = PK.t === 1 ? 'full' : 'coarse'; STR.gen = meshRegionG(k >> 6, k & 63, STR.kind); }
+      STR.jobs[STR.kind]++;
     }
     const ts = performance.now(), fin = STR.gen.next().done, st = performance.now() - ts;
-    if (st > STR.maxStep) STR.maxStep = st;
-    if (fin) { STR.gen = null; STR.pending.delete(STR.key); const cl = regionCluster(STR.key); if (cl) cl.pending = Math.max(0, cl.pending - 1); STR.done++; coarseCache.clear(); }
+    if (st > STR.maxStep) { STR.maxStep = st; STR.maxPhase = STR.kind + ':' + STR.phase; }
+    STR.ms[STR.phase] = (STR.ms[STR.phase] || 0) + st;
+    if (fin) { STR.gen = null; STR.urgent = false; STR.rest = 0; if (STR.kind !== 'props') { STR.done++; coarseCache.clear(); } }
   }
   return true;
 };
+function evict() {
+  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, RD = AF.REGION_LOD, FD = Math.min(AF.FAR_LOD || 1e9, 5000), MB = 1048576;
+  let bF = 0, bA = 0;
+  for (const r of RL.values()) { bF += r.bF; bA += r.bF + r.bC; }
+  const busy = STR.gen ? STR.key : -1;
+  if (bF > BUDGET.full * MB) {
+    const cand = [];
+    for (const [k, r] of RL) if (r.fullOk && r.coarse.length && !r.fadeE && (r.hid || r.lvl === 1) && k !== busy) { const d = Math.hypot(r.cx - c.x, r.cz - c.z, vy); if (d > RD + 40) cand.push({ k, r, d }); }
+    cand.sort((a, b) => b.d - a.d);
+    for (const e of cand) { if (bF <= BUDGET.full * MB) break; bF -= e.r.bF; bA -= e.r.bF; demote(e.k, e.r); STR.demoted++; }
+  }
+  const cls = [];
+  for (const cl of CLS.values()) {
+    if (!cl.built || cl.part || cl.lvl !== 1 || cl.fadeE || (busy >= 0 && regionCluster(busy) === cl)) continue;
+    const d = clDist(cl, c, vy); if (d < FD + 64) continue;
+    let b = 0, any = false; for (const k of cl.regs) { const r = RL.get(k); if (r) { any = true; b += r.bF + r.bC; } else if (AF.world.lod.has(k)) any = true; }
+    if (any) cls.push({ cl, d, b });
+  }
+  cls.sort((a, b) => b.d - a.d);
+  for (const e of cls) {
+    if (e.d < FD + BUDGET.drop && bA <= BUDGET.all * MB) break;
+    for (const k of e.cl.regs) dropRegion(k);
+    bA -= e.b; STR.unloaded++;
+  }
+  STR.bytes = bA; STR.fullBytes = bF;
+}
 AF.onIdle('region-stream', (ms) => streamWork(ms));
 AF.onTick('region-stream', 878, (dt) => {
-  if (!STR.on || !AF.ready) return;
-  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, FD = AF.FAR_LOD || 1e9;
-  // idle slots ran recently (fps cap on): a token slice here; otherwise the old per-frame budget
+  if (!AF.ready || !AF.world.regLod) return;
+  // a far job yields to an urgent one (nothing is attached before its last step, so dropping it is safe)
+  if (STR.gen && !STR.urgent && (STR.chk += dt) > 0.25) { STR.chk = 0; if (pickJob() && isUrgent()) { STR.gen = null; STR.aborted++; } }
+  if (!STR.gen && !PK.fresh && AF.clock.t >= STR.rest) pickJob();
+  const urgent = STR.gen ? STR.urgent : PK.fresh && isUrgent();
+  // idle slots of the fps cap carry the bulk; the rendered frame pays a slice only while something near lacks its detail
   const idle = AF.frameStats && AF.frameStats.idleT > AF.clock.t - 0.25;
-  streamWork(idle ? 1.5 : AF.MOBILE ? 3 : AF.mode === 'cine' ? 9 : 5);
-  if ((STR.t += dt) > 2) {
-    STR.t = 0;
-    const cur = STR.gen ? regionCluster(STR.key) : null;
-    for (const cl of CLS.values()) {
-      if (cl.pending > 0 || !cl.built || cl === cur || clDist(cl, c, vy) < FD + (AF.MOBILE ? 140 : 420)) continue;
-      for (const k of cl.regs) { dropRegion(k); STR.pending.add(k); }
-      cl.pending = cl.regs.length; STR.unloaded++;
-    }
-  }
+  streamWork(AF.mode === 'cine' ? 9 : urgent ? (idle ? 3 : AF.MOBILE ? 3.5 : 5) : idle ? 0.5 : AF.MOBILE ? 2 : 3);
+  if (STR.on && (STR.t += dt) > 1) { STR.t = 0; evict(); }
 });
 const HIDDEN_MAT = new THREE.MeshBasicMaterial({ visible: false });
 function setPartial(cl, on, RL, keepRegions) {
@@ -1590,7 +1706,8 @@ AF.onTick('prop-lod', 880, () => {
   const RL = AF.world.regLod;
   if (RL) {
     const RD = AF.REGION_LOD, FD = AF.FAR_LOD || 1e9, vy = Math.max(0, c.y - 12) * 0.7;
-    const regWant = (r) => r.coarse.length && Math.hypot(r.cx - c.x, r.cz - c.z, vy) > RD + (r.lvl === 1 ? -12 : 12) ? 1 : 0;
+    // a region with only its 0.5 m copy resident shows that until the streamer delivers the full mesh
+    const regWant = (r) => !r.fullOk || (r.coarse.length && Math.hypot(r.cx - c.x, r.cz - c.z, vy) > RD + (r.lvl === 1 ? -12 : 12)) ? 1 : 0;
     for (const cl of CLS.values()) {
       if (!cl.built) continue;
       const dx = Math.max(cl.x0 - c.x, 0, c.x - cl.x1), dz = Math.max(cl.z0 - c.z, 0, c.z - cl.z1);
@@ -1668,16 +1785,14 @@ AF.onTick('prop-lod', 880, () => {
       }
     }
   }
-  let budget = AF.SHOT || AF.TEST ? 1e9 : 10, best = null, bestD = 1e9;
-  const t0 = performance.now(), SN = AF.shadowNear, PC = AF.PROP_CULL || 900;
+  // near props are built by the stream scheduler (streamWork, 'props' jobs); ?shot / ?test build them on the spot
+  const sync = AF.SHOT || AF.TEST, SN = AF.shadowNear, PC = AF.PROP_CULL || 900;
   for (const [k, r] of AF.world.lod) {
     const rl = RL && RL.get(k), hid = !!(rl && rl.hid);
     const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
     if (hid) { if (r.nearBuilt) { FADE.cancel(r); freeNear(r); } }
-    else if (!r.nearBuilt && d < D) {
-      if (budget > 1e8) buildNear(r);
-      else if (d < bestD) { bestD = d; best = r; }
-    } else if (r.nearBuilt && d > D + 70) { FADE.cancel(r); freeNear(r); }
+    else if (!r.nearBuilt && d < D) { if (sync) buildNear(r); }
+    else if (r.nearBuilt && d > D + 70) { FADE.cancel(r); freeNear(r); }
     const showNear = !hid && r.nearBuilt && d < D + 25, farSeen = !!r.far && !showNear && d < PC;
     // near <-> far props and the far-prop cull cross-fade (PERF.md §4); the first decision for a region just sets the state
     if (!r.fadeE && r.showNear !== undefined && (r.showNear !== showNear || r.farSeen !== farSeen)) {
@@ -1696,7 +1811,6 @@ AF.onTick('prop-lod', 880, () => {
     if (r.far) { r.far.visible = showNear ? proxy : farSeen; r.far.layers.set(showNear ? 1 : 0); }
     if (AF.MOBILE && r.far) r.far.castShadow = Math.hypot(r.cx - SN.cx, r.cz - SN.cz) < SN.r + 24;
   }
-  if (best && performance.now() - t0 < budget) buildNear(best);
 });
 // PERF.md §4/§5 guard: whatever the camera does, each region shows exactly one copy (full, 0.5 m or its cluster's 1 m slice)
 AF.test('voxel: one LOD copy per region on screen', () => {
@@ -1738,7 +1852,8 @@ AF.meshWorld = async (progress) => {
     for (let rz = 0; rz < NRZ; rz++) {
       if (AF.NEAR && Math.hypot(X0 + (rx + 0.5) * rm - AF.NEAR.x, Z0 + (rz + 0.5) * rm - AF.NEAR.z) > AF.NEAR.r + rm * 0.71) { done++; continue; }
       const k = rx * 64 + rz, cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
-      if (STR.on && Math.hypot(X0 + (rx + 0.5) * rm - BF.x, Z0 + (rz + 0.5) * rm - BF.z) > BF.r) { STR.pending.add(k); cl.pending = (cl.pending || 0) + 1; done++; continue; }
+      ALL.push({ k, x: X0 + (rx + 0.5) * rm, z: Z0 + (rz + 0.5) * rm });
+      if (STR.on && Math.hypot(X0 + (rx + 0.5) * rm - BF.x, Z0 + (rz + 0.5) * rm - BF.z) > BF.r) { setMissing(k, true); done++; continue; }
       quads += AF.meshRegion(rx, rz); done++;
     }
     if (progress) await progress(done / (NRX * NRZ));
@@ -1753,8 +1868,15 @@ AF.meshWorld = async (progress) => {
   for (const k in AF.stats.meshT) AF.stats.meshT[k] = Math.round(AF.stats.meshT[k]);
   console.log('[af] world meshed:', quads, 'quads in', AF.stats.meshMs, 'ms', JSON.stringify(AF.stats.meshT));
 };
-// re-mesh regions touched by W.set since the last mesh (for runtime edits: doors, etc.)
-AF.remeshDirty = () => { for (const k of W.dirty) AF.meshRegion(k >> 6, k & 63); W.dirty.clear(); coarseCache.clear(); for (const key of compactPending) compactChunk(key); };
+// re-mesh regions touched by W.set since the last mesh (for runtime edits: doors, etc.); streamed-out regions pick the edit up when
+// they stream back in, and a streamed job for an edited region restarts
+AF.remeshDirty = () => {
+  for (const k of W.dirty) {
+    if (STR.gen && STR.key === k) STR.gen = null;
+    if (!STR.on || (AF.world.regLod && AF.world.regLod.has(k))) AF.meshRegion(k >> 6, k & 63);
+  }
+  W.dirty.clear(); coarseCache.clear(); for (const key of compactPending) compactChunk(key);
+};
 AF.onTick('chunk-compaction', 870, () => {
   if (!compactEnabled || !compactPending.size) return;
   let budget = 8;

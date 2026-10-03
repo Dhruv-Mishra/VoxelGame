@@ -279,7 +279,7 @@ try {
   UI.roster = roster;
   // drawn by the main renderer into the stage's screen rect after each frame (no second WebGL context)
   const stage = title.querySelector('.stage');
-  const PV = { scene: null, cam: null, P: null, st: { phase: 0, speed: 0, air: 0, t: 0, land: 0 }, yaw: 0.4, drag: null, pop: 1, aspect: 0, rect: null, canvasRect: null, size: new THREE.Vector2(), vp: new THREE.Vector4(), sc: new THREE.Vector4() };
+  const PV = { scene: null, cam: null, P: null, st: { phase: 0, speed: 0, air: 0, t: 0, land: 0 }, yaw: 0.4, drag: null, pop: 1, aspect: 0, rect: null, canvasRect: null, size: new THREE.Vector2(), rt: null, blit: null };
   const previewResize = () => { PV.rect = stage.getBoundingClientRect(); PV.canvasRect = AF.renderer.domElement.getBoundingClientRect(); };
   addEventListener('resize', previewResize);
   const previewObserver = new ResizeObserver(previewResize); previewObserver.observe(stage); previewObserver.observe(title.querySelector('.modal')); previewObserver.observe(AF.renderer.domElement);
@@ -323,6 +323,31 @@ try {
     PV.P.root.scale.setScalar(s); PV.P.root.rotation.y = PV.yaw;
     AF.avatar.animate(PV.P, PV.st, Math.min(dt, 0.05), 0, true);
   });
+  // own target (depth + MSAA, drawing-buffer px) + one quad: never shares the world's depth/scissor (phones draw straight to the MSAA screen)
+  const pvBlit = () => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 1, 1, 1, 0, 0, 1, 0]), 2));
+    geo.setIndex([0, 2, 1, 2, 3, 1]);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { tMap: { value: null } }, depthTest: false, depthWrite: false, toneMapped: true,
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: 'uniform sampler2D tMap; varying vec2 vUv; void main(){ gl_FragColor = vec4(texture2D(tMap, vUv).rgb, 1.0);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}',
+    });
+    const quad = new THREE.Mesh(geo, mat); quad.frustumCulled = false;
+    const sc = new THREE.Scene(); sc.add(quad);
+    return { sc, cam: new THREE.Camera(), pos: geo.attributes.position, mat };
+  };
+  const pvTarget = (W, H) => {
+    if (PV.rt && PV.rt.width === W && PV.rt.height === H) return PV.rt;
+    if (PV.rt) { PV.rt.setSize(W, H); return PV.rt; }
+    const R = AF.renderer, half = !!AF.gfx.halfFloatTargets;
+    PV.rt = new THREE.WebGLRenderTarget(W, H, { type: half ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: R.capabilities.isWebGL2 ? 4 : 0 });
+    if (!half && R.capabilities.isWebGL2) PV.rt.texture.colorSpace = THREE.SRGBColorSpace;   // 8-bit fallback: sRGB storage, no banding
+    PV.rt.texture.name = 'af.title.preview';
+    return PV.rt;
+  };
+  const pvRelease = () => { if (PV.rt) { PV.rt.dispose(); PV.rt = null; } };
   AF.afterFrame = () => {
     if (!S.title || !PV.P) return;
     if (!PV.rect) previewResize();
@@ -330,21 +355,29 @@ try {
     R.getSize(PV.size);
     const k = PV.size.x / (cr.width || 1), w = r.width * k, hh = r.height * k;
     if (w < 2 || hh < 2) return;
-    const x = (r.left - cr.left) * k, y = PV.size.y - (r.bottom - cr.top) * k;
+    const x = (r.left - cr.left) * k, y = (r.top - cr.top) * k, pr = R.getPixelRatio();
     if (PV.aspect !== w / hh) { PV.aspect = w / hh; PV.cam.aspect = PV.aspect; PV.cam.updateProjectionMatrix(); }
-    R.getViewport(PV.vp); R.getScissor(PV.sc);
-    const rt = R.getRenderTarget(), sct = R.getScissorTest(), ac = R.autoClear, tm = R.toneMapping, ex = R.toneMappingExposure;
+    const rt = pvTarget(Math.max(1, Math.round(w * pr)), Math.max(1, Math.round(hh * pr)));
+    const B = PV.blit || (PV.blit = pvBlit());
+    const X0 = x / PV.size.x * 2 - 1, X1 = (x + w) / PV.size.x * 2 - 1, Y0 = 1 - y / PV.size.y * 2, Y1 = 1 - (y + hh) / PV.size.y * 2, p = B.pos.array;
+    if (p[0] !== X0 || p[1] !== Y0 || p[3] !== X1 || p[7] !== Y1) { p[0] = p[6] = X0; p[3] = p[9] = X1; p[1] = p[4] = Y0; p[7] = p[10] = Y1; B.pos.needsUpdate = true; }
+    B.mat.uniforms.tMap.value = rt.texture;
+    const prev = R.getRenderTarget(), sct = R.getScissorTest(), ac = R.autoClear, tm = R.toneMapping, ex = R.toneMappingExposure;
     try {
-      R.setRenderTarget(null); R.autoClear = false; R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 1.2;
-      R.setViewport(x, y, w, hh); R.setScissor(x, y, w, hh); R.setScissorTest(true);
-      R.clearDepth(); R.render(PV.scene, PV.cam);
+      R.setScissorTest(false); R.autoClear = false;
+      R.setRenderTarget(rt); R.clear(true, true, false); R.render(PV.scene, PV.cam);
+      R.setRenderTarget(null); R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 1.2;
+      R.render(B.sc, B.cam);
     } finally {
-      R.setViewport(PV.vp); R.setScissor(PV.sc); R.setScissorTest(sct); R.autoClear = ac; R.toneMapping = tm; R.toneMappingExposure = ex; R.setRenderTarget(rt);
+      R.setScissorTest(sct); R.autoClear = ac; R.toneMapping = tm; R.toneMappingExposure = ex; R.setRenderTarget(prev);
     }
   };
   AF.test('ui: title preview uses the main renderer', () => {
     const extra = title.querySelectorAll('canvas').length, has = !!(PV.P && PV.P.root.parent === PV.scene);
-    return { ok: extra === 0 && !('r' in PV) && (!S.title || has), info: 'stage canvases ' + extra + ', title ' + (S.title ? 'open, avatar ' + has : 'closed') };
+    if (S.title && has) { previewResize(); AF.afterFrame(); }
+    const pr = AF.renderer.getPixelRatio(), r = PV.rect, rt = PV.rt;
+    const sized = !S.title || !has || !r || r.width < 2 || !!(rt && Math.abs(rt.width - r.width * pr) <= 1 && Math.abs(rt.height - r.height * pr) <= 1);
+    return { ok: extra === 0 && !('r' in PV) && (!S.title || has) && sized, info: 'stage canvases ' + extra + ', title ' + (S.title ? 'open, avatar ' + has + ', target ' + (rt ? rt.width + 'x' + rt.height + ' @' + pr.toFixed(2) : 'none') : 'closed') };
   });
   const select = (id) => {
     const c = AF.friends && AF.friends.byId[id]; if (!c) return;
@@ -365,6 +398,7 @@ try {
   const start = () => {
     if (!AF.ready || !S.pick || !S.title) return;
     S.title = false; root.classList.remove('titling'); title.classList.add('out'); setTimeout(() => { if (!S.title) title.style.display = 'none'; }, 600);
+    pvRelease();
     if (TOUCH) goFull();
     AF.input.requestLock();
     AF.friends.play(S.pick);

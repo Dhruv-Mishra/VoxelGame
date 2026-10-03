@@ -30,7 +30,7 @@
 </script>
 <script type="module">
 // Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.
-// Parts: 00-prologue, 01-core, 02-voxel, 03-render, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 98-tests, 99-boot
+// Parts: 00-prologue, 01-core, 02-voxel, 03-render, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-farms, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 98-tests, 99-boot
 // ===== prologue: module scope shared by every part (only THREE + ADDONS live here) =====
 window.AF = window.AF || {};
 {
@@ -581,49 +581,65 @@ W.stamp = (m, x, y, z, rot = 0, opts = {}) => {
 // Vertex layout: position(3) uv(2: block units, in-plane) aPal(1: palette index) aAN(1: riser*32 + ao*8 + normalIndex)
 // riser = low same-colour terrain step: its normal bends to +y with distance so hillside terraces don't alias into moire
 // normal index: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z
+// Typed arrays grown by doubling (JS number arrays cost ~68 bytes a vertex, garbage and a per-element conversion pass that was the
+// single largest streaming cost); the final geometry takes native copies.
 class GeoBuf {
-  constructor() { this.p = []; this.uv = []; this.pal = []; this.an = []; this.idx = []; this.n = 0; }
+  constructor() { this.n = 0; this.cap = 0; this.p = this.uv = this.pal = this.an = this.idx = null; }
+  grow(need) {
+    let cap = Math.max(1024, this.cap * 2); while (cap < need) cap *= 2;
+    const p = new Float32Array(cap * 3), uv = new Float32Array(cap * 2), pal = new Uint16Array(cap), an = new Uint8Array(cap), idx = new Uint32Array(cap / 4 * 6), n = this.n;
+    if (n) { p.set(this.p.subarray(0, n * 3)); uv.set(this.uv.subarray(0, n * 2)); pal.set(this.pal.subarray(0, n)); an.set(this.an.subarray(0, n)); idx.set(this.idx.subarray(0, n / 4 * 6)); }
+    this.p = p; this.uv = uv; this.pal = pal; this.an = an; this.idx = idx; this.cap = cap;
+  }
+  copyFrom(o) {
+    this.n = 0; if (!o.n) return;
+    this.grow(o.n); const n = o.n;
+    this.p.set(o.p.subarray(0, n * 3)); this.uv.set(o.uv.subarray(0, n * 2)); this.pal.set(o.pal.subarray(0, n)); this.an.set(o.an.subarray(0, n)); this.idx.set(o.idx.subarray(0, n / 4 * 6));
+    this.n = n;
+  }
   quad(v0, v1, v2, v3, uv0, uv1, uv2, uv3, pal, nIdx, ao, fl = 0) { // v* = [x,y,z], ao = [a0..a3] 0..3 ; CCW when seen from outside
-    const b = this.n;
-    this.p.push(v0[0], v0[1], v0[2], v1[0], v1[1], v1[2], v2[0], v2[1], v2[2], v3[0], v3[1], v3[2]);
-    this.uv.push(uv0[0], uv0[1], uv1[0], uv1[1], uv2[0], uv2[1], uv3[0], uv3[1]);
-    this.pal.push(pal, pal, pal, pal);
+    const b = this.n; if (b + 4 > this.cap) this.grow(b + 4);
+    const p = this.p, t = this.uv, an = this.an, o = b * 3, u = b * 2;
+    p[o] = v0[0]; p[o + 1] = v0[1]; p[o + 2] = v0[2]; p[o + 3] = v1[0]; p[o + 4] = v1[1]; p[o + 5] = v1[2];
+    p[o + 6] = v2[0]; p[o + 7] = v2[1]; p[o + 8] = v2[2]; p[o + 9] = v3[0]; p[o + 10] = v3[1]; p[o + 11] = v3[2];
+    t[u] = uv0[0]; t[u + 1] = uv0[1]; t[u + 2] = uv1[0]; t[u + 3] = uv1[1]; t[u + 4] = uv2[0]; t[u + 5] = uv2[1]; t[u + 6] = uv3[0]; t[u + 7] = uv3[1];
+    this.pal[b] = this.pal[b + 1] = this.pal[b + 2] = this.pal[b + 3] = pal;
     nIdx += fl;
-    this.an.push(ao[0] * 8 + nIdx, ao[1] * 8 + nIdx, ao[2] * 8 + nIdx, ao[3] * 8 + nIdx);
-    if (ao[0] + ao[2] < ao[1] + ao[3]) this.idx.push(b + 1, b + 2, b + 3, b + 1, b + 3, b);
-    else this.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
-    this.n += 4;
+    an[b] = ao[0] * 8 + nIdx; an[b + 1] = ao[1] * 8 + nIdx; an[b + 2] = ao[2] * 8 + nIdx; an[b + 3] = ao[3] * 8 + nIdx;
+    this.tri(b, ao[0] + ao[2] < ao[1] + ao[3]);
+  }
+  tri(b, flip) {
+    const ix = this.idx, i = b / 4 * 6;
+    if (flip) { ix[i] = b + 1; ix[i + 1] = b + 2; ix[i + 2] = b + 3; ix[i + 3] = b + 1; ix[i + 4] = b + 3; ix[i + 5] = b; }
+    else { ix[i] = b; ix[i + 1] = b + 1; ix[i + 2] = b + 2; ix[i + 3] = b; ix[i + 4] = b + 2; ix[i + 5] = b + 3; }
+    this.n = b + 4;
   }
   // allocation-free quad from scratch arrays: P (12 floats, corners 0..3), T (8 floats), order o0..o3 = corner indices, ao a0..a3 (coordinator perf)
   quadS(P, T, o0, o1, o2, o3, pal, nIdx, a0, a1, a2, a3) {
-    const b = this.n, p = this.p, uv = this.uv, an = this.an;
-    p.push(P[o0 * 3], P[o0 * 3 + 1], P[o0 * 3 + 2], P[o1 * 3], P[o1 * 3 + 1], P[o1 * 3 + 2], P[o2 * 3], P[o2 * 3 + 1], P[o2 * 3 + 2], P[o3 * 3], P[o3 * 3 + 1], P[o3 * 3 + 2]);
-    uv.push(T[o0 * 2], T[o0 * 2 + 1], T[o1 * 2], T[o1 * 2 + 1], T[o2 * 2], T[o2 * 2 + 1], T[o3 * 2], T[o3 * 2 + 1]);
-    this.pal.push(pal, pal, pal, pal);
-    an.push(a0 * 8 + nIdx, a1 * 8 + nIdx, a2 * 8 + nIdx, a3 * 8 + nIdx);
-    if (a0 + a2 < a1 + a3) this.idx.push(b + 1, b + 2, b + 3, b + 1, b + 3, b);
-    else this.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
-    this.n += 4;
+    const b = this.n; if (b + 4 > this.cap) this.grow(b + 4);
+    const p = this.p, t = this.uv, an = this.an, o = b * 3, u = b * 2;
+    p[o] = P[o0 * 3]; p[o + 1] = P[o0 * 3 + 1]; p[o + 2] = P[o0 * 3 + 2]; p[o + 3] = P[o1 * 3]; p[o + 4] = P[o1 * 3 + 1]; p[o + 5] = P[o1 * 3 + 2];
+    p[o + 6] = P[o2 * 3]; p[o + 7] = P[o2 * 3 + 1]; p[o + 8] = P[o2 * 3 + 2]; p[o + 9] = P[o3 * 3]; p[o + 10] = P[o3 * 3 + 1]; p[o + 11] = P[o3 * 3 + 2];
+    t[u] = T[o0 * 2]; t[u + 1] = T[o0 * 2 + 1]; t[u + 2] = T[o1 * 2]; t[u + 3] = T[o1 * 2 + 1]; t[u + 4] = T[o2 * 2]; t[u + 5] = T[o2 * 2 + 1]; t[u + 6] = T[o3 * 2]; t[u + 7] = T[o3 * 2 + 1];
+    this.pal[b] = this.pal[b + 1] = this.pal[b + 2] = this.pal[b + 3] = pal;
+    an[b] = a0 * 8 + nIdx; an[b + 1] = a1 * 8 + nIdx; an[b + 2] = a2 * 8 + nIdx; an[b + 3] = a3 * 8 + nIdx;
+    this.tri(b, a0 + a2 < a1 + a3);
   }
-  geometry() {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
-    // compact types (shader reads them as floats): 12 + 4 + 2 + 1 = 19 bytes per vertex
-    g.setAttribute('aBU', new THREE.BufferAttribute(new Int16Array(this.uv), 2));
-    g.setAttribute('aPal', new THREE.BufferAttribute(new Uint16Array(this.pal), 1));
-    g.setAttribute('aAN', new THREE.BufferAttribute(new Uint8Array(this.an), 1));
-    g.setIndex(this.n > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1));
-    g.computeBoundingSphere(); g.computeBoundingBox();
-    return g;
-  }
+  geometry() { const gen = this.geometryG(); let step; do step = gen.next(); while (!step.done); return step.value; }
+  // compact types (shader reads them as floats): 12 + 4 + 2 + 1 = 19 bytes per vertex (+ index). Also used by 49-outland on its own
+  // scratch buffers (typed arrays of exact length), so only n / p / uv / pal / an / idx are read here.
   *geometryG(floatUV = false) {
-    const geo = new THREE.BufferGeometry();
-    for (const [name, values, Type, size, factor] of [['position', this.p, Float32Array, 3, 1], ['aBU', this.uv, floatUV ? Float32Array : Int16Array, 2, floatUV ? 0.25 : 1], ['aPal', this.pal, Uint16Array, 1, 1], ['aAN', this.an, Uint8Array, 1, 1], ['index', this.idx, this.n > 65535 ? Uint32Array : Uint16Array, 1, 1]]) {
-      const array = new Type(values.length); yield;
-      for (let offset = 0; offset < values.length; offset += 2048) { const end = Math.min(values.length, offset + 2048); for (let index = offset; index < end; index++) array[index] = values[index] * factor; yield; }
-      const attr = new THREE.BufferAttribute(array, size);
-      if (name === 'index') geo.setIndex(attr); else geo.setAttribute(name, attr);
-    }
+    if (!this.p) this.grow(0);
+    const n = this.n, geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(this.p.slice(0, n * 3), 3)); yield;
+    let uv;
+    if (floatUV) { uv = this.uv.slice(0, n * 2); for (let i = 0; i < uv.length; i++) uv[i] *= 0.25; }
+    else uv = new Int16Array(this.uv.subarray(0, n * 2));
+    geo.setAttribute('aBU', new THREE.BufferAttribute(uv, 2));
+    geo.setAttribute('aPal', new THREE.BufferAttribute(this.pal.slice(0, n), 1));
+    geo.setAttribute('aAN', new THREE.BufferAttribute(this.an.slice(0, n), 1)); yield;
+    const ix = this.idx.subarray(0, n / 4 * 6);
+    geo.setIndex(new THREE.BufferAttribute(n > 65535 ? new Uint32Array(ix) : new Uint16Array(ix), 1)); yield;
     yield* geometryBoundsG(geo); return geo;
   }
 }
@@ -744,29 +760,36 @@ function greedy(sx, sy, sz, get, scale, origin, uvOff, out, flat) {
 }
 AF.greedy = greedy;
 
-// 2x downsampled, AO-free version of a model geometry (used for distant regions). Cached on the geometry.
-AF.lodOf = (g) => {
+// 2x downsampled, AO-free version of a model geometry (used for distant regions). Cached on the geometry. The generator form lets
+// the region streamer build a big model's LOD a slab at a time instead of in one long step.
+AF.lodOfG = function* (g) {
   if (g.userData.lod !== undefined) return g.userData.lod;
   const src = g.userData.src;
   if (!src || src.vs >= 0.45 || src.m.w * src.m.h * src.m.d > 4e6) { g.userData.lod = null; delete g.userData.src; return null; }   // already coarse: keep as is
   const m = src.m, F = src.vs >= 0.2 ? 2 : Math.max(2, Math.round(0.33 / src.vs)), w = Math.ceil(m.w / F), h = Math.ceil(m.h / F), d = Math.ceil(m.d / F);
   const L = new Model(w, h, d);
   const cnt = new Map();
-  for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) for (let z = 0; z < d; z++) {
-    cnt.clear(); let best = 0, bn = 0;
-    for (let a = 0; a < F; a++) for (let b = 0; b < F; b++) for (let c = 0; c < F; c++) {
-      const v = m.get(F * x + a, F * y + b, F * z + c); if (!v || AF.PAL.glass[v]) continue;
-      const k = (cnt.get(v) || 0) + 1; cnt.set(v, k); if (k > bn) { bn = k; best = v; }
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) for (let z = 0; z < d; z++) {
+      cnt.clear(); let best = 0, bn = 0;
+      for (let a = 0; a < F; a++) for (let b = 0; b < F; b++) for (let c = 0; c < F; c++) {
+        const v = m.get(F * x + a, F * y + b, F * z + c); if (!v || AF.PAL.glass[v]) continue;
+        const k = (cnt.get(v) || 0) + 1; cnt.set(v, k); if (k > bn) { bn = k; best = v; }
+      }
+      if (best) L.v[(x * h + y) * d + z] = best;
     }
-    if (best) L.v[(x * h + y) * d + z] = best;
+    yield;
   }
   const out = { opaque: new GeoBuf(), glass: new GeoBuf() };
   const vs2 = src.vs * F, an = src.anchor;
-  greedyPad(w, h, d, padModel(L), vs2, [-m.w * src.vs * an[0], -m.h * src.vs * an[1], -m.d * src.vs * an[2]], [0, 0, 0], out, true);
-  g.userData.lod = out.opaque.n ? out.opaque.geometry() : null;
+  yield* greedyPadG(w, h, d, padModel(L), vs2, [-m.w * src.vs * an[0], -m.h * src.vs * an[1], -m.d * src.vs * an[2]], [0, 0, 0], out, true);
+  const geo = out.opaque.n ? yield* out.opaque.geometryG() : null;
+  if (g.userData.lod !== undefined) { if (geo) geo.dispose(); return g.userData.lod; }   // a synchronous caller finished it meanwhile
+  g.userData.lod = geo;
   delete g.userData.src;
-  return g.userData.lod;
+  return geo;
 };
+AF.lodOf = (g) => { if (g.userData.lod !== undefined) return g.userData.lod; const gen = AF.lodOfG(g); let step; do step = gen.next(); while (!step.done); return step.value; };
 AF.meshModel = (m, o = {}) => {
   const vs = o.vs ?? 1 / 16, an = o.anchor ?? [0.5, 0, 0.5];
   const out = { opaque: new GeoBuf(), glass: new GeoBuf() };
@@ -1686,7 +1709,6 @@ AF.releaseStaticGeometry = (geo) => {
   AF.staticUploadQueue.push(geo);
 };
 const regMesh = (geo, mat, cast) => {
-  geo.computeBoundingBox();
   AF.releaseStaticGeometry(geo);
   const m = new THREE.Mesh(geo, mat); m.castShadow = cast; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); if (mat === AF.mat.glass) m.renderOrder = 2; AF.world.group.add(m); return m; };
 AF.test('voxel: uploaded region arrays are released', () => {
@@ -1827,24 +1849,30 @@ AF.onTick('far-lod-build', 879, () => {
 });
 // far prop meshes skip what can't be seen from a distance: furniture under a roof and tiny clutter
 const roofOver = (x, y, z) => { const bx = W.bx(x), bz = W.bz(z), OP = AF.PAL.opaque; for (let by = W.by(y), e = Math.min(NY - 1, W.by(y + 14)); by <= e; by++) { const c = W.get(bx, by, bz); if (c && OP[c]) return true; } return false; };
-function farPick(pr) {
+function farSkipOf(pr) {
   if (pr.farSkip === undefined) {
     const g = pr.geo, bb = g.boundingBox || (g.computeBoundingBox(), g.boundingBox);
     const big = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z);
     pr.farSkip = big < 0.7 || (big < 9 && roofOver(pr.x, pr.y + bb.max.y + 0.3, pr.z));
   }
-  return pr.farSkip ? null : (AF.lodOf(pr.geo) || pr.geo);
+  return pr.farSkip;
 }
-function buildNear(reg) {
-  const t = performance.now();
-  const g = mergeProps(reg.props, (pr) => pr.geo);
-  const gg = mergeProps(reg.props, (pr) => pr.geo.userData.glass || null);
+function farPick(pr) { return farSkipOf(pr) ? null : (AF.lodOf(pr.geo) || pr.geo); }
+function* buildNearG(reg) {
+  const g = yield* mergePropsG(reg.props, (pr) => pr.geo);
+  const gg = yield* mergePropsG(reg.props, (pr) => pr.geo.userData.glass || null);
+  // freed / rebuilt while this ran (streamed job): drop the result
+  if (reg.nearBuilt || AF.world.lod.get(reg.k) !== reg) { if (g) g.dispose(); if (gg) gg.dispose(); return; }
   reg.near = g ? regMesh(g, AF.mat.voxel, true) : null;
   reg.nearGlass = gg ? regMesh(gg, AF.mat.glass, false) : null;
   // hidden until prop-lod shows (or fades) them in
   if (reg.near) reg.near.visible = false;
   if (reg.nearGlass) reg.nearGlass.visible = false;
   reg.nearBuilt = true;
+}
+function buildNear(reg) {
+  const t = performance.now();
+  runSync(buildNearG(reg));
   AF.stats.nearMs = Math.round(performance.now() - t);
 }
 function freeNear(reg) { dropMesh(reg.near); dropMesh(reg.nearGlass); reg.near = reg.nearGlass = null; reg.nearBuilt = false; }
@@ -1854,15 +1882,23 @@ const dropRegion = (k) => {
   const oldC = AF.world.coarse.get(k); if (oldC) for (const m of oldC) dropMesh(m); AF.world.coarse.delete(k);
   const oldL = AF.world.lod.get(k); if (oldL) { freeNear(oldL); dropMesh(oldL.far); } AF.world.lod.delete(k);
   if (AF.world.regLod) AF.world.regLod.delete(k);
+  setMissing(k, true);
 };
-AF.meshRegion = (rx, rz) => runSync(meshRegionG(rx, rz));
+// full -> 0.5 m only (streaming budget): the region keeps showing its coarse copy, the full mesh is rebuilt on approach
+const demote = (k, r) => { for (const m of r.full) dropMesh(m); r.full = []; r.fullOk = false; r.bF = 0; AF.world.regions.delete(k); };
+const geoBytes = (g) => { let b = g.index.array.byteLength; for (const n in g.attributes) b += g.attributes[n].array.byteLength; return b; };
+AF.meshRegion = (rx, rz) => runSync(meshRegionG(rx, rz, 'both'));
 const COARSE_ON = !AF.Q.has('nocoarse');
-function* meshRegionG(rx, rz) {
-  const k = rx * 64 + rz;
-  dropRegion(k);
+// mode 'both' (boot, edits): full 0.25 m + 0.5 m copy from scratch. Streaming builds only what the distance asks for: 'full' near the
+// camera (no 0.5 m copy that the full mesh would replace at once), 'coarse' farther out; a full region moving away back-fills its
+// 0.5 m copy later. Nothing is attached before the last yield, so a streamed job can be abandoned at any step.
+function* meshRegionG(rx, rz, mode = 'both') {
+  const k = rx * 64 + rz, wantF = mode !== 'coarse', wantC = COARSE_ON && mode !== 'full';
+  if (mode === 'both') dropRegion(k);
+  const RL = AF.world.regLod || (AF.world.regLod = new Map()), old = RL.get(k);
   const out = { opaque: new GeoBuf(), glass: new GeoBuf() };
   const T = AF.stats.meshT || (AF.stats.meshT = { terrain: 0, voxel: 0, coarse: 0, far: 0, gpu: 0 });
-  let tt = performance.now();
+  let tt = performance.now(); STR.phase = 'terrain';
   yield* meshTerrainRegionG(rx, rz, out.opaque);
   const terrainQ = out.opaque.n;
   T.terrain += performance.now() - tt;
@@ -1870,54 +1906,89 @@ function* meshRegionG(rx, rz) {
   tt = performance.now();
   // coarse copy first (terrain quads are shared: copy them before the fine voxels are appended)
   const cout = { opaque: new GeoBuf(), glass: new GeoBuf() };
-  if (COARSE_ON && terrainQ) { const o = out.opaque, c = cout.opaque; c.p = o.p.slice(); c.uv = o.uv.slice(); c.pal = o.pal.slice(); c.an = o.an.slice(); c.idx = o.idx.slice(); c.n = o.n; }
-  yield* meshVoxelRegionG(rx, rz, out);
+  if (wantC && !wantF) cout.opaque = out.opaque;
+  else if (wantC && terrainQ) cout.opaque.copyFrom(out.opaque);
+  if (wantF) { STR.phase = 'voxel'; yield* meshVoxelRegionG(rx, rz, out); }
   T.voxel += performance.now() - tt; tt = performance.now();
-  for (let cx = (rx * REG) >> 4, e = Math.min(CX, (rx * REG + REG) >> 4); cx < e; cx++) for (let cz = (rz * REG) >> 4, f = Math.min(CZ, (rz * REG + REG) >> 4); cz < f; cz++) for (let cy = 0; cy < CY; cy++) coarseCache.delete((cx * CY + cy) * CZ + cz);
-  if (COARSE_ON) yield* meshVoxelRegionCoarseG(rx, rz, cout);
+  if (wantC) {
+    for (let cx = (rx * REG) >> 4, e = Math.min(CX, (rx * REG + REG) >> 4); cx < e; cx++) for (let cz = (rz * REG) >> 4, f = Math.min(CZ, (rz * REG + REG) >> 4); cz < f; cz++) for (let cy = 0; cy < CY; cy++) coarseCache.delete((cx * CY + cy) * CZ + cz);
+    STR.phase = 'coarse'; yield* meshVoxelRegionCoarseG(rx, rz, cout);
+  }
   T.coarse += performance.now() - tt;
   yield;
-  const meshes = [], cmeshes = [];
-  const keepC = COARSE_ON && out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8;
+  // only keep a coarse copy when it actually saves something (a coarse-first build keeps it: the full count is not known yet)
+  const nO = wantF ? out.opaque.n : 0, nC = cout.opaque.n, vq = wantF ? nO - terrainQ : old ? old.vq : -1, qF = wantF ? nO : old ? old.qF : 0;
+  const keepC = wantC && (vq < 0 || (vq > 400 && nC < qF * 0.8));
   // typed-array conversion happens here: one geometry per step so a dense block never costs a streamed frame much
-  const nO = out.opaque.n, nC = cout.opaque.n;
-  const gO = nO ? yield* out.opaque.geometryG() : null; out.opaque = null; yield;
-  const gG = out.glass.n ? yield* out.glass.geometryG() : null; yield;
-  const gCO = keepC && cout.opaque.n ? yield* cout.opaque.geometryG() : null; yield;
+  STR.phase = 'convert';
+  const gO = nO ? yield* out.opaque.geometryG() : null; yield;
+  const gG = wantF && out.glass.n ? yield* out.glass.geometryG() : null; yield;
+  const gCO = keepC && nC ? yield* cout.opaque.geometryG() : null; yield;
   const gCG = keepC && cout.glass.n ? yield* cout.glass.geometryG() : null;
-  if (gO) { const m = regMesh(gO, AF.mat.voxel, true); m.userData.region = k; meshes.push(m); }
-  if (gG) meshes.push(regMesh(gG, AF.mat.glass, false));
-  // only keep a coarse copy when it actually saves something
-  if (gCO) { const m = regMesh(gCO, AF.mat.voxel, true); m.userData.region = k; m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
-  if (gCG) { const m = regMesh(gCG, AF.mat.glass, false); m.userData.coarse = true; m.visible = false; cmeshes.push(m); }
-  AF.world.regions.set(k, meshes);
-  if (cmeshes.length) AF.world.coarse.set(k, cmeshes); else AF.world.coarse.delete(k);
-  const RL = AF.world.regLod || (AF.world.regLod = new Map());
-  const cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
-  RL.set(k, { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: meshes, coarse: cmeshes, lvl: -1, hid: cl.lvl === 1 && !cl.part, q: cmeshes.length ? nC : nO });
   const props = AF.world.propsByRegion.get(k) || [];
-  let farQ = 0;
-  if (props.length) {
+  const mkReg = props.length && !AF.world.lod.has(k);
+  let farQ = 0, fg = null;
+  if (mkReg) {
     // warm the per-model far LODs a few ms at a time (AF.lodOf builds them lazily) so the merge below is just copying
-    let tw = performance.now();
-    for (const pr of props) { farPick(pr); if (performance.now() - tw > 3) { yield; tw = performance.now(); } }
-    const reg = { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, props, far: null, near: null, nearGlass: null, nearBuilt: false };
+    STR.phase = 'props'; let tw = performance.now();
+    for (const pr of props) {
+      if (!farSkipOf(pr) && pr.geo.userData.lod === undefined) yield* AF.lodOfG(pr.geo);
+      if (performance.now() - tw > 2) { yield; tw = performance.now(); }
+    }
     const tf = performance.now();
-    const fg = yield* mergePropsG(props, farPick);
+    fg = yield* mergePropsG(props, farPick);
     T.far += performance.now() - tf;
-    if (fg) { reg.far = regMesh(fg, AF.mat.voxel, true); farQ = fg.attributes.position.count / 4; }
-    AF.world.lod.set(k, reg);
-  } else AF.world.lod.delete(k);
+  }
+  // attach (no yields below)
+  STR.phase = 'attach';
+  const cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
+  let r = RL.get(k);
+  if (!r) { r = { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, full: [], coarse: [], fullOk: false, coarseOk: false, lvl: -1, hid: cl.lvl === 1 && !cl.part, q: 0, vq: -1, qF: 0, bF: 0, bC: 0 }; RL.set(k, r); setMissing(k, false); }
+  // new meshes start hidden: prop-lod shows them (straight away for a new region, else with a cross-fade from what is on screen);
+  // a level that got built meanwhile (runtime edit) is not added twice
+  const addF = wantF && !r.fullOk, addC = wantC && !r.coarseOk;
+  for (const g of [addF ? null : gO, addF ? null : gG, addC ? null : gCO, addC ? null : gCG]) if (g) g.dispose();
+  if (addF) {
+    if (gO) { r.bF += geoBytes(gO); const m = regMesh(gO, AF.mat.voxel, true); m.userData.region = k; m.visible = false; r.full.push(m); }
+    if (gG) { r.bF += geoBytes(gG); const m = regMesh(gG, AF.mat.glass, false); m.visible = false; r.full.push(m); }
+    r.fullOk = true; r.vq = vq; r.qF = qF; AF.world.regions.set(k, r.full);
+    if (!r.coarse.length) r.q = nO;
+    if (vq <= 400) r.coarseOk = true;   // the keep rule would drop a 0.5 m copy of this region anyway
+  }
+  if (addC) {
+    if (gCO) { r.bC += geoBytes(gCO); const m = regMesh(gCO, AF.mat.voxel, true); m.userData.region = k; m.userData.coarse = true; m.visible = false; r.coarse.push(m); }
+    if (gCG) { r.bC += geoBytes(gCG); const m = regMesh(gCG, AF.mat.glass, false); m.userData.coarse = true; m.visible = false; r.coarse.push(m); }
+    r.coarseOk = true; r.sh = undefined;
+    if (r.coarse.length) { AF.world.coarse.set(k, r.coarse); r.q = nC; } else AF.world.coarse.delete(k);
+  }
+  if (mkReg && AF.world.lod.has(k)) { if (fg) fg.dispose(); }
+  else if (mkReg) {
+    AF.world.lod.set(k, { k, cx: r.cx, cz: r.cz, props, far: fg ? regMesh(fg, AF.mat.voxel, true) : null, near: null, nearGlass: null, nearBuilt: false });
+    if (fg) farQ = fg.attributes.position.count / 4;
+  } else if (!props.length) AF.world.lod.delete(k);
   return nO / 4 + farQ;
 }
 // REGION STREAMING (not in ?test / ?shot / ?near / ?nostream): boot meshes only the regions around AF.PLAN.bootFocus plus the 1 m
-// clusters for the whole island; full regions stream in nearest-cluster-first a few ms per frame (a cluster swaps from its 1 m copy
-// only once all 16 of its regions are ready, so nothing overlaps or flickers) and whole clusters far behind the camera are unloaded.
-const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, done: 0, unloaded: 0, t: 0, maxStep: 0 };
+// clusters for the whole island. One scheduler (streamWork) then runs a single job at a time, always the best one over all regions:
+//   props  near props of a region within AF.LOD_DIST (score d - 8)
+//   full   0.25 m mesh for a region within REGION_LOD + 24 m of the camera or of the look-ahead point (score d)
+//   coarse 0.5 m copy for an empty region within FAR_LOD + 48 (score d + 32), back-fill for a full region moving away (score d)
+// Jobs near the camera are "urgent": they also get a slice of every rendered frame and preempt a running far job. Full meshes the
+// camera left behind stay resident until a byte budget is used up (zipping back is instant); then the farthest drop to their 0.5 m
+// copy, and whole clusters showing their 1 m copy unload farthest first (always beyond FAR_LOD + 600 m, phones + 300 m).
+const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, kind: '', phase: '', urgent: false, rest: 0, chk: 0, done: 0, unloaded: 0, demoted: 0, aborted: 0, t: 0, maxStep: 0, maxPhase: '', ms: {}, bytes: 0, fullBytes: 0, jobs: { full: 0, coarse: 0, props: 0 } };
+const BUDGET = AF.MOBILE ? { full: 48, all: 128, drop: 300 } : { full: 192, all: 448, drop: 600 };   // MB, MB, m beyond FAR_LOD
 const regionCluster = (k) => CLS.get(((k >> 6) >> 2) * 64 + ((k & 63) >> 2));
 const clDist = (cl, c, vy) => Math.hypot(Math.max(cl.x0 - c.x, 0, c.x - cl.x1), Math.max(cl.z0 - c.z, 0, c.z - cl.z1), vy);
-// Priority (PERF.md §5): the nearer of the camera and a 1.5 s velocity-predicted point (fast planes load ahead of the nose).
-// Work runs a little every frame plus in the idle slots of the fps cap (AF.onIdle), where it costs the rendered frames nothing.
+// STR.pending = regions with nothing resident; cl.pending counts them per cluster (partial reveal shows their 1 m slice)
+function setMissing(k, miss) {
+  if (!STR.on) return;
+  const cl = regionCluster(k); if (!cl) return;
+  if (miss) { if (!STR.pending.has(k)) { STR.pending.add(k); cl.pending = (cl.pending || 0) + 1; } }
+  else if (STR.pending.delete(k)) cl.pending = Math.max(0, cl.pending - 1);
+}
+const ALL = [];   // every region { k, x, z } (centre), filled by meshWorld
+// Look-ahead (PERF.md §5): a 1.5 s velocity-predicted point, so regions ahead of a car or plane load before it gets there.
 const LA = { x: 0, z: 0, px: 0, pz: 0, vx: 0, vz: 0, init: false };
 AF.onTick('stream-look', 877, (dt) => {
   const c = AF.camera.position;
@@ -1928,42 +1999,87 @@ AF.onTick('stream-look', 877, (dt) => {
   const s = Math.min(1, 250 / (Math.hypot(LA.vx, LA.vz) * 1.5 + 1e-3));
   LA.x = c.x + LA.vx * 1.5 * s; LA.z = c.z + LA.vz * 1.5 * s;
 });
+const PK = { k: -1, t: 0, s: 0, fresh: false };   // best job of the last scan: t 1 full, 2 coarse, 3 props
+function pickJob() {
+  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, LOD = AF.world.lod;
+  const RD = AF.REGION_LOD, FD = Math.min(AF.FAR_LOD || 1e9, 5000), D = AF.LOD_DIST;
+  PK.k = -1; PK.t = 0; PK.s = 1e9;
+  for (let i = 0; i < ALL.length; i++) {
+    const g = ALL[i], k = g.k, d = Math.hypot(g.x - c.x, g.z - c.z, vy), de = Math.min(d, Math.hypot(g.x - LA.x, g.z - LA.z, vy) + 16);
+    if (de - 8 >= PK.s || (k === STR.key && STR.gen)) continue;
+    const r = RL.get(k);
+    let s = 1e9, t = 0;
+    if (STR.on) {
+      if (!r || !r.fullOk) { if (de < RD + 24) { s = de; t = 1; } else if (!r && de < FD + 48) { s = de + 32; t = 2; } }
+      else if (!r.coarseOk && COARSE_ON && de > RD - 24 && de < FD + 48) { s = de; t = 2; }   // full mesh shown too far out: as urgent as its distance
+    }
+    const reg = LOD.get(k);
+    if (reg && !reg.nearBuilt && d < D && d - 8 < s && !(r && r.hid)) { s = d - 8; t = 3; }
+    if (s < PK.s) { PK.s = s; PK.k = k; PK.t = t; }
+  }
+  PK.fresh = PK.k >= 0;
+  if (!PK.fresh) STR.rest = AF.clock.t + 0.15;   // nothing to do: no rescans for a moment
+  return PK.fresh;
+}
+const isUrgent = () => PK.t === 3 || (PK.t === 1 && PK.s < AF.REGION_LOD);
 const streamWork = (budget) => {
-  if (!STR.on || !AF.ready) return false;
-  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, FD = AF.FAR_LOD || 1e9;
+  if (!AF.ready || !AF.world.regLod) return false;
   const t0 = performance.now();
   while (performance.now() - t0 < budget) {
     if (!STR.gen) {
-      let best = null, bd = FD + 48;
-      for (const cl of CLS.values()) if (cl.pending > 0) { const d = Math.min(clDist(cl, c, vy), clDist(cl, LA, vy) + 24); if (d < bd) { bd = d; best = cl; } }
-      if (!best) return false;
-      let bk = -1, bkd = 1e18;
-      for (const k of best.regs) if (STR.pending.has(k)) { const x = X0 + ((k >> 6) + 0.5) * REG * VS, z = Z0 + ((k & 63) + 0.5) * REG * VS, d = (x - c.x) ** 2 + (z - c.z) ** 2; if (d < bkd) { bkd = d; bk = k; } }
-      if (bk < 0) { best.pending = 0; continue; }
-      STR.key = bk; STR.gen = meshRegionG(bk >> 6, bk & 63);
+      if (!PK.fresh && (AF.clock.t < STR.rest || !pickJob())) return false;
+      PK.fresh = false;
+      const k = STR.key = PK.k, r = AF.world.regLod.get(k), reg = AF.world.lod.get(k);
+      if (PK.t === 3 ? !reg || reg.nearBuilt : PK.t === 1 ? r && r.fullOk : r && r.coarseOk) continue;   // stale pick: rescan
+      STR.urgent = isUrgent();
+      if (PK.t === 3) { STR.kind = 'props'; STR.phase = 'near'; STR.gen = buildNearG(reg); }
+      else { STR.kind = PK.t === 1 ? 'full' : 'coarse'; STR.gen = meshRegionG(k >> 6, k & 63, STR.kind); }
+      STR.jobs[STR.kind]++;
     }
     const ts = performance.now(), fin = STR.gen.next().done, st = performance.now() - ts;
-    if (st > STR.maxStep) STR.maxStep = st;
-    if (fin) { STR.gen = null; STR.pending.delete(STR.key); const cl = regionCluster(STR.key); if (cl) cl.pending = Math.max(0, cl.pending - 1); STR.done++; coarseCache.clear(); }
+    if (st > STR.maxStep) { STR.maxStep = st; STR.maxPhase = STR.kind + ':' + STR.phase; }
+    STR.ms[STR.phase] = (STR.ms[STR.phase] || 0) + st;
+    if (fin) { STR.gen = null; STR.urgent = false; STR.rest = 0; if (STR.kind !== 'props') { STR.done++; coarseCache.clear(); } }
   }
   return true;
 };
+function evict() {
+  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, RD = AF.REGION_LOD, FD = Math.min(AF.FAR_LOD || 1e9, 5000), MB = 1048576;
+  let bF = 0, bA = 0;
+  for (const r of RL.values()) { bF += r.bF; bA += r.bF + r.bC; }
+  const busy = STR.gen ? STR.key : -1;
+  if (bF > BUDGET.full * MB) {
+    const cand = [];
+    for (const [k, r] of RL) if (r.fullOk && r.coarse.length && !r.fadeE && (r.hid || r.lvl === 1) && k !== busy) { const d = Math.hypot(r.cx - c.x, r.cz - c.z, vy); if (d > RD + 40) cand.push({ k, r, d }); }
+    cand.sort((a, b) => b.d - a.d);
+    for (const e of cand) { if (bF <= BUDGET.full * MB) break; bF -= e.r.bF; bA -= e.r.bF; demote(e.k, e.r); STR.demoted++; }
+  }
+  const cls = [];
+  for (const cl of CLS.values()) {
+    if (!cl.built || cl.part || cl.lvl !== 1 || cl.fadeE || (busy >= 0 && regionCluster(busy) === cl)) continue;
+    const d = clDist(cl, c, vy); if (d < FD + 64) continue;
+    let b = 0, any = false; for (const k of cl.regs) { const r = RL.get(k); if (r) { any = true; b += r.bF + r.bC; } else if (AF.world.lod.has(k)) any = true; }
+    if (any) cls.push({ cl, d, b });
+  }
+  cls.sort((a, b) => b.d - a.d);
+  for (const e of cls) {
+    if (e.d < FD + BUDGET.drop && bA <= BUDGET.all * MB) break;
+    for (const k of e.cl.regs) dropRegion(k);
+    bA -= e.b; STR.unloaded++;
+  }
+  STR.bytes = bA; STR.fullBytes = bF;
+}
 AF.onIdle('region-stream', (ms) => streamWork(ms));
 AF.onTick('region-stream', 878, (dt) => {
-  if (!STR.on || !AF.ready) return;
-  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, FD = AF.FAR_LOD || 1e9;
-  // idle slots ran recently (fps cap on): a token slice here; otherwise the old per-frame budget
+  if (!AF.ready || !AF.world.regLod) return;
+  // a far job yields to an urgent one (nothing is attached before its last step, so dropping it is safe)
+  if (STR.gen && !STR.urgent && (STR.chk += dt) > 0.25) { STR.chk = 0; if (pickJob() && isUrgent()) { STR.gen = null; STR.aborted++; } }
+  if (!STR.gen && !PK.fresh && AF.clock.t >= STR.rest) pickJob();
+  const urgent = STR.gen ? STR.urgent : PK.fresh && isUrgent();
+  // idle slots of the fps cap carry the bulk; the rendered frame pays a slice only while something near lacks its detail
   const idle = AF.frameStats && AF.frameStats.idleT > AF.clock.t - 0.25;
-  streamWork(idle ? 1.5 : AF.MOBILE ? 3 : AF.mode === 'cine' ? 9 : 5);
-  if ((STR.t += dt) > 2) {
-    STR.t = 0;
-    const cur = STR.gen ? regionCluster(STR.key) : null;
-    for (const cl of CLS.values()) {
-      if (cl.pending > 0 || !cl.built || cl === cur || clDist(cl, c, vy) < FD + (AF.MOBILE ? 140 : 420)) continue;
-      for (const k of cl.regs) { dropRegion(k); STR.pending.add(k); }
-      cl.pending = cl.regs.length; STR.unloaded++;
-    }
-  }
+  streamWork(AF.mode === 'cine' ? 9 : urgent ? (idle ? 3 : AF.MOBILE ? 3.5 : 5) : idle ? 0.5 : AF.MOBILE ? 2 : 3);
+  if (STR.on && (STR.t += dt) > 1) { STR.t = 0; evict(); }
 });
 const HIDDEN_MAT = new THREE.MeshBasicMaterial({ visible: false });
 function setPartial(cl, on, RL, keepRegions) {
@@ -2002,7 +2118,8 @@ AF.onTick('prop-lod', 880, () => {
   const RL = AF.world.regLod;
   if (RL) {
     const RD = AF.REGION_LOD, FD = AF.FAR_LOD || 1e9, vy = Math.max(0, c.y - 12) * 0.7;
-    const regWant = (r) => r.coarse.length && Math.hypot(r.cx - c.x, r.cz - c.z, vy) > RD + (r.lvl === 1 ? -12 : 12) ? 1 : 0;
+    // a region with only its 0.5 m copy resident shows that until the streamer delivers the full mesh
+    const regWant = (r) => !r.fullOk || (r.coarse.length && Math.hypot(r.cx - c.x, r.cz - c.z, vy) > RD + (r.lvl === 1 ? -12 : 12)) ? 1 : 0;
     for (const cl of CLS.values()) {
       if (!cl.built) continue;
       const dx = Math.max(cl.x0 - c.x, 0, c.x - cl.x1), dz = Math.max(cl.z0 - c.z, 0, c.z - cl.z1);
@@ -2080,16 +2197,14 @@ AF.onTick('prop-lod', 880, () => {
       }
     }
   }
-  let budget = AF.SHOT || AF.TEST ? 1e9 : 10, best = null, bestD = 1e9;
-  const t0 = performance.now(), SN = AF.shadowNear, PC = AF.PROP_CULL || 900;
+  // near props are built by the stream scheduler (streamWork, 'props' jobs); ?shot / ?test build them on the spot
+  const sync = AF.SHOT || AF.TEST, SN = AF.shadowNear, PC = AF.PROP_CULL || 900;
   for (const [k, r] of AF.world.lod) {
     const rl = RL && RL.get(k), hid = !!(rl && rl.hid);
     const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
     if (hid) { if (r.nearBuilt) { FADE.cancel(r); freeNear(r); } }
-    else if (!r.nearBuilt && d < D) {
-      if (budget > 1e8) buildNear(r);
-      else if (d < bestD) { bestD = d; best = r; }
-    } else if (r.nearBuilt && d > D + 70) { FADE.cancel(r); freeNear(r); }
+    else if (!r.nearBuilt && d < D) { if (sync) buildNear(r); }
+    else if (r.nearBuilt && d > D + 70) { FADE.cancel(r); freeNear(r); }
     const showNear = !hid && r.nearBuilt && d < D + 25, farSeen = !!r.far && !showNear && d < PC;
     // near <-> far props and the far-prop cull cross-fade (PERF.md §4); the first decision for a region just sets the state
     if (!r.fadeE && r.showNear !== undefined && (r.showNear !== showNear || r.farSeen !== farSeen)) {
@@ -2108,7 +2223,6 @@ AF.onTick('prop-lod', 880, () => {
     if (r.far) { r.far.visible = showNear ? proxy : farSeen; r.far.layers.set(showNear ? 1 : 0); }
     if (AF.MOBILE && r.far) r.far.castShadow = Math.hypot(r.cx - SN.cx, r.cz - SN.cz) < SN.r + 24;
   }
-  if (best && performance.now() - t0 < budget) buildNear(best);
 });
 // PERF.md §4/§5 guard: whatever the camera does, each region shows exactly one copy (full, 0.5 m or its cluster's 1 m slice)
 AF.test('voxel: one LOD copy per region on screen', () => {
@@ -2150,7 +2264,8 @@ AF.meshWorld = async (progress) => {
     for (let rz = 0; rz < NRZ; rz++) {
       if (AF.NEAR && Math.hypot(X0 + (rx + 0.5) * rm - AF.NEAR.x, Z0 + (rz + 0.5) * rm - AF.NEAR.z) > AF.NEAR.r + rm * 0.71) { done++; continue; }
       const k = rx * 64 + rz, cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
-      if (STR.on && Math.hypot(X0 + (rx + 0.5) * rm - BF.x, Z0 + (rz + 0.5) * rm - BF.z) > BF.r) { STR.pending.add(k); cl.pending = (cl.pending || 0) + 1; done++; continue; }
+      ALL.push({ k, x: X0 + (rx + 0.5) * rm, z: Z0 + (rz + 0.5) * rm });
+      if (STR.on && Math.hypot(X0 + (rx + 0.5) * rm - BF.x, Z0 + (rz + 0.5) * rm - BF.z) > BF.r) { setMissing(k, true); done++; continue; }
       quads += AF.meshRegion(rx, rz); done++;
     }
     if (progress) await progress(done / (NRX * NRZ));
@@ -2165,8 +2280,15 @@ AF.meshWorld = async (progress) => {
   for (const k in AF.stats.meshT) AF.stats.meshT[k] = Math.round(AF.stats.meshT[k]);
   console.log('[af] world meshed:', quads, 'quads in', AF.stats.meshMs, 'ms', JSON.stringify(AF.stats.meshT));
 };
-// re-mesh regions touched by W.set since the last mesh (for runtime edits: doors, etc.)
-AF.remeshDirty = () => { for (const k of W.dirty) AF.meshRegion(k >> 6, k & 63); W.dirty.clear(); coarseCache.clear(); for (const key of compactPending) compactChunk(key); };
+// re-mesh regions touched by W.set since the last mesh (for runtime edits: doors, etc.); streamed-out regions pick the edit up when
+// they stream back in, and a streamed job for an edited region restarts
+AF.remeshDirty = () => {
+  for (const k of W.dirty) {
+    if (STR.gen && STR.key === k) STR.gen = null;
+    if (!STR.on || (AF.world.regLod && AF.world.regLod.has(k))) AF.meshRegion(k >> 6, k & 63);
+  }
+  W.dirty.clear(); coarseCache.clear(); for (const key of compactPending) compactChunk(key);
+};
 AF.onTick('chunk-compaction', 870, () => {
   if (!compactEnabled || !compactPending.size) return;
   let budget = 8;
@@ -2713,7 +2835,9 @@ try {
   const runIdle = (budget = Math.min(AF.MOBILE ? 4 : 6, rafEma * 0.6)) => {
     const L = AF.hooks.idle; if (!L.length) return;
     const t0 = performance.now(), end = t0 + budget;
-    for (let pass = 0; pass < 4 && performance.now() < end - 0.2; pass++) {
+    // 1 ms turns round-robin until the slot is used up or no hook has work left (4 passes left most of a slot idle
+    // whenever only the streamer was busy)
+    for (let pass = 0; pass < 16 && performance.now() < end - 0.2; pass++) {
       let busy = false;
       for (let index = 0; index < L.length; index++) {
         const left = end - performance.now(); if (left < 0.2) break;
@@ -3580,7 +3704,7 @@ AF.PLAN = (() => {
       landing: { x: -20, z: 478, r: 20, y: 2, pier: { x0: -24, x1: -16, z0: 420, z1: 478 } } },
     roads: [
       { name: 'Coast Road', w: 10, surface: 'asphalt', points: [[-660, 0], [-820, -10], [-1000, -40]], heights: [0, 5, 10] },
-      { name: 'Eastwood Road', w: 10, surface: 'asphalt', points: [[460, 0], [700, -40], [980, -120]], heights: [0, 10, 19] },
+      { name: 'Eastwood Road', w: 10, surface: 'asphalt', joinsRing: true, points: [[460, 0], [700, -40], [965, -142]], heights: [0, 10, 19] },   // T into the ring's side (Eastwood Loop runs straight on into the ring)
       { name: 'Lake Road', w: 10, surface: 'gravel', points: [[258, -284], [258, -300], [230, -360], [160, -420], [50, -480], [-40, -560], [-40, -590]], heights: [30, 40, 44, 38, 23, 22, 23] },
       { name: 'West Coast Drive', w: 10, surface: 'asphalt', points: [[-1000, -40], [-1210, -40], [-1220, -220], [-1180, -280]], heights: [10, 9, 7, 9] },
       { name: 'Beach Lane', w: 10, surface: 'gravel', points: [[-1210, -40], [-1210, 60], [-1200, 120], [-1150, 164]], heights: [9, 9, 8, 7] },
@@ -3767,21 +3891,37 @@ function edge(x, z) {
   if (O.edgeReady) edges.set(key, height);
   return height;
 }
-// nearest road segment (any: decks, traffic) and nearest ground-bearing segment (t*: bridges excluded) through a 64 m bucket grid
-let roadD = Infinity, roadY = 0, roadS = 0, roadKind = 0, roadHW = 5, roadFlag = 0, roadDeck = false, roadRef = null;
-let tD = Infinity, tY = 0, tS = 0, tKind = 0, tHW = 5, tFlag = 0;
+// nearest road segment (any: decks, traffic) and the ground-bearing segment (t*: bridges excluded; where the cores of several roads
+// overlap the lowest surface wins, so a junction never lifts the ground through a ribbon) through a 64 m bucket grid; c* = nearest
+// bridge deck. Each road contributes only its own nearest segment (R* scratch), never a neighbouring vertex of itself.
+let roadD = Infinity, roadY = 0, roadS = 0, roadKind = 0, roadHW = 5, roadFlag = 0, roadDeck = false, roadRef = null, roadLift = 0;
+let tD = Infinity, tY = 0, tS = 0, tKind = 0, tHW = 5, tFlag = 0, cD = Infinity, cY = 0, cHW = 0;
+const RN = 48, rRoad = new Array(RN), rD = new Float64Array(RN), rY = new Float64Array(RN), rS = new Float64Array(RN), rSeg = new Array(RN), rEnd = new Uint8Array(RN);
 const key64 = (x, z) => Math.floor(x / 64) * 10000 + Math.floor(z / 64);
+// ribbon height on a segment at (x,z): centreline profile plus the junction cross-fall (bank, per metre to the left of travel)
+const segY = (s, along, x, z) => AF.lerp(s.y0, s.y1, along) + (s.b0 || s.b1 ? AF.lerp(s.b0, s.b1, along) * ((z - s.z) * s.dx - (x - s.x) * s.dz) / s.length : 0);
 function roadAt(x, z, brute = false) {
-  roadD = tD = Infinity; let nearest = Infinity, ground = Infinity;
+  roadD = tD = cD = Infinity; let nearest = Infinity, bridge = Infinity, count = 0;
   const candidates = brute ? segments : roadGrid.get(key64(x, z));
   if (!candidates) return;
   for (const segment of candidates) {
     const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1);
     const dx = x - segment.x - segment.dx * along, dz = z - segment.z - segment.dz * along, distance = dx * dx + dz * dz;
-    if (distance < nearest) { nearest = distance; roadY = AF.lerp(segment.y0, segment.y1, along); roadS = segment.acc + segment.length * along; roadKind = segment.kind; roadHW = segment.hw; roadFlag = segment.flag; roadDeck = segment.deck; roadRef = segment.road; }
-    if (distance < ground && segment.flag !== 1) { ground = distance; tY = AF.lerp(segment.y0, segment.y1, along); tS = segment.acc + segment.length * along; tKind = segment.kind; tHW = segment.hw; tFlag = segment.flag; }
+    if (distance < nearest) { nearest = distance; roadY = segY(segment, along, x, z); roadS = segment.acc + segment.length * along; roadKind = segment.kind; roadHW = segment.hw; roadFlag = segment.flag; roadDeck = segment.deck; roadRef = segment.road; roadLift = segment.lift; }
+    if (segment.flag === 1) { if (distance < bridge) { bridge = distance; cY = AF.lerp(segment.y0, segment.y1, along); cHW = segment.hw; } continue; }
+    let slot = 0; while (slot < count && rRoad[slot] !== segment.road) slot++;
+    if (slot === count) { if (count === RN) continue; rRoad[count] = segment.road; rD[count++] = Infinity; }
+    if (distance < rD[slot]) { rD[slot] = distance; rY[slot] = segY(segment, along, x, z); rS[slot] = segment.acc + segment.length * along; rSeg[slot] = segment; }
   }
-  roadD = Math.sqrt(nearest); tD = Math.sqrt(ground);
+  let pick = -1, cover = Infinity, ground = Infinity;
+  for (let slot = 0; slot < count; slot++) {
+    const segment = rSeg[slot], core = segment.hw + (segment.kind === 0 ? 0.6 : 0.3), surface = rY[slot] - (segment.kind === 0 ? 0.2 : 0);
+    if (rD[slot] < core * core) { if (surface < cover - 1e-9 || surface < cover + 1e-9 && rD[slot] < ground) { cover = surface; ground = rD[slot]; pick = slot; } }
+    else if (cover === Infinity && rD[slot] < ground) { ground = rD[slot]; pick = slot; }
+  }
+  if (pick >= 0) { const segment = rSeg[pick]; tD = Math.sqrt(ground); tY = rY[pick]; tS = rS[pick]; tKind = segment.kind; tHW = segment.hw; tFlag = segment.flag; }
+  for (let slot = 0; slot < count; slot++) rRoad[slot] = rSeg[slot] = null;
+  roadD = Math.sqrt(nearest); cD = Math.sqrt(bridge);
 }
 // rivers: channel + banks carved into the terrain (after the city-edge blend), levels fall monotonically to the sea / the city falls
 let rivD = Infinity, rivY = 0, rivHW = 0, riverReady = false;
@@ -3820,6 +3960,11 @@ O.h = (x, z) => {
       // asphalt sits 0.2 m under its smooth ribbon (49-roads); cuts and fills widen with their depth, tunnels keep sheer walls
       const core = tHW + (tKind === 0 ? 0.6 : 0.3), outer = core + (tFlag === 2 ? 1 : Math.min(36, 2.5 + Math.abs(height - tY) * 0.9));
       if (tD < outer) height = AF.lerp(tY - (tKind === 0 ? 0.2 : 0), height, smooth(core, outer, tD));
+    }
+    // bridges only ever cut: banks and abutments never rise through a deck
+    if (cD < cHW + 40) {
+      const core = cHW + 0.6, outer = core + Math.min(36, 2.5 + Math.max(0, height - cY) * 0.9);
+      if (cD < outer) height = Math.min(height, AF.lerp(cY - 0.2, height, smooth(core, outer, cD)));
     }
   }
   return height;
@@ -3888,15 +4033,51 @@ O.forestDensity = (x, z) => {
 };
 // distance past a road's edge + 5 (so a 10 m lane keeps its old meaning; trails let the trees come close)
 O.roadDistance = (x, z) => { roadAt(x, z); return roadD === Infinity ? Infinity : Math.min(roadD - roadHW, tD - tHW) + 5; };
-// drivable surface of a road ribbon / bridge deck at (x,z) (-Infinity off the ribbon); y above a tunnel roof stands on the roof
+// drivable top of the ribbons / bridge decks at (x,z) (-Infinity off them). With y: the highest top at or below y + 0.35 (a
+// viaduct over a lane, or the lane under it); y above a tunnel roof stands on the roof. Without y: the nearest ribbon.
 O.deckY = (x, z, y) => {
   if (z > 300) return -Infinity;
-  roadAt(x, z); if (!roadDeck || roadD > roadHW + 0.15) return -Infinity;
-  return roadFlag === 2 && y !== undefined && y > roadY + O.TUNNEL_H ? roadY + O.TUNNEL_H + 0.6 : roadY;
+  const list = roadGrid.get(key64(x, z)); if (!list) return -Infinity;
+  let count = 0;
+  for (const segment of list) {
+    if (!segment.deck) continue;
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1), reach = segment.hw + 0.15;
+    const distance = (x - segment.x - segment.dx * along) ** 2 + (z - segment.z - segment.dz * along) ** 2;
+    if (distance > reach * reach) continue;
+    let slot = 0; while (slot < count && rRoad[slot] !== segment.road) slot++;
+    if (slot === count) { if (count === RN) continue; rRoad[count] = segment.road; rD[count++] = Infinity; }
+    if (distance < rD[slot]) { rD[slot] = distance; rY[slot] = segY(segment, along, x, z) + segment.lift; rSeg[slot] = segment; rEnd[slot] = pastEnd(segment.road, x, z) ? 1 : 0; }
+  }
+  // ribbons end square: past a road's last vertex it only carries a car where nothing else does (junction pads)
+  let best = -Infinity, near = Infinity;
+  for (let pass = 0; pass < 2 && best === -Infinity; pass++) for (let slot = 0; slot < count; slot++) {
+    if (rEnd[slot] !== pass) continue;
+    let top = rY[slot], under = false;
+    // a ribbon trimmed under an outranking one at the same level (49-roads junctions) is not a surface there
+    for (let other = 0; other < count && !under; other++) under = other !== slot && !rEnd[other] && rRoad[slot].kind === 0 && rRoad[other].kind === 0 && rD[other] < (rSeg[other].hw - 0.02) ** 2 && outranks(rRoad[other], rRoad[slot]) && Math.abs(rY[other] - top) < 1.5;
+    if (under) continue;
+    if (y === undefined) { if (rD[slot] < near) { near = rD[slot]; best = top; } }
+    else {
+      if (rSeg[slot].flag === 2 && y > top + O.TUNNEL_H) top += O.TUNNEL_H + 0.6;
+      if (top <= y + 0.35 && top > best) best = top;
+    }
+  }
+  for (let slot = 0; slot < count; slot++) rRoad[slot] = rSeg[slot] = null;
+  return best;
 };
-O.roadY = (x, z) => { roadAt(x, z); return roadD === Infinity ? O.h(x, z) : roadY; };
+O.roadY = (x, z) => { roadAt(x, z); return roadD === Infinity ? O.h(x, z) : roadY + (roadDeck ? roadLift : 0); };
+// ribbon top of one road (route cars keep to their own road where another passes under or over it)
+O.roadYOn = (road, x, z) => {
+  let best = Infinity, y = O.h(x, z);
+  for (const segment of roadGrid.get(key64(x, z)) || []) {
+    if (segment.road !== road) continue;
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1), distance = (x - segment.x - segment.dx * along) ** 2 + (z - segment.z - segment.dz * along) ** 2;
+    if (distance < best) { best = distance; y = segY(segment, along, x, z) + (segment.deck ? segment.lift : 0); }
+  }
+  return y;
+};
 O.roadInfo = (x, z) => { roadAt(x, z); return { d: roadD, y: roadY, s: roadS, kind: roadKind, hw: roadHW, flag: roadFlag, deck: roadDeck, road: roadRef }; };
-// nearest segment of any road other than `exclude` (junction trimming)
+// nearest segment of any road other than `exclude`
 O.otherRoad = (x, z, exclude) => {
   let best = Infinity, hit = null;
   for (const segment of roadGrid.get(key64(x, z)) || []) {
@@ -3905,6 +4086,74 @@ O.otherRoad = (x, z, exclude) => {
     if (distance < best) { best = distance; hit = segment; }
   }
   return hit ? { d: Math.sqrt(best), hw: hit.hw, road: hit.road, deck: hit.deck, flag: hit.flag } : null;
+};
+// junction trimming (49-roads): the asphalt road whose ribbon covers (x,z) and outranks `road` (ring > wider > listed first;
+// driveways yield to everything; any = every other road), at the same level (+-1.5 m of y), or null. Ribbon ends are square.
+const outranks = (other, road) => !other.driveway && (road.driveway || other.ring || !road.ring && (other.w > road.w || other.w === road.w && other.order < road.order));
+O.coverAt = (x, z, road, y, any = false) => {
+  for (const segment of roadGrid.get(key64(x, z)) || []) {
+    const other = segment.road;
+    if (other === road || other.kind !== 0 || !any && !outranks(other, road)) continue;
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1);
+    const distance = (x - segment.x - segment.dx * along) ** 2 + (z - segment.z - segment.dz * along) ** 2;
+    if (distance < (segment.hw - 0.02) ** 2 && Math.abs(AF.lerp(segment.y0, segment.y1, along) - y) < 1.5 && !pastEnd(other, x, z)) return other;
+  }
+  return null;
+};
+// beyond the square end of a road's first or last vertex (the drawn ribbon stops there; only tested near those ends)
+function setEnds(road) {
+  const p = road.points, n = p.length, a = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]) || 1, b = Math.hypot(p[n - 1][0] - p[n - 2][0], p[n - 1][1] - p[n - 2][1]) || 1;
+  road.ends = [p[0][0], p[0][1], (p[1][0] - p[0][0]) / a, (p[1][1] - p[0][1]) / a, p[n - 1][0], p[n - 1][1], (p[n - 1][0] - p[n - 2][0]) / b, (p[n - 1][1] - p[n - 2][1]) / b];
+}
+const pastEnd = (road, x, z) => {
+  const e = road.ends, r = road.w + 2;
+  return (x - e[0]) ** 2 + (z - e[1]) ** 2 < r * r && (x - e[0]) * e[2] + (z - e[1]) * e[3] < 0 || (x - e[4]) ** 2 + (z - e[5]) ** 2 < r * r && (x - e[4]) * e[6] + (z - e[5]) * e[7] > 0;
+};
+// outland mesher heights (49-outland): a quantised cell never rises through an asphalt ribbon or deck it overlaps at any LOD
+O.meshH = (x, z, step) => {
+  const quantum = step <= 1 ? step * 0.5 : step * 0.75, height = Math.round(O.h(x, z) / quantum) * quantum;
+  if (z > 300) return height;
+  const reach = step * 0.71 + 0.35;
+  let cap = Infinity;
+  for (const segment of roadGrid.get(key64(x, z)) || []) {
+    if (segment.kind !== 0 && segment.flag !== 1) continue;
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1), limit = segment.hw + reach;
+    const distance = (x - segment.x - segment.dx * along) ** 2 + (z - segment.z - segment.dz * along) ** 2;
+    if (distance < limit * limit) cap = Math.min(cap, segY(segment, along, x, z) - 0.1 - reach * (segment.grade + Math.max(Math.abs(segment.b0), Math.abs(segment.b1))));
+  }
+  return height > cap ? Math.floor(cap / quantum) * quantum : height;
+};
+// outland tile boundary profile (49-outland rimSample): tile edges interpolate an 8 m lattice of rim heights, so a lattice edge
+// crossing a ribbon / deck (tunnels: their trench) must pass under it. Each crossing is carried by the node hidden under the road
+// (lowering it is invisible); a node beside the road only takes the constraint when neither or both are under it. Per-node and
+// local (neighbours enter with their natural height, an upper bound), so every tile still shares the same crack-free profile.
+let capTunnel = false;
+const ribbonCap = (x, z) => {
+  let cap = Infinity; capTunnel = false;
+  for (const segment of roadGrid.get(key64(x, z)) || []) {
+    if (segment.kind !== 0 && segment.flag !== 1) continue;
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1), reach = segment.hw + (segment.flag === 2 ? 1.7 : 0.15);
+    const distance = (x - segment.x - segment.dx * along) ** 2 + (z - segment.z - segment.dz * along) ** 2;
+    if (distance < reach * reach) { const y = segY(segment, along, x, z) - 0.15; if (y < cap) { cap = y; capTunnel = segment.flag === 2; } }
+  }
+  return cap;
+};
+const RIM_DIRS = [[8, 0], [-8, 0], [0, 8], [0, -8]];
+O.rimH = (x, z) => {
+  const natural = Math.round(O.h(x, z) * 4) / 4;
+  if (z > 300 || !O.edgeReady) return natural;
+  roadAt(x, z); if (roadD > 17) return natural;
+  const own = ribbonCap(x, z), hidden = own < Infinity, depth = capTunnel ? 40 : 8;
+  let value = Math.min(natural, own);
+  for (const [dx, dz] of RIM_DIRS) {
+    const mx = x + dx, mz = z + dz, other = Math.round(O.h(mx, mz) * 4) / 4, otherHidden = ribbonCap(mx, mz) < Infinity;
+    for (let k = 1; k < 16; k++) {
+      const t = k / 16; if (hidden === otherHidden ? t > 0.5 : !hidden) continue;
+      const cap = ribbonCap(x + dx * t, z + dz * t);
+      if (cap < Infinity) value = Math.min(value, Math.max(cap - depth, (cap - t * other) / (1 - t)));
+    }
+  }
+  return value < natural ? Math.floor(value * 4) / 4 : natural;
 };
 O.riverInfo = (x, z) => { riverAt(x, z); return { d: rivD, y: rivY, hw: rivHW }; };
 O.fieldEdge = (x, z) => { farmAt(x, z); return fieldD; };
@@ -3943,7 +4192,7 @@ AF.test('outland: ring road loops the range with bridges, tunnels and wayside st
   let length = 0, bridges = 0, tunnels = 0, deckOk = true;
   for (let index = 1; index < ring.points.length; index++) length += Math.hypot(ring.points[index][0] - ring.points[index - 1][0], ring.points[index][1] - ring.points[index - 1][1]);
   for (let index = 1; index < ring.flags.length; index++) if (ring.flags[index] !== ring.flags[index - 1]) { if (ring.flags[index] === 1) bridges++; if (ring.flags[index] === 2) tunnels++; }
-  for (let index = 0; index < ring.points.length; index += 7) { const [x, z] = ring.points[index], deck = O.deckY(x, z, ring.heights[index] + 0.5); if (Math.abs(deck - ring.heights[index]) > 0.05) deckOk = false; }
+  for (let index = 0; index < ring.points.length; index += 7) { const [x, z] = ring.points[index], deck = O.deckY(x, z, ring.heights[index] + 0.5); if (Math.abs(deck - ring.heights[index] - ring.lift) > 0.02) deckOk = false; }
   return { ok: length > 2000 && bridges >= 2 && tunnels >= 1 && deckOk && O.wayside.length >= 6, info: Math.round(length) + ' m, ' + bridges + ' bridges, ' + tunnels + ' tunnels, ' + O.wayside.length + ' stops, deck ' + deckOk };
 });
 AF.test('outland: rivers run downhill to the sea or the Solace falls, bridged where roads cross', () => {
@@ -4009,19 +4258,20 @@ function buildRivers() {
   riverReady = true;
 }
 function nearestOn(road, x, z) {
-  let best = Infinity, y = 0, flag = 0;
+  let best = Infinity, y = 0, flag = 0, gx = 0, gz = 0;
   for (let index = 1; index < road.points.length; index++) {
-    const a = road.points[index - 1], b = road.points[index], dx = b[0] - a[0], dz = b[1] - a[1], t = clamp(((x - a[0]) * dx + (z - a[1]) * dz) / (dx * dx + dz * dz || 1), 0, 1);
+    const a = road.points[index - 1], b = road.points[index], dx = b[0] - a[0], dz = b[1] - a[1], len2 = dx * dx + dz * dz || 1, t = clamp(((x - a[0]) * dx + (z - a[1]) * dz) / len2, 0, 1);
     const distance = (x - a[0] - dx * t) ** 2 + (z - a[1] - dz * t) ** 2;
-    if (distance < best) { best = distance; y = AF.lerp(road.heights[index - 1], road.heights[index], t); flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0; }
+    if (distance < best) { best = distance; y = AF.lerp(road.heights[index - 1], road.heights[index], t); flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0; const rise = (road.heights[index] - road.heights[index - 1]) / len2, terminal = t === 0 && index === 1 || t === 1 && index === road.points.length - 1; gx = terminal ? NaN : dx * rise; gz = dz * rise; }
   }
-  return { d: Math.sqrt(best), y, flag };
+  // gx, gz: the host's surface gradient there (its cross-section is level); NaN past the host's own end (end-to-end joins)
+  return { d: Math.sqrt(best), y, flag, gx, gz };
 }
 // dense centreline + height profile: smoothed terrain, grade-limited, anchored to the city and to roads already profiled;
 // flags 1 = bridge (over water or > 7 m above ground), 2 = tunnel (ring only, > 12 m under ground)
 function profile(road, done) {
   const kind = road.kind, pts = catmull(road.ctrl, kind === 2 ? 5 : 6), n = pts.length;
-  const base = new Float64Array(n), lo = new Float64Array(n).fill(-Infinity), anchor = new Float64Array(n).fill(NaN), water = new Uint8Array(n), step = new Float64Array(n);
+  const base = new Float64Array(n), lo = new Float64Array(n).fill(-Infinity), anchor = new Float64Array(n).fill(NaN), water = new Uint8Array(n), step = new Float64Array(n), slopeX = new Float64Array(n).fill(NaN), slopeZ = new Float64Array(n);
   for (let index = 0; index < n; index++) {
     const x = pts[index][0], z = pts[index][1];
     if (index) step[index] = Math.hypot(x - pts[index - 1][0], z - pts[index - 1][1]);
@@ -4032,8 +4282,10 @@ function profile(road, done) {
     riverAt(x, z); if (rivD < rivHW + 5) { lo[index] = rivY + (kind === 2 ? 1.8 : 3.4); water[index] = 1; }
     for (const lake of waters) if (waterE(x, z, lake) < 1.1) { lo[index] = Math.max(lo[index], lake.waterY + 3); water[index] = 1; }
     if (base[index] < 0) { lo[index] = Math.max(lo[index], 2.5); water[index] = 1; }
-    const end = index === 0 || index === n - 1;
-    for (const other of done) { const hit = nearestOn(other, x, z); if (hit.d < (end ? 8 : 3.5) && hit.flag === 0) anchor[index] = hit.y; }
+    const end = index === 0 || index === n - 1, near = index <= 2 || index >= n - 3;
+    // junctions: everything on an older road's carriageway, and near this road's ends the first vertex past its edge, takes the
+    // older road's level, so the trimmed ribbon meets it flush
+    for (const other of done) { const hit = nearestOn(other, x, z); if (hit.d < (near ? Math.max(end ? 8 : 0, other.w / 2 + 6.5) : other.w / 2 + 2) && hit.flag === 0) { anchor[index] = hit.y; const beside = pastEnd(other, x, z); slopeX[index] = beside ? NaN : hit.gx; slopeZ[index] = beside ? 0 : hit.gz; } }
   }
   const radius = road.ring ? 6 : kind === 1 ? 4 : kind === 2 ? 1 : 5;
   let current = base.map((value, index) => Math.max(value, lo[index]));
@@ -4044,6 +4296,13 @@ function profile(road, done) {
     for (let index = 1; index < n; index++) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index - 1] - grade * step[index], y[index - 1] + grade * step[index]);
     for (let index = n - 2; index >= 0; index--) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index + 1] - grade * step[index + 1], y[index + 1] + grade * step[index + 1]);
   }
+  // round off the grade breaks the clamp leaves (a car felt each one as a bump), then re-check the limit
+  for (let pass = 0; pass < 3; pass++) {
+    const prev = y.slice();
+    for (let index = 1; index < n - 1; index++) if (Number.isNaN(anchor[index])) y[index] = Math.max(lo[index], (prev[index - 1] + 2 * prev[index] + prev[index + 1]) / 4);
+  }
+  for (let index = 1; index < n; index++) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index - 1] - grade * step[index], y[index - 1] + grade * step[index]);
+  for (let index = n - 2; index >= 0; index--) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index + 1] - grade * step[index + 1], y[index + 1] + grade * step[index + 1]);
   const raw = new Uint8Array(n), flags = new Uint8Array(n);
   for (let index = 0; index < n; index++) if (Number.isNaN(anchor[index]) || W.col(pts[index][0], pts[index][1]) < 0) {
     if (water[index] || kind !== 2 && y[index] - base[index] > 7) raw[index] = 1; else if (road.ring && base[index] - y[index] > 12) raw[index] = 2;
@@ -4051,7 +4310,17 @@ function profile(road, done) {
   for (let index = 0; index < n; index++) flags[index] = raw[index] || (raw[index - 1] === 1 || raw[index + 1] === 1 ? 1 : 0);
   for (let index = 0; index < n;) { if (flags[index] !== 2) { index++; continue; } let end = index; while (end < n && flags[end] === 2) end++; if (end - index < 4) flags.fill(0, index, end); index = end; }
   for (let index = 0; index < n; index++) if (W.col(pts[index][0], pts[index][1]) >= 0) flags[index] = 0;
-  road.points = pts; road.heights = Array.from(y); road.flags = flags; road.base = base;
+  // junction cross-fall: where an asphalt road takes an older road's level, its cross-section also takes that road's slope
+  // (a level cross-section meeting a climbing road left a step at the seam); fades out one vertex past the junction
+  const bank = new Float64Array(n);
+  if (kind === 0) for (let index = 0; index < n; index++) {
+    let source = index, weight = 1;
+    if (Number.isNaN(slopeX[index])) { weight = 0.5; source = index > 0 && !Number.isNaN(slopeX[index - 1]) ? index - 1 : index < n - 1 && !Number.isNaN(slopeX[index + 1]) ? index + 1 : -1; }
+    if (source < 0) continue;
+    const before = pts[Math.max(0, index - 1)], after = pts[Math.min(n - 1, index + 1)], tx = after[0] - before[0], tz = after[1] - before[1], length = Math.hypot(tx, tz) || 1;
+    bank[index] = weight * (slopeX[source] * -tz + slopeZ[source] * tx) / length;
+  }
+  road.points = pts; road.heights = Array.from(y); road.flags = flags; road.base = base; road.bank = Array.from(bank); setEnds(road);
 }
 const STOPS = [['kiosk', 'Wayside Kiosk', 7], ['houses', 'Roadside Cottages', 17], ['fuel', 'Ring Road Fuel', 14], ['supermarket', 'Ridgeway Market', 19], ['diner', 'Summit Diner', 12], ['houses', 'Pine Row', 17],
   ['mall', 'Range Shopping Centre', 26], ['motel', 'Lookout Motel', 16], ['kiosk', 'Farm Stall', 7], ['houses', 'Hilltop Homes', 17], ['diner', 'Valley View Cafe', 12], ['supermarket', 'Westmoor Co-op', 19]];
@@ -4078,7 +4347,12 @@ function wayside(ring, done) {
         if (bad) continue;
         const face = Math.abs(nx) > Math.abs(nz) ? [-Math.sign(nx), 0] : [0, -Math.sign(nz)];
         placed = { name, kind, x: Math.round(cx), z: Math.round(cz), rx: R, rz: R, y: Math.round(y * 4) / 4, bank: 12, props: [], face, rot: face[1] > 0 ? 0 : face[0] < 0 ? 1 : face[1] < 0 ? 2 : 3, ringS: cum[index], roadX: pts[index][0], roadZ: pts[index][1] };
-        drives.push({ name: name + ' drive', w: 6, surface: 'asphalt', kind: 0, grade: 0.1, driveway: true, ctrl: [[pts[index][0] + nx * (ring.w / 2 - 0.5), pts[index][1] + nz * (ring.w / 2 - 0.5)], [placed.x, placed.z]], points: [[pts[index][0] + nx * (ring.w / 2 - 0.5), pts[index][1] + nz * (ring.w / 2 - 0.5)], [placed.x, placed.z]], heights: [y, placed.y], flags: new Uint8Array(2) });
+        // the drive stops at the forecourt edge of the pad (bays, buildings and picnic tables stand behind it)
+        const start = [pts[index][0] + nx * (ring.w / 2 - 0.5), pts[index][1] + nz * (ring.w / 2 - 0.5)], stop = [placed.x + face[0] * R, placed.z + face[1] * R];
+        const rise = (ring.heights[index + 1] - ring.heights[index - 1]) / (tl * tl), dl = Math.hypot(stop[0] - start[0], stop[1] - start[1]) || 1;
+        const bank = (tx * rise * -(stop[1] - start[1]) + tz * rise * (stop[0] - start[0])) / dl;
+        drives.push({ name: name + ' drive', w: 6, surface: 'asphalt', kind: 0, grade: 0.1, driveway: true, ctrl: [start, stop],
+          points: [0, 1, 2, 3, 4].map((k) => [AF.lerp(start[0], stop[0], k / 4), AF.lerp(start[1], stop[1], k / 4)]), heights: [0, 1, 2, 3, 4].map((k) => AF.lerp(y, placed.y, k / 4)), flags: new Uint8Array(5), bank: [0, 1, 2, 3, 4].map((k) => bank * (1 - k / 4)) });
         break;
       }
     }
@@ -4089,10 +4363,13 @@ function wayside(ring, done) {
 }
 function register(road) {
   let acc = 0;
+  road.order = P.roads.indexOf(road); road.lift = 0.05; setEnds(road);
   for (let index = 1; index < road.points.length; index++) {
     const start = road.points[index - 1], end = road.points[index], dx = end[0] - start[0], dz = end[1] - start[1], len2 = dx * dx + dz * dz || 1e-6;
-    const flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0;
-    const segment = { x: start[0], z: start[1], dx, dz, len2, length: Math.sqrt(len2), y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.kind, hw: road.w / 2, flag, deck: road.kind === 0 || flag === 1, road };
+    const flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0, length = Math.sqrt(len2);
+    const segment = { x: start[0], z: start[1], dx, dz, len2, length, y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.kind, hw: road.w / 2, flag, deck: road.kind === 0 || flag === 1, road,
+      lift: road.lift, grade: Math.abs(road.heights[index] - road.heights[index - 1]) / length, first: index === 1, last: index === road.points.length - 1,
+      b0: road.bank ? road.bank[index - 1] : 0, b1: road.bank ? road.bank[index] : 0 };
     segments.push(segment); acc += segment.length;
     const x0 = Math.floor((Math.min(segment.x, segment.x + segment.dx) - 44) / 64), x1 = Math.floor((Math.max(segment.x, segment.x + segment.dx) + 44) / 64);
     const z0 = Math.floor((Math.min(segment.z, segment.z + segment.dz) - 44) / 64), z1 = Math.floor((Math.max(segment.z, segment.z + segment.dz) + 44) / 64);
@@ -4104,14 +4381,15 @@ AF.onBuild('outland-boundary', 496, () => {
   buildRivers();
   const done = [], order = [...P.roads.filter((road) => road.ring), ...P.roads.filter((road) => !road.ring)];
   for (const road of order) {
-    // forks leave the ring at the nearest at-grade point (never from a bridge or a tunnel)
-    if ((road.fork || road.kind === 2) && done.length) {
-      const ring = done[0], [fx, fz] = road.ctrl[0]; let best = Infinity, at = -1;
+    // forks leave the ring at the nearest at-grade point (never from a bridge or a tunnel); `joinsRing` roads end on its side (a T)
+    for (const end of [0, road.ctrl.length - 1]) {
+      if (!(end === 0 ? road.fork || road.kind === 2 : road.joinsRing) || !done.length) continue;
+      const ring = done[0], [fx, fz] = road.ctrl[end]; let best = Infinity, at = -1;
       for (let index = 3; index < ring.points.length - 3; index++) {
         let level = true; for (let k = index - 3; k <= index + 3; k++) if (ring.flags[k]) level = false;
         const d = Math.hypot(ring.points[index][0] - fx, ring.points[index][1] - fz); if (level && d < best) { best = d; at = index; }
       }
-      if (at >= 0 && best < 150) road.ctrl[0] = [ring.points[at][0], ring.points[at][1]];
+      if (at >= 0 && best < 150) road.ctrl[end] = [ring.points[at][0], ring.points[at][1]];
     }
     profile(road, done); done.push(road);
   }
@@ -18815,6 +19093,604 @@ try {
 }
 } catch (e) { AF.partError('43-east.js', e); }
 
+// ================================================================ 44-farms.js
+try {
+// ===== 44-farms: Westmoor crops and farm life. Fields come from 07-outland's field function (re-derived in field space, so
+//       rows follow the painted stripes): wheat, corn, sunflowers, vineyards, vegetables (cabbage / pumpkin / lavender /
+//       lettuce), fallow and meadows. Crops are four shared near InstancedMeshes (one 4 x 2.5 m row segment per instance,
+//       wind sway) plus one shared box "canopy" InstancedMesh to the far range; dithered hand-over, selection in idle slots,
+//       no shadows. Farm machines (combines, tractors) are merged props when parked and two instanced batches when working.
+//       Scarecrows, bales, troughs, hives, sheds, bins, wind pumps, coops: merged outland props (zero extra draws).
+const O = AF.outland, hash = AF.hash2, noise = AF.noise2, smooth = AF.smooth;
+const FM = AF.farms = { fields: [], movers: [], meshes: [], models: {}, stats: { ready: false, phase: 'idle', records: 0, kinds: [0, 0, 0, 0, 0], props: 0, draws: 0, triangles: 0, near: 0, mid: 0, workMs: 0, maxSliceMs: 0, selects: 0, fields: 0, walkers: 0 } };
+// ---------------------------------------------------------------- field space (mirror of 07-outland farmAt; guarded by a test)
+const U_K = 1 + 0.19 * 0.12;
+const toU = (x, z) => x + z * 0.19 + (noise(x * 0.012, z * 0.012) - 0.5) * 15;
+function toWorld(U, V, out) {
+  let x = (U - 0.19 * V) / U_K, z = V + 0.12 * x;
+  for (let step = 0; step < 5; step++) { x = (U - 0.19 * V - (noise(x * 0.012, z * 0.012) - 0.5) * 15) / U_K; z = V + 0.12 * x; }
+  out[0] = x; out[1] = z; return out;
+}
+// world displacement of a unit field-space step (dU,dV) at (x,z)
+function worldStep(x, z, dU, dV, out) {
+  const a = 1 + (noise((x + 0.5) * 0.012, z * 0.012) - noise((x - 0.5) * 0.012, z * 0.012)) * 15, b = 0.19 + (noise(x * 0.012, (z + 0.5) * 0.012) - noise(x * 0.012, (z - 0.5) * 0.012)) * 15, det = a + 0.12 * b;
+  out[0] = (dU - b * dV) / det; out[1] = (0.12 * dU + a * dV) / det; return out;
+}
+const farmW = (x, z) => 1 - smooth(-700, -620, x + (noise(x * 0.004 + 3, z * 0.004 - 8) - 0.5) * 110);
+const laneD = (x, z) => Math.min(Math.abs(z + 64 + Math.sin(x * 0.008) * 17), Math.abs(x + 990 + Math.sin(z * 0.013) * 24));
+FM.fieldAt = (x, z) => {
+  const ux = toU(x, z), uz = z - x * 0.12, row = Math.floor(uz / 83), width = 65 + hash(row, 91) * 58, fx = (ux + hash(row, 7) * 80) / width, phase = fx - Math.floor(fx), strip = uz - row * 83;
+  return { id: hash(Math.floor(fx), row), d: Math.min(phase * width, (1 - phase) * width, strip, 83 - strip), lane: laneD(x, z) };
+};
+// crop kinds: 0 wheat, 1 corn, 2 sunflower, 3 vine, 4 vegetables; -1 fallow, -2 meadow
+const cropOf = (id) => id < 0.3 ? 0 : id < 0.4 ? 1 : id < 0.5 ? 3 : id < 0.58 ? -1 : id < 0.68 ? 2 : id < 0.8 ? 4 : -2;
+const KIND = ['wheat', 'corn', 'sunflower', 'vine', 'veg'];
+// clear ground for crops / props: farmland interior, off roads, lanes, rivers, water and site pads (pads flatten into their bank)
+function clear(x, z, margin = 0) {
+  if (x > -662 || z < -294 || z > O.coastZ(x) - 30 || x - O.coastX(z) < 40 || farmW(x, z) < 0.6 || laneD(x, z) < 4.5 + margin) return false;
+  if (O.roadDistance(x, z) < 9 + margin || O.waterY(x, z) !== null) return false;
+  const river = O.riverInfo(x, z); if (river.d < river.hw + 6 + margin) return false;
+  for (const pad of O.pads) if (Math.max(Math.abs(x - pad.x) - pad.rx, Math.abs(z - pad.z) - pad.rz) < pad.bank + 2 + margin) return false;
+  return true;
+}
+FM.clear = clear;
+function enumerate() {
+  const fields = [], at = [0, 0];
+  for (let row = -4; row <= 5; row++) {
+    const width = 65 + hash(row, 91) * 58, off = hash(row, 7) * 80;
+    for (let index = Math.floor((-1380 + off) / width); index <= Math.floor((-600 + off) / width); index++) {
+      const id = hash(index, row), U0 = index * width - off, V0 = row * 83, gx = id > 0.5 ? 1 : 0.3, gz = id > 0.5 ? 0.2 : 0.95, gl = Math.hypot(gx, gz);
+      toWorld(U0 + width / 2, V0 + 41.5, at);
+      if (at[0] > -630 || at[0] < -1330 || at[1] < -340 || at[1] > 260) continue;
+      fields.push({ key: index * 16 + row, i: index, r: row, id, crop: cropOf(id), U0, U1: U0 + width, V0, V1: V0 + 83, gx: gx / gl, gz: gz / gl, dx: -gz / gl, dz: gx / gl, P: 2.5 / gl, cx: at[0], cz: at[1], v: hash(index * 7 + 3, row * 13 + 5), cut: -Infinity, records: 0 });
+    }
+  }
+  return fields;
+}
+const L_SEG = 4, MARGIN = 3.6, STRIDE = 9;
+// lattice in field space: stripe k centre (k + 0.5) * P along g, segment a along d (odd stripes staggered by half a segment)
+function stripes(f) {
+  let t0 = Infinity, t1 = -Infinity, s0 = Infinity, s1 = -Infinity;
+  for (const U of [f.U0, f.U1]) for (const V of [f.V0, f.V1]) { const t = f.gx * U + f.gz * V, s = f.dx * U + f.dz * V; t0 = Math.min(t0, t); t1 = Math.max(t1, t); s0 = Math.min(s0, s); s1 = Math.max(s1, s); }
+  return { k0: Math.ceil(t0 / f.P - 0.5), k1: Math.floor(t1 / f.P - 0.5), s0, s1 };
+}
+const inField = (f, U, V, m) => U >= f.U0 + m && U <= f.U1 - m && V >= f.V0 + m && V <= f.V1 - m;
+const fieldPoint = (f, t, s, out) => { out[0] = f.gx * t + f.dx * s; out[1] = f.gz * t + f.dz * s; return out; };
+// contiguous clear run along stripe k (or between stripes when half=true), longest run; returns field-space s values.
+// wide=true (machines) also keeps 9 m clear of any water around the line
+const dry = (x, z, r) => { for (let index = 0; index < 8; index++) { const angle = index / 8 * Math.PI * 2; if (O.waterY(x + Math.cos(angle) * r, z + Math.sin(angle) * r) !== null) return false; } return true; };
+function run(f, k, half = false, margin = 2, wide = false) {
+  const st = stripes(f), t = (k + (half ? 1 : 0.5)) * f.P, uv = [0, 0], w = [0, 0];
+  let best = null, cur = null;
+  for (let s = Math.ceil(st.s0 / 2) * 2; s <= st.s1; s += 2) {
+    fieldPoint(f, t, s, uv); toWorld(uv[0], uv[1], w); const ok = inField(f, uv[0], uv[1], MARGIN) && clear(w[0], w[1], margin) && (!wide || dry(w[0], w[1], 9));
+    if (ok) { if (!cur) cur = [s, s]; cur[1] = s; if (!best || cur[1] - cur[0] > best[1] - best[0]) best = cur.slice(); } else cur = null;
+  }
+  return best && best[1] - best[0] >= 24 ? best : null;
+}
+// ---------------------------------------------------------------- palettes
+const pc = (hex) => AF.col(hex, { jitter: 0.6, edge: 0.12, solid: false, pat: 'none' });
+const quad = (a, b, c, d) => [pc(a), pc(b), pc(c), pc(d ?? c)];
+// canopy boxes: [row centre, row edge]
+const pair = (a, b) => [pc(a), pc(b)];
+const PALS = {
+  wheat: [quad(0xd6b24e, 0xa9883a, 0xe2c262), quad(0xe0c26a, 0xb89c4c, 0xead07c), quad(0xc4b04a, 0x8f9440, 0xd2bf58)], wheatSlab: [pair(0xb8a05a, 0x9c8648), pair(0xc2aa64, 0xa48e50), pair(0xae9c54, 0x8e8a44)],
+  corn: [quad(0x5f8a3a, 0x4a7830, 0x56843a, 0xd9c47a)], cornSlab: [pair(0x5a8a3a, 0x3f6a2c)],
+  sunflower: [quad(0x5a8a34, 0x46752c, 0xf2c21e, 0x5a3a1e), quad(0x5f8f38, 0x4a7a30, 0xf5d040, 0x6a4422)], sunflowerSlab: [pair(0xb89a2e, 0x5f7a30), pair(0xbea236, 0x627e34)],
+  vine: [quad(0x4f7d34, 0x6a9a40, 0x4c2c5e, 0x34203f), quad(0x557f36, 0x739c44, 0xb6c25a, 0x98a848)], vineSlab: [pair(0x4f7d34, 0x3c6a2a), pair(0x557f36, 0x426e2c)],
+  veg: [quad(0x3f6e3a, 0x3f6e3a, 0xa9c98a, 0xc7dca8), quad(0x3d6b2e, 0x3d6b2e, 0xe07a1f, 0x5a7a2a), quad(0x7a8a6a, 0x7a8a6a, 0x8a6ac0, 0xa88ad8), quad(0x5f9a3c, 0x5f9a3c, 0x9acb5a, 0xb8dc78)],
+  vegSlab: [pair(0x8ab070, 0x5c7a40), pair(0xb8742a, 0x4f6a2a), pair(0x8a72b8, 0x6a7a5a), pair(0x7ab04a, 0x5a8a3a)],
+};
+// per kind: near radius by tier [low/phone, laptop, balanced+], canopy box height (m) / width (x 2.5 m) / lift (m)
+const KS = [
+  { mesh: 'wheat', R: [24, 40, 48], h: 0.8, w: 1, y: 0 },
+  { mesh: 'tall', R: [20, 32, 40], h: 2.0, w: 1, y: 0 },
+  { mesh: 'tall', R: [20, 32, 40], h: 1.95, w: 1, y: 0 },
+  { mesh: 'vine', R: [22, 36, 44], h: 1.5, w: 0.26, y: 0.15 },
+  { mesh: 'veg', R: [16, 26, 32], h: 0.35, w: 0.84, y: 0 },
+];
+const FAR = [100, 180, 230];
+// ---------------------------------------------------------------- crop geometry (1/8 m voxels; four palette slots per instance)
+const MARK = [0xfe01f1, 0xfe01f2, 0xfe01f3, 0xfe01f4].map((hex) => AF.col(hex, { jitter: 0.6, edge: 0.12, solid: false, pat: 'none' }));
+const S0 = MARK[0], S1 = MARK[1], S2 = MARK[2], S3 = MARK[3];
+const poppy = pc(0xc8301e), cornflower = pc(0x4a6ad0), postWood = pc(0x6a5038), wire = pc(0x8a8e90), trunk = pc(0x5a4230);
+const rnd = (index, salt) => hash(index * 31 + salt, salt * 17 + 5);
+const CROP_MODELS = {
+  wheat() {
+    const m = new AF.Model(32, 8, 20); m.box(0, 0, 0, 32, 5, 20, S1);
+    for (let z = 1; z < 20; z += 2) m.box(0, 5, z, 32, 6, z + 1, S0);
+    for (let index = 0; index < 22; index++) { const x = Math.floor(rnd(index, 1) * 32), z = 1 + 2 * Math.floor(rnd(index, 2) * 10); m.set(x, 6, z, S0); if (rnd(index, 3) < 0.4) m.set(x, 7, z, S2); }
+    for (let index = 0; index < 5; index++) m.set(Math.floor(rnd(index, 4) * 32), 5, 2 * Math.floor(rnd(index, 5) * 10), index % 3 ? poppy : cornflower);
+    return m;
+  },
+  tall() {
+    const m = new AF.Model(32, 19, 20);
+    [[2, 5], [10, 5], [18, 5], [26, 5], [6, 14], [14, 14], [22, 14], [30, 14]].forEach(([px, pz], index) => {
+      const h = 13 + Math.floor(rnd(index, 7) * 3), flip = index % 2 ? 1 : -1;
+      m.box(px, 0, pz, px + 1, h, pz + 1, S0);
+      m.box(flip > 0 ? px + 1 : px - 3, 5, pz, flip > 0 ? px + 4 : px, 6, pz + 1, S1);
+      m.box(px, 9, flip > 0 ? pz - 3 : pz + 1, px + 1, 10, flip > 0 ? pz : pz + 4, S1);
+      m.box(px - 1, h - 1, pz + 1, px + 2, h + 2, pz + 2, S2); m.set(px, h, pz + 1, S3);
+    });
+    return m;
+  },
+  vine() {
+    const m = new AF.Model(32, 14, 20); m.box(0, 0, 9, 1, 14, 11, postWood); m.box(1, 8, 10, 32, 9, 11, wire);
+    for (const x of [5, 13, 21, 29]) m.box(x, 0, 10, x + 1, 8, 11, trunk);
+    m.box(0, 8, 8, 32, 13, 13, S0);
+    for (let index = 0; index < 6; index++) { const x = Math.floor(rnd(index, 8) * 29), side = index % 2 ? 7 : 13, lift = index % 3; m.box(x, 9 + lift, side, x + 3, 11 + lift, side + 1, S1); }
+    for (let index = 0; index < 4; index++) { const x = Math.floor(rnd(index, 9) * 28); m.box(x, 13, 9, x + 4, 14, 12, S1); }
+    for (let index = 0; index < 6; index++) { const x = 2 + index * 5 + Math.floor(rnd(index, 10) * 2), side = index % 2 ? 7 : 12; m.box(x, 6, side, x + 2, 8, side + 1, S2); m.set(x, 5, side, S3); }
+    return m;
+  },
+  veg() {
+    const m = new AF.Model(32, 4, 20);
+    for (const [pz, x0] of [[5, 2], [14, 5]]) for (let px = x0; px < 31; px += 5) { m.box(px - 1, 0, pz - 1, px + 2, 1, pz + 2, S0); m.box(px - 1, 1, pz - 1, px + 1, 3, pz + 1, S2); m.set(px, 3, pz, S3); }
+    return m;
+  },
+  slab() { return new AF.Model(8, 1, 5).box(0, 0, 0, 8, 1, 5, S1).box(0, 0, 1, 8, 1, 4, S0); },
+};
+function remap(geo) {
+  const attr = geo.attributes.aPal, values = new Float32Array(attr.count);
+  for (let index = 0; index < values.length; index++) { const value = attr.getX(index), slot = MARK.indexOf(value); values[index] = slot < 0 ? value : -slot - 1; }
+  geo.setAttribute('aPal', new THREE.BufferAttribute(values, 1)); return geo;
+}
+const uniforms = { cropFar: { value: 180 } };
+// near: keep inside the per-instance radius; mid (canopy box): complementary dither outside it, fading out at cropFar
+function material(lod) {
+  const mat = AF.mat.patchVoxel(AF.mat.voxelInst.clone(), 'crops-' + lod), compile = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, renderer) => {
+    compile(shader, renderer); shader.uniforms.cropFar = uniforms.cropFar;
+    shader.vertexShader = 'attribute vec4 cropPal; attribute float cropR; uniform float uAfTime; varying float cropD; varying float cropN;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('vec2 pUV =', 'float cropP = aPal < -3.5 ? cropPal.w : aPal < -2.5 ? cropPal.z : aPal < -1.5 ? cropPal.y : aPal < -0.5 ? cropPal.x : aPal;\nvec2 pUV =')
+      .replace('mod(aPal,', 'mod(cropP,').replace('floor(aPal /', 'floor(cropP /')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n{vec3 cropO = (modelMatrix * instanceMatrix * vec4(0., 0., 0., 1.)).xyz; cropD = distance(cropO, cameraPosition); cropN = cropR;'
+        + (lod === 'near' ? 'if (aPal < -0.5) { float k = min(max(position.y - 0.3, 0.), 0.9) * 0.07; transformed.x += sin(uAfTime * 1.7 + cropO.x * 0.31 + cropO.z * 0.23 + position.x * 0.9) * k; transformed.z += cos(uAfTime * 1.3 + cropO.z * 0.27 + position.z * 0.8) * k; }' : '') + '}');
+    shader.fragmentShader = 'uniform float cropFar; varying float cropD; varying float cropN;\n' + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n{float cropT = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715)))); float cropA = 1. - smoothstep(cropN - 5., cropN + 5., cropD);'
+      + (lod === 'near' ? 'if (cropT >= cropA) discard;' : 'float cropF = 1. - smoothstep(cropFar - 35., cropFar, cropD); if (cropT < cropA || cropT >= cropF) discard;') + '}');
+  };
+  mat.customProgramCacheKey = () => 'crops-' + lod; return mat;
+}
+const group = new THREE.Group(); group.name = 'farm-crops'; AF.scene.add(group);
+const batches = {};
+function* cropModels() {
+  const near = material('near'), mid = material('mid');
+  for (const [name, cap] of [['wheat', 1100], ['tall', 800], ['vine', 1000], ['veg', 800], ['slab', 7000]]) {
+    const geo = remap(yield* AF.meshModelG(CROP_MODELS[name](), { vs: name === 'slab' ? 0.5 : 0.125, flat: true })); yield;
+    const pal = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4), radius = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1);
+    pal.setUsage(THREE.DynamicDrawUsage); radius.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('cropPal', pal); geo.setAttribute('cropR', radius);
+    const mesh = new THREE.InstancedMesh(geo, name === 'slab' ? mid : near, cap); mesh.name = 'farm-crops-' + name; mesh.count = 0; mesh.frustumCulled = false; mesh.castShadow = false; mesh.receiveShadow = true;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.layers.set(31); group.add(mesh); FM.meshes.push(mesh);
+    batches[name] = { mesh, cap, n: 0, tris: geo.index.count / 3 };
+  }
+  FM.stats.trianglesPer = Object.fromEntries(Object.entries(batches).map(([key, batch]) => [key, batch.tris]));
+}
+// ---------------------------------------------------------------- crop records (typed arrays, 64 m buckets)
+let N = 0, REC = new Float32Array(STRIDE * 4096), KINDS = new Uint8Array(4096), PALI = new Uint8Array(4096);
+const buckets = new Map();
+// x, y, z, cos, sin, scale along, scale across, ground slope along / across (sheared so neighbours meet on slopes)
+function addRecord(kind, pal, x, y, z, c, s, sx, sz, ka, kc) {
+  if (N >= KINDS.length) { const grow = KINDS.length * 2, rec = new Float32Array(STRIDE * grow), kinds = new Uint8Array(grow), pals = new Uint8Array(grow); rec.set(REC); kinds.set(KINDS); pals.set(PALI); REC = rec; KINDS = kinds; PALI = pals; }
+  const o = N * STRIDE; REC[o] = x; REC[o + 1] = y; REC[o + 2] = z; REC[o + 3] = c; REC[o + 4] = s; REC[o + 5] = sx; REC[o + 6] = sz; REC[o + 7] = ka; REC[o + 8] = kc; KINDS[N] = kind; PALI[N] = pal;
+  const key = Math.floor(x / 64) * 10000 + Math.floor(z / 64); let bucket = buckets.get(key); if (!bucket) { bucket = []; buckets.set(key, bucket); } bucket.push(N);
+  FM.stats.kinds[kind]++; return N++;
+}
+function* crops() {
+  const uv = [0, 0], w = [0, 0], dir = [0, 0], across = [0, 0];
+  for (const f of FM.fields) {
+    if (f.crop < 0) continue;
+    const st = stripes(f), kind = f.crop;
+    const pal = kind === 0 ? Math.floor(f.v * 3) : kind === 2 || kind === 3 ? Math.floor(f.v * 2) : kind === 4 ? Math.floor(f.v * 4) : 0;
+    let count = 0;
+    for (let k = st.k0; k <= st.k1; k++) {
+      if (k < f.cut) continue;
+      const t = (k + 0.5) * f.P, stagger = (k & 1) * L_SEG / 2;
+      for (let a = Math.ceil((st.s0 - stagger) / L_SEG); a * L_SEG + stagger <= st.s1; a++) {
+        if (++count % 24 === 0) yield;
+        fieldPoint(f, t, a * L_SEG + stagger, uv); if (!inField(f, uv[0], uv[1], MARGIN)) continue;
+        toWorld(uv[0], uv[1], w); const x = w[0], z = w[1]; if (!clear(x, z)) continue;
+        worldStep(x, z, f.dx, f.dz, dir); worldStep(x, z, f.gx, f.gz, across);
+        const len = Math.hypot(dir[0], dir[1]), flip = kind === 1 || kind === 2 ? 1 : hash(a * 3 + 1, k * 5 + f.i) < 0.5 ? -1 : 1, yaw = Math.atan2(-dir[1], dir[0]), c = Math.cos(yaw) * flip, s = Math.sin(yaw) * flip;
+        // local +x runs along (c, -s), local +z along (s, c)
+        const h0 = O.h(x, z), ha = O.h(x + c * 1.9, z - s * 1.9), hb = O.h(x - c * 1.9, z + s * 1.9), hc = O.h(x + s * 1.2, z + c * 1.2), hd = O.h(x - s * 1.2, z - c * 1.2);
+        if (Math.max(h0, ha, hb, hc, hd) - Math.min(h0, ha, hb, hc, hd) > 0.9 || h0 < 1) continue;
+        addRecord(kind, pal, x, h0 - 0.15, z, c, s, len * 1.03, f.P * Math.abs(dir[0] * across[1] - dir[1] * across[0]) / len / 2.5 * 1.05, (ha - hb) / 3.8, (hc - hd) / 2.4);
+        f.records++;
+      }
+    }
+  }
+  FM.stats.records = N;
+}
+// ---------------------------------------------------------------- selection (idle slots; camera moves > 3 m or turns)
+const frustum = new THREE.Frustum(), projection = new THREE.Matrix4(), sphere = new THREE.Sphere(), lastQ = new THREE.Quaternion();
+let lastX = Infinity, lastY = Infinity, lastZ = Infinity, revision = 0, selected = -1, selection = null, generator = null;
+const tierIndex = () => AF.MOBILE || AF.GFX.tier === 'low' ? 0 : AF.GFX.lite ? 1 : 2;
+function put(batch, index, sx, sy, sz, lift, p0, p1, p2, p3, radius) {
+  if (batch.n >= batch.cap) return;
+  const slot = batch.n++, e = batch.mesh.instanceMatrix.array, o = slot * 16, r = index * STRIDE, c = REC[r + 3], s = REC[r + 4];
+  e[o] = c * sx; e[o + 1] = REC[r + 7] * sx; e[o + 2] = -s * sx; e[o + 3] = 0; e[o + 4] = 0; e[o + 5] = sy; e[o + 6] = 0; e[o + 7] = 0;
+  e[o + 8] = s * sz; e[o + 9] = REC[r + 8] * sz; e[o + 10] = c * sz; e[o + 11] = 0; e[o + 12] = REC[r]; e[o + 13] = REC[r + 1] + lift; e[o + 14] = REC[r + 2]; e[o + 15] = 1;
+  const pal = batch.mesh.geometry.attributes.cropPal.array; pal[slot * 4] = p0; pal[slot * 4 + 1] = p1; pal[slot * 4 + 2] = p2; pal[slot * 4 + 3] = p3;
+  batch.mesh.geometry.attributes.cropR.array[slot] = radius;
+}
+function upload(attr, count) { attr.clearUpdateRanges(); attr.addUpdateRange(0, Math.max(1, count) * attr.itemSize); attr.needsUpdate = true; }
+const radii = [0, 0, 0, 0, 0];
+function* select(eye = AF.camera.position, cull = true) {
+  const cx = eye.x, cy = eye.y, cz = eye.z, view = AF.lodScale || 1, tier = tierIndex();
+  // from the street inside the city grid the fields are > 110 m away behind buildings: keep the canopy boxes off
+  const far = AF.W.col(cx, cz) >= 0 && cy - O.h(cx, cz) < 40 ? 110 : Math.min(400, FAR[tier] * view);
+  for (let kind = 0; kind < 5; kind++) radii[kind] = Math.min(90, KS[kind].R[tier] * view);
+  uniforms.cropFar.value = far;
+  if (cull) { AF.camera.updateMatrixWorld(); projection.multiplyMatrices(AF.camera.projectionMatrix, AF.camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projection); }
+  for (const name in batches) batches[name].n = 0;
+  const reach = Math.ceil((far + 64) / 64), bx = Math.floor(cx / 64), bz = Math.floor(cz / 64), far2 = far * far;
+  for (let ix = bx - reach; ix <= bx + reach; ix++) for (let iz = bz - reach; iz <= bz + reach; iz++) {
+    const bucket = buckets.get(ix * 10000 + iz); if (!bucket) continue;
+    if (cull) { sphere.center.set(ix * 64 + 32, 6, iz * 64 + 32); sphere.radius = 50; if ((ix * 64 + 32 - cx) ** 2 + (iz * 64 + 32 - cz) ** 2 > 8100 && !frustum.intersectsSphere(sphere)) continue; }
+    for (let at = 0; at < bucket.length; at++) {
+      if ((at & 63) === 63) yield;
+      const index = bucket[at], r = index * STRIDE, dx = REC[r] - cx, dy = REC[r + 1] - cy, dz = REC[r + 2] - cz, d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 > far2) continue;
+      if (cull && d2 > 400) { sphere.center.set(REC[r], REC[r + 1] + 1, REC[r + 2]); sphere.radius = 3.5; if (!frustum.intersectsSphere(sphere)) continue; }
+      const kind = KINDS[index], spec = KS[kind], radius = radii[kind], pal = PALI[index], sx = REC[r + 5], sz = REC[r + 6];
+      if (d2 < (radius + 6) ** 2) {
+        const q = kind === 0 ? PALS.wheat[pal] : kind === 1 ? PALS.corn[0] : kind === 2 ? PALS.sunflower[pal] : kind === 3 ? PALS.vine[pal] : PALS.veg[pal];
+        put(batches[spec.mesh], index, sx, kind === 1 || kind === 2 ? 0.92 + hash(index, 17) * 0.16 : 1, sz, 0, q[0], q[1], q[2], q[3], radius);
+      }
+      if (d2 > (radius - 6) ** 2) {
+        const two = (kind === 0 ? PALS.wheatSlab : kind === 1 ? PALS.cornSlab : kind === 2 ? PALS.sunflowerSlab : kind === 3 ? PALS.vineSlab : PALS.vegSlab)[pal];
+        put(batches.slab, index, sx, spec.h * 2, spec.w * (kind === 3 ? 1 : sz), spec.y, two[0], two[1], two[0], two[0], radius);
+      }
+    }
+    yield;
+  }
+  let draws = 0, triangles = 0;
+  for (const name in batches) {
+    const batch = batches[name], mesh = batch.mesh; mesh.count = batch.n; mesh.layers.set(batch.n ? 0 : 31);
+    mesh.instanceMatrix.needsUpdate = true; upload(mesh.geometry.attributes.cropPal, batch.n); upload(mesh.geometry.attributes.cropR, batch.n);
+    if (batch.n) { draws++; triangles += batch.n * batch.tris; }
+  }
+  Object.assign(FM.stats, { draws, triangles, near: batches.wheat.n + batches.tall.n + batches.vine.n + batches.veg.n, mid: batches.slab.n, selects: FM.stats.selects + 1 });
+  if (cull) { lastX = cx; lastY = cy; lastZ = cz; lastQ.copy(AF.camera.quaternion); selected = revision; }
+}
+FM.select = (eye, cull = true) => { const gen = select(eye, cull); while (!gen.next().done); if (!cull) revision++; return { ...FM.stats }; };
+function stale() {
+  if (selected !== revision) return true;
+  const cp = AF.camera.position;
+  // nothing drawn and the camera is well east of the farmland: keep sleeping
+  if (!FM.stats.draws && cp.x > -660 + FAR[2] * 2.6) return false;
+  return (cp.x - lastX) ** 2 + (cp.y - lastY) ** 2 + (cp.z - lastZ) ** 2 > 9 || Math.abs(lastQ.dot(AF.camera.quaternion)) < 0.996;
+}
+// ---------------------------------------------------------------- machine and prop models
+const col = (hex, opts = {}) => AF.col(hex, { jitter: 0.4, edge: 0.2, ...opts });
+const C = {
+  red: col(0xb5372c, { metal: 0.25, rough: 0.45 }), green: col(0x3e7a36, { metal: 0.25, rough: 0.45 }), cream: col(0xeee4c8), yellow: col(0xe2b53a, { metal: 0.2, rough: 0.5 }),
+  tyre: col(0x232323, { rough: 0.95, jitter: 0.2 }), iron: col(0x3a3d40, { metal: 0.5, rough: 0.55 }), steel: col(0x9aa1a8, { metal: 0.7, rough: 0.35 }), galv: col(0xbac1c3, { metal: 0.6, rough: 0.4 }), galvD: col(0x9ca4a7, { metal: 0.6, rough: 0.45 }),
+  glass: col(0x30444c, { rough: 0.12, metal: 0.2 }), glow: col(0xfff1c9, { emit: 0xffd48a, emitK: 2.5, mode: 'night', jitter: 0, edge: 0 }), amber: col(0xf0a030, { emit: 0xff9a20, emitK: 1.5, mode: 'night' }),
+  grain: col(0xd9b85a), straw: col(0xd6bb68), strawD: col(0xb89a48), strawL: col(0xe6cf86), wood: col(0x7a573d, { pat: 'plank' }), woodL: col(0x9c7650), woodD: col(0x5a4030),
+  burlap: col(0xb89c6c), denim: col(0x3d5a82), shirtA: col(0xa8423a), shirtB: col(0xd8c8a0), hat: col(0xc9a14a), crow: col(0x1c1c22), white: col(0xeeeae0), hiveY: col(0xe8d58a), hiveB: col(0x9cc0d0),
+  slate: col(0x52676a), stone: col(0x8a8981, { pat: 'stone' }), water: col(0x4a7d92, { rough: 0.15 }), comb: col(0xd03a2a), roofM: col(0x7d8a8e, { metal: 0.5, rough: 0.5 }), roofR: col(0x8e3b30),
+  barrel: col(0x7a5030, { pat: 'plank' }), sheet: col(0xf4f1e8, { jitter: 0.1 }), blue: col(0x5a8ac0), pink: col(0xd88a9a), leaf: col(0x4f7d34), plaster: col(0xe6dcc2), mail: col(0xb03a2e),
+};
+function disc(m, axis, a, b, r, from, to, c) {
+  for (let u = Math.floor(a - r); u < Math.ceil(a + r); u++) for (let v = Math.floor(b - r); v < Math.ceil(b + r); v++) {
+    const d = Math.hypot(u + 0.5 - a, v + 0.5 - b); if (d > r) continue;
+    const k = typeof c === 'function' ? c(d, u, v) : c; if (!k) continue;
+    for (let w = from; w < to; w++) { if (axis === 'x') m.set(w, u, v, k); else if (axis === 'y') m.set(u, w, v, k); else m.set(u, v, w, k); }
+  }
+  return m;
+}
+function paste(dst, src, ox, oy, oz) { for (let x = 0; x < src.w; x++) for (let y = 0; y < src.h; y++) for (let z = 0; z < src.d; z++) { const v = src.get(x, y, z); if (v) dst.set(x + ox, y + oy, z + oz, v); } return dst; }
+const wheel = (m, x0, x1, cy, cz, r, hub) => disc(m, 'x', cy, cz, r, x0, x1, (d) => d > r - 1.6 ? C.tyre : d > 1.2 ? hub : C.iron);
+const M = FM.models = {
+  // 1/8 m voxels, front +z
+  tractor(paint = C.red, hub = C.cream, roof = C.cream) {
+    const m = new AF.Model(20, 23, 34);
+    wheel(m, 0, 4, 6, 8, 6, hub); wheel(m, 16, 20, 6, 8, 6, hub); wheel(m, 2, 5, 3.5, 27, 3.5, hub); wheel(m, 15, 18, 3.5, 27, 3.5, hub);
+    m.box(5, 3, 4, 15, 6, 31, C.iron); m.box(6, 6, 15, 14, 12, 32, paint); m.box(7, 12, 15, 13, 13, 32, paint);
+    m.box(6, 6, 32, 14, 11, 33, C.iron); for (let y = 7; y < 11; y += 2) m.box(7, y, 32, 13, y + 1, 33, C.steel); m.set(6, 10, 33, C.glow); m.set(13, 10, 33, C.glow);
+    m.box(12, 13, 26, 13, 20, 27, C.iron); m.box(4, 6, 2, 16, 8, 14, paint); m.box(4, 8, 2, 16, 20, 14, C.glass);
+    for (const [x, z] of [[4, 2], [15, 2], [4, 13], [15, 13]]) m.box(x, 8, z, x + 1, 20, z + 1, C.iron);
+    m.box(3, 20, 1, 17, 22, 15, roof); m.set(9, 22, 7, C.amber); m.box(0, 12, 2, 4, 13, 14, paint); m.box(16, 12, 2, 20, 13, 14, paint); m.box(9, 3, 0, 11, 5, 4, C.iron); m.box(3, 4, 10, 4, 5, 12, C.iron);
+    return m;
+  },
+  harrowTractor() {
+    const m = new AF.Model(28, 23, 56); paste(m, M.tractor(C.green, C.yellow, C.green), 4, 0, 22);
+    for (const z of [5, 13]) { m.box(1, 3, z - 1, 27, 4, z + 1, C.yellow); for (let x = 2; x < 27; x += 3) disc(m, 'x', 2.5, z, 2.5, x, x + 1, C.steel); }
+    m.box(13, 3, 5, 15, 4, 24, C.iron); return m;
+  },
+  combine() {
+    const m = new AF.Model(42, 34, 76);
+    m.box(0, 1, 62, 42, 5, 72, C.steel); m.box(0, 0, 70, 42, 1, 73, C.iron); m.box(0, 1, 61, 1, 8, 74, C.red); m.box(41, 1, 61, 42, 8, 74, C.red);
+    m.box(0, 8, 64, 1, 10, 72, C.iron); m.box(41, 8, 64, 42, 10, 72, C.iron); m.box(1, 9, 67, 41, 10, 68, C.iron);
+    for (const [y, z] of [[9, 71], [12, 68], [9, 64], [6, 68]]) m.box(1, y, z, 41, y + 1, z + 1, C.yellow);
+    m.box(15, 3, 56, 27, 9, 63, C.red);
+    m.box(10, 5, 8, 32, 22, 56, C.red); m.box(10, 5, 8, 32, 7, 56, C.iron); m.box(9, 17, 10, 10, 18, 54, C.cream); m.box(32, 17, 10, 33, 18, 54, C.cream);
+    wheel(m, 3, 10, 7, 46, 7, C.cream); wheel(m, 32, 39, 7, 46, 7, C.cream); wheel(m, 6, 10, 4.5, 14, 4.5, C.cream); wheel(m, 32, 36, 4.5, 14, 4.5, C.cream);
+    m.box(12, 22, 24, 30, 27, 48, C.red); m.box(11, 27, 23, 31, 28, 49, C.cream); m.box(13, 27, 25, 29, 28, 47, C.grain);
+    m.box(13, 15, 48, 29, 28, 58, C.glass); for (const [x, z] of [[13, 48], [28, 48], [13, 57], [28, 57]]) m.box(x, 15, z, x + 1, 28, z + 1, C.iron);
+    m.box(12, 28, 47, 30, 30, 59, C.cream); m.set(21, 30, 52, C.amber); m.set(14, 28, 59, C.glow); m.set(27, 28, 59, C.glow);
+    m.box(11, 13, 56, 31, 15, 60, C.iron); for (let y = 3; y < 13; y += 2) m.box(9, y, 52, 10, y + 1, 55, C.steel);
+    m.box(31, 22, 10, 34, 25, 46, C.cream); m.box(31, 19, 44, 34, 22, 47, C.steel);
+    m.box(12, 22, 10, 30, 26, 22, C.red); m.box(12, 23, 9, 30, 25, 10, C.iron); m.box(26, 26, 14, 28, 33, 16, C.iron); m.box(13, 6, 4, 29, 13, 8, C.iron);
+    return m;
+  },
+  // 1/10 m voxels
+  scarecrow() {
+    const m = new AF.Model(16, 24, 6);
+    m.box(7, 0, 2, 9, 20, 4, C.wood); m.box(1, 14, 2, 15, 15, 4, C.wood);
+    for (let y = 10; y < 16; y++) m.box(5, y, 1, 11, y + 1, 5, y % 2 ? C.shirtA : C.shirtB);
+    m.box(1, 13, 2, 5, 16, 4, C.shirtA); m.box(11, 13, 2, 15, 16, 4, C.shirtA); m.box(0, 12, 2, 1, 15, 4, C.straw); m.box(15, 12, 2, 16, 15, 4, C.straw);
+    m.box(5, 6, 2, 7, 10, 4, C.denim); m.box(9, 6, 2, 11, 10, 4, C.denim); m.box(5, 5, 2, 7, 6, 4, C.straw); m.box(9, 4, 2, 11, 6, 4, C.straw);
+    m.box(6, 16, 1, 10, 20, 5, C.burlap); m.set(7, 18, 5, C.crow); m.set(9, 18, 5, C.crow); m.box(7, 17, 5, 10, 18, 6, C.crow);
+    m.box(4, 20, 0, 12, 21, 6, C.hat); m.box(6, 21, 1, 10, 23, 5, C.hat); m.box(6, 21, 1, 10, 22, 5, C.shirtA);
+    m.box(13, 15, 2, 15, 16, 4, C.crow); m.set(14, 16, 3, C.crow); m.set(15, 16, 3, C.yellow);
+    return m;
+  },
+  // 1/5 m voxels
+  bale() { return disc(new AF.Model(8, 8, 7), 'z', 4, 4, 4, 0, 7, (d) => d > 3.3 ? C.straw : Math.floor(d * 1.3) & 1 ? C.strawL : C.strawD); },
+  // 1/8 m voxels
+  trough() { const m = new AF.Model(24, 6, 7); m.box(0, 0, 0, 24, 6, 7, C.galv); m.box(1, 4, 1, 23, 5, 6, C.water); m.box(1, 5, 1, 23, 6, 6, 0); m.box(0, 0, 0, 24, 1, 7, C.galvD); return m; },
+  hives() {
+    const m = new AF.Model(32, 9, 7), tones = [C.white, C.hiveY, C.hiveB, C.white];
+    for (let index = 0; index < 4; index++) { const x = index * 8; m.box(x, 0, 0, x + 6, 1, 6, C.woodD); m.box(x, 1, 0, x + 6, 6, 6, tones[index]); m.box(x + 2, 1, 6, x + 4, 2, 7, C.iron); m.box(x, 6, 0, x + 6, 7, 6, C.slate); m.box(x + 1, 7, 1, x + 5, 8, 5, C.slate); }
+    return m;
+  },
+  well() {
+    const m = new AF.Model(14, 20, 14); disc(m, 'y', 7, 7, 6, 0, 6, (d) => d > 4.5 ? C.stone : 0); disc(m, 'y', 7, 7, 4.5, 0, 3, C.water);
+    m.box(2, 6, 6, 3, 17, 8, C.wood); m.box(11, 6, 6, 12, 17, 8, C.wood); m.box(2, 14, 6, 12, 15, 8, C.woodD); m.box(6, 9, 6, 8, 11, 8, C.woodL); m.box(7, 11, 7, 8, 14, 8, C.iron);
+    for (let layer = 0; layer < 4; layer++) m.box(0, 17 + layer, 3 + layer, 14, 18 + layer, 11 - layer, C.roofR);
+    return m;
+  },
+  coop() {
+    const m = new AF.Model(26, 14, 16);
+    for (const [x, z] of [[0, 0], [11, 0], [0, 11], [11, 11]]) m.box(x, 0, z, x + 1, 3, z + 1, C.woodD);
+    m.box(0, 3, 0, 12, 9, 12, C.wood); m.box(5, 3, 12, 7, 6, 13, C.iron); m.line(6, 0, 15, 6, 3, 12, C.woodL);
+    for (let layer = 0; layer < 4; layer++) m.box(0, 9 + layer, layer * 1.5, 12, 10 + layer, 12 - layer * 1.5, C.roofR);
+    for (const [x, z] of [[12, 0], [25, 0], [12, 15], [25, 15], [18, 0], [18, 15]]) m.box(x, 0, z, x + 1, 7, z + 1, C.woodL);
+    m.box(12, 6, 0, 26, 7, 1, C.galvD); m.box(12, 6, 15, 26, 7, 16, C.galvD); m.box(25, 6, 0, 26, 7, 16, C.galvD); m.box(12, 2, 0, 26, 3, 1, C.galvD); m.box(12, 2, 15, 26, 3, 16, C.galvD); m.box(25, 2, 0, 26, 3, 16, C.galvD);
+    for (const [x, z] of [[16, 6], [21, 10], [19, 3]]) { m.box(x, 0, z, x + 2, 2, z + 3, C.white); m.set(x, 2, z + 2, C.white); m.set(x, 3, z + 2, C.comb); m.set(x, 2, z + 3, C.yellow); }
+    return m;
+  },
+  washing() {
+    const m = new AF.Model(40, 18, 2); m.box(0, 0, 0, 1, 18, 2, C.woodD); m.box(39, 0, 0, 40, 18, 2, C.woodD); m.box(1, 16, 0, 39, 17, 1, C.white);
+    for (const [x0, x1, y0, c] of [[4, 10, 9, C.sheet], [12, 16, 12, C.blue], [18, 22, 11, C.shirtA], [24, 32, 9, C.sheet], [34, 37, 13, C.pink]]) m.box(x0, y0, 0, x1, 16, 1, c);
+    return m;
+  },
+  woodpile() {
+    const m = new AF.Model(16, 8, 8);
+    for (let y = 0; y < 8; y += 2) for (let z = 0; z < 8; z += 2) { const end = (y + z) % 4 ? C.woodL : C.strawD; m.box(0, y, z, 16, y + 2, z + 2, C.woodD); m.box(0, y, z, 1, y + 2, z + 2, end); m.box(15, y, z, 16, y + 2, z + 2, end); }
+    return m;
+  },
+  mailbox() { const m = new AF.Model(6, 13, 7); m.box(2, 0, 3, 3, 9, 4, C.woodD); m.box(0, 9, 0, 5, 12, 7, C.mail); m.box(1, 12, 1, 4, 13, 6, C.mail); m.box(5, 10, 2, 6, 13, 3, C.yellow); return m; },
+  barrels() { const m = new AF.Model(22, 7, 7); for (const x of [0, 8, 15]) disc(m, 'y', x + 3.5, 3.5, 3.5, 0, 7, (d) => d > 2.6 ? C.barrel : C.woodL); for (const x of [0, 8, 15]) for (const y of [1, 5]) disc(m, 'y', x + 3.5, 3.5, 3.5, y, y + 1, (d) => d > 2.6 ? C.iron : 0); return m; },
+  // 1/4 m voxels
+  bin() {
+    const m = new AF.Model(18, 30, 18); disc(m, 'y', 9, 9, 8.5, 0, 22, (d, u, v) => d > 7.5 ? (u + v) % 2 ? C.galv : C.galvD : C.galvD);
+    for (let layer = 0; layer < 7; layer++) disc(m, 'y', 9, 9, 8.5 - layer * 1.25, 22 + layer, 23 + layer, C.galv);
+    m.box(8, 29, 8, 10, 30, 10, C.iron); m.box(8, 1, 17, 9, 24, 18, C.iron); for (let y = 2; y < 24; y += 3) m.box(7, y, 17, 10, y + 1, 18, C.steel);
+    return m;
+  },
+  shed() {
+    const m = new AF.Model(52, 22, 30);
+    m.box(0, 0, 0, 52, 1, 30, C.stone); m.box(0, 1, 0, 52, 17, 1, C.wood); m.box(0, 1, 0, 1, 17, 30, C.wood); m.box(51, 1, 0, 52, 17, 30, C.wood);
+    for (const x of [0, 17, 34, 51]) m.box(x, 1, 29, x + 1, 17, 30, C.woodD);
+    for (let z = 0; z < 30; z++) { const y = 17 + Math.floor(Math.min(z, 29 - z) / 4); m.box(0, y, z, 52, y + 1, z + 1, C.roofM); }
+    m.box(4, 1, 2, 14, 4, 6, C.straw); m.box(40, 1, 3, 48, 2, 10, C.woodL);
+    return m;
+  },
+  windpump() {
+    const m = new AF.Model(14, 52, 14);
+    for (const [x, z] of [[0, 0], [13, 0], [0, 13], [13, 13]]) m.line(x, 0, z, x < 7 ? 5 : 8, 40, z < 7 ? 5 : 8, C.galvD);
+    for (const y of [10, 20, 30]) { const inset = Math.round(y / 40 * 5); m.box(inset, y, inset, 14 - inset, y + 1, inset + 1, C.galvD); m.box(inset, y, 13 - inset, 14 - inset, y + 1, 14 - inset, C.galvD); m.box(inset, y, inset, inset + 1, y + 1, 14 - inset, C.galvD); m.box(13 - inset, y, inset, 14 - inset, y + 1, 14 - inset, C.galvD); }
+    m.box(4, 40, 4, 10, 41, 10, C.wood); m.box(6, 41, 6, 8, 45, 12, C.iron);
+    for (let u = 0; u < 14; u++) for (let v = 39; v < 52; v++) { const d = Math.hypot(u + 0.5 - 7, v + 0.5 - 45.5), angle = Math.atan2(v + 0.5 - 45.5, u + 0.5 - 7); if (d < 6.5 && (d > 5.6 || d > 1.4 && (Math.floor((angle + Math.PI) / (Math.PI / 9)) & 1) || d <= 1.4)) m.set(u, v, 2, d <= 1.4 ? C.iron : C.galv); }
+    m.box(7, 44, 3, 8, 45, 12, C.galvD); m.box(7, 42, 11, 8, 49, 14, C.red);
+    return m;
+  },
+  hut() { const m = new AF.Model(12, 12, 10); m.box(0, 0, 0, 12, 7, 10, C.stone); m.box(5, 0, 10, 7, 5, 10, C.woodD); m.box(5, 1, 9, 7, 5, 10, C.woodD); for (let layer = 0; layer < 5; layer++) m.box(0, 7 + layer, layer, 12, 8 + layer, 10 - layer, C.roofR); return m; },
+  pergola() {
+    const m = new AF.Model(56, 12, 26);
+    for (const x of [0, 27, 55]) for (const z of [0, 25]) m.box(x, 0, z, x + 1, 11, z + 1, C.woodD);
+    for (const z of [0, 25]) m.box(0, 11, z, 56, 12, z + 1, C.wood); for (let x = 2; x < 56; x += 4) m.box(x, 11, 0, x + 1, 12, 26, C.woodL);
+    for (let index = 0; index < 14; index++) { const x = Math.floor(rnd(index, 21) * 50), z = Math.floor(rnd(index, 22) * 22); m.box(x, 11, z, x + 6, 12, z + 4, C.leaf); if (index % 3 === 0) m.box(x + 2, 10, z + 1, x + 3, 11, z + 2, C.crow); }
+    return m;
+  },
+};
+// ---------------------------------------------------------------- farmsteads (called by 44-sites for every 'farm' site)
+const lib = () => AF.outlandSites.lib;
+function* place(site, key, build, vs, dx, dz, rot = 0, opts = {}) { const L = lib(); const geo = yield* L.geometry(key, build, vs); L.prop(site, geo, dx, dz, rot, opts); FM.stats.props++; return geo; }
+FM.farmstead = function* (site) {
+  const v = hash(site.x * 3, site.z * 7), red = v < 0.5;
+  yield* place(site, 'farm-bin', M.bin, 0.25, 28, 10); yield* place(site, 'farm-bin', M.bin, 0.25, 28, 16.5); yield;
+  yield* place(site, 'farm-shed', M.shed, 0.25, 0, -17, 2); yield;
+  yield* place(site, 'farm-combine', M.combine, 0.125, -3, 15.5, 1); yield;
+  yield* place(site, red ? 'farm-tractor-red' : 'farm-tractor-green', red ? () => M.tractor() : () => M.tractor(C.green, C.yellow, C.green), 0.125, -14, 15, 0); yield;
+  yield* place(site, 'farm-coop', M.coop, 0.125, -24, 15); yield;
+  yield* place(site, 'farm-well', M.well, 0.125, 9.5, -9); yield* place(site, 'farm-woodpile', M.woodpile, 0.125, 9.5, -1.5, 1);
+  yield* place(site, 'farm-washing', M.washing, 0.1, 0, -9.5, 0, { collide: false }); yield;
+  yield* place(site, 'farm-hives', M.hives, 0.1, -17, -19.5); yield* place(site, 'farm-trough', M.trough, 0.125, 18, 6.5);
+  yield* place(site, 'farm-mailbox', M.mailbox, 0.1, 11.5, 24.5, 0, { y: O.h(site.x + 11.5, site.z + 24.5) });
+  if (v > 0.35) yield* place(site, 'farm-windpump', M.windpump, 0.25, -27, -19.5);
+  if (AF.vehicles && AF.vehicles.placeParked) try { AF.vehicles.placeParked('pickup', site.x + 20.5, site.z + 19, Math.PI / 2, { y: site.y }); } catch (e) { AF.warnOnce('farm pickup', e); }
+};
+FM.winery = function* (site) {
+  const L = lib(), P = L.palette;
+  L.prop(site, yield* L.house('winery-hall', 30, 18, 12, C.plaster, C.roofR), 0, -9); yield;
+  L.prop(site, yield* L.house('winery-cellar', 20, 14, 9, P.stone, P.slate), 17, 4, 1); yield;
+  yield* place(site, 'farm-pergola', M.pergola, 0.25, -1, 1, 0, { collide: false }); yield* L.picnic(site); yield;
+  yield* place(site, 'farm-barrels', M.barrels, 0.125, -14, 10); yield* place(site, 'farm-barrels', M.barrels, 0.125, -14, 12.5);
+  L.prop(site, yield* L.geometry('sign-VINEYARD', () => AF.textModel('VINEYARD', P.trim, { bg: P.red, pad: 1, depth: 1 }), 0.25), 0, 16, 0, { y: site.y + 2.2, collide: false });
+  for (const dx of [-5.5, 5.5]) yield* place(site, 'farm-sign-post', () => new AF.Model(1, 12, 1).box(0, 0, 0, 1, 12, 1, P.wood), 0.25, dx, 16);
+  yield* L.lamp(site, 8, 6);
+  if (AF.vehicles && AF.vehicles.placeParked) try { AF.vehicles.placeParked(null, site.x - 20, site.z - 12, 0, { y: site.y }); } catch (e) { AF.warnOnce('winery car', e); }
+};
+// ---------------------------------------------------------------- field props (scarecrows, bales, troughs, hives, huts)
+function* fieldProps() {
+  const L = lib(), uv = [0, 0], w = [0, 0], tag = { tag: 'farm-field' };
+  const at = function* (key, build, vs, f, t, s, rot, margin = 1.5) {
+    fieldPoint(f, t, s, uv); if (!inField(f, uv[0], uv[1], 2)) return false; toWorld(uv[0], uv[1], w);
+    if (!clear(w[0], w[1], margin)) return false;
+    const geo = yield* L.geometry(key, build, vs), y = Math.min(O.h(w[0], w[1]), O.h(w[0] + 1, w[1]), O.h(w[0] - 1, w[1]), O.h(w[0], w[1] + 1), O.h(w[0], w[1] - 1)) - 0.08;
+    O.addProp(geo, w[0], y, w[1], rot, tag); FM.stats.props++; return true;
+  };
+  for (const f of FM.fields) {
+    yield;
+    const st = stripes(f), tc = (st.k0 + st.k1 + 1) / 2 * f.P, sc = (st.s0 + st.s1) / 2, h = (salt) => hash(f.i * 13 + salt, f.r * 7 + salt * 3), rot = Math.floor(h(1) * 4);
+    if (f.crop >= 0 && f.crop <= 2 && h(2) < 0.6) yield* at('farm-scarecrow', M.scarecrow, 0.1, f, tc + (h(3) - 0.5) * 12, sc + (h(4) - 0.5) * 16, rot);
+    if (f.crop === 2 && h(5) < 0.5) yield* at('farm-hives', M.hives, 0.1, f, (st.k0 + 2) * f.P, st.s0 + 10, rot & 1);
+    if (f.crop === 3 && h(6) < 0.35) yield* at('farm-hut', M.hut, 0.25, f, (st.k1 - 1) * f.P, st.s1 - 8, rot);
+    if (f.crop === -2 && h(7) < 0.55) yield* at('farm-trough', M.trough, 0.125, f, tc, sc + 6, rot & 1);
+    const bales = f.crop === -1 && !f.mover ? 3 + Math.floor(h(8) * 4) : f.cut > -Infinity ? 5 : 0, kMax = f.cut > -Infinity ? f.cut - 6 : st.k1;
+    for (let index = 0; index < bales && kMax > st.k0; index++) {
+      const k = st.k0 + Math.floor(h(10 + index) * (kMax - st.k0)), s = st.s0 + h(20 + index) * (st.s1 - st.s0);
+      yield* at('farm-bale', M.bale, 0.2, f, (k + 0.5) * f.P, s, Math.floor(h(30 + index) * 4)); yield;
+    }
+  }
+}
+// ---------------------------------------------------------------- working machines (two shared instanced batches)
+const machines = { combine: null, tractor: null };
+function loopPath(f, kA, kB, span, margin) {
+  // field-space loop: along stripe kA, U-turn to kB, back, U-turn to kA (semicircles bulging past the run ends)
+  const pts = [], uv = [0, 0], w = [0, 0], tA = (kA + 0.5) * f.P, tB = (kB + 0.5) * f.P, tc = (tA + tB) / 2, rr = Math.abs(tA - tB) / 2, dir = Math.sign(tB - tA);
+  const push = (t, s) => { fieldPoint(f, t, s, uv); toWorld(uv[0], uv[1], w); pts.push(w[0], O.h(w[0], w[1]), w[1]); };
+  for (let s = span[0]; s <= span[1]; s += 4) push(tA, s);
+  for (let step = 1; step < 8; step++) { const angle = step / 8 * Math.PI; push(tc - dir * Math.cos(angle) * rr, span[1] + Math.sin(angle) * Math.min(rr, margin)); }
+  for (let s = span[1]; s >= span[0]; s -= 4) push(tB, s);
+  for (let step = 1; step < 8; step++) { const angle = step / 8 * Math.PI; push(tc + dir * Math.cos(angle) * rr, span[0] - Math.sin(angle) * Math.min(rr, margin)); }
+  pts.push(pts[0], pts[1], pts[2]);
+  const points = new Float32Array(pts), cum = new Float32Array(points.length / 3);
+  for (let index = 1; index < cum.length; index++) cum[index] = cum[index - 1] + Math.hypot(points[index * 3] - points[index * 3 - 3], points[index * 3 + 2] - points[index * 3 - 1]);
+  return { points, cum, total: cum[cum.length - 1] };
+}
+function setupMovers() {
+  const farms = AF.outlandSites ? AF.outlandSites.sites.filter((site) => site.kind === 'farm') : [], used = new Set();
+  const pick = (crop, count, near) => {
+    const picks = [];
+    for (const site of farms) {
+      if (picks.length >= count) break;
+      const candidates = FM.fields.filter((f) => f.crop === crop && !used.has(f.key) && Math.hypot(f.cx - site.x, f.cz - site.z) < near).sort((a, b) => Math.hypot(a.cx - site.x, a.cz - site.z) - Math.hypot(b.cx - site.x, b.cz - site.z));
+      for (const f of candidates) {
+        const st = stripes(f), kc = Math.round((st.k0 + st.k1) / 2), a = run(f, kc - 1, false, 3, true), b = run(f, kc - 3, false, 3, true);
+        if (!a || !b) continue;
+        const span = [Math.max(a[0], b[0]) + 2, Math.min(a[1], b[1]) - 2]; if (span[1] - span[0] < 24) continue;
+        used.add(f.key); picks.push({ f, kc, span }); break;
+      }
+    }
+    return picks;
+  };
+  for (const { f, kc, span } of pick(0, 2, 320)) { f.cut = kc; FM.movers.push({ kind: 'combine', field: f.key, speed: 1.7, s: hash(f.i, f.r) * 50, seg: 0, yaw: 0, cx: f.cx, cz: f.cz, ...loopPath(f, kc - 1, kc - 3, span, 2.5) }); }
+  for (const { f, kc, span } of pick(-1, 2, 480)) { f.mover = true; FM.movers.push({ kind: 'tractor', field: f.key, speed: 2.3, s: hash(f.r, f.i) * 50, seg: 0, yaw: 0, cx: f.cx, cz: f.cz, ...loopPath(f, kc - 1, kc - 3, span, 2.5) }); }
+}
+function* moverMeshes() {
+  const L = lib();
+  for (const [kind, key, build, cap] of [['combine', 'farm-combine', M.combine, 2], ['tractor', 'farm-harrow-tractor', M.harrowTractor, 3]]) {
+    if (!FM.movers.some((mover) => mover.kind === kind)) continue;
+    const geo = yield* L.geometry(key, build, 0.125), mesh = new THREE.InstancedMesh(geo, AF.mat.voxelInst, cap);
+    mesh.name = 'farm-' + kind; mesh.count = 0; mesh.frustumCulled = false; mesh.castShadow = true; mesh.receiveShadow = true; mesh.customDepthMaterial = AF.mat.depthInst;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.layers.set(31); AF.scene.add(mesh); machines[kind] = { mesh, n: 0 };
+  }
+}
+const MOVER_R2 = 320 * 320, moverFrustum = new THREE.Frustum(), moverProj = new THREE.Matrix4(), moverSphere = new THREE.Sphere();
+AF.onTick('farm-machines', 333, (dt) => {
+  if (!machines.combine && !machines.tractor) return;
+  const cp = AF.camera.position;
+  if (machines.combine) machines.combine.n = 0; if (machines.tractor) machines.tractor.n = 0;
+  let nearest = Infinity, framed = false;
+  for (const mover of FM.movers) {
+    const batch = machines[mover.kind], d2 = (mover.cx - cp.x) ** 2 + (mover.cz - cp.z) ** 2; if (!batch || d2 > MOVER_R2) continue;
+    if (!framed) { moverProj.multiplyMatrices(AF.camera.projectionMatrix, AF.camera.matrixWorldInverse); moverFrustum.setFromProjectionMatrix(moverProj); framed = true; }
+    const p = mover.points, cum = mover.cum;
+    mover.s += mover.speed * Math.min(dt, 0.1); if (mover.s >= mover.total) { mover.s -= mover.total; mover.seg = 0; }
+    while (mover.seg < cum.length - 2 && cum[mover.seg + 1] <= mover.s) mover.seg++;
+    const i = mover.seg, f = (mover.s - cum[i]) / Math.max(1e-4, cum[i + 1] - cum[i]), x0 = p[i * 3], z0 = p[i * 3 + 2], x1 = p[i * 3 + 3], z1 = p[i * 3 + 5];
+    mover.yaw += AF.angDiff(mover.yaw, Math.atan2(x1 - x0, z1 - z0)) * Math.min(1, dt * 2.5);
+    const px = x0 + (x1 - x0) * f, py = p[i * 3 + 1] + (p[i * 3 + 4] - p[i * 3 + 1]) * f - 0.05, pz = z0 + (z1 - z0) * f;
+    moverSphere.center.set(px, py + 2, pz); moverSphere.radius = 6; if (!moverFrustum.intersectsSphere(moverSphere)) continue;
+    nearest = Math.min(nearest, (px - cp.x) ** 2 + (pz - cp.z) ** 2);
+    const e = batch.mesh.instanceMatrix.array, o = batch.n++ * 16, c = Math.cos(mover.yaw), s = Math.sin(mover.yaw);
+    e[o] = c; e[o + 1] = 0; e[o + 2] = -s; e[o + 3] = 0; e[o + 4] = 0; e[o + 5] = 1; e[o + 6] = 0; e[o + 7] = 0; e[o + 8] = s; e[o + 9] = 0; e[o + 10] = c; e[o + 11] = 0;
+    e[o + 12] = px; e[o + 13] = py; e[o + 14] = pz; e[o + 15] = 1;
+  }
+  for (const kind in machines) {
+    const batch = machines[kind]; if (!batch) continue;
+    if (batch.mesh.count !== batch.n) batch.mesh.layers.set(batch.n ? 0 : 31);
+    batch.mesh.count = batch.n; batch.mesh.castShadow = nearest < 160 * 160; if (batch.n) batch.mesh.instanceMatrix.needsUpdate = true;
+  }
+});
+// ---------------------------------------------------------------- build: fields, working fields, vineyard pickers and farmhands
+AF.onBuild('farm-life', 664, () => {
+  FM.fields = enumerate(); FM.stats.fields = FM.fields.length;
+  setupMovers();
+  if (!AF.walkers || !AF.walkers.addPath) return;
+  const height = (x, z) => Math.ceil(Math.max(O.h(x - 0.35, z - 0.35), O.h(x + 0.35, z - 0.35), O.h(x - 0.35, z + 0.35), O.h(x + 0.35, z + 0.35)) * 4) / 4 + 0.25;
+  const walk = (name, ends, count) => {
+    const points = [];
+    for (let index = 1; index < ends.length; index++) { const [x0, z0] = ends[index - 1], [x1, z1] = ends[index], steps = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 1.5); for (let part = index > 1 ? 1 : 0; part <= steps; part++) { const x = AF.lerp(x0, x1, part / steps), z = AF.lerp(z0, z1, part / steps); points.push([x, height(x, z), z]); } }
+    AF.walkers.addPath(name, points, { count, mode: 'pingpong', speed: 0.7, activeRadius: 120, luggage: 0 }); FM.stats.walkers += count;
+  };
+  const winery = AF.outlandSites && AF.outlandSites.sites.find((site) => site.kind === 'winery');
+  if (winery) {
+    const vines = FM.fields.filter((f) => f.crop === 3 && Math.hypot(f.cx - winery.x, f.cz - winery.z) < 260).sort((a, b) => Math.hypot(a.cx - winery.x, a.cz - winery.z) - Math.hypot(b.cx - winery.x, b.cz - winery.z));
+    let made = 0;
+    for (const f of vines) {
+      if (made >= 2) break;
+      const st = stripes(f), k = Math.round((st.k0 + st.k1) / 2) + made * 4, span = run(f, k, true, 1); if (!span) continue;
+      const t = (k + 1) * f.P, uv = [0, 0], a = toWorld(...fieldPoint(f, t, span[0] + 2, uv), [0, 0]), b = toWorld(...fieldPoint(f, t, span[1] - 2, uv), [0, 0]);
+      walk('Westmoor vineyard pickers ' + (made + 1), [a, b], 2); made++;
+    }
+  }
+  if (AF.outlandSites) for (const site of AF.outlandSites.sites) if (site.kind === 'farm') walk(site.name + ' farmhand', [[site.x + 8, site.z + 7], [site.x + 8, site.z + 30]], 1);
+});
+// ---------------------------------------------------------------- idle work
+function* generate() {
+  FM.stats.phase = 'models'; yield* cropModels();
+  FM.stats.phase = 'crops'; yield* crops();
+  FM.stats.phase = 'machines'; yield* moverMeshes();
+  FM.stats.phase = 'props'; yield* fieldProps();
+  FM.stats.phase = 'select';
+}
+const work = FM.work = (ms) => {
+  if (!AF.ready || !AF.outlandSites || !AF.outlandSites.lib) return false;
+  const start = performance.now(), end = start + Math.min(ms, AF.MOBILE ? 1.5 : 2.5);
+  while (performance.now() < end) {
+    const slice = performance.now();
+    if (!FM.stats.ready) { if (!generator) generator = generate(); if (generator.next().done) { generator = null; FM.stats.ready = true; revision++; } }
+    else { if (!selection) { if (!stale()) break; selection = select(); } if (selection.next().done) selection = null; }
+    FM.stats.maxSliceMs = Math.max(FM.stats.maxSliceMs, performance.now() - slice);
+  }
+  FM.stats.workMs += performance.now() - start;
+  return !FM.stats.ready || !!selection || stale();
+};
+FM.settle = () => { while (work(8)); };
+AF.onIdle('farms', work);
+// ---------------------------------------------------------------- tests
+AF.test('farms: field mirror matches the outland field function', () => {
+  let bad = 0, checked = 0;
+  for (let index = 0; index < 300; index++) {
+    const x = -1250 + hash(index, 3) * 580, z = -290 + hash(index, 5) * 450, f = FM.fieldAt(x, z); checked++;
+    if (Math.abs(f.d - O.fieldEdge(x, z)) > 1e-6 || (f.id >= 0.8) !== O.fieldMeadow(x, z) || (x < -660 && z > -300 && z < O.coastZ(x) - 30 && f.id < 0.3 && f.d > 7 && f.lane > 7) !== O.fieldWheat(x, z)) bad++;
+  }
+  const uv = [0, 0]; let drift = 0; for (let index = 0; index < 50; index++) { const x = -1200 + hash(index, 9) * 500, z = -250 + hash(index, 11) * 400; toWorld(toU(x, z), z - x * 0.12, uv); drift = Math.max(drift, Math.hypot(uv[0] - x, uv[1] - z)); }
+  return { ok: !bad && drift < 0.1, info: bad + '/' + checked + ' mismatches, inverse drift ' + drift.toFixed(3) + ' m, ' + FM.fields.length + ' fields' };
+});
+AF.test('farms: crops are shared instanced LODs on clear field interiors', () => {
+  FM.settle(); let bad = 0;
+  for (let index = 0; index < N; index += 7) { const r = index * STRIDE, x = REC[r], z = REC[r + 2]; if (!clear(x, z) || O.h(x, z) < REC[r + 1]) bad++; }
+  const eye = { x: -950, y: O.h(-950, -60) + 1.7, z: -60 }, stats = FM.select(eye, false), kinds = FM.stats.kinds;
+  return { ok: N > 3000 && kinds.every((count) => count > 100) && !bad && FM.meshes.length === 5 && stats.draws <= 5 && stats.triangles < 900000 && FM.meshes.every((mesh) => !mesh.castShadow && !mesh.frustumCulled),
+    info: N + ' segments ' + JSON.stringify(kinds) + ', ' + bad + ' invalid, all-round select at Westmoor: ' + stats.draws + ' draws ' + Math.round(stats.triangles / 1000) + 'k tris (' + stats.near + ' near / ' + stats.mid + ' canopy), per segment ' + JSON.stringify(FM.stats.trianglesPer) };
+});
+AF.test('farms: machines, farmsteads and field props', () => {
+  FM.settle(); if (AF.outlandSites) AF.outlandSites.settle();
+  let wet = 0; for (const mover of FM.movers) for (let index = 0; index < mover.points.length; index += 3) if (O.waterY(mover.points[index], mover.points[index + 2]) !== null) wet++;
+  const farms = AF.outlandSites.sites.filter((site) => site.kind === 'farm');
+  return { ok: FM.movers.some((mover) => mover.kind === 'combine') && FM.movers.some((mover) => mover.kind === 'tractor') && !wet && farms.length >= 6 && FM.stats.props > 60 && FM.stats.walkers >= 6,
+    info: FM.movers.map((mover) => mover.kind + ' ' + Math.round(mover.total) + 'm').join(', ') + ', ' + farms.length + ' farms, ' + FM.stats.props + ' props, ' + FM.stats.walkers + ' walkers, wet ' + wet };
+});
+} catch (e) { AF.partError('44-farms.js', e); }
+
 try {
 const O=AF.outland,W=AF.W,hash=AF.hash2;
 const F=AF.flora={kinds:{},records:[],meshes:[],stats:{total:0,biomes:{},near:0,far:0,draws:0,triangles:0,workMs:0,maxSliceMs:0,generated:false}};
@@ -19109,12 +19985,12 @@ AF.test('island: ferry round trip and safe pier height',()=>{
 }catch(error){AF.partError('44-island.js',error);}
 
 try {
-const O=AF.outland,F=AF.flora,S=AF.outlandSites={sites:[],windmills:[],wheat:[],stats:{ready:false,workMs:0,props:0,walkers:0,hamlets:0,houses:0,wheat:0}},cache=new Map();
+const O=AF.outland,F=AF.flora,S=AF.outlandSites={sites:[],windmills:[],stats:{ready:false,workMs:0,props:0,walkers:0,hamlets:0,houses:0}},cache=new Map();
 const color=(hex,opts={})=>AF.col(hex,{jitter:0.45,edge:0.2,...opts});
 const wood=color(0x72513b,{pat:'plank'}),trim=color(0xe9e2cd),stone=color(0x8a8981,{pat:'stone'}),red=color(0x9e3e35),slate=color(0x52676a),gold=color(0xc4a25a),dark=color(0x313a3c),pane=color(0x9aaea9),grass=color(0x637d4b),glow=color(0xffdf9a,{emit:0xffbf69,emitK:2,mode:'night'});
-const adobe=color(0xcbb58d),clay=color(0xb27655),wheatGold=color(0xd5b34f),wheatShade=color(0xb79a40);
+const adobe=color(0xcbb58d),clay=color(0xb27655);
 const specs=[
- ['Alder Farm','farm',-944,-145,32,24],['Foxglove Farm','farm',-1110,-250,32,24],['Southfield Farm','farm',-820,48,32,24],['Bramble Farm','farm',-1100,108,32,24],
+ ['Alder Farm','farm',-944,-145,32,24],['Foxglove Farm','farm',-1110,-250,32,24],['Southfield Farm','farm',-820,48,32,24],['Bramble Farm','farm',-1100,108,32,24],['Hollin Farm','farm',-1096,-96,32,24],['Larkspur Farm','farm',-940,152,32,24],['Westmoor Vineyard','winery',-820,-210,28,20],
  ['Westmoor Windmill','windmill',-1145,-38,6,6],['Southfield Windmill','windmill',-780,126,6,6],['Mill Pond Mill','mill',-938,90,9,7],
  ['St Agnes Church','church',-1030,-65,8,12],['The Red Fox','pub',-1024,-14,10,7],['Coast Road Cottages','cottage',-1065,-24,7,6],['Rose Cottage','cottage',-1055,12,7,6],['Westmoor Fuel','fuel',-980,-16,9,7],
  ['Tamsin Lodge','lodge',-10,-575,13,8],['Tamsin Boathouse','boathouse',40,-610,7,5],['Tamsin Picnic','picnic',-98,-596,10,7],
@@ -19161,7 +20037,8 @@ function* farm(site){
  prop(site,yield* house('farmhouse',22,16,11));yield;prop(site,yield* house('barn',26,18,12,red,dark),18,-3,1);yield;
  prop(site,yield* geometry('silo',()=>{const m=new AF.Model(10,24,10);for(let y=0;y<21;y++)for(let x=0;x<10;x++)for(let z=0;z<10;z++)if(Math.hypot(x-4.5,z-4.5)<4.8)m.set(x,y,z,y%4?stone:trim);for(let layer=0;layer<3;layer++)m.box(layer,21+layer,layer,10-layer,22+layer,10-layer,slate);return m;}),26,-12);yield;
  const hay=yield* box('hay',5,3,4,gold);for(let index=0;index<6;index++){prop(site,hay,14+(index%3)*3,12+Math.floor(index/3)*2.5,0,{y:site.y+(index>3?0.5:0)});yield;}
- prop(site,yield* geometry('tractor',()=>{const m=new AF.Model(6,8,12);m.box(1,2,1,5,5,8,grass);m.box(1,3,8,5,4,11,grass);m.box(1,7,7,5,8,11,grass);for(const x of [0,5]){m.box(x,0,7,x+1,4,11,dark);m.box(x,0,1,x+1,3,4,dark);}m.box(4,4,2,5,8,3,dark);m.box(2,4,8,4,6,10,wood);return m;}),9,12,1);yield;
+ // sheds, bins, machines, coop, well, hives (44-farms)
+ if(AF.farms)yield* AF.farms.farmstead(site);yield;
  for(const dz of [-22,22])for(const dx of [-22,-6,18]){yield* fence(site,dx,dz);yield;}yield* fence(site,-30,0,1);yield;
  for(let dx=-24;dx<=-10;dx+=7)for(let dz=-14;dz<=7;dz+=7){F.add('maple-gold',site.x+dx,site.z+dz,{y:site.y,scale:0.5,planted:true,biome:'orchard'});yield;}
  for(let index=0;index<5;index++){F.add('shrub',site.x-29,site.z-16+index*8,{y:site.y,planted:true});yield;}
@@ -19180,28 +20057,13 @@ function* hamlet(site){
  for(const dx of [-18,18])for(const dz of [-12,12]){F.add(dry?'dry-bush':'shrub',site.x+dx,site.z+dz,{y:site.y,planted:true,scale:0.8});yield;}
  S.stats.hamlets++;
 }
-function* wheat(){
- const model=new AF.Model(32,4,32),coarse=new AF.Model(16,1,16);
- for(let row=1;row<32;row+=4)for(let stalk=1;stalk<32;stalk+=4){model.box(stalk,0,row,stalk+1,3,row+1,wheatShade);model.box(stalk,3,row,stalk+2,4,row+2,wheatGold);}
- for(let row=1;row<16;row+=4)coarse.box(1,0,row,15,1,row+1,wheatShade);
- const geo=yield* AF.meshModelG(model,{vs:0.25,flat:true});yield;
- geo.userData.lod=yield* AF.meshModelG(coarse,{vs:0.5,flat:true});yield;
- for(let x=-1210;x<-730;x+=14)for(let z=-280;z<170;z+=14){
-  yield;
-  if(!O.fieldWheat(x,z)||O.roadDistance(x,z)<20||O.waterY(x,z)!==null||O.pads.some(pad=>Math.abs(x-pad.x)<pad.rx+pad.bank+5&&Math.abs(z-pad.z)<pad.rz+pad.bank+5))continue;
-  let low=Infinity,high=-Infinity,clear=true;
-  for(const dx of [-4,0,4])for(const dz of [-4,0,4]){if(!O.fieldWheat(x+dx,z+dz)||O.waterY(x+dx,z+dz)!==null||O.roadDistance(x+dx,z+dz)<16)clear=false;const height=O.h(x+dx,z+dz);low=Math.min(low,height);high=Math.max(high,height);}
-  if(!clear||high-low>0.5||low<3)continue;
-  const y=low-0.25;O.addProp(geo,x,y,z,0,{collide:false,tag:'outland-wheat'});S.wheat.push({x,y,z});S.stats.wheat++;yield;
- }
- S.stats.wheatTriangles=geo.index.count/3;S.stats.wheatFarTriangles=geo.userData.lod.index.count/3;
-}
 S.lib={geometry,house,prop,lamp,picnic,fence,color,palette:{wood,trim,stone,red,slate,gold,dark,pane,grass,glow,adobe,clay}};
 function* build(){
  for(const site of S.sites){
     if(site.kind==='farm')yield* farm(site);
   else if(site.kind==='hamlet')yield* hamlet(site);
   else if(site.kind==='windmill')yield* windmill(site);
+  else if(site.kind==='winery'){if(AF.farms)yield* AF.farms.winery(site);}
   else if(site.kind==='church'){prop(site,yield* house('church',14,28,14,stone,slate));prop(site,yield* geometry('church-tower',()=>{const m=new AF.Model(10,37,10);m.box(1,0,1,9,26,9,stone);m.box(3,20,8,7,24,9,dark);for(let layer=0;layer<7;layer++)m.box(1+Math.floor(layer/2),26+layer,1+Math.floor(layer/2),9-Math.floor(layer/2),27+layer,9-Math.floor(layer/2),slate);m.box(4,32,4,5,37,5,trim);m.box(3,34,4,6,35,5,trim);return m;}),0,10);yield* lamp(site,10,12);}
   else if(site.kind==='fuel'){prop(site,yield* house('fuel-office',12,8,7,trim,red),-5,-2);prop(site,yield* geometry('fuel-canopy',()=>{const m=new AF.Model(24,12,16);m.box(0,10,0,24,12,16,red);for(const x of [1,22])for(const z of [1,14])m.box(x,0,z,x+1,10,z+1,trim);for(const x of [8,15]){m.box(x,0,7,x+2,5,9,trim);m.box(x,3,9,x+2,4,10,dark);}return m;}),4,3,0,{collide:false});for(const dx of [2,6])prop(site,yield* box('fuel-pump',2,5,2,trim),dx,3);yield* lamp(site,11,8);}
   else if(site.kind==='tower'){prop(site,yield* geometry('lookout',()=>{const m=new AF.Model(14,40,14);for(const x of [1,12])for(const z of [1,12]){m.box(x,0,z,x+1,28,z+1,wood);m.line(x,1,z,13-x,26,z,wood);}m.box(0,27,0,14,28,14,wood);m.box(2,28,2,12,35,12,wood);m.box(3,30,11,11,33,12,pane);m.box(1,35,1,13,37,13,slate);for(let y=1;y<28;y+=2)m.box(6,y,12,9,y+1,13,trim);return m;}));}
@@ -19213,7 +20075,6 @@ function* build(){
  }
  for(const [x,z]of [[-230,-785],[290,-880],[475,-715],[-1180,225],[930,235]]){O.addProp(yield* box('cairn',3,4,3,stone),x,O.h(x,z),z,0,{tag:'outland-cairn'});yield;}
  const sign=yield* geometry('signpost',()=>{const m=new AF.Model(8,7,2);m.box(3,0,0,4,7,1,wood);m.box(0,5,0,8,7,2,trim);return m;});for(const road of AF.PLAN.world.roads){if(road.driveway)continue;const ctrl=road.ctrl??road.points;for(let index=1;index<ctrl.length;index+=2){const [x,z]=ctrl[index],next=ctrl[Math.min(ctrl.length-1,index+1)],prev=ctrl[index-1],tx=next[0]-prev[0],tz=next[1]-prev[1],length=Math.hypot(tx,tz)||1,offset=road.w/2+3,sx=x-tz/length*offset,sz=z+tx/length*offset;if(O.roadInfo(x,z).flag||O.roadDistance(sx,sz)<6||O.waterY(sx,sz)!==null)continue;O.addProp(sign,sx,O.h(sx,sz),sz,0,{tag:'outland-signpost'});yield;}}
- yield* wheat();
  const sailGeo=(yield* geometry('windmill-sails',()=>{const m=new AF.Model(30,30,1);m.box(13,0,0,16,30,1,trim);m.box(0,13,0,30,16,1,trim);for(let index=0;index<30;index+=3){m.box(12,index,0,17,index+1,1,wood);m.box(index,12,0,index+1,17,1,wood);}return m;})).clone().translate(0,-7.5,0);
  sails=new THREE.InstancedMesh(sailGeo,AF.mat.voxelInst,2);sails.name='outland-windmill-sails';sails.count=0;sails.frustumCulled=false;sails.castShadow=false;sails.customDepthMaterial=AF.mat.depthInst;AF.scene.add(sails);
  S.stats.ready=true;
@@ -19233,9 +20094,9 @@ AF.onBuild('outland-walkers',665,()=>{
  add('Westmoor villagers',[[-1004,-39],[-992,-39],[-992,-28],[-1004,-28]],8);
 });
 AF.test('outland-sites: named rural sites have merged solid colliders',()=>{S.settle();const bad=S.sites.filter(site=>!site.props.length||!site.props.some(prop=>prop.col));return{ok:S.sites.length>=20&&!bad.length&&S.windmills.length===2,info:S.sites.length+' sites, '+S.stats.props+' merged props, missing solids '+bad.map(site=>site.name).join(',')};});
-AF.test('outland: wheat patches use shared LODs and clear field interiors',()=>{
- S.settle();let bad=0;for(const patch of S.wheat)if(!O.fieldWheat(patch.x,patch.z)||O.roadDistance(patch.x,patch.z)<20||O.waterY(patch.x,patch.z)!==null||O.h(patch.x,patch.z)<patch.y)bad++;
- return{ok:S.stats.wheat>15&&S.stats.wheat<250&&!bad&&S.stats.wheatFarTriangles<S.stats.wheatTriangles&&S.stats.hamlets===8&&S.stats.houses===24,info:S.stats.wheat+' patches, '+S.stats.wheatTriangles+'/'+S.stats.wheatFarTriangles+' triangles, '+bad+' invalid, '+S.stats.hamlets+' hamlets / '+S.stats.houses+' houses'};
+AF.test('outland: wheat fields carry shared instanced crops; hamlets furnished',()=>{
+ S.settle();const FM=AF.farms;if(FM)FM.settle();const wheat=FM?FM.stats.kinds[0]:0;
+ return{ok:wheat>500&&FM.meshes.length===5&&S.stats.hamlets===8&&S.stats.houses===24,info:wheat+' wheat segments (44-farms), '+S.stats.hamlets+' hamlets / '+S.stats.houses+' houses'};
 });
 AF.test('outland-sites: hikers and villagers leave island walker capacity',()=>{
  S.settle();const used=AF.walkers.paths.reduce((sum,path)=>sum+path.count,0),hits=[];let blocked=0,samples=0;
@@ -21951,7 +22812,7 @@ const rimCache = new Map();
 function rimSample(x, z) {
   const key = x * 10000 + z;
   let height = rimCache.get(key);
-  if (height === undefined) { height = Math.round(O.h(x, z) * 4) / 4; rimCache.set(key, height); }
+  if (height === undefined) { height = O.rimH ? O.rimH(x, z) : Math.round(O.h(x, z) * 4) / 4; rimCache.set(key, height); }
   return height;
 }
 function boundaryH(x, z) {
@@ -22014,7 +22875,7 @@ function* build(entry) {
   for (let row = -1; row <= 64; row++) {
     for (let col = -1; col <= 64; col++) {
       const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step, offset = (row + 1) * 66 + col + 1;
-      heights[offset] = Math.round(O.h(x, z) / quantum) * quantum * 4;
+      heights[offset] = (O.meshH ? O.meshH(x, z, step) : Math.round(O.h(x, z) / quantum) * quantum) * 4;
     }
     yield;
   }
@@ -22115,25 +22976,40 @@ function frozen(entry) {
   if (entry.children) for (const child of entry.children) if (frozen(child)) return true;
   return false;
 }
-function update(entry, cp, inherited) {
-  if (!entry.ready || entry.fadeE || entry.busy || inherited) return;
-  const dist = distance(entry, cp.x, cp.y, cp.z), ahead = distance(entry, aheadX, cp.y, aheadZ);
-  entry.used = stamp;
+// split wanted? (hysteresis: a split tile merges back only 25 % farther out)
+function wants(entry, cp, split) {
+  if (entry.level <= 0) return false;
+  const horizon = entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > 800;
+  if (horizon) return false;
   const k = (AF.MOBILE || AF.GFX.tier === 'low' ? 0.38 : AF.GFX.lite ? 0.48 : 0.7) * (AF.lodScale || 1);
   const threshold = entry.level === 1 ? 40 : entry.size * k;
-  const horizon = entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > 800;
-  const refine = entry.level > 0 && !horizon && Math.min(dist, ahead + 24) < threshold * (entry.split ? 1.25 : 1);
-  if (refine) {
+  return Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, aheadX, cp.y, aheadZ) + 24) < threshold * (split ? 1.25 : 1);
+}
+// what a tile about to split shows: each child, or straight away that child's own ready children when it wants to split too
+// (an approach never waits for one fade per quadtree level). Only for subtrees that are not on screen.
+function cover(entry, cp, output) {
+  entry.used = stamp;
+  const deeper = wants(entry, cp, false) && !!entry.children && entry.children.every((child) => child.ready);
+  entry.split = deeper;
+  if (deeper) for (const child of entry.children) cover(child, cp, output);
+  else for (const mesh of entry.meshes) output.push(mesh);
+}
+function update(entry, cp, inherited) {
+  if (!(entry.ready || entry.split) || entry.fadeE || entry.busy || inherited) return;
+  entry.used = stamp;
+  if (wants(entry, cp, entry.split)) {
     makeChildren(entry);
     let ready = true;
     for (const child of entry.children) { enqueue(child); if (!child.ready) ready = false; }
     if (!entry.split && ready) {
       const ins = entry.ins; ins.length = 0;
-      for (const child of entry.children) listVisible(child, ins);
+      for (const child of entry.children) cover(child, cp, ins);
       entry.split = true; entry.busy = true; fade.swap(entry, entry.meshes, ins, entry.finish);
     }
     if (entry.split && !entry.busy) for (const child of entry.children) update(child, cp, false);
   } else if (entry.split && !frozen(entry)) {
+    // merging back needs this tile's own mesh (a split tile being rebuilt stays split until it is ready)
+    if (!entry.ready) { enqueue(entry); for (const child of entry.children) update(child, cp, false); return; }
     const outs = entry.outs; outs.length = 0; for (const child of entry.children) listVisible(child, outs);
     entry.split = false; entry.busy = true; fade.swap(entry, outs, entry.meshes, entry.finish);
   }
@@ -22160,12 +23036,13 @@ function work(ms) {
         if (dist < bestD) { bestD = dist; best = index; }
       }
       if (best < 0) break;
+      R.urgent = bestD < 48;   // a tile right around the camera: the rendered frame helps (outland-lod)
       current = queue[best]; queue[best] = queue[queue.length - 1]; queue.pop();
       generator = build(current);
     }
     const slice = performance.now(), done = generator.next().done;
     R.maxStepMs = Math.max(R.maxStepMs, performance.now() - slice);
-    if (done) { generator = null; current = null; }
+    if (done) { generator = null; current = null; R.urgent = false; }
   }
   R.workMs = performance.now() - start;
   return !!generator || queue.length > 0;
@@ -22195,8 +23072,9 @@ AF.onTick('outland-lod', 876, (dt) => {
   const cp = AF.camera.position, dx = cp.x - lastX, dz = cp.z - lastZ, length = Math.hypot(dx, dz);
   const prediction = length < 40 && dt > 0 ? Math.min(1.5 / dt, 160 / Math.max(0.001, length)) : 0;
   aheadX = cp.x + dx * prediction; aheadZ = cp.z + dz * prediction; lastX = cp.x; lastZ = cp.z;
-  scanT += dt; if (scanT >= 0.2) { scanT = 0; scan(); }
-  work(1);
+  scanT += dt; if (scanT >= 0.1) { scanT = 0; scan(); }
+  // a tile right around the camera is missing: the rendered frame helps, more so while the city streamer has nothing urgent
+  work(R.urgent ? (AF.world.stream && AF.world.stream.urgent ? 1.5 : AF.MOBILE ? 2.5 : 3) : 1);
 });
 R.settle = () => {
   aheadX = AF.camera.position.x; aheadZ = AF.camera.position.z;
@@ -22220,7 +23098,10 @@ R.diagnose = () => {
     const vertical = x0 === x1 && z1 > z0, horizontal = z0 === z1 && x1 > x0;
     if (!vertical && !horizontal) continue;
     const side = vertical ? left.x < right.x ? 1 : 0 : left.z < right.z ? 3 : 2, low = vertical ? z0 : x0, high = vertical ? z1 : x1;
-    for (let value = low; value <= high; value += Math.min(left.size, right.size) / 64) maxGap = Math.max(maxGap, Math.abs(sample(left, side, value) - sample(right, side ^ 1, value)));
+    for (let value = low; value <= high; value += Math.min(left.size, right.size) / 64) {
+      const gap = Math.abs(sample(left, side, value) - sample(right, side ^ 1, value));
+      if (gap > maxGap) { maxGap = gap; R.worstGap = { a: [left.x, left.z, left.level], b: [right.x, right.z, right.level], side, at: value, ha: sample(left, side, value), hb: sample(right, side ^ 1, value) }; }
+    }
     pairs++;
   }
   for (let x = plan.play.x0 + 20; x < plan.play.x1; x += 80) for (let z = plan.play.z0 + 20; z < plan.play.z1; z += 80) {
@@ -22335,17 +23216,57 @@ function quad(buf, a, b, c, d, color, hx, hy, hz) {
   const uv = (p) => idx < 2 ? [p[2] * 16, p[1] * 16] : idx < 4 ? [p[0] * 16, p[2] * 16] : [p[0] * 16, p[1] * 16];
   buf.quad(a, b, c, d, uv(a), uv(b), uv(c), uv(d), color, idx, [3, 3, 3, 3]);
 }
-const at = (frame, index, offset, lift) => [frame.x[index] + frame.nx[index] * offset, frame.y[index] + lift, frame.z[index] + frame.nz[index] * offset];
-// a strip between lateral offsets o1..o2 across segment (i-1, i), optionally only the part [t0, t1] along it
-function strip(buf, frame, i, o1, o2, lift, color, t0 = 0, t1 = 1) {
-  const a0 = at(frame, i - 1, o1, lift), a1 = at(frame, i, o1, lift), b0 = at(frame, i - 1, o2, lift), b1 = at(frame, i, o2, lift);
-  const mix = (p, q, t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
-  quad(buf, mix(a0, a1, t0), mix(a0, a1, t1), mix(b0, b1, t1), mix(b0, b1, t0), color, 0, 1, 0);
+const at = (frame, index, offset, lift) => [frame.x[index] + frame.nx[index] * offset, frame.y[index] + lift + frame.b[index] * offset, frame.z[index] + frame.nz[index] * offset];
+// point at fraction t along segment (i-1, i), lateral offset o
+const pt = (frame, i, t, o, lift) => { const a = at(frame, i - 1, o, lift), b = at(frame, i, o, lift); return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; };
+// junction / city-edge trimming: a ribbon cell is clipped where it runs onto the city grid or onto an outranking road's ribbon
+let clipRoad = null, clipFrame = null, clipI = 0;
+const hidden = (t, o) => { const p = pt(clipFrame, clipI, t, o, 0); return W.col(p[0], p[2]) >= 0 || !!O.coverAt(p[0], p[2], clipRoad, p[1]); };
+// a seam vertex takes the covering road's surface height, so the trimmed ribbon meets it without a step
+const seam = (p, t, o) => { const q = pt(clipFrame, clipI, t, o, 0), other = W.col(q[0], q[2]) < 0 && O.coverAt(q[0], q[2], clipRoad, q[1]); if (other) p[1] = O.roadYOn(other, p[0], p[2]); return p; };
+// where another ribbon attaches to this one's edge, its kerb skirt would show as a dark seam
+const joined = (t, o) => { const p = pt(clipFrame, clipI, t, o, 0); return !!O.coverAt(p[0], p[2], clipRoad, p[1], true); };
+const CORNERS = [[0, 0], [0, 0], [0, 0], [0, 0]], HID = [false, false, false, false];
+// flat cell t0..t1 x o1..o2 of segment i; clipped: marching-squares on the corners, edge crossings found by bisection
+function cell(buf, frame, i, t0, t1, o1, o2, lift, color, clip) {
+  const c = CORNERS; c[0][0] = t0; c[0][1] = o1; c[1][0] = t1; c[1][1] = o1; c[2][0] = t1; c[2][1] = o2; c[3][0] = t0; c[3][1] = o2;
+  let shown = 0;
+  for (let k = 0; k < 4; k++) { HID[k] = clip && hidden(c[k][0], c[k][1]); if (!HID[k]) shown++; }
+  if (!shown) { RD.stats.clipped++; return; }
+  if (shown === 4) { quad(buf, pt(frame, i, t0, o1, lift), pt(frame, i, t1, o1, lift), pt(frame, i, t1, o2, lift), pt(frame, i, t0, o2, lift), color, 0, 1, 0); return; }
+  const v = [];
+  for (let k = 0; k < 4; k++) {
+    const a = c[k], b = c[(k + 1) % 4];
+    if (!HID[k]) v.push(pt(frame, i, a[0], a[1], lift));
+    if (HID[k] !== HID[(k + 1) % 4]) {
+      let lo = 0, hi = 1;
+      for (let step = 0; step < 8; step++) { const m = (lo + hi) / 2; if (hidden(a[0] + (b[0] - a[0]) * m, a[1] + (b[1] - a[1]) * m) === HID[k]) lo = m; else hi = m; }
+      const m = HID[k] ? hi : lo, inside = HID[k] ? lo : hi;
+      v.push(seam(pt(frame, i, a[0] + (b[0] - a[0]) * m, a[1] + (b[1] - a[1]) * m, lift), a[0] + (b[0] - a[0]) * inside, a[1] + (b[1] - a[1]) * inside));
+    }
+  }
+  quad(buf, v[0], v[1], v[2], v[3] || v[2], color, 0, 1, 0);
+  for (let k = 4; k < v.length; k++) quad(buf, v[0], v[k - 1], v[k], v[k], color, 0, 1, 0);
 }
-// vertical wall along the segment at lateral offset o, from lift y0 to y1, facing side (+1 = +normal)
-function wall(buf, frame, i, o, y0, y1, color, side) {
+// a strip between lateral offsets o1..o2 across segment (i-1, i), optionally only the part [t0, t1] along it
+function strip(buf, frame, i, o1, o2, lift, color, t0 = 0, t1 = 1, clip = false) { cell(buf, frame, i, t0, t1, o1, o2, lift, color, clip); }
+// vertical wall along the segment at lateral offset o, from lift y0 to y1, facing side (+1 = +normal); clipped kerb skirts also
+// stop where another ribbon attaches outside them (longest shown run of 9 samples, ends refined by bisection)
+const SHOWN = new Uint8Array(9);
+function wall(buf, frame, i, o, y0, y1, color, side, clip = false) {
+  let t0 = 0, t1 = 1;
+  if (clip) {
+    const show = (t) => !hidden(t, o) && !joined(t, o + side * 0.3);
+    let best = -1, length = 0;
+    for (let k = 0; k < 9; k++) SHOWN[k] = show(k / 8) ? 1 : 0;
+    for (let k = 0; k < 9;) { if (!SHOWN[k]) { k++; continue; } let end = k; while (end < 9 && SHOWN[end]) end++; if (end - k > length) { length = end - k; best = k; } k = end; }
+    if (best < 0) return;
+    const refine = (inside, outside) => { let a = inside, b = outside; for (let step = 0; step < 7; step++) { const m = (a + b) / 2; if (show(m)) a = m; else b = m; } return a; };
+    t0 = best > 0 ? refine(best / 8, (best - 1) / 8) : 0; t1 = best + length < 9 ? refine((best + length - 1) / 8, (best + length) / 8) : 1;
+    if (t1 - t0 < 1e-3) return;
+  }
   const nx = (frame.nx[i - 1] + frame.nx[i]) * side, nz = (frame.nz[i - 1] + frame.nz[i]) * side;
-  quad(buf, at(frame, i - 1, o, y0), at(frame, i, o, y0), at(frame, i, o, y1), at(frame, i - 1, o, y1), color, nx, 0, nz);
+  quad(buf, pt(frame, i, t0, o, y0), pt(frame, i, t1, o, y0), pt(frame, i, t1, o, y1), pt(frame, i, t0, o, y1), color, nx, 0, nz);
 }
 function box(buf, cx, cz, y0, y1, hx, hz, color) {
   const c = [[cx - hx, cz - hz], [cx + hx, cz - hz], [cx + hx, cz + hz], [cx - hx, cz + hz]];
@@ -22355,34 +23276,39 @@ function box(buf, cx, cz, y0, y1, hx, hz, color) {
   }
 }
 function frameOf(road, lift = 0) {
-  const pts = road.points, n = pts.length, frame = { x: new Float64Array(n), z: new Float64Array(n), y: new Float64Array(n), nx: new Float64Array(n), nz: new Float64Array(n), s: new Float64Array(n) };
+  const pts = road.points, n = pts.length, frame = { x: new Float64Array(n), z: new Float64Array(n), y: new Float64Array(n), nx: new Float64Array(n), nz: new Float64Array(n), s: new Float64Array(n), b: new Float64Array(n) };
   for (let index = 0; index < n; index++) {
     const before = pts[Math.max(0, index - 1)], after = pts[Math.min(n - 1, index + 1)], tx = after[0] - before[0], tz = after[1] - before[1], length = Math.hypot(tx, tz) || 1;
-    frame.x[index] = pts[index][0]; frame.z[index] = pts[index][1]; frame.y[index] = road.heights[index] + lift; frame.nx[index] = -tz / length; frame.nz[index] = tx / length;
+    frame.x[index] = pts[index][0]; frame.z[index] = pts[index][1]; frame.y[index] = road.heights[index] + lift; frame.nx[index] = -tz / length; frame.nz[index] = tx / length; frame.b[index] = road.bank ? road.bank[index] : 0;
     if (index) frame.s[index] = frame.s[index - 1] + Math.hypot(pts[index][0] - pts[index - 1][0], pts[index][1] - pts[index - 1][1]);
   }
   return frame;
 }
 function* buildAll() {
   const k = palette(), surf = new AF.GeoBuf(), struct = new AF.GeoBuf();
+  RD.stats.clipped = RD.stats.pads = 0;
   for (let ri = 0; ri < P.roads.length; ri++) {
     const road = P.roads[ri];
-    // junctions: the joining road stops under the one it forks from, and overlapping pieces sit at distinct heights (no coplanar faces)
-    const frame = frameOf(road, road.ring ? 0.05 : road.driveway ? 0 : 0.02 * (1 + ri % 2)), n = road.points.length, hw = road.w / 2, flags = road.flags, asphalt = road.kind === 0, marked = asphalt && !road.driveway;
+    // junctions: a ribbon is trimmed where it runs onto an outranking road (O.coverAt) or the city grid; all ribbons share one
+    // lift (road.lift) so trimmed pieces meet flush instead of overlapping at slightly different heights
+    const frame = frameOf(road, road.lift ?? 0.05), n = road.points.length, hw = road.w / 2, flags = road.flags, asphalt = road.kind === 0, marked = asphalt && !road.driveway;
+    clipRoad = road; clipFrame = frame;
     for (let i = 1; i < n; i++) {
-      if (W.col(frame.x[i - 1], frame.z[i - 1]) >= 0 || W.col(frame.x[i], frame.z[i]) >= 0) continue;
-      if (!road.ring) { const info = O.otherRoad((frame.x[i - 1] + frame.x[i]) / 2, (frame.z[i - 1] + frame.z[i]) / 2, road); if (info && info.deck && info.flag === 0 && info.d < info.hw - 0.5 && info.road.kind === 0 && (info.road.ring || info.road.w > road.w || ri > P.roads.indexOf(info.road))) { RD.stats.joins = (RD.stats.joins || 0) + 1; continue; } }
       const flag = flags[i - 1] === flags[i] ? flags[i] : 0, bridge = flag === 1, tunnel = flag === 2;
       if (!asphalt && !bridge) continue;
+      clipI = i;
+      let clip = false;
+      if (!bridge && !tunnel) for (let corner = 0; corner < 6 && !clip; corner++) clip = hidden(corner & 1, ((corner >> 1) - 1) * hw);
+      else if (W.col(frame.x[i - 1], frame.z[i - 1]) >= 0 || W.col(frame.x[i], frame.z[i]) >= 0) continue;
       if (asphalt) {
         const base = k.asph[Math.floor(AF.hash2(i, road.w * 7 + n) * 4)];
-        strip(surf, frame, i, -hw, -hw + 0.5, 0, k.gutter); strip(surf, frame, i, hw - 0.5, hw, 0, k.gutter);
+        strip(surf, frame, i, -hw, -hw + 0.5, 0, k.gutter, 0, 1, clip); strip(surf, frame, i, hw - 0.5, hw, 0, k.gutter, 0, 1, clip);
         if (marked) {
-          strip(surf, frame, i, -hw + 0.5, -hw + 0.65, 0, k.white); strip(surf, frame, i, hw - 0.65, hw - 0.5, 0, k.white);
-          strip(surf, frame, i, -hw + 0.65, -0.12, 0, base); strip(surf, frame, i, 0.12, hw - 0.65, 0, base);
+          strip(surf, frame, i, -hw + 0.5, -hw + 0.65, 0, k.white, 0, 1, clip); strip(surf, frame, i, hw - 0.65, hw - 0.5, 0, k.white, 0, 1, clip);
+          strip(surf, frame, i, -hw + 0.65, -0.12, 0, base, 0, 1, clip); strip(surf, frame, i, 0.12, hw - 0.65, 0, base, 0, 1, clip);
           const dash = Math.floor((frame.s[i - 1] + frame.s[i]) / 6) & 1;
-          strip(surf, frame, i, -0.12, 0.12, 0, dash ? k.yellow : base, 0, 0.5); strip(surf, frame, i, -0.12, 0.12, 0, dash ? base : k.yellow, 0.5, 1);
-        } else strip(surf, frame, i, -hw + 0.5, hw - 0.5, 0, base);
+          strip(surf, frame, i, -0.12, 0.12, 0, dash ? k.yellow : base, 0, 0.5, clip); strip(surf, frame, i, -0.12, 0.12, 0, dash ? base : k.yellow, 0.5, 1, clip);
+        } else strip(surf, frame, i, -hw + 0.5, hw - 0.5, 0, base, 0, 1, clip);
       } else strip(surf, frame, i, -hw, hw, 0, road.kind === 2 ? k.plank : k.gravel);
       if (bridge) {
         wall(struct, frame, i, -hw - 0.3, -1.3, 0.95, k.conc, -1); wall(struct, frame, i, hw + 0.3, -1.3, 0.95, k.conc, 1);
@@ -22393,6 +23319,14 @@ function* buildAll() {
         if (i % 4 === 0) {
           const ground = O.h(frame.x[i], frame.z[i]);
           if (frame.y[i] - 1.3 - ground > 0.5) box(struct, frame.x[i], frame.z[i], Math.min(ground, O.waterY(frame.x[i], frame.z[i]) ?? ground) - 0.5, frame.y[i] - 1.3, road.kind === 2 ? 0.4 : 1.4, road.kind === 2 ? 0.4 : 1.4, k.concD);
+        }
+        // abutments: the deck box is closed where it meets the embankment (wall down to the ground, parapet end caps)
+        for (const [end, dir] of [[i - 1, -1], [i, 1]]) {
+          if (flags[end + dir] === 1) continue;
+          const tx = -frame.nz[end] * dir, tz = frame.nx[end] * dir, low = Math.min(O.h(frame.x[end], frame.z[end]), frame.y[end] - 1.3) - 0.6 - frame.y[end];
+          const p = (o, h) => at(frame, end, o, h);
+          quad(struct, p(-hw - 0.3, low), p(hw + 0.3, low), p(hw + 0.3, -0.03), p(-hw - 0.3, -0.03), k.concD, tx, 0, tz);
+          for (const side of [-1, 1]) quad(struct, p(side * hw, 0), p(side * (hw + 0.3), 0), p(side * (hw + 0.3), 0.95), p(side * hw, 0.95), k.conc, -tx, 0, -tz);
         }
         if (flags[i - 2] !== 1) RD.stats.bridges++;
       } else if (tunnel) {
@@ -22414,11 +23348,38 @@ function* buildAll() {
           quad(struct, p(-wx - 3, TH + 3.2), p(wx + 3, TH + 3.2), [p(wx + 3, 0)[0] - tx * 1.2, y + TH + 3.2, p(wx + 3, 0)[2] - tz * 1.2], [p(-wx - 3, 0)[0] - tx * 1.2, y + TH + 3.2, p(-wx - 3, 0)[2] - tz * 1.2], k.concD, 0, 1, 0);
         }
       }
-      if (!bridge && !tunnel && asphalt) { wall(surf, frame, i, -hw, -0.7, 0, k.gutter, -1); wall(surf, frame, i, hw, -0.7, 0, k.gutter, 1); }
+      if (!bridge && !tunnel && asphalt) {
+        let skirt = clip; for (let probe = 0; probe < 6 && !skirt; probe++) skirt = joined((probe % 3) / 2, (probe < 3 ? -1 : 1) * (hw + 0.3));
+        wall(surf, frame, i, -hw, -0.7, 0, k.gutter, -1, skirt); wall(surf, frame, i, hw, -0.7, 0, k.gutter, 1, skirt);
+      }
       else if (tunnel) { wall(surf, frame, i, -hw, -0.3, 0, k.gutter, -1); wall(surf, frame, i, hw, -0.3, 0, k.gutter, 1); }
-      if (i % 48 === 0) yield;
+      if (i % 24 === 0) yield;
     }
     yield;
+  }
+  // dead-end junctions (two or more asphalt roads ending at one point): a flat fan just under the ribbons fills the wedges
+  // between their square ends; its rim follows the ribbons so it never shows through a sloping one
+  const nodes = [];
+  for (const road of P.roads) if (road.kind === 0 && !road.driveway) for (const index of [0, road.points.length - 1]) {
+    const [x, z] = road.points[index]; if (W.col(x, z) >= 0) continue;
+    let node = nodes.find((entry) => Math.hypot(entry.x - x, entry.z - z) < 1.5);
+    if (!node) nodes.push(node = { x, z, y: road.heights[index] + (road.lift ?? 0.05), hw: 0, roads: 0 });
+    node.hw = Math.max(node.hw, road.w / 2); node.roads++;
+  }
+  for (const node of nodes) {
+    if (node.roads < 2) continue;
+    const rim = [], count = 24, radius = node.hw + 0.1;
+    for (let index = 0; index < count; index++) {
+      const angle = index / count * Math.PI * 2, x = node.x + Math.cos(angle) * radius, z = node.z + Math.sin(angle) * radius, deck = O.deckY(x, z);
+      rim.push([x, (deck > -Infinity ? deck : O.roadY(x, z)) - 0.11, z]);
+    }
+    const low = rim.map((point, index) => Math.min(point[1], rim[(index + 1) % count][1], rim[(index + count - 1) % count][1]));
+    const centre = [node.x, node.y - 0.11, node.z];
+    for (let index = 0; index < count; index++) {
+      const a = rim[index], b = rim[(index + 1) % count];
+      quad(surf, centre, [a[0], low[index], a[2]], [b[0], low[(index + 1) % count], b[2]], [b[0], low[(index + 1) % count], b[2]], k.asph[0], 0, 1, 0);
+    }
+    RD.stats.pads++;
   }
   RD.stats.quads = surf.n / 4; RD.stats.structQuads = struct.n / 4;
   for (const [buf, name, cast] of [[surf, 'outland-roads', false], [struct, 'outland-structures', true]]) {
@@ -22450,13 +23411,12 @@ function lanes(road, from, to, offset) {
 AF.onBuild('outland-traffic', 661, () => {
   const VV = AF.vehicles; if (!VV || !VV.addRoute) return;
   const types = ['sedan', 'pickup', 'coupe', 'wagon', 'stream', 'convertible'].filter((id) => VV.TYPES.some((type) => type.id === id));
-  const yAt = (x, z) => O.roadY(x, z);
   const outside = (road) => { let first = 0, last = road.points.length - 1; while (first < last && W.col(road.points[first][0], road.points[first][1]) >= 0) first++; while (last > first && W.col(road.points[last][0], road.points[last][1]) >= 0) last--; return [Math.min(first + 2, last), last]; };
-  RD.routes = [];
+  RD.routes = []; RD.routeRoads = [];
   for (const [name, count, radius] of [['Solace Ring Road', 4, 1e9], ['Eastwood Road', 4, 700], ['Coast Road', 3, 700], ['West Coast Drive', 2, 600], ['Eastwood Loop', 1, 450], ['Westmoor Link', 2, 600], ['Jungle Highway', 1, 500]]) {
     const road = P.roads.find((entry) => entry.name === name); if (!road || road.points.length < 4) continue;
     const [from, to] = outside(road); if (to - from < 4) continue;
-    RD.routes.push(VV.addRoute(name + ' traffic', lanes(road, from, to, 2.6), { count, types, activeRadius: radius, yAt }));
+    RD.routes.push(VV.addRoute(name + ' traffic', lanes(road, from, to, 2.6), { count, types, activeRadius: radius, yAt: (x, z) => O.roadYOn(road, x, z) })); RD.routeRoads.push(road);
   }
 });
 // ---------------------------------------------------------------- hikers on the trails (shared walker batches)
@@ -22476,13 +23436,13 @@ AF.onBuild('outland-hikers', 666, () => {
 AF.test('roads: outland ribbons match the deck surface, bridges and tunnels are built', () => {
   RD.settle();
   const ring = P.roads.find((road) => road.ring); let worst = 0;
-  for (let index = 3; index < ring.points.length; index += 11) { const [x, z] = ring.points[index], y = AF.surfaceBelow(x, z, ring.heights[index] + 0.5, 4); worst = Math.max(worst, Math.abs(y - ring.heights[index])); }
+  for (let index = 3; index < ring.points.length; index += 11) { const [x, z] = ring.points[index], y = AF.surfaceBelow(x, z, ring.heights[index] + 0.5, 4); worst = Math.max(worst, Math.abs(y - ring.heights[index] - ring.lift)); }
   const s = RD.stats;
   return { ok: s.ready && RD.meshes.length === 2 && s.bridges >= 2 && s.tunnels >= 1 && worst < 0.05 && s.quads + s.structQuads < 60000, info: JSON.stringify(s) + ', deck error ' + worst.toFixed(3) };
 });
 AF.test('roads: rural traffic stays sparse and on the road surface', () => {
   const routes = RD.routes || []; let cars = 0, worst = 0;
-  for (const route of routes) for (const car of route.cars) { cars++; worst = Math.max(worst, Math.abs(car.y - O.roadY(car.x, car.z))); }
+  routes.forEach((route, index) => { for (const car of route.cars) { cars++; worst = Math.max(worst, Math.abs(car.y - O.roadYOn(RD.routeRoads[index], car.x, car.z))); } });
   return { ok: routes.length >= 3 && cars >= 8 && cars <= 24 && worst < 0.6, info: routes.length + ' routes, ' + cars + ' cars, worst height error ' + worst.toFixed(2) };
 });
 } catch (e) { AF.partError('49-roads.js', e); }
@@ -31183,7 +32143,7 @@ try {
   UI.roster = roster;
   // drawn by the main renderer into the stage's screen rect after each frame (no second WebGL context)
   const stage = title.querySelector('.stage');
-  const PV = { scene: null, cam: null, P: null, st: { phase: 0, speed: 0, air: 0, t: 0, land: 0 }, yaw: 0.4, drag: null, pop: 1, aspect: 0, rect: null, canvasRect: null, size: new THREE.Vector2(), vp: new THREE.Vector4(), sc: new THREE.Vector4() };
+  const PV = { scene: null, cam: null, P: null, st: { phase: 0, speed: 0, air: 0, t: 0, land: 0 }, yaw: 0.4, drag: null, pop: 1, aspect: 0, rect: null, canvasRect: null, size: new THREE.Vector2(), rt: null, blit: null };
   const previewResize = () => { PV.rect = stage.getBoundingClientRect(); PV.canvasRect = AF.renderer.domElement.getBoundingClientRect(); };
   addEventListener('resize', previewResize);
   const previewObserver = new ResizeObserver(previewResize); previewObserver.observe(stage); previewObserver.observe(title.querySelector('.modal')); previewObserver.observe(AF.renderer.domElement);
@@ -31227,6 +32187,31 @@ try {
     PV.P.root.scale.setScalar(s); PV.P.root.rotation.y = PV.yaw;
     AF.avatar.animate(PV.P, PV.st, Math.min(dt, 0.05), 0, true);
   });
+  // own target (depth + MSAA, drawing-buffer px) + one quad: never shares the world's depth/scissor (phones draw straight to the MSAA screen)
+  const pvBlit = () => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 1, 1, 1, 0, 0, 1, 0]), 2));
+    geo.setIndex([0, 2, 1, 2, 3, 1]);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { tMap: { value: null } }, depthTest: false, depthWrite: false, toneMapped: true,
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: 'uniform sampler2D tMap; varying vec2 vUv; void main(){ gl_FragColor = vec4(texture2D(tMap, vUv).rgb, 1.0);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}',
+    });
+    const quad = new THREE.Mesh(geo, mat); quad.frustumCulled = false;
+    const sc = new THREE.Scene(); sc.add(quad);
+    return { sc, cam: new THREE.Camera(), pos: geo.attributes.position, mat };
+  };
+  const pvTarget = (W, H) => {
+    if (PV.rt && PV.rt.width === W && PV.rt.height === H) return PV.rt;
+    if (PV.rt) { PV.rt.setSize(W, H); return PV.rt; }
+    const R = AF.renderer, half = !!AF.gfx.halfFloatTargets;
+    PV.rt = new THREE.WebGLRenderTarget(W, H, { type: half ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: R.capabilities.isWebGL2 ? 4 : 0 });
+    if (!half && R.capabilities.isWebGL2) PV.rt.texture.colorSpace = THREE.SRGBColorSpace;   // 8-bit fallback: sRGB storage, no banding
+    PV.rt.texture.name = 'af.title.preview';
+    return PV.rt;
+  };
+  const pvRelease = () => { if (PV.rt) { PV.rt.dispose(); PV.rt = null; } };
   AF.afterFrame = () => {
     if (!S.title || !PV.P) return;
     if (!PV.rect) previewResize();
@@ -31234,21 +32219,29 @@ try {
     R.getSize(PV.size);
     const k = PV.size.x / (cr.width || 1), w = r.width * k, hh = r.height * k;
     if (w < 2 || hh < 2) return;
-    const x = (r.left - cr.left) * k, y = PV.size.y - (r.bottom - cr.top) * k;
+    const x = (r.left - cr.left) * k, y = (r.top - cr.top) * k, pr = R.getPixelRatio();
     if (PV.aspect !== w / hh) { PV.aspect = w / hh; PV.cam.aspect = PV.aspect; PV.cam.updateProjectionMatrix(); }
-    R.getViewport(PV.vp); R.getScissor(PV.sc);
-    const rt = R.getRenderTarget(), sct = R.getScissorTest(), ac = R.autoClear, tm = R.toneMapping, ex = R.toneMappingExposure;
+    const rt = pvTarget(Math.max(1, Math.round(w * pr)), Math.max(1, Math.round(hh * pr)));
+    const B = PV.blit || (PV.blit = pvBlit());
+    const X0 = x / PV.size.x * 2 - 1, X1 = (x + w) / PV.size.x * 2 - 1, Y0 = 1 - y / PV.size.y * 2, Y1 = 1 - (y + hh) / PV.size.y * 2, p = B.pos.array;
+    if (p[0] !== X0 || p[1] !== Y0 || p[3] !== X1 || p[7] !== Y1) { p[0] = p[6] = X0; p[3] = p[9] = X1; p[1] = p[4] = Y0; p[7] = p[10] = Y1; B.pos.needsUpdate = true; }
+    B.mat.uniforms.tMap.value = rt.texture;
+    const prev = R.getRenderTarget(), sct = R.getScissorTest(), ac = R.autoClear, tm = R.toneMapping, ex = R.toneMappingExposure;
     try {
-      R.setRenderTarget(null); R.autoClear = false; R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 1.2;
-      R.setViewport(x, y, w, hh); R.setScissor(x, y, w, hh); R.setScissorTest(true);
-      R.clearDepth(); R.render(PV.scene, PV.cam);
+      R.setScissorTest(false); R.autoClear = false;
+      R.setRenderTarget(rt); R.clear(true, true, false); R.render(PV.scene, PV.cam);
+      R.setRenderTarget(null); R.toneMapping = THREE.ACESFilmicToneMapping; R.toneMappingExposure = 1.2;
+      R.render(B.sc, B.cam);
     } finally {
-      R.setViewport(PV.vp); R.setScissor(PV.sc); R.setScissorTest(sct); R.autoClear = ac; R.toneMapping = tm; R.toneMappingExposure = ex; R.setRenderTarget(rt);
+      R.setScissorTest(sct); R.autoClear = ac; R.toneMapping = tm; R.toneMappingExposure = ex; R.setRenderTarget(prev);
     }
   };
   AF.test('ui: title preview uses the main renderer', () => {
     const extra = title.querySelectorAll('canvas').length, has = !!(PV.P && PV.P.root.parent === PV.scene);
-    return { ok: extra === 0 && !('r' in PV) && (!S.title || has), info: 'stage canvases ' + extra + ', title ' + (S.title ? 'open, avatar ' + has : 'closed') };
+    if (S.title && has) { previewResize(); AF.afterFrame(); }
+    const pr = AF.renderer.getPixelRatio(), r = PV.rect, rt = PV.rt;
+    const sized = !S.title || !has || !r || r.width < 2 || !!(rt && Math.abs(rt.width - r.width * pr) <= 1 && Math.abs(rt.height - r.height * pr) <= 1);
+    return { ok: extra === 0 && !('r' in PV) && (!S.title || has) && sized, info: 'stage canvases ' + extra + ', title ' + (S.title ? 'open, avatar ' + has + ', target ' + (rt ? rt.width + 'x' + rt.height + ' @' + pr.toFixed(2) : 'none') : 'closed') };
   });
   const select = (id) => {
     const c = AF.friends && AF.friends.byId[id]; if (!c) return;
@@ -31269,6 +32262,7 @@ try {
   const start = () => {
     if (!AF.ready || !S.pick || !S.title) return;
     S.title = false; root.classList.remove('titling'); title.classList.add('out'); setTimeout(() => { if (!S.title) title.style.display = 'none'; }, 600);
+    pvRelease();
     if (TOUCH) goFull();
     AF.input.requestLock();
     AF.friends.play(S.pick);

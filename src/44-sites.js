@@ -1,10 +1,10 @@
 try {
-const O=AF.outland,F=AF.flora,S=AF.outlandSites={sites:[],windmills:[],wheat:[],stats:{ready:false,workMs:0,props:0,walkers:0,hamlets:0,houses:0,wheat:0}},cache=new Map();
+const O=AF.outland,F=AF.flora,S=AF.outlandSites={sites:[],windmills:[],stats:{ready:false,workMs:0,props:0,walkers:0,hamlets:0,houses:0}},cache=new Map();
 const color=(hex,opts={})=>AF.col(hex,{jitter:0.45,edge:0.2,...opts});
 const wood=color(0x72513b,{pat:'plank'}),trim=color(0xe9e2cd),stone=color(0x8a8981,{pat:'stone'}),red=color(0x9e3e35),slate=color(0x52676a),gold=color(0xc4a25a),dark=color(0x313a3c),pane=color(0x9aaea9),grass=color(0x637d4b),glow=color(0xffdf9a,{emit:0xffbf69,emitK:2,mode:'night'});
-const adobe=color(0xcbb58d),clay=color(0xb27655),wheatGold=color(0xd5b34f),wheatShade=color(0xb79a40);
+const adobe=color(0xcbb58d),clay=color(0xb27655);
 const specs=[
- ['Alder Farm','farm',-944,-145,32,24],['Foxglove Farm','farm',-1110,-250,32,24],['Southfield Farm','farm',-820,48,32,24],['Bramble Farm','farm',-1100,108,32,24],
+ ['Alder Farm','farm',-944,-145,32,24],['Foxglove Farm','farm',-1110,-250,32,24],['Southfield Farm','farm',-820,48,32,24],['Bramble Farm','farm',-1100,108,32,24],['Hollin Farm','farm',-1096,-96,32,24],['Larkspur Farm','farm',-940,152,32,24],['Westmoor Vineyard','winery',-820,-210,28,20],
  ['Westmoor Windmill','windmill',-1145,-38,6,6],['Southfield Windmill','windmill',-780,126,6,6],['Mill Pond Mill','mill',-938,90,9,7],
  ['St Agnes Church','church',-1030,-65,8,12],['The Red Fox','pub',-1024,-14,10,7],['Coast Road Cottages','cottage',-1065,-24,7,6],['Rose Cottage','cottage',-1055,12,7,6],['Westmoor Fuel','fuel',-980,-16,9,7],
  ['Tamsin Lodge','lodge',-10,-575,13,8],['Tamsin Boathouse','boathouse',40,-610,7,5],['Tamsin Picnic','picnic',-98,-596,10,7],
@@ -51,7 +51,8 @@ function* farm(site){
  prop(site,yield* house('farmhouse',22,16,11));yield;prop(site,yield* house('barn',26,18,12,red,dark),18,-3,1);yield;
  prop(site,yield* geometry('silo',()=>{const m=new AF.Model(10,24,10);for(let y=0;y<21;y++)for(let x=0;x<10;x++)for(let z=0;z<10;z++)if(Math.hypot(x-4.5,z-4.5)<4.8)m.set(x,y,z,y%4?stone:trim);for(let layer=0;layer<3;layer++)m.box(layer,21+layer,layer,10-layer,22+layer,10-layer,slate);return m;}),26,-12);yield;
  const hay=yield* box('hay',5,3,4,gold);for(let index=0;index<6;index++){prop(site,hay,14+(index%3)*3,12+Math.floor(index/3)*2.5,0,{y:site.y+(index>3?0.5:0)});yield;}
- prop(site,yield* geometry('tractor',()=>{const m=new AF.Model(6,8,12);m.box(1,2,1,5,5,8,grass);m.box(1,3,8,5,4,11,grass);m.box(1,7,7,5,8,11,grass);for(const x of [0,5]){m.box(x,0,7,x+1,4,11,dark);m.box(x,0,1,x+1,3,4,dark);}m.box(4,4,2,5,8,3,dark);m.box(2,4,8,4,6,10,wood);return m;}),9,12,1);yield;
+ // sheds, bins, machines, coop, well, hives (44-farms)
+ if(AF.farms)yield* AF.farms.farmstead(site);yield;
  for(const dz of [-22,22])for(const dx of [-22,-6,18]){yield* fence(site,dx,dz);yield;}yield* fence(site,-30,0,1);yield;
  for(let dx=-24;dx<=-10;dx+=7)for(let dz=-14;dz<=7;dz+=7){F.add('maple-gold',site.x+dx,site.z+dz,{y:site.y,scale:0.5,planted:true,biome:'orchard'});yield;}
  for(let index=0;index<5;index++){F.add('shrub',site.x-29,site.z-16+index*8,{y:site.y,planted:true});yield;}
@@ -70,28 +71,13 @@ function* hamlet(site){
  for(const dx of [-18,18])for(const dz of [-12,12]){F.add(dry?'dry-bush':'shrub',site.x+dx,site.z+dz,{y:site.y,planted:true,scale:0.8});yield;}
  S.stats.hamlets++;
 }
-function* wheat(){
- const model=new AF.Model(32,4,32),coarse=new AF.Model(16,1,16);
- for(let row=1;row<32;row+=4)for(let stalk=1;stalk<32;stalk+=4){model.box(stalk,0,row,stalk+1,3,row+1,wheatShade);model.box(stalk,3,row,stalk+2,4,row+2,wheatGold);}
- for(let row=1;row<16;row+=4)coarse.box(1,0,row,15,1,row+1,wheatShade);
- const geo=yield* AF.meshModelG(model,{vs:0.25,flat:true});yield;
- geo.userData.lod=yield* AF.meshModelG(coarse,{vs:0.5,flat:true});yield;
- for(let x=-1210;x<-730;x+=14)for(let z=-280;z<170;z+=14){
-  yield;
-  if(!O.fieldWheat(x,z)||O.roadDistance(x,z)<20||O.waterY(x,z)!==null||O.pads.some(pad=>Math.abs(x-pad.x)<pad.rx+pad.bank+5&&Math.abs(z-pad.z)<pad.rz+pad.bank+5))continue;
-  let low=Infinity,high=-Infinity,clear=true;
-  for(const dx of [-4,0,4])for(const dz of [-4,0,4]){if(!O.fieldWheat(x+dx,z+dz)||O.waterY(x+dx,z+dz)!==null||O.roadDistance(x+dx,z+dz)<16)clear=false;const height=O.h(x+dx,z+dz);low=Math.min(low,height);high=Math.max(high,height);}
-  if(!clear||high-low>0.5||low<3)continue;
-  const y=low-0.25;O.addProp(geo,x,y,z,0,{collide:false,tag:'outland-wheat'});S.wheat.push({x,y,z});S.stats.wheat++;yield;
- }
- S.stats.wheatTriangles=geo.index.count/3;S.stats.wheatFarTriangles=geo.userData.lod.index.count/3;
-}
 S.lib={geometry,house,prop,lamp,picnic,fence,color,palette:{wood,trim,stone,red,slate,gold,dark,pane,grass,glow,adobe,clay}};
 function* build(){
  for(const site of S.sites){
     if(site.kind==='farm')yield* farm(site);
   else if(site.kind==='hamlet')yield* hamlet(site);
   else if(site.kind==='windmill')yield* windmill(site);
+  else if(site.kind==='winery'){if(AF.farms)yield* AF.farms.winery(site);}
   else if(site.kind==='church'){prop(site,yield* house('church',14,28,14,stone,slate));prop(site,yield* geometry('church-tower',()=>{const m=new AF.Model(10,37,10);m.box(1,0,1,9,26,9,stone);m.box(3,20,8,7,24,9,dark);for(let layer=0;layer<7;layer++)m.box(1+Math.floor(layer/2),26+layer,1+Math.floor(layer/2),9-Math.floor(layer/2),27+layer,9-Math.floor(layer/2),slate);m.box(4,32,4,5,37,5,trim);m.box(3,34,4,6,35,5,trim);return m;}),0,10);yield* lamp(site,10,12);}
   else if(site.kind==='fuel'){prop(site,yield* house('fuel-office',12,8,7,trim,red),-5,-2);prop(site,yield* geometry('fuel-canopy',()=>{const m=new AF.Model(24,12,16);m.box(0,10,0,24,12,16,red);for(const x of [1,22])for(const z of [1,14])m.box(x,0,z,x+1,10,z+1,trim);for(const x of [8,15]){m.box(x,0,7,x+2,5,9,trim);m.box(x,3,9,x+2,4,10,dark);}return m;}),4,3,0,{collide:false});for(const dx of [2,6])prop(site,yield* box('fuel-pump',2,5,2,trim),dx,3);yield* lamp(site,11,8);}
   else if(site.kind==='tower'){prop(site,yield* geometry('lookout',()=>{const m=new AF.Model(14,40,14);for(const x of [1,12])for(const z of [1,12]){m.box(x,0,z,x+1,28,z+1,wood);m.line(x,1,z,13-x,26,z,wood);}m.box(0,27,0,14,28,14,wood);m.box(2,28,2,12,35,12,wood);m.box(3,30,11,11,33,12,pane);m.box(1,35,1,13,37,13,slate);for(let y=1;y<28;y+=2)m.box(6,y,12,9,y+1,13,trim);return m;}));}
@@ -103,7 +89,6 @@ function* build(){
  }
  for(const [x,z]of [[-230,-785],[290,-880],[475,-715],[-1180,225],[930,235]]){O.addProp(yield* box('cairn',3,4,3,stone),x,O.h(x,z),z,0,{tag:'outland-cairn'});yield;}
  const sign=yield* geometry('signpost',()=>{const m=new AF.Model(8,7,2);m.box(3,0,0,4,7,1,wood);m.box(0,5,0,8,7,2,trim);return m;});for(const road of AF.PLAN.world.roads){if(road.driveway)continue;const ctrl=road.ctrl??road.points;for(let index=1;index<ctrl.length;index+=2){const [x,z]=ctrl[index],next=ctrl[Math.min(ctrl.length-1,index+1)],prev=ctrl[index-1],tx=next[0]-prev[0],tz=next[1]-prev[1],length=Math.hypot(tx,tz)||1,offset=road.w/2+3,sx=x-tz/length*offset,sz=z+tx/length*offset;if(O.roadInfo(x,z).flag||O.roadDistance(sx,sz)<6||O.waterY(sx,sz)!==null)continue;O.addProp(sign,sx,O.h(sx,sz),sz,0,{tag:'outland-signpost'});yield;}}
- yield* wheat();
  const sailGeo=(yield* geometry('windmill-sails',()=>{const m=new AF.Model(30,30,1);m.box(13,0,0,16,30,1,trim);m.box(0,13,0,30,16,1,trim);for(let index=0;index<30;index+=3){m.box(12,index,0,17,index+1,1,wood);m.box(index,12,0,index+1,17,1,wood);}return m;})).clone().translate(0,-7.5,0);
  sails=new THREE.InstancedMesh(sailGeo,AF.mat.voxelInst,2);sails.name='outland-windmill-sails';sails.count=0;sails.frustumCulled=false;sails.castShadow=false;sails.customDepthMaterial=AF.mat.depthInst;AF.scene.add(sails);
  S.stats.ready=true;
@@ -123,9 +108,9 @@ AF.onBuild('outland-walkers',665,()=>{
  add('Westmoor villagers',[[-1004,-39],[-992,-39],[-992,-28],[-1004,-28]],8);
 });
 AF.test('outland-sites: named rural sites have merged solid colliders',()=>{S.settle();const bad=S.sites.filter(site=>!site.props.length||!site.props.some(prop=>prop.col));return{ok:S.sites.length>=20&&!bad.length&&S.windmills.length===2,info:S.sites.length+' sites, '+S.stats.props+' merged props, missing solids '+bad.map(site=>site.name).join(',')};});
-AF.test('outland: wheat patches use shared LODs and clear field interiors',()=>{
- S.settle();let bad=0;for(const patch of S.wheat)if(!O.fieldWheat(patch.x,patch.z)||O.roadDistance(patch.x,patch.z)<20||O.waterY(patch.x,patch.z)!==null||O.h(patch.x,patch.z)<patch.y)bad++;
- return{ok:S.stats.wheat>15&&S.stats.wheat<250&&!bad&&S.stats.wheatFarTriangles<S.stats.wheatTriangles&&S.stats.hamlets===8&&S.stats.houses===24,info:S.stats.wheat+' patches, '+S.stats.wheatTriangles+'/'+S.stats.wheatFarTriangles+' triangles, '+bad+' invalid, '+S.stats.hamlets+' hamlets / '+S.stats.houses+' houses'};
+AF.test('outland: wheat fields carry shared instanced crops; hamlets furnished',()=>{
+ S.settle();const FM=AF.farms;if(FM)FM.settle();const wheat=FM?FM.stats.kinds[0]:0;
+ return{ok:wheat>500&&FM.meshes.length===5&&S.stats.hamlets===8&&S.stats.houses===24,info:wheat+' wheat segments (44-farms), '+S.stats.hamlets+' hamlets / '+S.stats.houses+' houses'};
 });
 AF.test('outland-sites: hikers and villagers leave island walker capacity',()=>{
  S.settle();const used=AF.walkers.paths.reduce((sum,path)=>sum+path.count,0),hits=[];let blocked=0,samples=0;

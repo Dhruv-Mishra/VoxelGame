@@ -117,6 +117,10 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
   `AF.outland.deckY` from `AF.surfaceBelow`; route cars use `addRoute(..., { yAt })`. Rural traffic is 14 cars on five loops.
 - Measured (Standard, `perf-areas`): draws flat (-48..+10), GPU ms flat; triangles +40..115 k in city/aerial poses (ribbons +
   finer terrain colour runs). Boot +~110 ms (`outland-boundary` + roots).
+- Road surface invariants (Oct 2026, `tools/tmp-roads/` audit): no outland terrain cell or tile-edge rim rises through a ribbon
+  at any quadtree level (`O.meshH` caps cells, `O.rimH` lowers 8 m rim nodes; crack-free by construction); junctions trim the
+  outranked ribbon at the other's edge (`O.coverAt`, square ends) instead of overlapping, with matching cross-fall (`road.bank`);
+  `O.deckY` = highest ribbon at or under the wheel (never a hidden one), all ribbons sit at `road.lift` 0.05 m.
 
 ## 5d. UI / map
 - `74-map.js` rasterises the whole world (0.1 px/m) and the city (1.5 px/m) in idle slots (≤ 1.5 ms slices) after

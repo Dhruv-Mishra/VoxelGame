@@ -114,21 +114,37 @@ function edge(x, z) {
   if (O.edgeReady) edges.set(key, height);
   return height;
 }
-// nearest road segment (any: decks, traffic) and nearest ground-bearing segment (t*: bridges excluded) through a 64 m bucket grid
-let roadD = Infinity, roadY = 0, roadS = 0, roadKind = 0, roadHW = 5, roadFlag = 0, roadDeck = false, roadRef = null;
-let tD = Infinity, tY = 0, tS = 0, tKind = 0, tHW = 5, tFlag = 0;
+// nearest road segment (any: decks, traffic) and the ground-bearing segment (t*: bridges excluded; where the cores of several roads
+// overlap the lowest surface wins, so a junction never lifts the ground through a ribbon) through a 64 m bucket grid; c* = nearest
+// bridge deck. Each road contributes only its own nearest segment (R* scratch), never a neighbouring vertex of itself.
+let roadD = Infinity, roadY = 0, roadS = 0, roadKind = 0, roadHW = 5, roadFlag = 0, roadDeck = false, roadRef = null, roadLift = 0;
+let tD = Infinity, tY = 0, tS = 0, tKind = 0, tHW = 5, tFlag = 0, cD = Infinity, cY = 0, cHW = 0;
+const RN = 48, rRoad = new Array(RN), rD = new Float64Array(RN), rY = new Float64Array(RN), rS = new Float64Array(RN), rSeg = new Array(RN), rEnd = new Uint8Array(RN);
 const key64 = (x, z) => Math.floor(x / 64) * 10000 + Math.floor(z / 64);
+// ribbon height on a segment at (x,z): centreline profile plus the junction cross-fall (bank, per metre to the left of travel)
+const segY = (s, along, x, z) => AF.lerp(s.y0, s.y1, along) + (s.b0 || s.b1 ? AF.lerp(s.b0, s.b1, along) * ((z - s.z) * s.dx - (x - s.x) * s.dz) / s.length : 0);
 function roadAt(x, z, brute = false) {
-  roadD = tD = Infinity; let nearest = Infinity, ground = Infinity;
+  roadD = tD = cD = Infinity; let nearest = Infinity, bridge = Infinity, count = 0;
   const candidates = brute ? segments : roadGrid.get(key64(x, z));
   if (!candidates) return;
   for (const segment of candidates) {
     const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1);
     const dx = x - segment.x - segment.dx * along, dz = z - segment.z - segment.dz * along, distance = dx * dx + dz * dz;
-    if (distance < nearest) { nearest = distance; roadY = AF.lerp(segment.y0, segment.y1, along); roadS = segment.acc + segment.length * along; roadKind = segment.kind; roadHW = segment.hw; roadFlag = segment.flag; roadDeck = segment.deck; roadRef = segment.road; }
-    if (distance < ground && segment.flag !== 1) { ground = distance; tY = AF.lerp(segment.y0, segment.y1, along); tS = segment.acc + segment.length * along; tKind = segment.kind; tHW = segment.hw; tFlag = segment.flag; }
+    if (distance < nearest) { nearest = distance; roadY = segY(segment, along, x, z); roadS = segment.acc + segment.length * along; roadKind = segment.kind; roadHW = segment.hw; roadFlag = segment.flag; roadDeck = segment.deck; roadRef = segment.road; roadLift = segment.lift; }
+    if (segment.flag === 1) { if (distance < bridge) { bridge = distance; cY = AF.lerp(segment.y0, segment.y1, along); cHW = segment.hw; } continue; }
+    let slot = 0; while (slot < count && rRoad[slot] !== segment.road) slot++;
+    if (slot === count) { if (count === RN) continue; rRoad[count] = segment.road; rD[count++] = Infinity; }
+    if (distance < rD[slot]) { rD[slot] = distance; rY[slot] = segY(segment, along, x, z); rS[slot] = segment.acc + segment.length * along; rSeg[slot] = segment; }
   }
-  roadD = Math.sqrt(nearest); tD = Math.sqrt(ground);
+  let pick = -1, cover = Infinity, ground = Infinity;
+  for (let slot = 0; slot < count; slot++) {
+    const segment = rSeg[slot], core = segment.hw + (segment.kind === 0 ? 0.6 : 0.3), surface = rY[slot] - (segment.kind === 0 ? 0.2 : 0);
+    if (rD[slot] < core * core) { if (surface < cover - 1e-9 || surface < cover + 1e-9 && rD[slot] < ground) { cover = surface; ground = rD[slot]; pick = slot; } }
+    else if (cover === Infinity && rD[slot] < ground) { ground = rD[slot]; pick = slot; }
+  }
+  if (pick >= 0) { const segment = rSeg[pick]; tD = Math.sqrt(ground); tY = rY[pick]; tS = rS[pick]; tKind = segment.kind; tHW = segment.hw; tFlag = segment.flag; }
+  for (let slot = 0; slot < count; slot++) rRoad[slot] = rSeg[slot] = null;
+  roadD = Math.sqrt(nearest); cD = Math.sqrt(bridge);
 }
 // rivers: channel + banks carved into the terrain (after the city-edge blend), levels fall monotonically to the sea / the city falls
 let rivD = Infinity, rivY = 0, rivHW = 0, riverReady = false;
@@ -167,6 +183,11 @@ O.h = (x, z) => {
       // asphalt sits 0.2 m under its smooth ribbon (49-roads); cuts and fills widen with their depth, tunnels keep sheer walls
       const core = tHW + (tKind === 0 ? 0.6 : 0.3), outer = core + (tFlag === 2 ? 1 : Math.min(36, 2.5 + Math.abs(height - tY) * 0.9));
       if (tD < outer) height = AF.lerp(tY - (tKind === 0 ? 0.2 : 0), height, smooth(core, outer, tD));
+    }
+    // bridges only ever cut: banks and abutments never rise through a deck
+    if (cD < cHW + 40) {
+      const core = cHW + 0.6, outer = core + Math.min(36, 2.5 + Math.max(0, height - cY) * 0.9);
+      if (cD < outer) height = Math.min(height, AF.lerp(cY - 0.2, height, smooth(core, outer, cD)));
     }
   }
   return height;
@@ -235,15 +256,51 @@ O.forestDensity = (x, z) => {
 };
 // distance past a road's edge + 5 (so a 10 m lane keeps its old meaning; trails let the trees come close)
 O.roadDistance = (x, z) => { roadAt(x, z); return roadD === Infinity ? Infinity : Math.min(roadD - roadHW, tD - tHW) + 5; };
-// drivable surface of a road ribbon / bridge deck at (x,z) (-Infinity off the ribbon); y above a tunnel roof stands on the roof
+// drivable top of the ribbons / bridge decks at (x,z) (-Infinity off them). With y: the highest top at or below y + 0.35 (a
+// viaduct over a lane, or the lane under it); y above a tunnel roof stands on the roof. Without y: the nearest ribbon.
 O.deckY = (x, z, y) => {
   if (z > 300) return -Infinity;
-  roadAt(x, z); if (!roadDeck || roadD > roadHW + 0.15) return -Infinity;
-  return roadFlag === 2 && y !== undefined && y > roadY + O.TUNNEL_H ? roadY + O.TUNNEL_H + 0.6 : roadY;
+  const list = roadGrid.get(key64(x, z)); if (!list) return -Infinity;
+  let count = 0;
+  for (const segment of list) {
+    if (!segment.deck) continue;
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1), reach = segment.hw + 0.15;
+    const distance = (x - segment.x - segment.dx * along) ** 2 + (z - segment.z - segment.dz * along) ** 2;
+    if (distance > reach * reach) continue;
+    let slot = 0; while (slot < count && rRoad[slot] !== segment.road) slot++;
+    if (slot === count) { if (count === RN) continue; rRoad[count] = segment.road; rD[count++] = Infinity; }
+    if (distance < rD[slot]) { rD[slot] = distance; rY[slot] = segY(segment, along, x, z) + segment.lift; rSeg[slot] = segment; rEnd[slot] = pastEnd(segment.road, x, z) ? 1 : 0; }
+  }
+  // ribbons end square: past a road's last vertex it only carries a car where nothing else does (junction pads)
+  let best = -Infinity, near = Infinity;
+  for (let pass = 0; pass < 2 && best === -Infinity; pass++) for (let slot = 0; slot < count; slot++) {
+    if (rEnd[slot] !== pass) continue;
+    let top = rY[slot], under = false;
+    // a ribbon trimmed under an outranking one at the same level (49-roads junctions) is not a surface there
+    for (let other = 0; other < count && !under; other++) under = other !== slot && !rEnd[other] && rRoad[slot].kind === 0 && rRoad[other].kind === 0 && rD[other] < (rSeg[other].hw - 0.02) ** 2 && outranks(rRoad[other], rRoad[slot]) && Math.abs(rY[other] - top) < 1.5;
+    if (under) continue;
+    if (y === undefined) { if (rD[slot] < near) { near = rD[slot]; best = top; } }
+    else {
+      if (rSeg[slot].flag === 2 && y > top + O.TUNNEL_H) top += O.TUNNEL_H + 0.6;
+      if (top <= y + 0.35 && top > best) best = top;
+    }
+  }
+  for (let slot = 0; slot < count; slot++) rRoad[slot] = rSeg[slot] = null;
+  return best;
 };
-O.roadY = (x, z) => { roadAt(x, z); return roadD === Infinity ? O.h(x, z) : roadY; };
+O.roadY = (x, z) => { roadAt(x, z); return roadD === Infinity ? O.h(x, z) : roadY + (roadDeck ? roadLift : 0); };
+// ribbon top of one road (route cars keep to their own road where another passes under or over it)
+O.roadYOn = (road, x, z) => {
+  let best = Infinity, y = O.h(x, z);
+  for (const segment of roadGrid.get(key64(x, z)) || []) {
+    if (segment.road !== road) continue;
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1), distance = (x - segment.x - segment.dx * along) ** 2 + (z - segment.z - segment.dz * along) ** 2;
+    if (distance < best) { best = distance; y = segY(segment, along, x, z) + (segment.deck ? segment.lift : 0); }
+  }
+  return y;
+};
 O.roadInfo = (x, z) => { roadAt(x, z); return { d: roadD, y: roadY, s: roadS, kind: roadKind, hw: roadHW, flag: roadFlag, deck: roadDeck, road: roadRef }; };
-// nearest segment of any road other than `exclude` (junction trimming)
+// nearest segment of any road other than `exclude`
 O.otherRoad = (x, z, exclude) => {
   let best = Infinity, hit = null;
   for (const segment of roadGrid.get(key64(x, z)) || []) {
@@ -252,6 +309,74 @@ O.otherRoad = (x, z, exclude) => {
     if (distance < best) { best = distance; hit = segment; }
   }
   return hit ? { d: Math.sqrt(best), hw: hit.hw, road: hit.road, deck: hit.deck, flag: hit.flag } : null;
+};
+// junction trimming (49-roads): the asphalt road whose ribbon covers (x,z) and outranks `road` (ring > wider > listed first;
+// driveways yield to everything; any = every other road), at the same level (+-1.5 m of y), or null. Ribbon ends are square.
+const outranks = (other, road) => !other.driveway && (road.driveway || other.ring || !road.ring && (other.w > road.w || other.w === road.w && other.order < road.order));
+O.coverAt = (x, z, road, y, any = false) => {
+  for (const segment of roadGrid.get(key64(x, z)) || []) {
+    const other = segment.road;
+    if (other === road || other.kind !== 0 || !any && !outranks(other, road)) continue;
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1);
+    const distance = (x - segment.x - segment.dx * along) ** 2 + (z - segment.z - segment.dz * along) ** 2;
+    if (distance < (segment.hw - 0.02) ** 2 && Math.abs(AF.lerp(segment.y0, segment.y1, along) - y) < 1.5 && !pastEnd(other, x, z)) return other;
+  }
+  return null;
+};
+// beyond the square end of a road's first or last vertex (the drawn ribbon stops there; only tested near those ends)
+function setEnds(road) {
+  const p = road.points, n = p.length, a = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]) || 1, b = Math.hypot(p[n - 1][0] - p[n - 2][0], p[n - 1][1] - p[n - 2][1]) || 1;
+  road.ends = [p[0][0], p[0][1], (p[1][0] - p[0][0]) / a, (p[1][1] - p[0][1]) / a, p[n - 1][0], p[n - 1][1], (p[n - 1][0] - p[n - 2][0]) / b, (p[n - 1][1] - p[n - 2][1]) / b];
+}
+const pastEnd = (road, x, z) => {
+  const e = road.ends, r = road.w + 2;
+  return (x - e[0]) ** 2 + (z - e[1]) ** 2 < r * r && (x - e[0]) * e[2] + (z - e[1]) * e[3] < 0 || (x - e[4]) ** 2 + (z - e[5]) ** 2 < r * r && (x - e[4]) * e[6] + (z - e[5]) * e[7] > 0;
+};
+// outland mesher heights (49-outland): a quantised cell never rises through an asphalt ribbon or deck it overlaps at any LOD
+O.meshH = (x, z, step) => {
+  const quantum = step <= 1 ? step * 0.5 : step * 0.75, height = Math.round(O.h(x, z) / quantum) * quantum;
+  if (z > 300) return height;
+  const reach = step * 0.71 + 0.35;
+  let cap = Infinity;
+  for (const segment of roadGrid.get(key64(x, z)) || []) {
+    if (segment.kind !== 0 && segment.flag !== 1) continue;
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1), limit = segment.hw + reach;
+    const distance = (x - segment.x - segment.dx * along) ** 2 + (z - segment.z - segment.dz * along) ** 2;
+    if (distance < limit * limit) cap = Math.min(cap, segY(segment, along, x, z) - 0.1 - reach * (segment.grade + Math.max(Math.abs(segment.b0), Math.abs(segment.b1))));
+  }
+  return height > cap ? Math.floor(cap / quantum) * quantum : height;
+};
+// outland tile boundary profile (49-outland rimSample): tile edges interpolate an 8 m lattice of rim heights, so a lattice edge
+// crossing a ribbon / deck (tunnels: their trench) must pass under it. Each crossing is carried by the node hidden under the road
+// (lowering it is invisible); a node beside the road only takes the constraint when neither or both are under it. Per-node and
+// local (neighbours enter with their natural height, an upper bound), so every tile still shares the same crack-free profile.
+let capTunnel = false;
+const ribbonCap = (x, z) => {
+  let cap = Infinity; capTunnel = false;
+  for (const segment of roadGrid.get(key64(x, z)) || []) {
+    if (segment.kind !== 0 && segment.flag !== 1) continue;
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1), reach = segment.hw + (segment.flag === 2 ? 1.7 : 0.15);
+    const distance = (x - segment.x - segment.dx * along) ** 2 + (z - segment.z - segment.dz * along) ** 2;
+    if (distance < reach * reach) { const y = segY(segment, along, x, z) - 0.15; if (y < cap) { cap = y; capTunnel = segment.flag === 2; } }
+  }
+  return cap;
+};
+const RIM_DIRS = [[8, 0], [-8, 0], [0, 8], [0, -8]];
+O.rimH = (x, z) => {
+  const natural = Math.round(O.h(x, z) * 4) / 4;
+  if (z > 300 || !O.edgeReady) return natural;
+  roadAt(x, z); if (roadD > 17) return natural;
+  const own = ribbonCap(x, z), hidden = own < Infinity, depth = capTunnel ? 40 : 8;
+  let value = Math.min(natural, own);
+  for (const [dx, dz] of RIM_DIRS) {
+    const mx = x + dx, mz = z + dz, other = Math.round(O.h(mx, mz) * 4) / 4, otherHidden = ribbonCap(mx, mz) < Infinity;
+    for (let k = 1; k < 16; k++) {
+      const t = k / 16; if (hidden === otherHidden ? t > 0.5 : !hidden) continue;
+      const cap = ribbonCap(x + dx * t, z + dz * t);
+      if (cap < Infinity) value = Math.min(value, Math.max(cap - depth, (cap - t * other) / (1 - t)));
+    }
+  }
+  return value < natural ? Math.floor(value * 4) / 4 : natural;
 };
 O.riverInfo = (x, z) => { riverAt(x, z); return { d: rivD, y: rivY, hw: rivHW }; };
 O.fieldEdge = (x, z) => { farmAt(x, z); return fieldD; };
@@ -290,7 +415,7 @@ AF.test('outland: ring road loops the range with bridges, tunnels and wayside st
   let length = 0, bridges = 0, tunnels = 0, deckOk = true;
   for (let index = 1; index < ring.points.length; index++) length += Math.hypot(ring.points[index][0] - ring.points[index - 1][0], ring.points[index][1] - ring.points[index - 1][1]);
   for (let index = 1; index < ring.flags.length; index++) if (ring.flags[index] !== ring.flags[index - 1]) { if (ring.flags[index] === 1) bridges++; if (ring.flags[index] === 2) tunnels++; }
-  for (let index = 0; index < ring.points.length; index += 7) { const [x, z] = ring.points[index], deck = O.deckY(x, z, ring.heights[index] + 0.5); if (Math.abs(deck - ring.heights[index]) > 0.05) deckOk = false; }
+  for (let index = 0; index < ring.points.length; index += 7) { const [x, z] = ring.points[index], deck = O.deckY(x, z, ring.heights[index] + 0.5); if (Math.abs(deck - ring.heights[index] - ring.lift) > 0.02) deckOk = false; }
   return { ok: length > 2000 && bridges >= 2 && tunnels >= 1 && deckOk && O.wayside.length >= 6, info: Math.round(length) + ' m, ' + bridges + ' bridges, ' + tunnels + ' tunnels, ' + O.wayside.length + ' stops, deck ' + deckOk };
 });
 AF.test('outland: rivers run downhill to the sea or the Solace falls, bridged where roads cross', () => {
@@ -356,19 +481,20 @@ function buildRivers() {
   riverReady = true;
 }
 function nearestOn(road, x, z) {
-  let best = Infinity, y = 0, flag = 0;
+  let best = Infinity, y = 0, flag = 0, gx = 0, gz = 0;
   for (let index = 1; index < road.points.length; index++) {
-    const a = road.points[index - 1], b = road.points[index], dx = b[0] - a[0], dz = b[1] - a[1], t = clamp(((x - a[0]) * dx + (z - a[1]) * dz) / (dx * dx + dz * dz || 1), 0, 1);
+    const a = road.points[index - 1], b = road.points[index], dx = b[0] - a[0], dz = b[1] - a[1], len2 = dx * dx + dz * dz || 1, t = clamp(((x - a[0]) * dx + (z - a[1]) * dz) / len2, 0, 1);
     const distance = (x - a[0] - dx * t) ** 2 + (z - a[1] - dz * t) ** 2;
-    if (distance < best) { best = distance; y = AF.lerp(road.heights[index - 1], road.heights[index], t); flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0; }
+    if (distance < best) { best = distance; y = AF.lerp(road.heights[index - 1], road.heights[index], t); flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0; const rise = (road.heights[index] - road.heights[index - 1]) / len2, terminal = t === 0 && index === 1 || t === 1 && index === road.points.length - 1; gx = terminal ? NaN : dx * rise; gz = dz * rise; }
   }
-  return { d: Math.sqrt(best), y, flag };
+  // gx, gz: the host's surface gradient there (its cross-section is level); NaN past the host's own end (end-to-end joins)
+  return { d: Math.sqrt(best), y, flag, gx, gz };
 }
 // dense centreline + height profile: smoothed terrain, grade-limited, anchored to the city and to roads already profiled;
 // flags 1 = bridge (over water or > 7 m above ground), 2 = tunnel (ring only, > 12 m under ground)
 function profile(road, done) {
   const kind = road.kind, pts = catmull(road.ctrl, kind === 2 ? 5 : 6), n = pts.length;
-  const base = new Float64Array(n), lo = new Float64Array(n).fill(-Infinity), anchor = new Float64Array(n).fill(NaN), water = new Uint8Array(n), step = new Float64Array(n);
+  const base = new Float64Array(n), lo = new Float64Array(n).fill(-Infinity), anchor = new Float64Array(n).fill(NaN), water = new Uint8Array(n), step = new Float64Array(n), slopeX = new Float64Array(n).fill(NaN), slopeZ = new Float64Array(n);
   for (let index = 0; index < n; index++) {
     const x = pts[index][0], z = pts[index][1];
     if (index) step[index] = Math.hypot(x - pts[index - 1][0], z - pts[index - 1][1]);
@@ -379,8 +505,10 @@ function profile(road, done) {
     riverAt(x, z); if (rivD < rivHW + 5) { lo[index] = rivY + (kind === 2 ? 1.8 : 3.4); water[index] = 1; }
     for (const lake of waters) if (waterE(x, z, lake) < 1.1) { lo[index] = Math.max(lo[index], lake.waterY + 3); water[index] = 1; }
     if (base[index] < 0) { lo[index] = Math.max(lo[index], 2.5); water[index] = 1; }
-    const end = index === 0 || index === n - 1;
-    for (const other of done) { const hit = nearestOn(other, x, z); if (hit.d < (end ? 8 : 3.5) && hit.flag === 0) anchor[index] = hit.y; }
+    const end = index === 0 || index === n - 1, near = index <= 2 || index >= n - 3;
+    // junctions: everything on an older road's carriageway, and near this road's ends the first vertex past its edge, takes the
+    // older road's level, so the trimmed ribbon meets it flush
+    for (const other of done) { const hit = nearestOn(other, x, z); if (hit.d < (near ? Math.max(end ? 8 : 0, other.w / 2 + 6.5) : other.w / 2 + 2) && hit.flag === 0) { anchor[index] = hit.y; const beside = pastEnd(other, x, z); slopeX[index] = beside ? NaN : hit.gx; slopeZ[index] = beside ? 0 : hit.gz; } }
   }
   const radius = road.ring ? 6 : kind === 1 ? 4 : kind === 2 ? 1 : 5;
   let current = base.map((value, index) => Math.max(value, lo[index]));
@@ -391,6 +519,13 @@ function profile(road, done) {
     for (let index = 1; index < n; index++) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index - 1] - grade * step[index], y[index - 1] + grade * step[index]);
     for (let index = n - 2; index >= 0; index--) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index + 1] - grade * step[index + 1], y[index + 1] + grade * step[index + 1]);
   }
+  // round off the grade breaks the clamp leaves (a car felt each one as a bump), then re-check the limit
+  for (let pass = 0; pass < 3; pass++) {
+    const prev = y.slice();
+    for (let index = 1; index < n - 1; index++) if (Number.isNaN(anchor[index])) y[index] = Math.max(lo[index], (prev[index - 1] + 2 * prev[index] + prev[index + 1]) / 4);
+  }
+  for (let index = 1; index < n; index++) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index - 1] - grade * step[index], y[index - 1] + grade * step[index]);
+  for (let index = n - 2; index >= 0; index--) if (Number.isNaN(anchor[index])) y[index] = clamp(y[index], y[index + 1] - grade * step[index + 1], y[index + 1] + grade * step[index + 1]);
   const raw = new Uint8Array(n), flags = new Uint8Array(n);
   for (let index = 0; index < n; index++) if (Number.isNaN(anchor[index]) || W.col(pts[index][0], pts[index][1]) < 0) {
     if (water[index] || kind !== 2 && y[index] - base[index] > 7) raw[index] = 1; else if (road.ring && base[index] - y[index] > 12) raw[index] = 2;
@@ -398,7 +533,17 @@ function profile(road, done) {
   for (let index = 0; index < n; index++) flags[index] = raw[index] || (raw[index - 1] === 1 || raw[index + 1] === 1 ? 1 : 0);
   for (let index = 0; index < n;) { if (flags[index] !== 2) { index++; continue; } let end = index; while (end < n && flags[end] === 2) end++; if (end - index < 4) flags.fill(0, index, end); index = end; }
   for (let index = 0; index < n; index++) if (W.col(pts[index][0], pts[index][1]) >= 0) flags[index] = 0;
-  road.points = pts; road.heights = Array.from(y); road.flags = flags; road.base = base;
+  // junction cross-fall: where an asphalt road takes an older road's level, its cross-section also takes that road's slope
+  // (a level cross-section meeting a climbing road left a step at the seam); fades out one vertex past the junction
+  const bank = new Float64Array(n);
+  if (kind === 0) for (let index = 0; index < n; index++) {
+    let source = index, weight = 1;
+    if (Number.isNaN(slopeX[index])) { weight = 0.5; source = index > 0 && !Number.isNaN(slopeX[index - 1]) ? index - 1 : index < n - 1 && !Number.isNaN(slopeX[index + 1]) ? index + 1 : -1; }
+    if (source < 0) continue;
+    const before = pts[Math.max(0, index - 1)], after = pts[Math.min(n - 1, index + 1)], tx = after[0] - before[0], tz = after[1] - before[1], length = Math.hypot(tx, tz) || 1;
+    bank[index] = weight * (slopeX[source] * -tz + slopeZ[source] * tx) / length;
+  }
+  road.points = pts; road.heights = Array.from(y); road.flags = flags; road.base = base; road.bank = Array.from(bank); setEnds(road);
 }
 const STOPS = [['kiosk', 'Wayside Kiosk', 7], ['houses', 'Roadside Cottages', 17], ['fuel', 'Ring Road Fuel', 14], ['supermarket', 'Ridgeway Market', 19], ['diner', 'Summit Diner', 12], ['houses', 'Pine Row', 17],
   ['mall', 'Range Shopping Centre', 26], ['motel', 'Lookout Motel', 16], ['kiosk', 'Farm Stall', 7], ['houses', 'Hilltop Homes', 17], ['diner', 'Valley View Cafe', 12], ['supermarket', 'Westmoor Co-op', 19]];
@@ -425,7 +570,12 @@ function wayside(ring, done) {
         if (bad) continue;
         const face = Math.abs(nx) > Math.abs(nz) ? [-Math.sign(nx), 0] : [0, -Math.sign(nz)];
         placed = { name, kind, x: Math.round(cx), z: Math.round(cz), rx: R, rz: R, y: Math.round(y * 4) / 4, bank: 12, props: [], face, rot: face[1] > 0 ? 0 : face[0] < 0 ? 1 : face[1] < 0 ? 2 : 3, ringS: cum[index], roadX: pts[index][0], roadZ: pts[index][1] };
-        drives.push({ name: name + ' drive', w: 6, surface: 'asphalt', kind: 0, grade: 0.1, driveway: true, ctrl: [[pts[index][0] + nx * (ring.w / 2 - 0.5), pts[index][1] + nz * (ring.w / 2 - 0.5)], [placed.x, placed.z]], points: [[pts[index][0] + nx * (ring.w / 2 - 0.5), pts[index][1] + nz * (ring.w / 2 - 0.5)], [placed.x, placed.z]], heights: [y, placed.y], flags: new Uint8Array(2) });
+        // the drive stops at the forecourt edge of the pad (bays, buildings and picnic tables stand behind it)
+        const start = [pts[index][0] + nx * (ring.w / 2 - 0.5), pts[index][1] + nz * (ring.w / 2 - 0.5)], stop = [placed.x + face[0] * R, placed.z + face[1] * R];
+        const rise = (ring.heights[index + 1] - ring.heights[index - 1]) / (tl * tl), dl = Math.hypot(stop[0] - start[0], stop[1] - start[1]) || 1;
+        const bank = (tx * rise * -(stop[1] - start[1]) + tz * rise * (stop[0] - start[0])) / dl;
+        drives.push({ name: name + ' drive', w: 6, surface: 'asphalt', kind: 0, grade: 0.1, driveway: true, ctrl: [start, stop],
+          points: [0, 1, 2, 3, 4].map((k) => [AF.lerp(start[0], stop[0], k / 4), AF.lerp(start[1], stop[1], k / 4)]), heights: [0, 1, 2, 3, 4].map((k) => AF.lerp(y, placed.y, k / 4)), flags: new Uint8Array(5), bank: [0, 1, 2, 3, 4].map((k) => bank * (1 - k / 4)) });
         break;
       }
     }
@@ -436,10 +586,13 @@ function wayside(ring, done) {
 }
 function register(road) {
   let acc = 0;
+  road.order = P.roads.indexOf(road); road.lift = 0.05; setEnds(road);
   for (let index = 1; index < road.points.length; index++) {
     const start = road.points[index - 1], end = road.points[index], dx = end[0] - start[0], dz = end[1] - start[1], len2 = dx * dx + dz * dz || 1e-6;
-    const flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0;
-    const segment = { x: start[0], z: start[1], dx, dz, len2, length: Math.sqrt(len2), y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.kind, hw: road.w / 2, flag, deck: road.kind === 0 || flag === 1, road };
+    const flag = road.flags[index - 1] === road.flags[index] ? road.flags[index] : 0, length = Math.sqrt(len2);
+    const segment = { x: start[0], z: start[1], dx, dz, len2, length, y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.kind, hw: road.w / 2, flag, deck: road.kind === 0 || flag === 1, road,
+      lift: road.lift, grade: Math.abs(road.heights[index] - road.heights[index - 1]) / length, first: index === 1, last: index === road.points.length - 1,
+      b0: road.bank ? road.bank[index - 1] : 0, b1: road.bank ? road.bank[index] : 0 };
     segments.push(segment); acc += segment.length;
     const x0 = Math.floor((Math.min(segment.x, segment.x + segment.dx) - 44) / 64), x1 = Math.floor((Math.max(segment.x, segment.x + segment.dx) + 44) / 64);
     const z0 = Math.floor((Math.min(segment.z, segment.z + segment.dz) - 44) / 64), z1 = Math.floor((Math.max(segment.z, segment.z + segment.dz) + 44) / 64);
@@ -451,14 +604,15 @@ AF.onBuild('outland-boundary', 496, () => {
   buildRivers();
   const done = [], order = [...P.roads.filter((road) => road.ring), ...P.roads.filter((road) => !road.ring)];
   for (const road of order) {
-    // forks leave the ring at the nearest at-grade point (never from a bridge or a tunnel)
-    if ((road.fork || road.kind === 2) && done.length) {
-      const ring = done[0], [fx, fz] = road.ctrl[0]; let best = Infinity, at = -1;
+    // forks leave the ring at the nearest at-grade point (never from a bridge or a tunnel); `joinsRing` roads end on its side (a T)
+    for (const end of [0, road.ctrl.length - 1]) {
+      if (!(end === 0 ? road.fork || road.kind === 2 : road.joinsRing) || !done.length) continue;
+      const ring = done[0], [fx, fz] = road.ctrl[end]; let best = Infinity, at = -1;
       for (let index = 3; index < ring.points.length - 3; index++) {
         let level = true; for (let k = index - 3; k <= index + 3; k++) if (ring.flags[k]) level = false;
         const d = Math.hypot(ring.points[index][0] - fx, ring.points[index][1] - fz); if (level && d < best) { best = d; at = index; }
       }
-      if (at >= 0 && best < 150) road.ctrl[0] = [ring.points[at][0], ring.points[at][1]];
+      if (at >= 0 && best < 150) road.ctrl[end] = [ring.points[at][0], ring.points[at][1]];
     }
     profile(road, done); done.push(road);
   }

@@ -31,7 +31,7 @@ const rimCache = new Map();
 function rimSample(x, z) {
   const key = x * 10000 + z;
   let height = rimCache.get(key);
-  if (height === undefined) { height = Math.round(O.h(x, z) * 4) / 4; rimCache.set(key, height); }
+  if (height === undefined) { height = O.rimH ? O.rimH(x, z) : Math.round(O.h(x, z) * 4) / 4; rimCache.set(key, height); }
   return height;
 }
 function boundaryH(x, z) {
@@ -94,7 +94,7 @@ function* build(entry) {
   for (let row = -1; row <= 64; row++) {
     for (let col = -1; col <= 64; col++) {
       const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step, offset = (row + 1) * 66 + col + 1;
-      heights[offset] = Math.round(O.h(x, z) / quantum) * quantum * 4;
+      heights[offset] = (O.meshH ? O.meshH(x, z, step) : Math.round(O.h(x, z) / quantum) * quantum) * 4;
     }
     yield;
   }
@@ -195,25 +195,40 @@ function frozen(entry) {
   if (entry.children) for (const child of entry.children) if (frozen(child)) return true;
   return false;
 }
-function update(entry, cp, inherited) {
-  if (!entry.ready || entry.fadeE || entry.busy || inherited) return;
-  const dist = distance(entry, cp.x, cp.y, cp.z), ahead = distance(entry, aheadX, cp.y, aheadZ);
-  entry.used = stamp;
+// split wanted? (hysteresis: a split tile merges back only 25 % farther out)
+function wants(entry, cp, split) {
+  if (entry.level <= 0) return false;
+  const horizon = entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > 800;
+  if (horizon) return false;
   const k = (AF.MOBILE || AF.GFX.tier === 'low' ? 0.38 : AF.GFX.lite ? 0.48 : 0.7) * (AF.lodScale || 1);
   const threshold = entry.level === 1 ? 40 : entry.size * k;
-  const horizon = entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > 800;
-  const refine = entry.level > 0 && !horizon && Math.min(dist, ahead + 24) < threshold * (entry.split ? 1.25 : 1);
-  if (refine) {
+  return Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, aheadX, cp.y, aheadZ) + 24) < threshold * (split ? 1.25 : 1);
+}
+// what a tile about to split shows: each child, or straight away that child's own ready children when it wants to split too
+// (an approach never waits for one fade per quadtree level). Only for subtrees that are not on screen.
+function cover(entry, cp, output) {
+  entry.used = stamp;
+  const deeper = wants(entry, cp, false) && !!entry.children && entry.children.every((child) => child.ready);
+  entry.split = deeper;
+  if (deeper) for (const child of entry.children) cover(child, cp, output);
+  else for (const mesh of entry.meshes) output.push(mesh);
+}
+function update(entry, cp, inherited) {
+  if (!(entry.ready || entry.split) || entry.fadeE || entry.busy || inherited) return;
+  entry.used = stamp;
+  if (wants(entry, cp, entry.split)) {
     makeChildren(entry);
     let ready = true;
     for (const child of entry.children) { enqueue(child); if (!child.ready) ready = false; }
     if (!entry.split && ready) {
       const ins = entry.ins; ins.length = 0;
-      for (const child of entry.children) listVisible(child, ins);
+      for (const child of entry.children) cover(child, cp, ins);
       entry.split = true; entry.busy = true; fade.swap(entry, entry.meshes, ins, entry.finish);
     }
     if (entry.split && !entry.busy) for (const child of entry.children) update(child, cp, false);
   } else if (entry.split && !frozen(entry)) {
+    // merging back needs this tile's own mesh (a split tile being rebuilt stays split until it is ready)
+    if (!entry.ready) { enqueue(entry); for (const child of entry.children) update(child, cp, false); return; }
     const outs = entry.outs; outs.length = 0; for (const child of entry.children) listVisible(child, outs);
     entry.split = false; entry.busy = true; fade.swap(entry, outs, entry.meshes, entry.finish);
   }
@@ -240,12 +255,13 @@ function work(ms) {
         if (dist < bestD) { bestD = dist; best = index; }
       }
       if (best < 0) break;
+      R.urgent = bestD < 48;   // a tile right around the camera: the rendered frame helps (outland-lod)
       current = queue[best]; queue[best] = queue[queue.length - 1]; queue.pop();
       generator = build(current);
     }
     const slice = performance.now(), done = generator.next().done;
     R.maxStepMs = Math.max(R.maxStepMs, performance.now() - slice);
-    if (done) { generator = null; current = null; }
+    if (done) { generator = null; current = null; R.urgent = false; }
   }
   R.workMs = performance.now() - start;
   return !!generator || queue.length > 0;
@@ -275,8 +291,9 @@ AF.onTick('outland-lod', 876, (dt) => {
   const cp = AF.camera.position, dx = cp.x - lastX, dz = cp.z - lastZ, length = Math.hypot(dx, dz);
   const prediction = length < 40 && dt > 0 ? Math.min(1.5 / dt, 160 / Math.max(0.001, length)) : 0;
   aheadX = cp.x + dx * prediction; aheadZ = cp.z + dz * prediction; lastX = cp.x; lastZ = cp.z;
-  scanT += dt; if (scanT >= 0.2) { scanT = 0; scan(); }
-  work(1);
+  scanT += dt; if (scanT >= 0.1) { scanT = 0; scan(); }
+  // a tile right around the camera is missing: the rendered frame helps, more so while the city streamer has nothing urgent
+  work(R.urgent ? (AF.world.stream && AF.world.stream.urgent ? 1.5 : AF.MOBILE ? 2.5 : 3) : 1);
 });
 R.settle = () => {
   aheadX = AF.camera.position.x; aheadZ = AF.camera.position.z;
@@ -300,7 +317,10 @@ R.diagnose = () => {
     const vertical = x0 === x1 && z1 > z0, horizontal = z0 === z1 && x1 > x0;
     if (!vertical && !horizontal) continue;
     const side = vertical ? left.x < right.x ? 1 : 0 : left.z < right.z ? 3 : 2, low = vertical ? z0 : x0, high = vertical ? z1 : x1;
-    for (let value = low; value <= high; value += Math.min(left.size, right.size) / 64) maxGap = Math.max(maxGap, Math.abs(sample(left, side, value) - sample(right, side ^ 1, value)));
+    for (let value = low; value <= high; value += Math.min(left.size, right.size) / 64) {
+      const gap = Math.abs(sample(left, side, value) - sample(right, side ^ 1, value));
+      if (gap > maxGap) { maxGap = gap; R.worstGap = { a: [left.x, left.z, left.level], b: [right.x, right.z, right.level], side, at: value, ha: sample(left, side, value), hb: sample(right, side ^ 1, value) }; }
+    }
     pairs++;
   }
   for (let x = plan.play.x0 + 20; x < plan.play.x1; x += 80) for (let z = plan.play.z0 + 20; z < plan.play.z1; z += 80) {

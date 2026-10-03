@@ -203,7 +203,9 @@ try {
   const runIdle = (budget = Math.min(AF.MOBILE ? 4 : 6, rafEma * 0.6)) => {
     const L = AF.hooks.idle; if (!L.length) return;
     const t0 = performance.now(), end = t0 + budget;
-    for (let pass = 0; pass < 4 && performance.now() < end - 0.2; pass++) {
+    // 1 ms turns round-robin until the slot is used up or no hook has work left (4 passes left most of a slot idle
+    // whenever only the streamer was busy)
+    for (let pass = 0; pass < 16 && performance.now() < end - 0.2; pass++) {
       let busy = false;
       for (let index = 0; index < L.length; index++) {
         const left = end - performance.now(); if (left < 0.2) break;

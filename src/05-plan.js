@@ -217,7 +217,7 @@ AF.PLAN = (() => {
       landing: { x: -20, z: 478, r: 20, y: 2, pier: { x0: -24, x1: -16, z0: 420, z1: 478 } } },
     roads: [
       { name: 'Coast Road', w: 10, surface: 'asphalt', points: [[-660, 0], [-820, -10], [-1000, -40]], heights: [0, 5, 10] },
-      { name: 'Eastwood Road', w: 10, surface: 'asphalt', points: [[460, 0], [700, -40], [980, -120]], heights: [0, 10, 19] },
+      { name: 'Eastwood Road', w: 10, surface: 'asphalt', joinsRing: true, points: [[460, 0], [700, -40], [965, -142]], heights: [0, 10, 19] },   // T into the ring's side (Eastwood Loop runs straight on into the ring)
       { name: 'Lake Road', w: 10, surface: 'gravel', points: [[258, -284], [258, -300], [230, -360], [160, -420], [50, -480], [-40, -560], [-40, -590]], heights: [30, 40, 44, 38, 23, 22, 23] },
       { name: 'West Coast Drive', w: 10, surface: 'asphalt', points: [[-1000, -40], [-1210, -40], [-1220, -220], [-1180, -280]], heights: [10, 9, 7, 9] },
       { name: 'Beach Lane', w: 10, surface: 'gravel', points: [[-1210, -40], [-1210, 60], [-1200, 120], [-1150, 164]], heights: [9, 9, 8, 7] },
