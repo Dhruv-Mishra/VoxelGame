@@ -115,7 +115,7 @@ function edge(x, z) {
   return height;
 }
 // nearest road segment (any: decks, traffic) and nearest ground-bearing segment (t*: bridges excluded) through a 64 m bucket grid
-let roadD = Infinity, roadY = 0, roadS = 0, roadKind = 0, roadHW = 5, roadFlag = 0, roadDeck = false;
+let roadD = Infinity, roadY = 0, roadS = 0, roadKind = 0, roadHW = 5, roadFlag = 0, roadDeck = false, roadRef = null;
 let tD = Infinity, tY = 0, tS = 0, tKind = 0, tHW = 5, tFlag = 0;
 const key64 = (x, z) => Math.floor(x / 64) * 10000 + Math.floor(z / 64);
 function roadAt(x, z, brute = false) {
@@ -125,7 +125,7 @@ function roadAt(x, z, brute = false) {
   for (const segment of candidates) {
     const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1);
     const dx = x - segment.x - segment.dx * along, dz = z - segment.z - segment.dz * along, distance = dx * dx + dz * dz;
-    if (distance < nearest) { nearest = distance; roadY = AF.lerp(segment.y0, segment.y1, along); roadS = segment.acc + segment.length * along; roadKind = segment.kind; roadHW = segment.hw; roadFlag = segment.flag; roadDeck = segment.deck; }
+    if (distance < nearest) { nearest = distance; roadY = AF.lerp(segment.y0, segment.y1, along); roadS = segment.acc + segment.length * along; roadKind = segment.kind; roadHW = segment.hw; roadFlag = segment.flag; roadDeck = segment.deck; roadRef = segment.road; }
     if (distance < ground && segment.flag !== 1) { ground = distance; tY = AF.lerp(segment.y0, segment.y1, along); tS = segment.acc + segment.length * along; tKind = segment.kind; tHW = segment.hw; tFlag = segment.flag; }
   }
   roadD = Math.sqrt(nearest); tD = Math.sqrt(ground);
@@ -242,7 +242,17 @@ O.deckY = (x, z, y) => {
   return roadFlag === 2 && y !== undefined && y > roadY + O.TUNNEL_H ? roadY + O.TUNNEL_H + 0.6 : roadY;
 };
 O.roadY = (x, z) => { roadAt(x, z); return roadD === Infinity ? O.h(x, z) : roadY; };
-O.roadInfo = (x, z) => { roadAt(x, z); return { d: roadD, y: roadY, s: roadS, kind: roadKind, hw: roadHW, flag: roadFlag, deck: roadDeck }; };
+O.roadInfo = (x, z) => { roadAt(x, z); return { d: roadD, y: roadY, s: roadS, kind: roadKind, hw: roadHW, flag: roadFlag, deck: roadDeck, road: roadRef }; };
+// nearest segment of any road other than `exclude` (junction trimming)
+O.otherRoad = (x, z, exclude) => {
+  let best = Infinity, hit = null;
+  for (const segment of roadGrid.get(key64(x, z)) || []) {
+    if (segment.road === exclude) continue;
+    const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1), distance = (x - segment.x - segment.dx * along) ** 2 + (z - segment.z - segment.dz * along) ** 2;
+    if (distance < best) { best = distance; hit = segment; }
+  }
+  return hit ? { d: Math.sqrt(best), hw: hit.hw, road: hit.road, deck: hit.deck, flag: hit.flag } : null;
+};
 O.riverInfo = (x, z) => { riverAt(x, z); return { d: rivD, y: rivY, hw: rivHW }; };
 O.fieldEdge = (x, z) => { farmAt(x, z); return fieldD; };
 O.fieldMeadow = (x, z) => { farmAt(x, z); return fieldId >= 0.8; };
@@ -440,7 +450,18 @@ AF.onBuild('outland-boundary', 496, () => {
   O.edgeReady = false; tiles.clear(); edges.clear(); segments.length = 0; roadGrid.clear(); O.wayside.length = 0;
   buildRivers();
   const done = [], order = [...P.roads.filter((road) => road.ring), ...P.roads.filter((road) => !road.ring)];
-  for (const road of order) { profile(road, done); done.push(road); }
+  for (const road of order) {
+    // forks leave the ring at the nearest at-grade point (never from a bridge or a tunnel)
+    if ((road.fork || road.kind === 2) && done.length) {
+      const ring = done[0], [fx, fz] = road.ctrl[0]; let best = Infinity, at = -1;
+      for (let index = 3; index < ring.points.length - 3; index++) {
+        let level = true; for (let k = index - 3; k <= index + 3; k++) if (ring.flags[k]) level = false;
+        const d = Math.hypot(ring.points[index][0] - fx, ring.points[index][1] - fz); if (level && d < best) { best = d; at = index; }
+      }
+      if (at >= 0 && best < 150) road.ctrl[0] = [ring.points[at][0], ring.points[at][1]];
+    }
+    profile(road, done); done.push(road);
+  }
   for (const road of P.roads) register(road);
   O.edgeReady = true; tiles.clear();
 });

@@ -617,7 +617,7 @@ try {
     const tex = A.softTex = softTex();
     // leaves: tiny voxel leaves (instanced boxes)
     {
-      const N = 340;
+      const N = 140;
       const geo = new THREE.BoxGeometry(0.15, 0.022, 0.11);
       const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
       const im = A.leaves = new THREE.InstancedMesh(geo, mat, N);
@@ -839,9 +839,9 @@ try {
     const pts = A.smoke; if (!pts) return;
     if (frameN % 10 === 1 || !A.smokeSel || AF.SHOT) {
       const ch = AF.chimneys || [];
-      A.smokeSel = ch.map((c) => ({ c, d: Math.hypot(c.x - camP.x, c.z - camP.z, (c.y - camP.y) * 0.5) })).filter((o) => o.d < 420).sort((a, b) => a.d - b.d).slice(0, 38).map((o) => o.c);
+      A.smokeSel = ch.map((c) => ({ c, d: Math.hypot(c.x - camP.x, c.z - camP.z, (c.y - camP.y) * 0.5) })).filter((o) => o.d < 300).sort((a, b) => a.d - b.d).slice(0, 14).map((o) => o.c);
     }
-    const sel = A.smokeSel, PER = 12, LIFE = 9, NMAX = 456;
+    const sel = A.smokeSel, PER = 8, LIFE = 9, NMAX = 456;
     const G = pts.geometry, pa = G.attributes.position.array, sa = G.attributes.aSize.array, aa = G.attributes.aAlpha.array;
     let n = 0;
     const Wd = AF.wind, ws = Wd ? 0.45 + 0.55 * Math.min(1.4, Wd.strength) : 0.6, windX = Wd ? Wd.x * ws : 0.5 + 0.25 * Math.sin(t * 0.07), windZ = Wd ? Wd.z * ws : 0.22;   // R2b: smoke leans with AF.wind (gusts flatten it)
@@ -1006,9 +1006,9 @@ try {
     {
       const all = (AF.manholes || []).filter((m) => Number.isFinite(m.x) && Number.isFinite(m.z));
       let src = [];
-      if (all.length) { const step = Math.max(1, Math.floor(all.length / 15)); for (let i = 3; i < all.length && src.length < 15; i += step) src.push(all[i]); }
-      else for (const [x, z] of [[20, 0], [-60, 0], [120, 0], [0, 40], [0, -60], [-80, 80], [80, -80], [-120, -80], [160, 100], [-40, 160]]) src.push({ x, z });
-      const PER = 14, N = src.length * PER;
+      if (all.length) { const step = Math.max(1, Math.floor(all.length / 8)); for (let i = 3; i < all.length && src.length < 8; i += step) src.push(all[i]); }
+      else for (const [x, z] of [[20, 0], [-60, 0], [120, 0], [0, 40], [0, -60], [-80, 80], [80, -80], [-120, -80]]) src.push({ x, z });
+      const PER = 8, N = src.length * PER;
       const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
       const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
       const mat = new THREE.PointsMaterial({ size: 2.2, map: A.softTex || null, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, fog: true });
@@ -1110,14 +1110,16 @@ try {
     const night = (AF.time && AF.time.night) || 0, cam = AF.camera.position;
     // steam
     const St = PX.steam;
-    if (St) {
+    let steamNear = false;
+    if (St) { for (const e of St.src) if (Math.abs(e.x - cam.x) < 140 && Math.abs(e.z - cam.z) < 140 && cam.y < 80) { steamNear = true; break; } St.pts.visible = steamNear; }
+    if (St && steamNear) {
       const wind = 0.5 + 0.3 * Math.sin(t * 0.2), cold = 0.55 + 0.45 * night;
       for (let i = 0; i < St.parts.length; i++) {
-        const p = St.parts[i], near = Math.abs(p.e.x - cam.x) < 180 && Math.abs(p.e.z - cam.z) < 180;
+        const p = St.parts[i], near = Math.abs(p.e.x - cam.x) < 140 && Math.abs(p.e.z - cam.z) < 140;
         p.age += dt;
         if (p.age >= p.life) { p.age = 0; p.life = 3 + Math.random() * 2.5; p.x = p.e.x + (Math.random() - 0.5) * 0.6; p.z = p.e.z + (Math.random() - 0.5) * 0.6; p.y = 0.1; p.vx = wind * (0.4 + Math.random() * 0.4); p.vz = (Math.random() - 0.5) * 0.3; }
         p.y += dt * (0.9 - p.age * 0.12); p.x += p.vx * dt * p.age * 0.5; p.z += p.vz * dt;
-        const f = near ? Math.sin(Math.min(1, p.age / p.life) * Math.PI) * 0.34 * cold : 0;
+        const f = near ? Math.sin(Math.min(1, p.age / p.life) * Math.PI) * 0.22 * cold : 0;
         St.pos[i * 3] = p.x; St.pos[i * 3 + 1] = p.y; St.pos[i * 3 + 2] = p.z;
         const lk = (p.e.lampK || 0) * night, lc = p.e.lampC;
         St.col[i * 3] = f * (0.95 + (lc ? lc.r * 1.6 - 0.95 : 0) * lk); St.col[i * 3 + 1] = f * (0.95 + (lc ? lc.g * 1.6 - 0.95 : 0) * lk); St.col[i * 3 + 2] = f * (1 + (lc ? lc.b * 1.6 - 1 : 0) * lk);
@@ -1132,7 +1134,7 @@ try {
       Sp.pts.visible = near;
       if (near) {
         const lk = 0.25 + 0.75 * smooth(-0.05, 0.3, sunVec.y);
-        Sp.acc += dt * 26;
+        Sp.acc += dt * 12;
         for (let i = 0; i < Sp.parts.length; i++) {
           const p = Sp.parts[i];
           p.age += dt;
@@ -1183,7 +1185,7 @@ try {
     for (let i = 0; i < 120; i++) stepBlimp(B, 0.25);
     B.cool = sv.cool;
     const moved = Math.hypot(B.mesh.position.x - x0, B.mesh.position.z - z0);
-    return { ok: moved > 20 && isFinite(moved) && PX.beams.length >= 3 && PX.steam && PX.steam.src.length >= 10, info: `blimp moved ${moved.toFixed(1)} m in 30 s at y ${B.y}, beams ${PX.beams.length}, steam vents ${PX.steam ? PX.steam.src.length : 0}, ${PX.ms} ms` };
+    return { ok: moved > 20 && isFinite(moved) && PX.beams.length >= 3 && PX.steam && PX.steam.src.length >= 6, info: `blimp moved ${moved.toFixed(1)} m in 30 s at y ${B.y}, beams ${PX.beams.length}, steam vents ${PX.steam ? PX.steam.src.length : 0}, ${PX.ms} ms` };
   });
 
   // ============================================================ ROUND 2: HARBOUR DAYS FIREWORKS over the harbour at night (20.6 h -> 0.5 h)

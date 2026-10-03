@@ -234,6 +234,10 @@ AF.PLAN = (() => {
       { name: 'Tamsin Gorge Trail', w: 3, surface: 'trail', points: [[-262, -476], [-250, -560], [-270, -640], [-245, -720], [-232, -780]] },
       { name: 'Eastwood Ridge Trail', w: 3, surface: 'trail', points: [[600, -436], [580, -540], [530, -630], [478, -708]] },
       { name: 'Westmoor Hill Trail', w: 3, surface: 'trail', points: [[-652, -400], [-640, -500], [-600, -600], [-560, -700]] },
+      // link roads: forks off the ring down to the older lanes (profiled + anchored to both ends at build)
+      { name: 'Westmoor Link', w: 10, surface: 'asphalt', fork: true, points: [[-880, -300], [-884, -230], [-890, -160], [-896, -90], [-905, -24]] },
+      { name: 'Jungle Highway', w: 10, surface: 'asphalt', fork: true, points: [[700, -400], [688, -310], [700, -220], [730, -160], [750, -130]] },
+      { name: 'Summit Link', w: 8, surface: 'gravel', fork: true, points: [[490, -445], [470, -520], [445, -600]] },
     ],
   };
   P.west = {

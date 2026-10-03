@@ -1332,8 +1332,9 @@ AF.test('vehicles: 60+ AI cars run 60 s (no NaN, stay on the asphalt)', () => {
     if (i % 10 === 0) for (const c of VV.ai) { if (!isFinite(c.x) || !isFinite(c.z) || !isFinite(c.yaw)) nan++; else if (c.ai.piece.kind !== 'route') worst = Math.max(worst, VP.nearestRoad(c.x, c.z).edge + 1); }
   } } finally { AF.clock.t = clock; }
   VV.ai.forEach((c, i) => { if (Math.hypot(c.x - start[i][0], c.z - start[i][1]) > 20) moved++; });
+  const live = VV.ai.filter((c) => c.active !== false).length;
   syncInstances(0);
-  return { ok: nan === 0 && worst < 1.3 && moved >= VV.ai.length * 0.6, info: `nan ${nan}, max past kerb+1 ${worst.toFixed(2)} m, moved ${moved}/${VV.ai.length}` };
+  return { ok: nan === 0 && worst < 1.3 && moved >= live * 0.6, info: `nan ${nan}, max past kerb+1 ${worst.toFixed(2)} m, moved ${moved}/${live} active of ${VV.ai.length}` };
 });
 AF.test('vehicles: drive mode enter + exit returns to walk', () => {
   const prev = AF.mode;

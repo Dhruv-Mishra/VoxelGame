@@ -4,12 +4,17 @@ const F=AF.flora={kinds:{},records:[],meshes:[],stats:{total:0,biomes:{},near:0,
 const buckets=new Map(),batches=[],slots=[],matrix=new THREE.Matrix4(),rotation=new THREE.Quaternion(),position=new THREE.Vector3(),scale=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
 const frustum=new THREE.Frustum(),projection=new THREE.Matrix4(),sphere=new THREE.Sphere();
 const group=new THREE.Group();group.name='flora';AF.scene.add(group);
-const uniforms={floraEye:{value:AF.camera.position},floraNear:{value:160},floraFar:{value:800},floraShadow:{value:55}};
+const uniforms={floraEye:{value:AF.camera.position},floraMid:{value:50},floraNear:{value:160},floraFar:{value:800},floraShadow:{value:55}};
 let generator=null,selection=null,lastX=Infinity,lastY=Infinity,lastZ=Infinity,lastQ=new THREE.Quaternion(),revision=0,selected=-1,ready=false;
 const palette=colors=>colors.map(hex=>AF.col(hex,{jitter:0.7,edge:0.15,solid:false,pat:'none'}));
-for(const spec of AF.land.treeSpecs)F.kinds[spec.id]={shape:spec.shape==='pine'||spec.shape==='cone'?1:0,palette:palette(spec.leaves),spec};
+// crown shapes: 0 round, 1 pine, 2 palm, 3 rock, 4 cactus, 5 shrub, 6 cone (spruce/fir), 7 column (birch/poplar), 8 spread (elm/oak)
+const SHAPE_OF={round:0,pine:1,cone:6,column:7,spread:8,vase:8,willow:8};
+for(const spec of AF.land.treeSpecs)F.kinds[spec.id]={shape:SHAPE_OF[spec.shape]??0,palette:palette(spec.leaves),spec};
+for(const [id,shape,leaves] of [['fir',6,[0x23463a,0x2c5442,0x183428,0x3a6650]],['larch',6,[0x8a9a3a,0xa0a848,0x6a7a2e,0xc0b858]],['mountain-pine',1,[0x355e3c,0x416c46,0x264a30,0x557e50]],['beech',0,[0x5a8a36,0x6a9a40,0x44702c,0x86b056]],['poplar',7,[0x6a9a3a,0x7aaa44,0x507a2e,0x96c060]],['lime',8,[0x6f9a3c,0x82aa48,0x557a2e,0x9cc05a]]])F.kinds[id]={shape,palette:palette(leaves)};
 F.kinds.palm={shape:2,palette:palette([0x36754e,0x53935c,0x275a42,0x74a567])};
-F.kinds.shrub={shape:5,palette:palette([0x477344,0x689452,0x365739,0x7b9e57])};
+F.kinds.shrub={shape:5,palette:palette([0x3f6e34,0x4d7f3c,0x2e5428,0x62924a])};
+F.kinds['shrub-berry']={shape:5,palette:palette([0x5a7a36,0x6a8a3e,0x44602a,0x7aa050])};
+F.kinds['shrub-autumn']={shape:5,palette:palette([0xb84a26,0xd07030,0x80321e,0xe89a48])};
 F.kinds['dry-bush']={shape:5,palette:palette([0x8e955c,0xa5a46b,0x747b4f,0xb4ad7b])};
 F.kinds.cactus={shape:4,palette:palette([0x568864,0x73976b,0x3c6d50,0x96a579])};
 F.kinds.rock={shape:3,palette:palette([0x8a8c82,0xa3a296,0x6f756b,0xb2ac9d])};
@@ -33,50 +38,61 @@ F.scatter=(kind,{x0,z0,x1,z1,spacing=12,density=0.5,seed=44,...opts})=>{
  let count=0;for(let x=x0;x<x1;x+=spacing)for(let z=z0;z<z1;z+=spacing){if(hash(x+seed,z)>density)continue;const px=x+(hash(x,z+seed)-0.5)*spacing*0.7,pz=z+(hash(x+seed,z+7)-0.5)*spacing*0.7;if(F.add(kind,px,pz,opts))count++;}return count;
 };
 function crown(shape,design){
- const leaves=design.palette,bark=AF.col(shape===2?0x786348:0x594736,{jitter:0.5,pat:'none'}),m=new AF.Model(shape===2?24:20,shape===1?34:28,shape===2?24:20);
- if(shape===0){m.box(9,0,9,11,13,11,bark);m.box(3,10,4,17,18,16,leaves[2]);m.box(1,14,6,19,21,14,leaves[0]);m.box(5,13,2,15,22,18,leaves[0]);m.box(4,21,5,16,24,15,leaves[1]);m.box(7,24,7,13,26,13,leaves[3]);}
- else if(shape===1){m.box(9,0,9,11,30,11,bark);for(let layer=0;layer<5;layer++){const inset=2+layer;m.box(inset,6+layer*5,inset,20-inset,10+layer*5,20-inset,leaves[layer%4]);m.box(inset+2,10+layer*5,inset+2,18-inset,12+layer*5,18-inset,leaves[layer%4]);}}
- else {m.box(11,0,11,13,14,13,bark);m.box(12,14,11,14,24,13,bark);m.box(3,24,10,21,25,14,leaves[0]);m.box(10,25,3,14,26,21,leaves[1]);m.box(6,25,6,18,27,18,leaves[2]);for(const edge of [3,18]){m.box(edge,22,10,edge+3,24,14,leaves[0]);m.box(10,23,edge,14,25,edge+3,leaves[1]);}}
- return {m,vs:shape===1?0.5:shape===2?0.4:0.45};
+ const leaves=design.palette,bark=AF.col(0x786348,{jitter:0.5,pat:'none'}),m=new AF.Model(24,28,24);
+ m.box(11,0,11,13,14,13,bark);m.box(12,14,11,14,24,13,bark);m.box(3,24,10,21,25,14,leaves[0]);m.box(10,25,3,14,26,21,leaves[1]);m.box(6,25,6,18,27,18,leaves[2]);for(const edge of [3,18]){m.box(edge,22,10,edge+3,24,14,leaves[0]);m.box(10,23,edge,14,25,edge+3,leaves[1]);}
+ return {m,vs:0.4};
 }
 function hull(shape,design){
- const leaf=design.palette[0],bark=AF.col(0x594736,{jitter:0.5,pat:'none'}),m=new AF.Model(12,20,12);
+ const leaf=design.palette[0],dark=design.palette[2],bark=AF.col(0x594736,{jitter:0.5,pat:'none'}),m=new AF.Model(12,20,12);
  if(shape===3){m.box(3,0,2,9,2,10,leaf);m.box(2,1,3,10,3,9,leaf);return{m,vs:0.5};}
  if(shape===4){m.box(5,0,5,7,14,7,leaf);m.box(2,6,5,10,8,7,leaf);m.box(2,7,5,4,11,7,leaf);m.box(8,7,5,10,13,7,leaf);return{m,vs:0.3};}
  if(shape===5){m.box(2,0,3,10,2,9,design.palette[2]);m.box(3,2,2,9,4,10,leaf);m.box(4,4,4,8,5,8,design.palette[1]);return{m,vs:0.3};}
  m.box(5,0,5,6,shape===2?16:13,6,bark);
- if(shape===1){m.box(1,5,1,11,12,11,leaf);m.box(3,12,3,9,19,9,leaf);}
+ if(shape===1){m.box(1,5,1,11,10,11,dark);m.box(2,10,2,10,15,10,leaf);m.box(4,15,4,8,19,8,leaf);}
+ else if(shape===6){m.box(1,3,1,11,8,11,dark);m.box(2,8,2,10,13,10,leaf);m.box(3,13,3,9,17,9,leaf);m.box(5,17,5,7,20,7,leaf);}
+ else if(shape===7){m.box(3,6,3,9,12,9,dark);m.box(3,12,3,9,19,9,leaf);}
+ else if(shape===8){m.box(0,8,1,12,12,11,dark);m.box(1,12,0,11,14,12,leaf);m.box(3,14,3,9,15,9,leaf);}
  else if(shape===2){m.box(1,16,5,11,17,7,leaf);m.box(5,17,1,7,18,11,leaf);m.box(3,17,3,9,18,9,leaf);}
- else {m.box(2,6,2,10,14,10,leaf);}
+ else {m.box(2,6,2,10,10,10,dark);m.box(1,10,1,11,14,11,leaf);m.box(3,14,3,9,16,9,leaf);}
  return{m,vs:shape===2?0.6:0.85};
 }
+// the zoo / park trees (12-nature makeTree: trunk, limbs, clumped crown) re-meshed coarser for instancing
+const TREE_SPEC={0:'maple-orange',1:'pine',6:'spruce',7:'ginkgo',8:'elm-green'};
 function remap(geo,pal){const attr=geo.attributes.aPal,values=new Float32Array(attr.count),colors=pal.map(value=>AF.PAL.hex[value]);for(let index=0;index<values.length;index++){const value=attr.getX(index),slot=colors.indexOf(AF.PAL.hex[value]);values[index]=slot<0?value:-slot-1;}geo.setAttribute('aPal',new THREE.BufferAttribute(values,1));return geo;}
+// lod: 'n' near (< floraMid), 'm' mid (floraMid..floraNear), 'f' far (floraNear..floraFar), 's' single model to floraFar; dithered cross-fades
 function material(lod){
  const mat=AF.mat.patchVoxel(AF.mat.voxelInst.clone(),'flora-'+lod),compile=mat.onBeforeCompile;
+ const keep={n:'floraD>=min(floraA,floraF)',N:'floraD>=min(floraN,floraF)',m:'floraD<floraA||floraD>=min(floraN,floraF)',f:'floraD<floraN||floraD>=floraF',s:'floraD>=floraF'}[lod];
  mat.onBeforeCompile=(shader,renderer)=>{
   compile(shader,renderer);Object.assign(shader.uniforms,uniforms);
   shader.vertexShader='attribute vec4 floraPalette; attribute float floraLimit; uniform vec3 floraEye; varying float floraDistance; varying float floraExtent;\n'+shader.vertexShader;
   shader.vertexShader=shader.vertexShader.replace('vec2 pUV =','float floraPal=aPal < -3.5 ? floraPalette.w : aPal < -2.5 ? floraPalette.z : aPal < -1.5 ? floraPalette.y : aPal < -0.5 ? floraPalette.x : aPal;\nvec2 pUV =').replace('mod(aPal,','mod(floraPal,').replace('floor(aPal /','floor(floraPal /').replace('#include <begin_vertex>','#include <begin_vertex>\nfloraExtent=floraLimit;floraDistance=distance((modelMatrix * instanceMatrix * vec4(0.,0.,0.,1.)).xyz,floraEye);');
-  shader.fragmentShader='uniform float floraNear; uniform float floraFar; varying float floraDistance; varying float floraExtent;\n'+shader.fragmentShader;
-  shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\n{float floraD=fract(52.9829189*fract(dot(floor(gl_FragCoord.xy),vec2(0.06711056,0.00583715))));float floraN=1.-smoothstep(floraNear-16.,floraNear+16.,floraDistance);float floraEnd=min(floraFar,floraExtent);float floraF=1.-smoothstep(floraEnd-55.,floraEnd,floraDistance);if('+ (lod===0?'floraD>=min(floraN,floraF)':lod===1?'floraD<floraN||floraD>=floraF':'floraD>=floraF') +')discard;}');
+  shader.fragmentShader='uniform float floraMid; uniform float floraNear; uniform float floraFar; varying float floraDistance; varying float floraExtent;\n'+shader.fragmentShader;
+  shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\n{float floraD=fract(52.9829189*fract(dot(floor(gl_FragCoord.xy),vec2(0.06711056,0.00583715))));float floraA=1.-smoothstep(floraMid-8.,floraMid+8.,floraDistance);float floraN=1.-smoothstep(floraNear-16.,floraNear+16.,floraDistance);float floraEnd=min(floraFar,floraExtent);float floraF=1.-smoothstep(floraEnd-55.,floraEnd,floraDistance);if('+keep+')discard;}');
  };
  mat.customProgramCacheKey=()=> 'flora-'+lod;return mat;
 }
 function* models(){
- const designs=[F.kinds['maple-orange'],F.kinds.pine,F.kinds.palm,F.kinds.rock,F.kinds.cactus,F.kinds.shrub],materials=[material(0),material(1),material(2)];
+ const designs=[F.kinds['maple-orange'],F.kinds.pine,F.kinds.palm,F.kinds.rock,F.kinds.cactus,F.kinds.shrub,F.kinds.spruce,F.kinds.ginkgo,F.kinds['elm-green']],materials={n:material('n'),N:material('N'),m:material('m'),f:material('f'),s:material('s')};
  const depth=AF.mat.depthInst.clone();depth.onBeforeCompile=shader=>{Object.assign(shader.uniforms,uniforms);shader.vertexShader='uniform vec3 floraEye; varying float floraDistance;\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nfloraDistance=distance((modelMatrix * instanceMatrix * vec4(0.,0.,0.,1.)).xyz,floraEye);');shader.fragmentShader='uniform float floraShadow; varying float floraDistance;\n'+shader.fragmentShader;shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\nif(floraDistance>floraShadow)discard;');};depth.customProgramCacheKey=()=> 'flora-depth';
- for(let shape=0;shape<6;shape++){
-  const design=designs[shape],source=shape<3?crown(shape,design):hull(shape,design),far=hull(shape,design),single=shape===3||shape===5;
-  slots[shape]={near:null,far:null,single:null};
+ const mesh=function*(model,vs,design){return remap(yield* AF.meshModelG(model,{vs,flat:true}),design.palette);};
+ for(let shape=0;shape<9;shape++){
+  const design=designs[shape],single=shape===3||shape===4,lods=[];
+  slots[shape]={near:null,mid:null,far:null,single:null};
   yield;
-  const geometry=remap(yield* AF.meshModelG(source.m,{vs:source.vs,flat:true}),design.palette);
+  if(TREE_SPEC[shape]){
+   const spec=AF.land.treeSpecs.find(s=>s.id===TREE_SPEC[shape]);
+   lods.push(['near',yield* mesh(AF.land.makeTree(spec,shape*7+3,0.5).m,0.5,design),700]);yield;
+   lods.push(['mid',yield* mesh(AF.land.makeTree(spec,shape*7+3,0.75).m,0.75,design),2400]);yield;
+  } else if(shape===2)lods.push(['near',yield* mesh(crown(shape,design).m,0.4,design),2200]);
+  else if(shape===5)lods.push(['near',yield* mesh(AF.land.makeBush('box',11),0.16,design),2200]);
+  const far=hull(shape,design);
+  lods.push([single?'single':'far',yield* mesh(far.m,far.vs,design),6000]);
   yield;
-  const farGeo=single?geometry:remap(yield* AF.meshModelG(far.m,{vs:far.vs,flat:true}),design.palette);
-  yield;
-  for(let lod=0;lod<2;lod++){
-    if(single&&lod===1)continue;
-    const geo=lod?farGeo:geometry,capacity=lod?6000:2200,pal=new THREE.InstancedBufferAttribute(new Float32Array(capacity*4),4),limit=new THREE.InstancedBufferAttribute(new Float32Array(capacity),1);pal.setUsage(THREE.DynamicDrawUsage);limit.setUsage(THREE.DynamicDrawUsage);geo.setAttribute('floraPalette',pal);geo.setAttribute('floraLimit',limit);
-    const mesh=new THREE.InstancedMesh(geo,materials[single?2:lod],capacity);mesh.name='flora-'+shape+'-'+lod;mesh.count=0;mesh.frustumCulled=false;mesh.castShadow=lod===0&&!single;mesh.receiveShadow=true;mesh.customDepthMaterial=depth;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);group.add(mesh);F.meshes.push(mesh);const batch={shape,lod,mesh,capacity,write:0};batches.push(batch);slots[shape][single?'single':lod?'far':'near']=batch;
+  for(const [lod,geo,capacity] of lods){
+    const pal=new THREE.InstancedBufferAttribute(new Float32Array(capacity*4),4),limit=new THREE.InstancedBufferAttribute(new Float32Array(capacity),1);pal.setUsage(THREE.DynamicDrawUsage);limit.setUsage(THREE.DynamicDrawUsage);geo.setAttribute('floraPalette',pal);geo.setAttribute('floraLimit',limit);
+    const mat=lod==='near'?(TREE_SPEC[shape]?materials.n:materials.N):lod==='mid'?materials.m:lod==='far'?materials.f:materials.s;
+    const im=new THREE.InstancedMesh(geo,mat,capacity);im.name='flora-'+shape+'-'+lod;im.count=0;im.frustumCulled=false;im.castShadow=lod==='near'&&shape!==5;im.receiveShadow=true;im.customDepthMaterial=depth;im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);group.add(im);F.meshes.push(im);const batch={shape,lod,mesh:im,capacity,write:0};batches.push(batch);slots[shape][lod]=batch;
   }
   yield;
  }
@@ -85,7 +101,7 @@ function* generate(){
  F.stats.phase='models';
  yield* models();
  F.stats.phase='scatter';
- const choices=['maple-scarlet','maple-orange','maple-gold','elm-green','maple-turning','birch','oak'];
+ const choices=['maple-scarlet','maple-orange','maple-gold','elm-green','maple-turning','birch','oak','beech','poplar','lime','red-oak','aspen'],conifers=['pine','spruce','fir','mountain-pine','larch','spruce'],upland=['beech','birch','aspen','elm-green','poplar','lime','maple-turning'],shrubs=['shrub','shrub','shrub-berry','shrub-autumn'];
  for(let x=-1280;x<1080;x+=7){for(let z=-1150;z<270;z+=7){
   const px=x+(hash(x,z+11)-0.5)*5,pz=z+(hash(x+13,z)-0.5)*5;
   yield;
@@ -95,11 +111,14 @@ function* generate(){
   const rnd=hash(x+991,z),beach=px<-660&&px-O.coastX(pz)<55;
   if(beach){if(rnd<0.45)F.add('palm',px,pz,{scale:0.7+hash(x,z+83)*0.3,biome:'beach'});else if(rnd>0.8)F.add('shrub',px,pz,{scale:0.65,biome:'beach'});continue;}
   if(biome==='desert'){if(rnd<0.13&&slope<0.6)F.add('cactus',px,pz,{scale:0.85+hash(x+4,z)*0.45,biome});else if(rnd<0.42)F.add('dry-bush',px,pz,{scale:0.6+hash(x,z+98)*0.7,biome});else if(rnd>0.91)F.add('rock',px,pz,{scale:0.35+hash(x,z+98)*0.5,biome});continue;}
-  const density=biome==='farmland'?(O.fieldEdge(px,pz)<4.5?0.68:0):O.forestDensity(px,pz)*0.9+(height<78?0.035:0);
+  let density=biome==='farmland'?(O.fieldEdge(px,pz)<4.5?0.68:0):O.forestDensity(px,pz)*0.9+(height<78?0.035:0);
+  // mountains: thinner, clumped stands with open meadows between them, thinning out toward the tree line
+  if(biome==='range'||biome==='valley')density*=0.5*AF.smooth(0.3,0.62,AF.noise2(px*0.018+5,pz*0.018-3))*(1-AF.smooth(60,105,height)*0.6);
+  const shrub=shrubs[Math.floor(hash(x+3,z+71)*shrubs.length)];
   if(biome==='jungle'){if(height<110&&slope<1.1&&rnd<density)F.add(hash(x+17,z)<0.45?'palm':'elm-green',px,pz,{scale:0.95+hash(x+4,z)*0.55,biome});else if(slope<0.9&&rnd<density+0.3)F.add('shrub',px,pz,{scale:0.8+hash(x,z+39)*0.5,biome});continue;}
   if(biome==='farmland'&&O.fieldMeadow(px,pz)&&rnd<0.035&&slope<0.5){F.add('shrub',px,pz,{scale:0.6,biome});continue;}
-  if(height<118&&slope<1.1&&rnd<density){const conifer=biome==='range'&&hash(x+91,z)>0.18;F.add(biome==='farmland'&&rnd>0.32?'shrub':conifer?'pine':choices[Math.floor(hash(x,z+55)*choices.length)],px,pz,{scale:0.8+hash(x+4,z)*0.45,biome});}
-  else if(height<100&&slope<0.7&&biome!=='farmland'&&rnd<density+0.13)F.add('shrub',px,pz,{scale:0.65+hash(x,z+39)*0.4,biome});
+  if(height<118&&slope<1.1&&rnd<density){const conifer=biome==='range'&&hash(x+91,z)>0.3,pick=hash(x,z+55);F.add(biome==='farmland'&&rnd>0.32?shrub:conifer?conifers[Math.floor(pick*conifers.length)]:biome==='range'||biome==='valley'?upland[Math.floor(pick*upland.length)]:choices[Math.floor(pick*choices.length)],px,pz,{scale:0.7+hash(x+4,z)*0.6,biome});}
+  else if(height<100&&slope<0.7&&biome!=='farmland'&&rnd<density+0.13)F.add(shrub,px,pz,{scale:0.6+hash(x,z+39)*0.6,biome});
   else if((biome==='range'&&height>48&&slope>0.35||biome==='forest')&&rnd>0.91)F.add('rock',px,pz,{scale:0.65+hash(x,z+98)*1.1,biome});
  }yield;}
  F.stats.phase='island';
@@ -118,19 +137,19 @@ function put(batch,entry){
 function upload(attr,count){attr.clearUpdateRanges();attr.addUpdateRange(0,Math.max(1,count)*attr.itemSize);attr.needsUpdate=true;}
 function* select(){
  F.stats.phase='select';
- const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,view=AF.lodScale||1,near=Math.min(320,(AF.MOBILE||AF.GFX.tier==='low'?80:AF.GFX.lite?125:190)*view),far=Math.min(1600,(AF.MOBILE||AF.GFX.tier==='low'?480:AF.GFX.lite?720:880)*view);
- uniforms.floraNear.value=near;uniforms.floraFar.value=far;uniforms.floraShadow.value=AF.MOBILE?25:55;
+ const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,view=AF.lodScale||1,near=Math.min(320,(AF.MOBILE||AF.GFX.tier==='low'?80:AF.GFX.lite?125:190)*view),mid=Math.min(near-30,(AF.MOBILE||AF.GFX.tier==='low'?28:AF.GFX.lite?45:65)*view),far=Math.min(1600,(AF.MOBILE||AF.GFX.tier==='low'?480:AF.GFX.lite?720:880)*view);
+ uniforms.floraMid.value=mid;uniforms.floraNear.value=near;uniforms.floraFar.value=far;uniforms.floraShadow.value=AF.MOBILE?25:55;
  AF.camera.updateMatrixWorld();projection.multiplyMatrices(AF.camera.projectionMatrix,AF.camera.matrixWorldInverse);frustum.setFromProjectionMatrix(projection);
  for(const batch of batches)batch.write=0;
  const radius=Math.ceil((far+64)/64),bx=Math.floor(cx/64),bz=Math.floor(cz/64);
  for(let ix=bx-radius;ix<=bx+radius;ix++)for(let iz=bz-radius;iz<=bz+radius;iz++){
   const bucket=buckets.get(ix*10000+iz);if(!bucket)continue;
     let processed=0;
-    for(const entry of bucket){if(++processed%16===0)yield;const dx=entry.x-cx,dy=entry.y-cy,dz=entry.z-cz,distance=dx*dx+dy*dy+dz*dz,range=entry.range?Math.min(entry.range,far):far;if(distance>range*range)continue;sphere.center.set(entry.x,entry.y+8*entry.sy,entry.z);sphere.radius=24+10*entry.sx;if(distance>6400&&!frustum.intersectsSphere(sphere))continue;const slot=slots[entry.shape];if(slot.single)put(slot.single,entry);else {if(distance<(near+32)**2)put(slot.near,entry);if(distance>(near-32)**2)put(slot.far,entry);}}
+    for(const entry of bucket){if(++processed%16===0)yield;const dx=entry.x-cx,dy=entry.y-cy,dz=entry.z-cz,distance=dx*dx+dy*dy+dz*dz,range=entry.range?Math.min(entry.range,far):far;if(distance>range*range)continue;sphere.center.set(entry.x,entry.y+8*entry.sy,entry.z);sphere.radius=24+10*entry.sx;if(distance>6400&&!frustum.intersectsSphere(sphere))continue;const slot=slots[entry.shape];if(slot.single)put(slot.single,entry);else {if(slot.mid){if(distance<(mid+30)**2)put(slot.near,entry);if(distance>(mid-30)**2&&distance<(near+32)**2)put(slot.mid,entry);}else if(distance<(near+32)**2)put(slot.near,entry);if(distance>(near-32)**2)put(slot.far,entry);}}
   yield;
  }
- F.stats.near=F.stats.far=F.stats.draws=F.stats.triangles=0;
- for(const batch of batches){const mesh=batch.mesh;mesh.count=batch.write;mesh.layers.set(mesh.count?0:31);mesh.instanceMatrix.needsUpdate=true;upload(mesh.geometry.attributes.floraPalette,mesh.count);upload(mesh.geometry.attributes.floraLimit,mesh.count);F.stats[batch.lod?'far':'near']+=mesh.count;if(mesh.count){F.stats.draws++;F.stats.triangles+=mesh.count*mesh.geometry.index.count/3;}}
+ F.stats.near=F.stats.mid=F.stats.far=F.stats.draws=F.stats.triangles=0;
+ for(const batch of batches){const mesh=batch.mesh;mesh.count=batch.write;mesh.layers.set(mesh.count?0:31);mesh.instanceMatrix.needsUpdate=true;upload(mesh.geometry.attributes.floraPalette,mesh.count);upload(mesh.geometry.attributes.floraLimit,mesh.count);F.stats[batch.lod==='single'?'far':batch.lod]+=mesh.count;if(mesh.count){F.stats.draws++;F.stats.triangles+=mesh.count*mesh.geometry.index.count/3;}}
  lastX=cx;lastY=cy;lastZ=cz;lastQ.copy(AF.camera.quaternion);selected=revision;
 }
 const work=F.work=ms=>{
@@ -153,7 +172,7 @@ AF.test('flora: biome populations and reusable palm/shrub API',()=>{
 AF.test('flora: natural trees avoid roads, water and crop interiors',()=>{
  F.settle();let bad=0,checked=0;for(const entry of F.records){if(entry.kind==='rock')continue;checked++;if(O.roadDistance(entry.x,entry.z)<14||O.waterY(entry.x,entry.z)!==null||!entry.planted&&entry.biome==='farmland'&&O.fieldEdge(entry.x,entry.z)>5&&!(entry.shape===5&&O.fieldMeadow(entry.x,entry.z)))bad++;}return{ok:checked>300&&!bad,info:checked+' trees/shrubs, '+bad+' exclusions violated'};
 });
-AF.test('flora: ten shared draws for six shapes with bounded triangle load',()=>{
- F.settle();return{ok:F.meshes.length===10&&F.stats.draws<=10&&F.stats.triangles<350000&&F.meshes.every(mesh=>mesh.frustumCulled===false&&mesh.material.customProgramCacheKey().startsWith('flora-')),info:F.stats.draws+' draws, '+F.stats.triangles+' triangles'};
+AF.test('flora: shared instanced draws (three LODs per tree shape) with bounded triangle load',()=>{
+ F.settle();return{ok:F.meshes.length===21&&F.stats.draws<=21&&F.stats.triangles<450000&&F.meshes.every(mesh=>mesh.frustumCulled===false&&mesh.material.customProgramCacheKey().startsWith('flora-')),info:F.stats.draws+' draws, '+F.stats.triangles+' triangles'};
 });
 }catch(e){AF.partError('44-flora.js',e);}

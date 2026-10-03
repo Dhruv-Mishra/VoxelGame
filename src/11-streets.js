@@ -927,7 +927,7 @@ try {
       }
     }
     // 7c) steam / smoke wisps from the cart pots and roaster pipes (tiny instanced puffs, only near the camera)
-    { const sp = ST.steamPts || [], PER = 7, N = sp.length * PER;
+    { const sp = ST.steamPts || [], PER = 4, N = sp.length * PER;
       if (N) {
         const g = new THREE.IcosahedronGeometry(0.09, 0), mat = new THREE.MeshBasicMaterial({ color: 0xf2eee6, transparent: true, opacity: 0.32, depthWrite: false });
         const im = new THREE.InstancedMesh(g, mat, N), dm = new THREE.Object3D(); im.frustumCulled = false; im.castShadow = false; AF.scene.add(im);

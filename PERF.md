@@ -86,9 +86,13 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
 - Tiles are 64×64 cells, built in idle slots (`outland-build`), swapped with `AF.world.fade`. Tile edges share a
   world-anchored 8 m boundary profile (no skirts); `AF.outland.renderer.diagnose()` checks gaps/overlaps on demand.
 - Budget: outland ≤ 20 draws and ≤ 250 k triangles in city poses. Outland props go through `AF.outland.addProp`
-  (merged per tile, coarse LOD), vegetation through `44-flora.js` (six shapes — broadleaf, conifer, palm, rock, cactus,
-  shrub — in ≤ 10 shared instanced draws, ~13.6 k records with per-instance non-uniform scale/yaw/palette; near models
-  44–172 triangles). Outland roads are looked up through a 64 m segment grid (`roadAt`), never a scan of every segment.
+  (merged per tile, three LODs), vegetation through `44-flora.js`: the zoo/park tree generator (12-nature `makeTree`) re-meshed
+  at 0.5 m (near, < 45-65 m) and 0.75 m (mid, to the old near range) plus a box hull far; five tree crowns (round, pine, cone,
+  column, spread) + palm, shrub (12-nature bush), rock, cactus = 21 shared instanced meshes, ~15-17 drawn in a forest, near trees
+  650-1240 tris, forest pose ~260 k tris. ~25 palettes for variety. Mountain stands are clumped and thinned (`range`/`valley`).
+  Outland fauna (`56-wild`): five InstancedMeshes (deer, rabbit, sheep, cow, hawk), herds wake within 260 m (hawks 700 m), 15 Hz.
+  Particles were trimmed (Oct 2026): 140 falling leaves, 14 smoking chimneys x 8 puffs, 8 manhole vents x 8 (skipped when far),
+  4 puffs per cart, half the quay spray. Outland roads are looked up through a 64 m segment grid (`roadAt`), never a scan of every segment.
 - All outland water (Lake Tamsin, Mirror Lake, ponds) is one mesh; the island lagoon is one more.
 - Lights for idle-built content must be registered at build time: night light pools snapshot `AF.lights` once.
 

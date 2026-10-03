@@ -44,21 +44,24 @@ function box(buf, cx, cz, y0, y1, hx, hz, color) {
     quad(buf, [p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]], color, (p[0] + q[0]) / 2 - cx, 0, (p[1] + q[1]) / 2 - cz);
   }
 }
-function frameOf(road) {
+function frameOf(road, lift = 0) {
   const pts = road.points, n = pts.length, frame = { x: new Float64Array(n), z: new Float64Array(n), y: new Float64Array(n), nx: new Float64Array(n), nz: new Float64Array(n), s: new Float64Array(n) };
   for (let index = 0; index < n; index++) {
     const before = pts[Math.max(0, index - 1)], after = pts[Math.min(n - 1, index + 1)], tx = after[0] - before[0], tz = after[1] - before[1], length = Math.hypot(tx, tz) || 1;
-    frame.x[index] = pts[index][0]; frame.z[index] = pts[index][1]; frame.y[index] = road.heights[index]; frame.nx[index] = -tz / length; frame.nz[index] = tx / length;
+    frame.x[index] = pts[index][0]; frame.z[index] = pts[index][1]; frame.y[index] = road.heights[index] + lift; frame.nx[index] = -tz / length; frame.nz[index] = tx / length;
     if (index) frame.s[index] = frame.s[index - 1] + Math.hypot(pts[index][0] - pts[index - 1][0], pts[index][1] - pts[index - 1][1]);
   }
   return frame;
 }
 function* buildAll() {
   const k = palette(), surf = new AF.GeoBuf(), struct = new AF.GeoBuf();
-  for (const road of P.roads) {
-    const frame = frameOf(road), n = road.points.length, hw = road.w / 2, flags = road.flags, asphalt = road.kind === 0, marked = asphalt && !road.driveway;
+  for (let ri = 0; ri < P.roads.length; ri++) {
+    const road = P.roads[ri];
+    // junctions: the joining road stops under the one it forks from, and overlapping pieces sit at distinct heights (no coplanar faces)
+    const frame = frameOf(road, road.ring ? 0.05 : road.driveway ? 0 : 0.02 * (1 + ri % 2)), n = road.points.length, hw = road.w / 2, flags = road.flags, asphalt = road.kind === 0, marked = asphalt && !road.driveway;
     for (let i = 1; i < n; i++) {
       if (W.col(frame.x[i - 1], frame.z[i - 1]) >= 0 || W.col(frame.x[i], frame.z[i]) >= 0) continue;
+      if (!road.ring) { const info = O.otherRoad((frame.x[i - 1] + frame.x[i]) / 2, (frame.z[i - 1] + frame.z[i]) / 2, road); if (info && info.deck && info.flag === 0 && info.d < info.hw - 0.5 && info.road.kind === 0 && (info.road.ring || info.road.w > road.w || ri > P.roads.indexOf(info.road))) { RD.stats.joins = (RD.stats.joins || 0) + 1; continue; } }
       const flag = flags[i - 1] === flags[i] ? flags[i] : 0, bridge = flag === 1, tunnel = flag === 2;
       if (!asphalt && !bridge) continue;
       if (asphalt) {
@@ -140,7 +143,7 @@ AF.onBuild('outland-traffic', 661, () => {
   const yAt = (x, z) => O.roadY(x, z);
   const outside = (road) => { let first = 0, last = road.points.length - 1; while (first < last && W.col(road.points[first][0], road.points[first][1]) >= 0) first++; while (last > first && W.col(road.points[last][0], road.points[last][1]) >= 0) last--; return [Math.min(first + 2, last), last]; };
   RD.routes = [];
-  for (const [name, count, radius] of [['Solace Ring Road', 4, 1e9], ['Eastwood Road', 4, 700], ['Coast Road', 3, 700], ['West Coast Drive', 2, 600], ['Eastwood Loop', 1, 450]]) {
+  for (const [name, count, radius] of [['Solace Ring Road', 4, 1e9], ['Eastwood Road', 4, 700], ['Coast Road', 3, 700], ['West Coast Drive', 2, 600], ['Eastwood Loop', 1, 450], ['Westmoor Link', 2, 600], ['Jungle Highway', 1, 500]]) {
     const road = P.roads.find((entry) => entry.name === name); if (!road || road.points.length < 4) continue;
     const [from, to] = outside(road); if (to - from < 4) continue;
     RD.routes.push(VV.addRoute(name + ' traffic', lanes(road, from, to, 2.6), { count, types, activeRadius: radius, yAt }));
