@@ -4,12 +4,15 @@ const W = AF.W, P = AF.PLAN.world, smooth = AF.smooth, clamp = AF.clamp, noise =
 const O = AF.outland = { bounds: P.bounds, play: P.play, props: [], pads: [], edgeReady: false, rivers: [], wayside: [], TUNNEL_H: 6.5 };
 const tiles = new Map(), edges = new Map(), segments = [], roadGrid = new Map(), riverSegs = [], riverGrid = new Map();
 // 34-38 = the city street asphalt + gutter (same AF.col keys as 11-streets, so the outland roads share the city's surface), 39 centre line,
-// 40 jungle floor, 41 forest floor, 42 river shingle, 43 river bed, 44 dirt trail, 45 meadow, 46 olive scrub
+// 40 jungle floor, 41 forest floor, 42 river shingle, 43 river bed, 44 dirt trail, 45 meadow, 46 olive scrub, 47-49 island sand, 50 wet sand,
+// 51 basalt, 52 crater scoria, 53 plaza paving
 const hex = [AF.PAL.hex[AF.col('grass')], 0x5d8a37, 0x6f797c, 0xf5f8f9, 0xcabe9f, 0xa19b70, 0x85916b, 0x929078, 0x807363, 0x48573d, 0x4a4a4f, 0xe8dfb5, 0xada084, 0x948166, 0x536455,
   0x88a049, 0x7da646, 0x566467, 0x807e73, 0x414d51, 0x5e574c, 0xb9ae91, 0xd4c5a6, 0x557a34, 0x7a745e, 0x8b816b, 0x8e8862, 0x747e5c, 0x867c6b,
-  0xc8ac72, 0xd9bf87, 0xb29668, 0xc9a64c, 0xb18e3c, 0x67625b, 0x625d56, 0x6c675f, 0x726c63, 0x46423d, 0xcfa640, 0x3f6a2c, 0x4b6b2e, 0x8a8270, 0x5a5a48, 0x9a8462, 0x7d8f4a, 0x6a7a3a];
-const GRASS = new Set([0, 1, 9, 15, 16, 23, 40, 41, 45, 46]), ROCK = new Set([2, 8, 17, 18, 19, 20]);
+  0xc8ac72, 0xd9bf87, 0xb29668, 0xc9a64c, 0xb18e3c, 0x67625b, 0x625d56, 0x6c675f, 0x726c63, 0x46423d, 0xcfa640, 0x3f6a2c, 0x4b6b2e, 0x8a8270, 0x5a5a48, 0x9a8462, 0x7d8f4a, 0x6a7a3a,
+  0xe3c98f, 0xd6b97c, 0xecd9a8, 0xb59767, 0x38322f, 0x7a4632, 0xd9cfb6];
+const GRASS = new Set([0, 1, 9, 15, 16, 23, 40, 41, 45, 46]), ROCK = new Set([2, 8, 17, 18, 19, 20, 51, 52]);
 const pal = O.pal = hex.map((value, index) => index >= 34 && index <= 38 ? AF.col(value, { jitter: 0.2, edge: 0.02, pat: 'asphalt' }) : index === 39 ? AF.col(value, { jitter: 0.35, edge: 0.03 })
+  : index === 53 ? AF.col(value, { jitter: 0.3, edge: 0.1, pat: 'none', patTop: 'slab' })
   : AF.col(value, { jitter: 0.9, edge: 0, pat: ROCK.has(index) ? 'stone' : 'none', patTop: GRASS.has(index) ? 'grass' : ROCK.has(index) ? 'stone' : 'none' }));
 const farmW = (x, z) => 1 - smooth(-700, -620, x + (noise(x * 0.004 + 3, z * 0.004 - 8) - 0.5) * 110);
 O.jungle = (x, z) => smooth(175, 95, Math.hypot(x - 715, (z + 375) * 1.3) + (noise(x * 0.02 + 61, z * 0.02) - 0.5) * 60);
@@ -216,7 +219,19 @@ function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
     if (Math.abs(x - pad.x) < 2 || Math.abs(z - pad.z) < 2) return 12;
     return O.dryWeight(x, z) > 0.5 ? [29, 30, 31][tone] : patch < 0.55 ? 23 : 15;
   } else if (pad.face && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) return (x - pad.x) * pad.face[0] + (z - pad.z) * pad.face[1] > -1 ? 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3) : [23, 15, 45][tone];
-  if (z > 300) { const strip = P.island.airstrip; if (x >= strip.x0 && x <= strip.x1 && Math.abs(z - strip.z) < strip.w / 2) return 6; return islandE(x, z) > 0.78 ? 4 : height > 28 ? 2 : 0; }
+  else if (pad.pave && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) return 53;
+  if (z > 300) {
+    // Serena Isle: asphalt strip, wet sand at the waterline, warm beaches, tropical lowland, jungle flanks, a basalt cone and red crater rim
+    const isle = P.island, strip = isle.airstrip;
+    if (x >= strip.x0 && x <= strip.x1 && Math.abs(z - strip.z) < strip.w / 2) return 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3);
+    if (height < 0.4) return 50;
+    if (islandE(x, z) > 0.8 || height < 2.1) return [47, 48, 49][tone];
+    const cone = isle.cone, d = Math.hypot(x - cone.x, z - cone.z);
+    if (height > 31) return d < cone.craterR + 8 ? 52 : [51, 19, 20][tone];
+    if (height > 23 || slope > 0.9) return [20, 51, 8][tone];
+    if (height > 9) return [40, 1, 23][tone];
+    return [16, 1, 15][tone];
+  }
   const inland = Math.min(O.coastZ(x) - z, x - O.coastX(z), O.coastX(z, true) - x);
   if (inland < 19) return x < -660 ? [21, 4, 22][tone] : [17, 2, 18][tone];
   if (x > 610 && z > -100 && patch < O.dryWeight(x, z)) return [29, 30, 31][tone];

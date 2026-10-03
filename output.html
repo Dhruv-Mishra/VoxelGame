@@ -30,7 +30,7 @@
 </script>
 <script type="module">
 // Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.
-// Parts: 00-prologue, 01-core, 02-voxel, 03-render, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-farms, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 98-tests, 99-boot
+// Parts: 00-prologue, 01-core, 01-stream, 02-voxel, 03-render, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-farms, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 98-tests, 99-boot
 // ===== prologue: module scope shared by every part (only THREE + ADDONS live here) =====
 window.AF = window.AF || {};
 {
@@ -409,6 +409,148 @@ AF.on = (n, fn) => { (AF._ev[n] = AF._ev[n] || []).push(fn); };
 AF.emit = (n, ...a) => { for (const fn of AF._ev[n] || []) { try { fn(...a); } catch (e) { console.error('[af] event ' + n, e); } } };
 
 } catch (e) { AF.partError('01-core.js', e); }
+
+// ================================================================ 01-stream.js
+try {
+// ===== 01-stream: the one streaming engine every content system plugs into  (OWNER: coordinator) =====
+// AF.stream.register(name, { work(ms) -> true while busy, near() -> true while something the current view needs is still
+//   missing, gen: true = one-time content generation (finished by AF.stream.preload before play), order })
+// AF.LOD: every LOD range of every system (03 applyTier fills it from the one TIER table); AF.LOD.prefetch = how much farther
+//   than its display range each system loads (so a swap is always a dithered fade of something already resident)
+// AF.stream.ahead {x, z}: the look-ahead every streamer ranks against (camera + 2.5 s of velocity, or AF.stream.focus)
+// AF.stream.loading > 0: a veiled load (boot preload, travel): LOD swaps are instant and the streamers get most of every frame
+// AF.stream.travel({ label, go }): veil, go() (moves the camera / sets the mode), stream + compile until the view is complete, reveal
+{
+  const ST = AF.stream = {
+    systems: [], loading: 0, focus: null, traveling: false, LOOK: 2.5, PREFETCH: 1.3,
+    ahead: { x: 0, z: 0, vx: 0, vz: 0, px: 0, pz: 0, init: false },
+    stats: { preloadMs: 0, genMs: 0, settleMs: 0, warmMs: 0, travels: 0, travelMs: 0, waitingOn: '', timeouts: 0 },
+  };
+  AF.LOD = { view: AF.lodScale || 1, props: 110, region: 130, far: 1e9, cull: 900, outland: 0.7, floraMid: 65, floraNear: 160, floraFar: 880, prefetch: ST.PREFETCH };
+  ST.register = (name, o) => {
+    const s = Object.assign({ name, order: 50, gen: false, near: () => false }, o);
+    ST.systems.push(s); ST.systems.sort((a, b) => a.order - b.order);
+    AF.onIdle(name, s.work);
+    return s;
+  };
+  // name of the first system still missing something the view needs ('' = the view is complete)
+  ST.near = () => { for (const s of ST.systems) if (s.near()) return s.name; return ''; };
+
+  // frames: resolved by the last tick of every simulated frame (also in hidden tabs); 250 ms fallback when the loop is paused
+  const waiters = [];
+  ST.nextFrame = () => new Promise((resolve) => { waiters.push(resolve); setTimeout(resolve, 250); });
+  AF.onTick('stream-frame', 999, () => { if (waiters.length) for (const resolve of waiters.splice(0)) resolve(); });
+
+  // shared look-ahead + the loading pump (runs before the city 877/878 and outland 876 streamers)
+  AF.onTick('stream-ahead', 874, (dt) => {
+    const c = AF.camera.position, A = ST.ahead;
+    if (!A.init || dt <= 0) { A.px = c.x; A.pz = c.z; A.vx = A.vz = 0; A.init = true; }
+    const vx = (c.x - A.px) / Math.max(dt, 1e-3), vz = (c.z - A.pz) / Math.max(dt, 1e-3), k = Math.min(1, dt * 3);
+    if (Math.hypot(vx, vz) < 400) { A.vx += (vx - A.vx) * k; A.vz += (vz - A.vz) * k; } else A.vx = A.vz = 0;   // teleports
+    A.px = c.x; A.pz = c.z;
+    if (ST.focus) { A.x = ST.focus.x; A.z = ST.focus.z; }
+    else { const s = Math.min(1, 400 / (Math.hypot(A.vx, A.vz) * ST.LOOK + 1e-3)); A.x = c.x + A.vx * ST.LOOK * s; A.z = c.z + A.vz * ST.LOOK * s; }
+    if (!ST.loading || !AF.ready) return;
+    if (ST.traveling) AF.input.down.clear();
+    const end = performance.now() + (AF.MOBILE ? 45 : 70);
+    for (let pass = 0, busy = true; busy && pass < 400 && performance.now() < end; pass++) {
+      busy = false;
+      for (const s of ST.systems) { const left = end - performance.now(); if (left <= 0) break; if (s.work(Math.min(8, left))) busy = true; }
+    }
+  });
+
+  // every program the scene can use, compiled while nothing is on screen (r160 compile() walks invisible objects too), for both
+  // light variants (the night light pool shown / hidden changes every program) and against the post chain's scene target (a
+  // linear, untoned target is a different program from the canvas); the shadow pass has its own depth programs: one throw-away
+  // caster per custom depth material is drawn into the next shadow map
+  const warmed = new WeakSet();
+  ST.warm = async () => {
+    const R = AF.renderer, t0 = performance.now(), pool = (AF.atmos && AF.atmos.pool) || [], P = AF.post;
+    const compile = async () => {
+      const prev = R.getRenderTarget();
+      try { R.setRenderTarget(P && P.enabled && P.sceneRT ? P.sceneRT : null); R.compile(AF.scene, AF.camera); } catch (e) { AF.warnOnce('stream compile', e); }
+      finally { R.setRenderTarget(prev); }
+      await ST.nextFrame();
+    };
+    await compile();
+    if (pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; await compile(); for (const l of pool) l.visible = v; }
+    const proxies = [], tri = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)), seen = new Set();
+    AF.scene.traverse((o) => {
+      const d = o.customDepthMaterial; if (!d || warmed.has(d)) return;
+      const key = d.uuid + (o.isInstancedMesh ? 'i' : ''); if (seen.has(key)) return; seen.add(key); warmed.add(d);
+      const mat = Array.isArray(o.material) ? o.material[0] : o.material, m = o.isInstancedMesh ? new THREE.InstancedMesh(tri, mat, 1) : new THREE.Mesh(tri, mat);
+      m.customDepthMaterial = d; m.castShadow = true; m.frustumCulled = false; m.position.copy(AF.shadowFocus); m.position.y += 2; AF.scene.add(m); proxies.push(m);
+    });
+    if (proxies.length) { AF.shadowDirty = true; await ST.nextFrame(); await ST.nextFrame(); for (const m of proxies) { AF.scene.remove(m); if (m.dispose) m.dispose(); } }
+    ST.stats.warmMs = Math.round(performance.now() - t0);
+  };
+
+  // wait until no system misses anything near the view (3 calm frames), at most maxMs
+  const settle = async (maxMs, onProgress) => {
+    const t0 = performance.now(); let calm = 0, frames = 0;
+    while (performance.now() - t0 < maxMs) {
+      await ST.nextFrame(); frames++;
+      const n = ST.near(); ST.stats.waitingOn = n;
+      if (onProgress) onProgress(1 - Math.exp(-(performance.now() - t0) / 1500), n);
+      if (n || frames < 3) calm = 0; else if (++calm >= 3) return true;
+    }
+    ST.stats.timeouts++; return false;
+  };
+  const LABEL = { 'region-stream': 'raising the streets', 'outland-build': 'shaping the hills', 'flora-build': 'growing the forests', farms: 'sowing the fields', 'outland-sites': 'building the villages', 'outland-roads': 'paving the country roads', 'outland-wayside': 'stocking the roadside stops', 'water-shore': 'charting the shoreline' };
+  const label = (n) => (LABEL[n] || 'finishing touches') + '…';
+
+  // boot: finish every generator (props, crops, trees, roads) before play, so nothing is added to a tile on screen later; then the
+  // opening view streams in full and every program is compiled. Longer load, no pop-in afterwards.
+  ST.preload = async (progress) => {
+    const t0 = performance.now(), gens = ST.systems.filter((s) => s.gen), wasPaused = AF.paused;
+    ST.loading++;
+    try {
+      AF.paused = true;
+      for (let i = 0; i < gens.length; i++) {
+        const s = gens[i]; let t = performance.now();
+        progress(i / gens.length * 0.7, label(s.name));
+        while (s.work(50)) if (performance.now() - t > 40) { progress((i + 0.5) / gens.length * 0.7, label(s.name)); await AF.yield(); t = performance.now(); }
+      }
+      ST.stats.genMs = Math.round(performance.now() - t0);
+      AF.paused = wasPaused;
+      const t1 = performance.now();
+      await settle(15000, (f, n) => progress(0.7 + 0.25 * f, label(n)));
+      ST.stats.settleMs = Math.round(performance.now() - t1);
+      progress(0.97, 'warming up the shaders…');
+      await ST.warm();
+    } finally { AF.paused = wasPaused; ST.loading--; }
+    ST.stats.preloadMs = Math.round(performance.now() - t0);
+    console.log('[af] preload', JSON.stringify(ST.stats));
+  };
+
+  // the veil is the boot loader (#loader), reused: travel = veil, go(), stream + compile, reveal
+  const veil = (on, text) => {
+    const el = document.getElementById('loader'); if (!el) return Promise.resolve();
+    const sub = el.querySelector('.sub'); if (on && sub && text) sub.textContent = text;
+    el.classList.toggle('done', !on); el.style.pointerEvents = on ? 'auto' : 'none';
+    return new Promise((resolve) => setTimeout(resolve, on ? 220 : 0));
+  };
+  ST.travel = async ({ label: where = '', go, maxMs = 15000 } = {}) => {
+    if (ST.traveling || !AF.ready || AF.TEST) { if (go) go(); return; }
+    ST.traveling = true; ST.stats.travels++;
+    const t0 = performance.now();
+    try {
+      await veil(true, where ? 'Travelling to ' + where : 'Travelling…');
+      AF.loader(0, 'setting off…');
+      if (go) go();
+      ST.loading++;
+      try { await settle(maxMs, (f, n) => AF.loader(0.05 + 0.85 * f, label(n))); }
+      finally { ST.loading--; }
+      AF.loader(0.95, 'warming up the shaders…');
+      await ST.warm();
+      await ST.nextFrame(); await ST.nextFrame();
+      AF.loader(1, '');
+    } finally {
+      AF.input.down.clear(); veil(false); ST.traveling = false; ST.stats.travelMs = Math.round(performance.now() - t0);
+    }
+  };
+}
+} catch (e) { AF.partError('01-stream.js', e); }
 
 // ================================================================ 02-voxel.js
 try {
@@ -1748,7 +1890,7 @@ const fadeMats = () => FADE.mats || (FADE.mats = {
 });
 const seenByCam = (m) => m.visible && (m.layers.mask & 1) !== 0 && !!m.parent;
 FADE.swap = (owner, outs, ins, done) => {
-  const live = AF.ready && FADE.on;
+  const live = AF.ready && FADE.on && !AF.stream.loading;
   const e = { owner, outs: [], ins: [], done };
   for (const m of outs) if (m && seenByCam(m)) e.outs.push(m);
   for (const m of ins) {
@@ -1785,6 +1927,7 @@ FADE.cancel = (owner) => {
 };
 AF.onTick('lod-fade', 881, (dt) => {
   const U = AF.mat.uniforms;
+  if (AF.stream.loading) { if (FADE.act.length) fadeEnd(); if (FADE.pend.length) { fadeStart(); fadeEnd(); } }
   if (FADE.act.length) { FADE.k += dt / FADE.dur; if (FADE.k >= 1) fadeEnd(); }
   if (!FADE.act.length && FADE.pend.length) fadeStart();
   U.uFadeK.value = Math.min(1, FADE.k);
@@ -1980,11 +2123,12 @@ function* meshRegionG(rx, rz, mode = 'both') {
   return nO / 4 + farQ;
 }
 // REGION STREAMING (not in ?test / ?shot / ?near / ?nostream): boot meshes only the regions around AF.PLAN.bootFocus plus the 1 m
-// clusters for the whole island. One scheduler (streamWork) then runs a single job at a time, always the best one over all regions:
-//   props  near props of a region within AF.LOD_DIST (score d - 8)
-//   full   0.25 m mesh for a region within REGION_LOD + 24 m of the camera or of the look-ahead point (score d)
-//   coarse 0.5 m copy for an empty region within FAR_LOD + 48 (score d + 32), back-fill for a full region moving away (score d)
-// Jobs near the camera are "urgent": they also get a slice of every rendered frame and preempt a running far job. Full meshes the
+// clusters for the whole island. One scheduler (streamWork) then runs a single job at a time, always the best one over all regions,
+// ranked by distance to the camera or to the shared look-ahead (AF.stream.ahead); P = AF.LOD.prefetch loads ahead of display:
+//   props  near props of a region within AF.LOD_DIST * P (score d - 8)
+//   full   0.25 m mesh for a region within REGION_LOD * P + 24 m (score d)
+//   coarse 0.5 m copy for an empty region within FAR_LOD * P + 48 (score d + 32), back-fill for a full region moving away (score d)
+// Jobs inside the display ranges are "urgent": they also get a slice of every rendered frame and preempt a running far job. Full meshes the
 // camera left behind stay resident until a byte budget is used up (zipping back is instant); then the farthest drop to their 0.5 m
 // copy, and whole clusters showing their 1 m copy unload farthest first (always beyond FAR_LOD + 600 m, phones + 300 m).
 const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, kind: '', phase: '', urgent: false, rest: 0, chk: 0, done: 0, unloaded: 0, demoted: 0, aborted: 0, t: 0, maxStep: 0, maxPhase: '', ms: {}, bytes: 0, fullBytes: 0, jobs: { full: 0, coarse: 0, props: 0 } };
@@ -1999,21 +2143,11 @@ function setMissing(k, miss) {
   else if (STR.pending.delete(k)) cl.pending = Math.max(0, cl.pending - 1);
 }
 const ALL = [];   // every region { k, x, z } (centre), filled by meshWorld
-// Look-ahead (PERF.md §5): a 1.5 s velocity-predicted point, so regions ahead of a car or plane load before it gets there.
-const LA = { x: 0, z: 0, px: 0, pz: 0, vx: 0, vz: 0, init: false };
-AF.onTick('stream-look', 877, (dt) => {
-  const c = AF.camera.position;
-  if (!LA.init || dt <= 0) { LA.px = c.x; LA.pz = c.z; LA.init = true; }
-  const k = Math.min(1, dt * 3), vx = (c.x - LA.px) / Math.max(dt, 1e-3), vz = (c.z - LA.pz) / Math.max(dt, 1e-3);
-  if (Math.hypot(vx, vz) < 400) { LA.vx += (vx - LA.vx) * k; LA.vz += (vz - LA.vz) * k; }     // ignore teleports
-  LA.px = c.x; LA.pz = c.z;
-  const s = Math.min(1, 250 / (Math.hypot(LA.vx, LA.vz) * 1.5 + 1e-3));
-  LA.x = c.x + LA.vx * 1.5 * s; LA.z = c.z + LA.vz * 1.5 * s;
-});
+const LA = AF.stream.ahead;   // shared look-ahead (01-stream): 2.5 s of camera velocity, or the travel destination
 const PK = { k: -1, t: 0, s: 0, fresh: false };   // best job of the last scan: t 1 full, 2 coarse, 3 props
 function pickJob() {
-  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, LOD = AF.world.lod;
-  const RD = AF.REGION_LOD, FD = Math.min(AF.FAR_LOD || 1e9, 5000), D = AF.LOD_DIST;
+  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, LOD = AF.world.lod, P = AF.LOD.prefetch;
+  const RD = AF.REGION_LOD * P, FD = Math.min(AF.FAR_LOD || 1e9, 5000) * P, D = AF.LOD_DIST * P;
   PK.k = -1; PK.t = 0; PK.s = 1e9;
   for (let i = 0; i < ALL.length; i++) {
     const g = ALL[i], k = g.k, d = Math.hypot(g.x - c.x, g.z - c.z, vy), de = Math.min(d, Math.hypot(g.x - LA.x, g.z - LA.z, vy) + 16);
@@ -2022,17 +2156,24 @@ function pickJob() {
     let s = 1e9, t = 0;
     if (STR.on) {
       if (!r || !r.fullOk) { if (de < RD + 24) { s = de; t = 1; } else if (!r && de < FD + 48) { s = de + 32; t = 2; } }
-      else if (!r.coarseOk && COARSE_ON && de > RD - 24 && de < FD + 48) { s = de; t = 2; }   // full mesh shown too far out: as urgent as its distance
+      else if (!r.coarseOk && COARSE_ON && de > AF.REGION_LOD - 24 && de < FD + 48) { s = de; t = 2; }   // full mesh shown too far out: as urgent as its distance
     }
     const reg = LOD.get(k);
-    if (reg && !reg.nearBuilt && d < D && d - 8 < s && !(r && r.hid)) { s = d - 8; t = 3; }
+    if (reg && !reg.nearBuilt && de < D && de - 8 < s && !(r && r.hid)) { s = de - 8; t = 3; }
     if (s < PK.s) { PK.s = s; PK.k = k; PK.t = t; }
   }
   PK.fresh = PK.k >= 0;
   if (!PK.fresh) STR.rest = AF.clock.t + 0.15;   // nothing to do: no rescans for a moment
   return PK.fresh;
 }
-const isUrgent = () => PK.t === 3 || (PK.t === 1 && PK.s < AF.REGION_LOD);
+const isUrgent = () => (PK.t === 3 && PK.s < AF.LOD_DIST) || (PK.t === 1 && PK.s < AF.REGION_LOD);
+// the view still lacks detail it shows (or is about to): urgent work, or any full / props job, or a coarse copy inside 2x REGION_LOD
+STR.near = () => {
+  if (!AF.world.regLod) return false;
+  if (STR.gen && STR.urgent) return true;
+  if (!pickJob()) return !!STR.gen && STR.kind !== 'coarse';
+  return PK.t !== 2 || PK.s < AF.REGION_LOD * 2;
+};
 const streamWork = (budget) => {
   if (!AF.ready || !AF.world.regLod) return false;
   const t0 = performance.now();
@@ -2055,7 +2196,7 @@ const streamWork = (budget) => {
   return true;
 };
 function evict() {
-  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, RD = AF.REGION_LOD, FD = Math.min(AF.FAR_LOD || 1e9, 5000), MB = 1048576;
+  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, RD = AF.REGION_LOD * AF.LOD.prefetch, FD = Math.min(AF.FAR_LOD || 1e9, 5000), MB = 1048576;
   let bF = 0, bA = 0;
   for (const r of RL.values()) { bF += r.bF; bA += r.bF + r.bC; }
   const busy = STR.gen ? STR.key : -1;
@@ -2080,7 +2221,7 @@ function evict() {
   }
   STR.bytes = bA; STR.fullBytes = bF;
 }
-AF.onIdle('region-stream', (ms) => streamWork(ms));
+AF.stream.register('region-stream', { order: 10, work: (ms) => streamWork(ms), near: STR.near });
 AF.onTick('region-stream', 878, (dt) => {
   if (!AF.ready || !AF.world.regLod) return;
   // a far job yields to an urgent one (nothing is attached before its last step, so dropping it is safe)
@@ -2215,7 +2356,7 @@ AF.onTick('prop-lod', 880, () => {
     const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
     if (hid) { if (r.nearBuilt) { FADE.cancel(r); freeNear(r); } }
     else if (!r.nearBuilt && d < D) { if (sync) buildNear(r); }
-    else if (r.nearBuilt && d > D + 70) { FADE.cancel(r); freeNear(r); }
+    else if (r.nearBuilt && d > D * AF.LOD.prefetch + 70) { FADE.cancel(r); freeNear(r); }
     const showNear = !hid && r.nearBuilt && d < D + 25, farSeen = !!r.far && !showNear && d < PC;
     // near <-> far props and the far-prop cull cross-fade (PERF.md §4); the first decision for a region just sets the state
     if (!r.fadeE && r.showNear !== undefined && (r.showNear !== showNear || r.farSeen !== farSeen)) {
@@ -3004,13 +3145,15 @@ try {
   }
   if (AF.MOBILE) { G.tier = 'low'; G.cinema = false; G.auto = false; }
   // per-tier settings (read by R1 code every frame). near/far = shadow map sizes, lights = physical point lights, ao = SAO samples,
-  // regLod/farLod = metres to the 0.5 m coarse / 1 m far region copies, lod = near props, propCull = far props hidden beyond
+  // THE LOD TABLE (every system reads AF.LOD, filled from here): regLod/farLod = metres to the 0.5 m coarse / 1 m far region copies,
+  // lod = near props, propCull = far props hidden beyond, outland = quadtree split distance per tile size, flora = [mid, near, far]
+  // tree LOD distances. Loading runs AF.LOD.prefetch (01-stream) farther out than these display ranges.
   const TIER = {
-    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 70, propCull: 700 },
-    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 45, propCull: 300 },
-    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 2, pools: 8, regLod: 80, farLod: 240, lod: 35, propCull: 240 },
-    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 32, propCull: 200 },
-    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
+    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 70, propCull: 700, outland: 0.8, flora: [70, 180, 960] },
+    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 45, propCull: 300, outland: 0.7, flora: [65, 160, 880] },
+    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 2, pools: 8, regLod: 80, farLod: 240, lod: 35, propCull: 240, outland: 0.48, flora: [45, 105, 720] },
+    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 32, propCull: 200, outland: 0.38, flora: [28, 80, 480] },
+    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000, outland: 1.0, flora: [90, 240, 1400] },
   };
   AF.gfx.TIER = TIER;
   const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 50, farLod: 125, lod: 40, propCull: 180, dynMin: 0.55 };
@@ -3036,6 +3179,8 @@ try {
     AF.REGION_LOD = (T.regLod || 130) * view;
     AF.FAR_LOD = (T.farLod || 1e9) * view;
     AF.PROP_CULL = (T.propCull || 900) * view;
+    const fl = T.flora, near = Math.min(320, fl[1] * view);
+    Object.assign(AF.LOD, { view, props: AF.LOD_DIST, region: AF.REGION_LOD, far: AF.FAR_LOD, cull: AF.PROP_CULL, outland: T.outland * view, floraMid: Math.min(near - 30, fl[0] * view), floraNear: near, floraFar: Math.min(1600, fl[2] * view), prefetch: AF.stream.PREFETCH });
     if (AF.gfx.pools) AF.gfx.pools.max = T.pools;
     if (AF.atmos && AF.atmos.setLights) AF.atmos.setLights(T.lights);
     AF.shadowDirty = true;
@@ -3250,7 +3395,7 @@ try {
   AF.test('renderer: mobile GPU budgets stay bounded', () => {
     if (!AF.MOBILE) return { ok: true, info: 'desktop profile' };
     const cfg = cur(), context = R.getContext().getContextAttributes();
-    const ok = R.getPixelRatio() <= Math.min(devicePixelRatio || 1, 1) + 1e-3 && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools <= 6 && AF.LOD_DIST === 40 && AF.REGION_LOD === 50 && AF.PROP_CULL === 180 && (!AF.atmos.pool || AF.atmos.pool.length === 0);
+    const ok = R.getPixelRatio() <= Math.min(devicePixelRatio || 1, 1) + 1e-3 && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools <= 6 && AF.LOD_DIST === mobileTier.lod * AF.lodScale && AF.REGION_LOD === mobileTier.regLod * AF.lodScale && AF.LOD.outland === mobileTier.outland * AF.lodScale && (!AF.atmos.pool || AF.atmos.pool.length === 0);
     return { ok, info: 'pr ' + R.getPixelRatio() + ', msaa ' + context.antialias + ', near ' + sunSize() + ', direct renderer, no far/env/AO/point lights, ' + cfg.pools + ' shader pools' };
   });
   function sunSize() { return AF.sun.shadow.mapSize.x; }
@@ -3792,12 +3937,15 @@ const W = AF.W, P = AF.PLAN.world, smooth = AF.smooth, clamp = AF.clamp, noise =
 const O = AF.outland = { bounds: P.bounds, play: P.play, props: [], pads: [], edgeReady: false, rivers: [], wayside: [], TUNNEL_H: 6.5 };
 const tiles = new Map(), edges = new Map(), segments = [], roadGrid = new Map(), riverSegs = [], riverGrid = new Map();
 // 34-38 = the city street asphalt + gutter (same AF.col keys as 11-streets, so the outland roads share the city's surface), 39 centre line,
-// 40 jungle floor, 41 forest floor, 42 river shingle, 43 river bed, 44 dirt trail, 45 meadow, 46 olive scrub
+// 40 jungle floor, 41 forest floor, 42 river shingle, 43 river bed, 44 dirt trail, 45 meadow, 46 olive scrub, 47-49 island sand, 50 wet sand,
+// 51 basalt, 52 crater scoria, 53 plaza paving
 const hex = [AF.PAL.hex[AF.col('grass')], 0x5d8a37, 0x6f797c, 0xf5f8f9, 0xcabe9f, 0xa19b70, 0x85916b, 0x929078, 0x807363, 0x48573d, 0x4a4a4f, 0xe8dfb5, 0xada084, 0x948166, 0x536455,
   0x88a049, 0x7da646, 0x566467, 0x807e73, 0x414d51, 0x5e574c, 0xb9ae91, 0xd4c5a6, 0x557a34, 0x7a745e, 0x8b816b, 0x8e8862, 0x747e5c, 0x867c6b,
-  0xc8ac72, 0xd9bf87, 0xb29668, 0xc9a64c, 0xb18e3c, 0x67625b, 0x625d56, 0x6c675f, 0x726c63, 0x46423d, 0xcfa640, 0x3f6a2c, 0x4b6b2e, 0x8a8270, 0x5a5a48, 0x9a8462, 0x7d8f4a, 0x6a7a3a];
-const GRASS = new Set([0, 1, 9, 15, 16, 23, 40, 41, 45, 46]), ROCK = new Set([2, 8, 17, 18, 19, 20]);
+  0xc8ac72, 0xd9bf87, 0xb29668, 0xc9a64c, 0xb18e3c, 0x67625b, 0x625d56, 0x6c675f, 0x726c63, 0x46423d, 0xcfa640, 0x3f6a2c, 0x4b6b2e, 0x8a8270, 0x5a5a48, 0x9a8462, 0x7d8f4a, 0x6a7a3a,
+  0xe3c98f, 0xd6b97c, 0xecd9a8, 0xb59767, 0x38322f, 0x7a4632, 0xd9cfb6];
+const GRASS = new Set([0, 1, 9, 15, 16, 23, 40, 41, 45, 46]), ROCK = new Set([2, 8, 17, 18, 19, 20, 51, 52]);
 const pal = O.pal = hex.map((value, index) => index >= 34 && index <= 38 ? AF.col(value, { jitter: 0.2, edge: 0.02, pat: 'asphalt' }) : index === 39 ? AF.col(value, { jitter: 0.35, edge: 0.03 })
+  : index === 53 ? AF.col(value, { jitter: 0.3, edge: 0.1, pat: 'none', patTop: 'slab' })
   : AF.col(value, { jitter: 0.9, edge: 0, pat: ROCK.has(index) ? 'stone' : 'none', patTop: GRASS.has(index) ? 'grass' : ROCK.has(index) ? 'stone' : 'none' }));
 const farmW = (x, z) => 1 - smooth(-700, -620, x + (noise(x * 0.004 + 3, z * 0.004 - 8) - 0.5) * 110);
 O.jungle = (x, z) => smooth(175, 95, Math.hypot(x - 715, (z + 375) * 1.3) + (noise(x * 0.02 + 61, z * 0.02) - 0.5) * 60);
@@ -4004,7 +4152,19 @@ function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
     if (Math.abs(x - pad.x) < 2 || Math.abs(z - pad.z) < 2) return 12;
     return O.dryWeight(x, z) > 0.5 ? [29, 30, 31][tone] : patch < 0.55 ? 23 : 15;
   } else if (pad.face && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) return (x - pad.x) * pad.face[0] + (z - pad.z) * pad.face[1] > -1 ? 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3) : [23, 15, 45][tone];
-  if (z > 300) { const strip = P.island.airstrip; if (x >= strip.x0 && x <= strip.x1 && Math.abs(z - strip.z) < strip.w / 2) return 6; return islandE(x, z) > 0.78 ? 4 : height > 28 ? 2 : 0; }
+  else if (pad.pave && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) return 53;
+  if (z > 300) {
+    // Serena Isle: asphalt strip, wet sand at the waterline, warm beaches, tropical lowland, jungle flanks, a basalt cone and red crater rim
+    const isle = P.island, strip = isle.airstrip;
+    if (x >= strip.x0 && x <= strip.x1 && Math.abs(z - strip.z) < strip.w / 2) return 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3);
+    if (height < 0.4) return 50;
+    if (islandE(x, z) > 0.8 || height < 2.1) return [47, 48, 49][tone];
+    const cone = isle.cone, d = Math.hypot(x - cone.x, z - cone.z);
+    if (height > 31) return d < cone.craterR + 8 ? 52 : [51, 19, 20][tone];
+    if (height > 23 || slope > 0.9) return [20, 51, 8][tone];
+    if (height > 9) return [40, 1, 23][tone];
+    return [16, 1, 15][tone];
+  }
   const inland = Math.min(O.coastZ(x) - z, x - O.coastX(z), O.coastX(z, true) - x);
   if (inland < 19) return x < -660 ? [21, 4, 22][tone] : [17, 2, 18][tone];
   if (x > 610 && z > -100 && patch < O.dryWeight(x, z)) return [29, 30, 31][tone];
@@ -19321,7 +19481,7 @@ function* crops() {
   FM.stats.records = N;
 }
 // ---------------------------------------------------------------- selection (idle slots; camera moves > 3 m or turns)
-const frustum = new THREE.Frustum(), projection = new THREE.Matrix4(), sphere = new THREE.Sphere(), lastQ = new THREE.Quaternion();
+const frustum = new THREE.Frustum(), projection = new THREE.Matrix4(), sphere = new THREE.Sphere(), lastQ = new THREE.Quaternion(), wide = new THREE.PerspectiveCamera();
 let lastX = Infinity, lastY = Infinity, lastZ = Infinity, revision = 0, selected = -1, selection = null, generator = null;
 const tierIndex = () => AF.MOBILE || AF.GFX.tier === 'low' ? 0 : AF.GFX.lite ? 1 : 2;
 function put(batch, index, sx, sy, sz, lift, p0, p1, p2, p3, radius) {
@@ -19335,12 +19495,12 @@ function put(batch, index, sx, sy, sz, lift, p0, p1, p2, p3, radius) {
 function upload(attr, count) { attr.clearUpdateRanges(); attr.addUpdateRange(0, Math.max(1, count) * attr.itemSize); attr.needsUpdate = true; }
 const radii = [0, 0, 0, 0, 0];
 function* select(eye = AF.camera.position, cull = true) {
-  const cx = eye.x, cy = eye.y, cz = eye.z, view = AF.lodScale || 1, tier = tierIndex();
+  const cx = eye.x, cy = eye.y, cz = eye.z, view = AF.LOD.view, tier = tierIndex();
   // from the street inside the city grid the fields are > 110 m away behind buildings: keep the canopy boxes off
   const far = AF.W.col(cx, cz) >= 0 && cy - O.h(cx, cz) < 40 ? 110 : Math.min(400, FAR[tier] * view);
   for (let kind = 0; kind < 5; kind++) radii[kind] = Math.min(90, KS[kind].R[tier] * view);
   uniforms.cropFar.value = far;
-  if (cull) { AF.camera.updateMatrixWorld(); projection.multiplyMatrices(AF.camera.projectionMatrix, AF.camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projection); }
+  if (cull) { AF.camera.updateMatrixWorld(); wide.copy(AF.camera, false); wide.fov = Math.min(120, AF.camera.fov * 1.4); wide.aspect = AF.camera.aspect * 1.1; wide.updateProjectionMatrix(); projection.multiplyMatrices(wide.projectionMatrix, AF.camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projection); }
   for (const name in batches) batches[name].n = 0;
   const reach = Math.ceil((far + 64) / 64), bx = Math.floor(cx / 64), bz = Math.floor(cz / 64), far2 = far * far;
   for (let ix = bx - reach; ix <= bx + reach; ix++) for (let iz = bz - reach; iz <= bz + reach; iz++) {
@@ -19378,7 +19538,7 @@ function stale() {
   const cp = AF.camera.position;
   // nothing drawn and the camera is well east of the farmland: keep sleeping
   if (!FM.stats.draws && cp.x > -660 + FAR[2] * 2.6) return false;
-  return (cp.x - lastX) ** 2 + (cp.y - lastY) ** 2 + (cp.z - lastZ) ** 2 > 9 || Math.abs(lastQ.dot(AF.camera.quaternion)) < 0.996;
+  return (cp.x - lastX) ** 2 + (cp.y - lastY) ** 2 + (cp.z - lastZ) ** 2 > 9 || Math.abs(lastQ.dot(AF.camera.quaternion)) < 0.993;
 }
 // ---------------------------------------------------------------- machine and prop models
 const col = (hex, opts = {}) => AF.col(hex, { jitter: 0.4, edge: 0.2, ...opts });
@@ -19682,7 +19842,7 @@ const work = FM.work = (ms) => {
   return !FM.stats.ready || !!selection || stale();
 };
 FM.settle = () => { while (work(8)); };
-AF.onIdle('farms', work);
+AF.stream.register('farms', { order: 35, gen: true, work, near: () => AF.ready && !!AF.outlandSites && (!FM.stats.ready || !!selection || stale()) });
 // ---------------------------------------------------------------- tests
 AF.test('farms: field mirror matches the outland field function', () => {
   let bad = 0, checked = 0;
@@ -19713,7 +19873,7 @@ try {
 const O=AF.outland,W=AF.W,hash=AF.hash2;
 const F=AF.flora={kinds:{},records:[],meshes:[],stats:{total:0,biomes:{},near:0,far:0,draws:0,triangles:0,workMs:0,maxSliceMs:0,generated:false}};
 const buckets=new Map(),batches=[],slots=[],matrix=new THREE.Matrix4(),rotation=new THREE.Quaternion(),position=new THREE.Vector3(),scale=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
-const frustum=new THREE.Frustum(),projection=new THREE.Matrix4(),sphere=new THREE.Sphere();
+const frustum=new THREE.Frustum(),projection=new THREE.Matrix4(),sphere=new THREE.Sphere(),wide=new THREE.PerspectiveCamera();
 const group=new THREE.Group();group.name='flora';AF.scene.add(group);
 const uniforms={floraEye:{value:AF.camera.position},floraMid:{value:50},floraNear:{value:160},floraFar:{value:800},floraShadow:{value:55}};
 let generator=null,selection=null,lastX=Infinity,lastY=Infinity,lastZ=Infinity,lastQ=new THREE.Quaternion(),revision=0,selected=-1,ready=false;
@@ -19834,11 +19994,18 @@ function* generate(){
   else if((biome==='range'&&(height>48||slope>0.25)||biome==='forest'||biome==='valley')&&rnd>0.925)F.add('rock',px,pz,{scale:0.45+hash(x,z+98)*1.3,biome});
  }yield;}
  F.stats.phase='island';
- const isle=AF.PLAN.world.island;
- for(let x=isle.cx-isle.rx;x<isle.cx+isle.rx;x+=14)for(let z=isle.cz-isle.rz;z<isle.cz+isle.rz;z+=14){
+ // Serena Isle: palm groves on the lowland and beaches, a jungle of palms, broadleaves and shrubs up the cone's flanks, scrub and rocks
+ // on the basalt; never on the strip, the resort lawn, the pads or the crater trail
+ const isle=AF.PLAN.world.island,strip=isle.airstrip,trail=new Set();
+ for(const p of (AF.island&&AF.island.trail)||[])for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++)trail.add((Math.floor(p[0]/4)+dx)*10000+Math.floor(p[2]/4)+dz);
+ for(let x=isle.cx-isle.rx*1.1;x<isle.cx+isle.rx*1.1;x+=7)for(let z=isle.cz-isle.rz*1.1;z<isle.cz+isle.rz*1.1;z+=7){
   yield;
-  if(hash(x+47,z)>0.18||Math.abs(z-isle.airstrip.z)<20||blocked(x,z)||(x-isle.resort.x)**2+(z-isle.resort.z)**2<(isle.resort.r+8)**2)continue;
-  const height=O.h(x,z);if(height>3&&height<12)F.add('palm',x,z,{scale:0.7+hash(x,z+38)*0.25,biome:'island'});
+  const px=x+(hash(x,z+5)-0.5)*5,pz=z+(hash(x+9,z)-0.5)*5,height=O.h(px,pz);
+  if(height<1.6||height>40||Math.abs(pz-strip.z)<strip.w/2+12&&px>strip.x0-24&&px<strip.x1+24||blocked(px,pz)||trail.has(Math.floor(px/4)*10000+Math.floor(pz/4))||(px-isle.resort.x)**2+(pz-isle.resort.z)**2<(isle.resort.r+6)**2)continue;
+  const rnd=hash(x+47,z),size=0.7+hash(x,z+38)*0.45;
+  if(height<5){if(rnd<0.3)F.add('palm',px,pz,{scale:size,biome:'island'});else if(rnd<0.4)F.add('shrub',px,pz,{scale:0.6+size*0.3,biome:'island'});}
+  else if(height<24){if(rnd<0.24)F.add('palm',px,pz,{scale:size+0.1,biome:'island'});else if(rnd<0.4)F.add('elm-green',px,pz,{scale:size,biome:'island'});else if(rnd<0.62)F.add(rnd<0.5?'shrub':'shrub-berry',px,pz,{scale:0.7+size*0.4,biome:'island'});}
+  else if(rnd<0.1)F.add('dry-bush',px,pz,{scale:0.6+size*0.3,biome:'island'});else if(rnd<0.16)F.add('rock',px,pz,{scale:0.5+size,biome:'island'});
  }
  F.stats.generated=true;
 }
@@ -19849,34 +20016,36 @@ function put(batch,entry){
 function upload(attr,count){attr.clearUpdateRanges();attr.addUpdateRange(0,Math.max(1,count)*attr.itemSize);attr.needsUpdate=true;}
 function* select(){
  F.stats.phase='select';
- const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,view=AF.lodScale||1,near=Math.min(320,(AF.MOBILE||AF.GFX.tier==='low'?80:AF.GFX.lite?105:160)*view),mid=Math.min(near-30,(AF.MOBILE||AF.GFX.tier==='low'?28:AF.GFX.lite?45:65)*view),far=Math.min(1600,(AF.MOBILE||AF.GFX.tier==='low'?480:AF.GFX.lite?720:880)*view);
+ const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,L=AF.LOD,near=L.floraNear,mid=L.floraMid,far=L.floraFar;
  uniforms.floraMid.value=mid;uniforms.floraNear.value=near;uniforms.floraFar.value=far;uniforms.floraShadow.value=AF.MOBILE?25:55;
- AF.camera.updateMatrixWorld();projection.multiplyMatrices(AF.camera.projectionMatrix,AF.camera.matrixWorldInverse);frustum.setFromProjectionMatrix(projection);
+ // a wider frustum than the camera's: a turn of the head finds the trees already selected (no pop while the next pass runs)
+ AF.camera.updateMatrixWorld();wide.copy(AF.camera,false);wide.fov=Math.min(120,AF.camera.fov*1.4);wide.aspect=AF.camera.aspect*1.1;wide.updateProjectionMatrix();projection.multiplyMatrices(wide.projectionMatrix,AF.camera.matrixWorldInverse);frustum.setFromProjectionMatrix(projection);
  for(const batch of batches)batch.write=0;
- const radius=Math.ceil((far+64)/64),bx=Math.floor(cx/64),bz=Math.floor(cz/64);
+ const radius=Math.ceil((far+104)/64),bx=Math.floor(cx/64),bz=Math.floor(cz/64);
  for(let ix=bx-radius;ix<=bx+radius;ix++)for(let iz=bz-radius;iz<=bz+radius;iz++){
   const bucket=buckets.get(ix*10000+iz);if(!bucket)continue;
     let processed=0;
-    for(const entry of bucket){if(++processed%16===0)yield;const dx=entry.x-cx,dy=entry.y-cy,dz=entry.z-cz,distance=dx*dx+dy*dy+dz*dz,range=entry.range?Math.min(entry.range,far):far;if(distance>range*range)continue;sphere.center.set(entry.x,entry.y+8*entry.sy,entry.z);sphere.radius=24+10*entry.sx;if(distance>6400&&!frustum.intersectsSphere(sphere))continue;const slot=slots[entry.shape];if(slot.single)put(slot.single,entry);else {if(slot.mid){if(distance<(mid+30)**2)put(slot.near,entry);if(distance>(mid-30)**2&&distance<(near+32)**2)put(slot.mid,entry);}else if(distance<(near+32)**2)put(slot.near,entry);if(distance>(near-32)**2)put(slot.far,entry);}}
+    for(const entry of bucket){if(++processed%16===0)yield;const dx=entry.x-cx,dy=entry.y-cy,dz=entry.z-cz,distance=dx*dx+dy*dy+dz*dz,range=(entry.range?Math.min(entry.range,far):far)+24;if(distance>range*range)continue;sphere.center.set(entry.x,entry.y+8*entry.sy,entry.z);sphere.radius=24+10*entry.sx;if(distance>6400&&!frustum.intersectsSphere(sphere))continue;const slot=slots[entry.shape];if(slot.single)put(slot.single,entry);else {if(slot.mid){if(distance<(mid+30)**2)put(slot.near,entry);if(distance>(mid-30)**2&&distance<(near+32)**2)put(slot.mid,entry);}else if(distance<(near+32)**2)put(slot.near,entry);if(distance>(near-32)**2)put(slot.far,entry);}}
   yield;
  }
  F.stats.near=F.stats.mid=F.stats.far=F.stats.draws=F.stats.triangles=0;
  for(const batch of batches){const mesh=batch.mesh;mesh.count=batch.write;mesh.layers.set(mesh.count?0:31);mesh.instanceMatrix.needsUpdate=true;upload(mesh.geometry.attributes.floraPalette,mesh.count);upload(mesh.geometry.attributes.floraLimit,mesh.count);F.stats[batch.lod==='single'?'far':batch.lod]+=mesh.count;if(mesh.count){F.stats.draws++;F.stats.triangles+=mesh.count*mesh.geometry.index.count/3;}}
  lastX=cx;lastY=cy;lastZ=cz;lastQ.copy(AF.camera.quaternion);selected=revision;
 }
+const stale=()=>selected!==revision||(AF.camera.position.x-lastX)**2+(AF.camera.position.y-lastY)**2+(AF.camera.position.z-lastZ)**2>576||Math.abs(lastQ.dot(AF.camera.quaternion))<0.993;
 const work=F.work=ms=>{
  if(!AF.ready)return false;const start=performance.now(),end=start+Math.min(ms,AF.MOBILE?1.5:2);
  while(performance.now()<end){
   const slice=performance.now();
   if(!F.stats.generated){if(!generator)generator=generate();if(generator.next().done){generator=null;ready=true;}}
-    else {if(!selection&&(selected!==revision||(AF.camera.position.x-lastX)**2+(AF.camera.position.y-lastY)**2+(AF.camera.position.z-lastZ)**2>576||Math.abs(lastQ.dot(AF.camera.quaternion))<0.995))selection=select();if(!selection)break;if(selection.next().done)selection=null;}
+    else {if(!selection&&stale())selection=select();if(!selection)break;if(selection.next().done)selection=null;}
   const elapsed=performance.now()-slice;if(elapsed>F.stats.maxSliceMs){F.stats.maxSliceMs=elapsed;F.stats.maxSlicePhase=F.stats.phase;}
  }
  const elapsed=performance.now()-start;F.stats.workMs+=elapsed;F.stats.maxWorkMs=Math.max(F.stats.maxWorkMs??0,elapsed);return !ready||!!selection||selected!==revision;
 };
 F.settle=()=>{if(AF.outlandSites)AF.outlandSites.settle();while(work(6));};
 F.refresh=()=>{revision++;};
-AF.onIdle('flora-build',work);
+AF.stream.register('flora-build',{order:40,gen:true,work,near:()=>AF.ready&&(!F.stats.generated||!!selection||stale())});
 AF.test('flora: biome populations and reusable palm/shrub API',()=>{
  F.settle();const counts={range:0,forest:0,farmland:0,valley:0};for(const entry of F.records)if(entry.kind!=='rock'&&counts[entry.biome]!==undefined)counts[entry.biome]++;
  return{ok:!!(counts.range>100&&counts.range<13000&&counts.forest>150&&counts.forest<6000&&counts.farmland>30&&counts.farmland<2000&&counts.valley>5&&F.kinds.palm&&F.kinds.shrub&&F.kinds.cactus&&F.records.some(entry=>entry.sx!==entry.sy)),info:JSON.stringify(counts)};
@@ -19898,11 +20067,11 @@ const ridePrompt={label:'Skip crossing',act:()=>F.skip()};
 const rideHud={mode:'drive',speed:0,car:'Solace Belle'};
 function feetY(x,z){let y=-Infinity;for(const dx of [-0.35,0,0.35])for(const dz of [-0.35,0,0.35]){const ground=AF.W.groundY(x+dx,z+dz);y=Math.max(y,AF.surfaceBelow(x+dx,z+dz,Math.max(3,ground+1),8));}return y;}
 const paint=hex=>AF.col(hex,{jitter:0.25,edge:0.15}),white=paint(0xf2efdf),mint=paint(0x75b8a5),coral=paint(0xd87966),teal=paint(0x326e75),wood=AF.col(0xb18b60,{pat:'plank',jitter:0.4,edge:0.2}),rock=AF.col(0x45464a,{pat:'stone',jitter:0.6,edge:0}),gold=paint(0xd6b96f),dark=paint(0x30383d),win=AF.col(0x536f77,{win:'hotel',emit:0xffd4a0,emitK:1.3,mode:'night',edge:0.1}),glow=AF.col(0xffe2ab,{emit:0xffce80,emitK:2.4,mode:'night'}),cache=new Map();
-function geometry(key,width,height,depth,build){if(cache.has(key))return cache.get(key);const model=new AF.Model(width,height,depth);build(model);const geo=AF.meshModel(model,{vs:0.5,flat:true}),coarse=new AF.Model(Math.ceil(width/2),Math.ceil(height/2),Math.ceil(depth/2));for(let x=0;x<coarse.w;x++)for(let y=0;y<coarse.h;y++)for(let z=0;z<coarse.d;z++){let value=0;for(let dx=0;dx<2&&!value;dx++)for(let dy=0;dy<2&&!value;dy++)for(let dz=0;dz<2&&!value;dz++)value=model.get(x*2+dx,y*2+dy,z*2+dz);if(value)coarse.set(x,y,z,value);}geo.userData.lod=AF.meshModel(coarse,{vs:1,flat:true});cache.set(key,geo);return geo;}
+function geometry(key,width,height,depth,build,vs=0.5){if(cache.has(key))return cache.get(key);const model=new AF.Model(width,height,depth);build(model);const geo=AF.meshModel(model,{vs,flat:true}),coarse=new AF.Model(Math.ceil(width/2),Math.ceil(height/2),Math.ceil(depth/2));for(let x=0;x<coarse.w;x++)for(let y=0;y<coarse.h;y++)for(let z=0;z<coarse.d;z++){let value=0;for(let dx=0;dx<2&&!value;dx++)for(let dy=0;dy<2&&!value;dy++)for(let dz=0;dz<2&&!value;dz++)value=model.get(x*2+dx,y*2+dy,z*2+dz);if(value)coarse.set(x,y,z,value);}geo.userData.lod=AF.meshModel(coarse,{vs:vs*2,flat:true});geo.userData.small=Math.max(width,height,depth)*vs<3;cache.set(key,geo);return geo;}
 const block=(key,width,height,depth,col)=>geometry(key,width,height,depth,model=>model.box(0,0,0,width,height,depth,col));
 function site(name,x,z,rx,rz,y){const entry={name,x,z,y:y??Math.round(O.h(x,z)*4)/4,rx,rz,bank:5,props:[]};S.sites.push(entry);O.pads.push(entry);AF.addLabel(name,x,z,'place');return entry;}
 function prop(site,geo,dx=0,dz=0,opts={}){const item=O.addProp(geo,site.x+dx,opts.y??site.y,site.z+dz,opts.rot??0,{tag:'island:'+site.name,collide:opts.collide!==false});site.props.push(item);return item;}
-function sign(site,text,dx,dz,y=site.y+3){const geo=AF.hbLib.sign(text,teal,white,0.09);prop(site,geo,dx,dz,{y,collide:false});}
+function sign(site,text,dx,dz,y=site.y+3,rot=0){const geo=AF.hbLib.sign(text,teal,white,0.09);prop(site,geo,dx,dz,{y,rot,collide:false});}
 function furniture(site,dx,dz){prop(site,AF.hbLib.benchGeo(),dx,dz);}
 function canopy(key,col){return geometry(key,12,7,10,model=>{for(const x of [0,11])for(const z of [0,9])model.box(x,0,z,x+1,6,z+1,wood);model.box(0,6,0,12,7,10,col);model.box(1,1,8,11,2,10,white);});}
 function openCanopy(site,geo,dx,dz){prop(site,geo,dx,dz,{collide:false});for(const offset of [-2.75,2.75])AF.addCollider(site.x+dx+offset-0.25,site.y,site.z+dz-2.5,site.x+dx+offset+0.25,site.y+3,site.z+dz-2,'island:'+site.name);}
@@ -19931,8 +20100,15 @@ AF.onBuild('island-sites',496.4,()=>{
  const pier=I.landing.pier,deck=block('island-jetty-deck',16,1,16,wood);for(let z=pier.z0;z<pier.z1;z+=8){O.addProp(deck,-20,1.75,z+4,0,{tag:'island:jetty'});for(const x of [-23.5,-16.5]){O.addProp(block('jetty-pile',1,9,1,wood),x,-2,z+1,0,{collide:false});O.addProp(block('jetty-rail',1,1,15,white),x,3,z+4,0,{tag:'island:jetty-rail'});}}
  furniture(village,17,-7);sign(village,'SOLACE BELLE',0,-60,3.5);
  prop(light,geometry('lighthouse',16,46,16,model=>{for(let y=0;y<36;y++)for(let x=2;x<14;x++)for(let z=2;z<14;z++)if(Math.hypot(x-8,z-8)<5.7-y*0.045)model.set(x,y,z,Math.floor(y/7)%2?coral:white);model.box(0,36,0,16,37,16,dark);model.box(5,37,5,11,43,11,win);model.box(7,38,7,9,42,9,glow);model.box(3,43,3,13,44,13,coral);model.box(5,44,5,11,46,11,coral);model.box(7,0,13,10,5,14,teal);}));prop(light,cottage(white),0,-11);AF.addLight({x:light.x,y:light.y+20,z:light.z,color:0xffe2ae,intensity:2,range:18,kind:'street'});
- prop(air,geometry('hangar',48,18,28,model=>{model.box(0,0,0,48,14,28,teal);model.box(2,0,26,46,12,28,dark);for(let layer=0;layer<5;layer++)model.box(layer*3,14+layer,0,48-layer*3,15+layer,28,white);}));sign(air,'SERENA AIR',0,-7.1,8);
- const runway=I.airstrip;for(let x=runway.x0+4;x<runway.x1-4;x+=8)O.addProp(block('runway',16,1,44,dark),x,runway.y-0.48,runway.z,0,{collide:false});for(let x=runway.x0+20;x<runway.x1-12;x+=20)O.addProp(block('runway-dash',12,1,1,white),x,runway.y+0.04,runway.z,0,{collide:false});for(const x of [runway.x0+10,runway.x1-10])for(const dz of [-7,-4,4,7])O.addProp(block('runway-threshold',10,1,2,white),x,runway.y+0.05,runway.z+dz,0,{collide:false});
+ prop(air,geometry('hangar',48,18,28,model=>{model.box(0,0,0,48,14,28,teal);model.box(2,0,26,46,12,28,dark);for(let layer=0;layer<5;layer++)model.box(layer*3,14+layer,0,48-layer*3,15+layer,28,white);}),0,0,{rot:2});sign(air,'SERENA AIR',0,-7.1,8,2);
+ // the strip is asphalt in the terrain colours (07-outland); markings are 6 cm paint props 3 cm above it (no coplanar faces)
+ const runway=I.airstrip,mark=(key,w,d,col,h=1)=>{if(cache.has(key))return cache.get(key);const m=new AF.Model(w,h,d);m.box(0,0,0,w,h,d,col);const geo=AF.meshModel(m,{vs:1/16,flat:true});geo.userData.lod=geo;geo.userData.small=h>1;cache.set(key,geo);return geo;};
+ const stripe=AF.col(0xf2f0e6,{jitter:0.08,edge:0,pat:'none'}),lamp=AF.col(0xfff0c8,{emit:0xffe2a0,emitK:3,mode:'night',jitter:0,edge:0}),lampG=AF.col(0x9cffb0,{emit:0x60ff90,emitK:3,mode:'night',jitter:0,edge:0}),ry=runway.y+0.03;
+ for(let x=runway.x0+40;x<runway.x1-40;x+=24)O.addProp(mark('rw-dash',192,10,stripe),x,ry,runway.z,0,{collide:false});
+ for(const x of [runway.x0+9,runway.x1-9])for(const dz of [-8.4,-6.6,-4.8,-3,3,4.8,6.6,8.4])O.addProp(mark('rw-key',160,14,stripe),x,ry,runway.z+dz,0,{collide:false});
+ for(const [x,text,rot] of [[runway.x0+24,'09',0],[runway.x1-24,'27',2]]){const t=AF.textModel(text,stripe,{pad:0}),k=12,m=new AF.Model(t.h*k,1,t.w*k);for(let tx=0;tx<t.w;tx++)for(let ty=0;ty<t.h;ty++)if(t.get(tx,ty,0))m.box(ty*k,0,tx*k,ty*k+k,1,tx*k+k,stripe);const geo=AF.meshModel(m,{vs:1/16,flat:true});geo.userData.lod=geo;O.addProp(geo,x,ry,runway.z,rot,{collide:false});}
+ for(let x=runway.x0+2;x<=runway.x1-2;x+=20)for(const dz of [-11.7,11.7]){const end=x<runway.x0+6||x>runway.x1-6;O.addProp(mark(end?'rw-end-light':'rw-light',4,4,end?lampG:lamp,4),x,runway.y,runway.z+dz,0,{collide:false});}
+ const apron=site('Serena Apron',-150,556,22,5,2);apron.face=[0,-1];
  prop(air,geometry('windsock',14,15,3,model=>{model.box(1,0,1,2,14,2,dark);for(let x=2;x<14;x++)model.box(x,11,0,x+1,14-Math.floor(x/5),3,x%4<2?coral:white);}),25,0);
  for(let index=0;index<=240;index++){const progress=index/240,angle=Math.PI-progress*Math.PI/2+Math.sin(progress*Math.PI*6)*0.18,radius=85-67*progress,x=I.cone.x+Math.cos(angle)*radius,z=I.cone.z+Math.sin(angle)*radius,y=Math.round(O.h(x,z)*4)/4;S.trail.push([x,y+0.25,z]);O.addProp(block('trail-step',6,1,6,gold),x,y+0.04,z,0,{tag:'island:trail'});if(index%9===0)O.addProp(block('lava-rock',3,2,3,rock),x+3,y,z+2,0,{collide:false});}
  furniture(look,-2,0);prop(look,block('lookout-deck',16,1,12,wood),0,0,{y:look.y-0.5});
@@ -19941,22 +20117,131 @@ AF.onBuild('island-sites',496.4,()=>{
  for(let index=0;index<24;index++){const x=-207+(index%8)*10,z=652+Math.floor(index/8)*13;if(Math.abs(x+170)<24&&z<674)continue;if(AF.flora.add('palm',x,z,{scale:0.8+AF.hash2(index,9)*0.3,planted:true,biome:'island'}))S.palms++;}
  AF.flora.scatter('shrub',{x0:-260,z0:584,x1:-231,z1:644,spacing:7,density:0.7,planted:true,biome:'island'});AF.flora.scatter('rock',{x0:108,z0:610,x1:146,z1:669,spacing:8,density:0.6,planted:true,biome:'island'});
 });
+// ---------------------------------------------------------------- Serena fun: a sunset beach party, bonfire, beach volleyball, umbrellas,
+// a swim raft with a slide, tiki torches, hammocks and the jet-ski hire. Static parts are merged outland props (built before the
+// resort's palm ring, which keeps clear of these pads, and before the outland tiles); people, jet skis and riders are added in island-life.
+const fun=S.fun={party:null,bonfire:null,court:null,hire:null,docks:[]};
+const glowC=(hex,k=1.6)=>AF.col(hex,{emit:hex,emitK:k,mode:'night',jitter:0.05,edge:0}),pink=glowC(0xff4fb8),cyan=glowC(0x3fe0ff),lime=glowC(0xb8ff4a),amber=glowC(0xffb03a,2.2);
+const fire=AF.col(0xff7a2a,{emit:0xff6a1a,emitK:3,mode:'always',jitter:0.5,edge:0}),ember=AF.col(0xffc04a,{emit:0xffa030,emitK:3.5,mode:'always',jitter:0.4,edge:0});
+const blue=paint(0x2f5f9e),yellow=paint(0xf2c84a),black=paint(0x1f2326),grey=paint(0x8f979c),net=AF.col(0xf4f1e6,{jitter:0.05,edge:0,solid:false});
+AF.onBuild('island-fun',496.35,()=>{
+ // the party: stage + DJ booth on the sand with the sea behind it, a lit dance floor, speaker stacks, string lights on four poles
+ const party=fun.party=site('Serena Sunset Party',-25,717,16,9,2.25);party.bank=6;
+ prop(party,geometry('party-stage',40,18,12,m=>{m.box(0,0,0,40,2,12,wood);m.box(0,2,10,40,3,12,dark);for(const x of [0,38])m.box(x,2,8,x+2,16,12,dark);m.box(0,16,8,40,18,12,dark);for(let x=2;x<38;x+=2)m.box(x,15,8,x+1,16,9,[pink,cyan,lime,amber][(x/2)%4]);m.box(2,3,11,38,15,12,teal);for(let y=4;y<14;y+=3)m.box(4,y,10,36,y+1,11,[pink,cyan][(y/3)%2|0]);m.box(14,2,3,26,5,6,white);m.box(14,5,3,26,6,6,dark);m.box(15,3,2,25,4,3,cyan);for(const x of [1,33])for(let y=2;y<12;y++)m.box(x,y,1,x+6,y+1,6,y%3===0?grey:black);}),0,4);
+ sign(party,'SERENA SUNSET PARTY',0,4.9,party.y+9.1,2);
+ const floor=geometry('party-floor',64,1,40,m=>{for(let x=0;x<64;x+=8)for(let z=0;z<40;z+=8)m.box(x,0,z,x+8,1,z+8,[pink,cyan,lime,amber][((x+z)/8)%4]);},1/4);prop(party,floor,0,-4,{y:party.y+0.02});
+ prop(party,geometry('party-lights',72,24,52,m=>{for(const x of [0,71])for(const z of [0,51])m.box(x,0,z,x+1,22,z+1,wood);for(let i=0;i<72;i++){const sag=Math.round(Math.sin(i/71*Math.PI)*3);for(const z of [0,51])m.set(i,21-sag,z,i%3?dark:[amber,pink,cyan][(i/3)%3|0]);}for(let i=0;i<52;i++){const sag=Math.round(Math.sin(i/51*Math.PI)*3);for(const x of [0,71])m.set(x,21-sag,i,i%3?dark:[lime,amber,pink][(i/3)%3|0]);}},1/4),0,-4,{collide:false});
+ prop(party,geometry('party-drinks',10,6,4,m=>{m.box(0,0,0,10,4,4,coral);m.box(0,4,0,10,5,4,wood);for(let x=1;x<10;x+=2)m.box(x,5,1,x+1,6,2,[lime,amber,pink][x%3]);}),13,-6);
+ AF.addLight({x:party.x,y:party.y+5,z:party.z+2,color:0xff6ad5,intensity:1.6,range:20,kind:'street'});AF.addLight({x:party.x,y:party.y+4,z:party.z-6,color:0x5fd8ff,intensity:1.3,range:18,kind:'street'});
+ // bonfire on the beach: a stone ring, logs, flames; log benches round it
+ const bonfire=fun.bonfire=site('Serena Bonfire',-85,719,6,6,1.75);
+ prop(bonfire,geometry('bonfire',12,10,12,m=>{for(let x=0;x<12;x++)for(let z=0;z<12;z++){const d=Math.hypot(x-5.5,z-5.5);if(d>4.2&&d<5.8)m.set(x,0,z,rock);}m.box(3,0,5,9,1,7,wood);m.box(5,1,3,7,2,9,wood);for(let y=1;y<9;y++){const r=Math.max(0.6,2.6-y*0.3);for(let x=0;x<12;x++)for(let z=0;z<12;z++)if(Math.hypot(x-5.5,z-5.5)<r&&AF.hash3(x,y,z)<0.8-y*0.05)m.set(x,y,z,y<3?ember:fire);}}),0,0,{collide:false});
+ const bench=geometry('log-bench',10,2,3,m=>{m.box(0,0,0,10,2,3,wood);});for(const [dx,dz,rot] of [[0,-4.5,0],[0,4.5,0],[-4.5,0,1],[4.5,0,1]])prop(bonfire,bench,dx,dz,{rot});
+ AF.addLight({x:bonfire.x,y:bonfire.y+1.5,z:bonfire.z,color:0xff8a3a,intensity:1.8,range:16,kind:'street'});
+ // beach volleyball: court lines (paint on the sand), net on two posts
+ const court=fun.court=site('Serena Volleyball',-122,709,10,6,1.5);
+ prop(court,geometry('volley-lines',64,1,32,m=>{m.box(0,0,0,64,1,1,white);m.box(0,0,31,64,1,32,white);m.box(0,0,0,1,1,32,white);m.box(63,0,0,64,1,32,white);m.box(31,0,0,33,1,32,white);},1/4),0,0,{y:court.y+0.03,collide:false});
+ prop(court,geometry('volley-net',2,20,36,m=>{for(const z of [0,35])m.box(0,0,z,2,20,z+1,grey);for(let y=11;y<19;y++)for(let z=1;z<35;z++)if((y+z)%2===0||y===18)m.set(1,y,z,net);},1/8),0,0,{collide:false});
+ // umbrellas, loungers and towels along the south beach; hammocks by the beach bar; tiki torches on the boardwalk
+ const lounger=geometry('lounger',3,3,5,m=>{m.box(0,1,0,3,2,5,white);m.box(0,2,0,3,3,2,mint);m.box(0,0,1,1,1,4,wood);m.box(2,0,1,3,1,4,wood);}),towel=geometry('towel',4,1,8,m=>{for(let z=0;z<8;z++)m.box(0,0,z,4,1,z+1,z%2?white:coral);},1/4),umbrellaB=geometry('umbrella-b',9,7,9,m=>{m.box(4,0,4,5,6,5,wood);for(let l=0;l<3;l++)m.box(l,4+l,l,9-l,5+l,9-l,l%2?white:blue);});
+ let placed=0;for(let x=-200;x<=-140;x+=10){const z=704+(x%20?2:0),y=Math.round(O.h(x,z)*4)/4;if(y<0.8||y>3)continue;O.addProp(umbrellaB,x,y,z,0,{tag:'island:beach',collide:false});O.addProp(placed%2?towel:lounger,x+2,y+(placed%2?0.03:0),z+1.5,1,{tag:'island:beach',collide:false});placed++;}
+ const hammock=geometry('hammock',26,10,4,m=>{for(const x of [0,25])m.box(x,0,1,x+1,10,3,wood);for(let x=1;x<25;x++){const y=Math.round(7-Math.sin(x/25*Math.PI)*3);m.box(x,y,0,x+1,y+1,4,x%3?coral:white);}},1/8);
+ for(const [x,z] of [[-238,676],[-232,684]])O.addProp(hammock,x,Math.round(O.h(x,z)*4)/4,z,0,{tag:'island:beach',collide:false});
+ const torch=geometry('tiki-torch',3,16,3,m=>{m.box(1,0,1,2,13,2,wood);m.box(0,12,0,3,13,3,dark);m.box(0,13,0,3,15,3,amber);m.set(1,15,1,amber);},1/8);
+ for(let x=-210;x<=-112;x+=14)for(const z of [674,684]){const y=Math.round(O.h(x,z)*4)/4;if(y>0.6)O.addProp(torch,x,y,z,0,{tag:'island:torch',collide:false});}
+ // the swim raft off the party beach: floats, a deck, a ladder and a slide
+ O.addProp(geometry('swim-raft',14,12,14,m=>{for(const x of [0,10])for(const z of [0,10])m.box(x,0,z,x+4,2,z+4,blue);m.box(0,2,0,14,3,14,wood);m.box(1,3,1,5,10,2,white);m.box(1,10,1,5,11,5,wood);for(let i=0;i<8;i++)m.box(1,10-i,5+i,5,11-i,6+i,yellow);for(let y=0;y<3;y++)m.box(9,y,13,12,y+1,14,grey);}),-30,-2.25,758,0,{tag:'island:raft'});
+ // jet-ski hire on the south beach: hut, sign, kayaks, a surfboard rack; four docks round the island (land point + outward direction)
+ const hire=fun.hire=site('Serena Jet Skis',8,721,6,4,1.75);
+ openCanopy(hire,canopy('jetski-hut',yellow),0,0);sign(hire,'JET SKI HIRE',0,-2.6,hire.y+3.8,2);
+ const kayak=geometry('kayak',3,2,12,m=>{m.box(0,0,1,3,1,11,coral);m.box(1,0,0,2,1,12,coral);m.box(1,1,4,2,2,7,dark);},1/4),board=geometry('surf-rack',12,9,3,m=>{m.box(0,0,1,12,1,2,wood);for(let x=1;x<12;x+=3)m.box(x,1,0,x+2,9,3,[coral,cyan,yellow,mint][(x/3)|0]);},1/4);
+ for(let i=0;i<3;i++)prop(hire,kayak,-5+i*1.2,3.5,{collide:false});prop(hire,board,5,2,{collide:false});
+ AF.addLight({x:hire.x,y:hire.y+3,z:hire.z,color:0xffd28a,intensity:1.1,range:12,kind:'street'});
+ for(const [x,z,dx,dz] of [[8,727,0,1],[-70,471,0,-1],[150,650,1,0],[-286,600,-1,0]]){
+  let ox=x,oz=z;for(let i=0;i<60&&O.h(ox,oz)>-1.9;i++){ox+=dx;oz+=dz;}
+  fun.docks.push({land:[x-dx*1.5,z-dz*1.5],y:Math.max(0.5,Math.round(O.h(x-dx*1.5,z-dz*1.5)*4)/4),x:ox+dx*2,z:oz+dz*2,yaw:Math.atan2(dx,dz)});
+ }
+});
 AF.onBuild('island-life',666,()=>{
  function path(name,points,count,mode='loop',speed=0.9){const dense=[];for(let index=0;index<points.length-(mode==='loop'?0:1);index++){const from=points[index],to=points[(index+1)%points.length],steps=Math.max(1,Math.ceil(Math.hypot(to[0]-from[0],to[1]-from[1])/1.5));for(let part=0;part<steps;part++){const x=AF.lerp(from[0],to[0],part/steps),z=AF.lerp(from[1],to[1],part/steps);dense.push([x,feetY(x,z)+0.1,z]);}}if(mode!=='loop'){const [x,z]=points.at(-1);dense.push([x,feetY(x,z)+0.1,z]);}const entry=AF.walkers.addPath(name,dense,{count,speed,mode,activeRadius:150});S.paths.push(entry);S.walkers+=count;}
- path('Serena promenade',[[-209,679],[-115,679]],22,'pingpong');path('Serena beach',[[-214,686],[-170,695],[-100,695]],18,'pingpong');path('Serena hotel guests',[[-194,651],[-146,651],[-146,675],[-194,675]],16);path('Landing villagers',[[-25,486],[-25,500],[-15,500],[-15,486]],12);path('Serena fishermen',[[-21,430],[-21,456]],6,'pingpong',0.5);
+ path('Serena promenade',[[-209,679],[-115,679]],14,'pingpong');path('Serena beach',[[-214,686],[-170,695],[-100,695]],12,'pingpong');path('Serena hotel guests',[[-194,651],[-146,651],[-146,675],[-194,675]],12);path('Landing villagers',[[-25,486],[-25,500],[-15,500],[-15,486]],12);path('Serena fishermen',[[-21,430],[-21,456]],6,'pingpong',0.5);
  const deckhand={skin:0xd7a078,hair:0x463629,top:{col:0x326e75},bottom:{col:0xf2efdf},yaw:0},concierge={skin:0xa77754,hair:0x252a29,top:{col:0xf2efdf},bottom:{col:0x326e75},yaw:Math.PI};
  AF.walkers.addPath('Serena deckhand',[[2,AF.surfaceBelow(2,250,4,8),250]],{count:1,speed:0,activeRadius:150,looks:[deckhand]});AF.walkers.addPath('Serena concierge',[[-145,3,644]],{count:1,speed:0,activeRadius:150,looks:[concierge]});S.walkers+=2;
  AF.npc.spawn({id:'serena-deckhand',name:'Ellis',role:'Solace Belle deckhand',x:2,y:AF.surfaceBelow(2,250,4,8),z:250,visual:false,lines:[['Solace Belle waits twenty-five seconds at each pier. The crossing takes forty seconds. Serena is just across the water.']]});
  AF.npc.spawn({id:'serena-concierge',name:'Alma',role:'Hotel Serena concierge',x:-145,y:3,z:644,visual:false,lines:[['Welcome to Hotel Serena. The pool terrace faces the beach; the trail winds up to the crater pond. The airstrip is north of the hotel.']]});
- const cub=AF.planes.list.find(plane=>plane.id==='cub');if(cub)O.addProp(cub.G.geo,-145,2,563,1,{tag:'island:parked-cub'});
+ // a flyable Cub on the Serena apron (crashes tow it back here); the planes' approach guidance knows this strip too
+ if(AF.planes.make){S.cub=AF.planes.make('cub',-140,555,Math.PI);AF.planes.runways.push(I.airstrip);}
  const original=AF.sea.lighthouses[0];if(original?.beam){const beam=original.beam.clone();beam.position.set(S.light.x,S.light.y+20,S.light.z);beam.traverse(mesh=>{if(mesh.isMesh)mesh.frustumCulled=true;});AF.scene.add(beam);S.beam=beam;}
+ // the people of the fun spots (shared walker batches): dancers + DJ, a bonfire circle, bar patrons, volleyball, swimmers, hire staff
+ const rng=AF.rng(6060),tops=[0xff6f61,0x2ec4b6,0xffbf47,0x9b5de5,0xf15bb5,0x00bbf9,0x43aa8b,0xfee440],bottoms=[0x1d3557,0xf1faee,0xe76f51,0x264653,0xffffff];
+ const look=(pose,yaw)=>{const l=AF.peopleKit.makeLook('traveler',rng()<0.5?'m':'f','adult',rng);l.top={...(l.top||{}),col:tops[(rng()*tops.length)|0]};l.bottom={...(l.bottom||{}),col:bottoms[(rng()*bottoms.length)|0]};l.pose=pose;l.yaw=yaw;return l;};
+ const one=(name,x,y,z,l)=>{AF.walkers.addPath(name,[[x,y,z]],{count:1,speed:0,activeRadius:170,looks:[l]});S.walkers++;};
+ const P=fun.party;for(let i=0;i<26;i++){const a=i*2.399,r=0.8+Math.sqrt(i/26)*3.9;one('Serena party '+i,P.x+Math.cos(a)*r*1.7,P.y+0.27,P.z-4+Math.sin(a)*r*1.05,look('dance',(rng()-0.5)*1.2));}
+ one('Serena DJ',P.x,P.y+1,P.z+4.6,look('dance',Math.PI));
+ const B=fun.bonfire;for(let i=0;i<8;i++){const a=i/8*Math.PI*2+0.3,x=B.x+Math.cos(a)*3.3,z=B.z+Math.sin(a)*3.3;one('Serena bonfire '+i,x,B.y,z,look('stand',Math.atan2(B.x-x,B.z-z)));}
+ const bar=S.sites.find(site=>site.name==='Palm Beach Bar');if(bar)for(let i=0;i<5;i++){const x=bar.x-4+i*2;one('Serena bar '+i,x,feetY(x,bar.z+3.8)+0.05,bar.z+3.8,look('stand',Math.PI));}
+ const C=fun.court;for(const [dx,lane] of [[-4.5,0],[-10.5,1],[4.5,2],[10.5,3]]){const x=C.x+dx*0.6,pts=[[x,C.y,C.z-3+lane*0.4],[x,C.y,C.z+3-lane*0.4]];AF.walkers.addPath('Serena volleyball '+lane,pts,{count:1,speed:1.5,mode:'pingpong',activeRadius:170,dwell:[{i:0,t:0.6+lane*0.3},{i:1,t:0.4+lane*0.2}],looks:[look('stand',0)]});S.walkers++;}
+ AF.walkers.addPath('Serena swimmers',[[-62,-2.45,748],[-36,-2.45,751],[-10,-2.45,747]],{count:8,speed:0.45,mode:'pingpong',activeRadius:170,looks:[look(),look(),look(),look()]});S.walkers+=8;
+ one('Serena hire staff',fun.hire.x+2,fun.hire.y,fun.hire.z-1,look('stand',Math.PI));
+ // jet skis: the rideable four (one per dock) and three riders racing the coast (AI hulls follow their walker seats)
+ JS.mesh=new THREE.InstancedMesh(skiGeo(),AF.mat.voxelInst,8);JS.mesh.name='island-jetskis';JS.mesh.count=0;JS.mesh.frustumCulled=false;JS.mesh.castShadow=true;JS.mesh.receiveShadow=true;JS.mesh.customDepthMaterial=AF.mat.depthInst;JS.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);JS.mesh.layers.set(31);AF.scene.add(JS.mesh);
+ fun.docks.forEach((d,i)=>{const k={name:'Serena jet ski',x:d.x,z:d.z,yaw:d.yaw,v:0,w:0,roll:0,pitch:0,ph:i*1.7,home:d};JS.skis.push(k);
+  AF.addInteract({x:d.land[0],y:d.y+1,z:d.land[1],r:5,label:'Ride a jet ski',prio:0.3,can:()=>AF.mode==='walk',act:()=>{if(Math.hypot(k.x-d.x,k.z-d.z)>4){k.x=d.x;k.z=d.z;k.yaw=d.yaw;}AF.setMode('jetski',{ski:k});}});});
+ const lap=[];for(let a=-50;a<=230;a+=3){const r=a*Math.PI/180;let s=1+Math.sin(r*5)*0.04,x=0,z=0;for(let i=0;i<30;i++){x=I.cx+Math.cos(r)*290*s;z=I.cz+Math.sin(r)*190*s;if(O.h(x,z)<-2.4)break;s+=0.03;}lap.push([x,-1.12,z]);}
+ JS.riders=AF.walkers.addPath('Serena jet-ski riders',lap,{count:3,speed:16*AF.vehicles.SPEED_K*0.7,mode:'pingpong',activeRadius:420,looks:[look('ride',0),look('ride',0),look('ride',0)]});S.walkers+=3;
 });
 AF.onTick('island-light',334,(dt,time)=>{if(!S.beam)return;S.beam.visible=AF.time.night>0.2&&(AF.camera.position.x-S.light.x)**2+(AF.camera.position.z-S.light.z)**2<90000;if(S.beam.visible)S.beam.rotation.y=time*0.55+1.3;});
+// ---------------------------------------------------------------- jet skis ('jetski' mode): W/S throttle, A/D steer, Shift burst, E hops off at a beach
+const JS=S.jetski={skis:[],cur:null,mesh:null,riders:null,cam:new THREE.Vector3(),want:new THREE.Vector3(),look:new THREE.Vector3(),camInit:false,seat:{x:0,y:0,z:0,yaw:0,roll:0,pitch:0,seatH:0.55,lean:0.35},bumpT:0};
+const SEA=AF.PLAN.harbour.waterY,wet=(x,z)=>AF.W.groundY(x,z)<SEA-0.45&&!AF.solidAt(x,SEA+0.35,z);
+function skiGeo(){const m=new AF.Model(9,9,26);for(let z=0;z<26;z++){const t=z>17?Math.min(4,Math.floor((z-17)/2)):0;m.box(t,0,z,9-t,z>19?3:2,z+1,white);}m.box(0,2,1,9,3,16,coral);m.box(2,3,4,7,4,13,dark);m.box(2,2,14,7,5,19,teal);m.box(0,5,15,9,6,16,dark);m.box(3,6,15,6,7,16,dark);return AF.meshModel(m,{vs:1/8,anchor:[0.5,0,0.5]});}
+const skiY=(k,t)=>SEA-0.1+Math.sin(t*2.1+k.ph)*0.05+Math.sin(t*3.3+k.ph*2)*0.02*Math.min(1,Math.abs(k.v)/4);
+const jm=new THREE.Matrix4(),jq=new THREE.Quaternion(),je=new THREE.Euler(0,0,0,'YXZ'),jp=new THREE.Vector3(),one1=new THREE.Vector3(1,1,1);
+function skiAt(index,x,y,z,yaw,pitch,roll){jp.set(x,y,z);je.set(-pitch,yaw,roll,'YXZ');jq.setFromEuler(je);jm.compose(jp,jq,one1);JS.mesh.setMatrixAt(index,jm);}
+AF.onTick('island-jetskis',307,(dt,t)=>{
+ const M=JS.mesh;if(!M)return;const cp=AF.camera.position;
+ if(!JS.cur&&((cp.x-I.cx)/520)**2+((cp.z-I.cz)/430)**2>1){if(M.count){M.count=0;M.layers.set(31);}return;}
+ let n=0;
+ for(const k of JS.skis){
+  if(JS.cur!==k&&Math.abs(k.v)>0.05){k.v*=Math.exp(-dt*0.9);const nx=k.x+Math.sin(k.yaw)*k.v*dt,nz=k.z+Math.cos(k.yaw)*k.v*dt;if(wet(nx,nz)){k.x=nx;k.z=nz;}else k.v=0;k.roll*=Math.exp(-dt*2);k.pitch*=Math.exp(-dt*2);}
+  skiAt(n++,k.x,skiY(k,t),k.z,k.yaw,k.pitch,k.roll);
+ }
+ const R=JS.riders;if(R&&R.active)for(const a of R.actors)skiAt(n++,a.x,SEA-0.1+Math.sin(t*2.6+a.ph)*0.06,a.z,a.yaw,0.08,Math.sin(t*0.9+a.ph)*0.12);
+ M.count=n;M.layers.set(n?0:31);M.instanceMatrix.needsUpdate=true;
+});
+AF.modes.jetski={
+ enter(o={}){const k=o.ski;if(!k){AF.setMode('walk');return;}JS.cur=k;JS.camInit=false;k.v=0;k.w=0;AF.player.setVisible(true);AF.emit('toast',AF.touch?'Push the stick to ride. Tap EXIT beside a beach to hop off.':'Jet ski! W throttle, A/D steer, Shift for a burst, E to hop off beside a beach.');AF.emit('hint',AF.touch?'':'W/S throttle \u00b7 A/D steer \u00b7 Shift burst \u00b7 E hop off at a beach');},
+ exit(){JS.cur=null;AF.PL.seat=null;AF.emit('hud',{speed:null});AF.emit('hint','');},
+ update(dt){
+  const k=JS.cur;if(!k)return;dt=Math.min(dt,0.05);
+  const I=AF.input,St=I.stick,modal=!!(AF.ui&&AF.ui.modalOpen&&AF.ui.modalOpen());
+  const thr=modal?0:AF.clamp((I.key('KeyW')||I.key('ArrowUp')?1:0)-(I.key('KeyS')||I.key('ArrowDown')?1:0)+(St?St.y:0),-1,1);
+  const steer=modal?0:AF.clamp((I.key('KeyD')||I.key('ArrowRight')?1:0)-(I.key('KeyA')||I.key('ArrowLeft')?1:0)+(St?St.x:0),-1,1);
+  const burst=!modal&&(I.key('ShiftLeft')||I.key('ShiftRight')),vmax=16*AF.vehicles.SPEED_K*(burst?1.3:1);
+  if(thr>0)k.v+=thr*(burst?9:6.5)*Math.max(0,1-Math.max(0,k.v)/vmax)*dt;else if(thr<0)k.v+=thr*(k.v>0?9:2.5)*dt;
+  k.v-=k.v*0.25*dt+(thr?0:Math.sign(k.v)*Math.min(Math.abs(k.v),0.8*dt));k.v=AF.clamp(k.v,-3,vmax);
+  k.w+=(steer-k.w)*Math.min(1,dt*5);k.yaw-=k.w*(0.5+Math.min(1,Math.abs(k.v)/7)*1.1)*dt*(k.v<-0.2?-1:1);
+  const hx=Math.sin(k.yaw),hz=Math.cos(k.yaw),s=k.v<0?-1:1,nx=k.x+hx*k.v*dt,nz=k.z+hz*k.v*dt,Bd=AF.PLAN.world.bounds;
+  JS.bumpT-=dt;
+  if(wet(nx+hx*1.8*s,nz+hz*1.8*s)&&wet(nx,nz)&&nx>Bd.x0+20&&nx<Bd.x1-20&&nz>Bd.z0+20&&nz<Bd.z1-20){k.x=nx;k.z=nz;}
+  else{if(Math.abs(k.v)>4&&JS.bumpT<=0){AF.emit('toast','Bump! Too shallow \u2014 hop off with E or back out.');JS.bumpT=3;}k.v*=-0.3;}
+  k.roll+=(k.w*Math.min(1,Math.abs(k.v)/8)*0.4-k.roll)*Math.min(1,dt*4);k.pitch+=(Math.min(0.14,Math.max(0,k.v)*0.009)-k.pitch)*Math.min(1,dt*3);
+  const y=skiY(k,AF.clock.t),seat=JS.seat;seat.x=k.x-hx*0.15;seat.y=y-0.05;seat.z=k.z-hz*0.15;seat.yaw=k.yaw;seat.roll=k.roll;seat.pitch=-k.pitch;AF.PL.seat=seat;
+  JS.want.set(k.x-hx*6.4,SEA+2.6,k.z-hz*6.4);if(!JS.camInit){JS.cam.copy(JS.want);JS.camInit=true;}else JS.cam.lerp(JS.want,1-Math.exp(-dt*4));
+  const c=AF.camera;c.position.copy(JS.cam);JS.look.set(k.x+hx*2,y+1,k.z+hz*2);c.up.set(0,1,0);c.lookAt(JS.look);AF.camTarget.copy(JS.look);AF.shadowFocus.set(k.x,0,k.z);AF.shadowRadius=50;
+  AF.emit('hud',{mode:'drive',speed:Math.abs(k.v)*2.237,car:k.name+(burst?' \u00b7 burst':'')+' \u00b7 E hop off at a beach'});
+  if(!modal&&(I.hit('KeyE')||I.hit('KeyF'))){
+   let best=null;
+   for(let a=0;a<16;a++)for(const r of [2,3.5,5,6.5,8,10]){const x=k.x+Math.sin(a/16*Math.PI*2)*r,z=k.z+Math.cos(a/16*Math.PI*2)*r,gy=AF.surfaceBelow(x,z,8,12);if(Number.isFinite(gy)&&gy>SEA+0.35&&!AF.boxBlocked(x,gy+0.3,z,0.3,1.5)&&(!best||r<best.r))best={x,y:gy,z,r};}
+   if(best){k.v=0;AF.setMode('walk',{x:best.x,y:best.y,z:best.z,yaw:k.yaw});}else AF.emit('toast','Ride up to a beach or a jetty to hop off.');
+  }
+ }
+};
 function dockY(dock){const point=dock?route.islandPier:route.cityPier;return AF.surfaceBelow(point[0],point[1],4,8);}
 function land(dock){const point=dock?route.islandPier:route.cityPier;AF.setMode('walk',{x:point[0],y:dockY(dock),z:point[1],yaw:dock?0:Math.PI,snap:true});AF.emit('toast',dock?'Welcome to Serena Isle':'Welcome back to Port Solace');}
 F.reset=dock=>{F.dock=F.from=dock;F.to=1-dock;F.elapsed=0;F.acc=0;F.waiting=-1;F.speed=0;const point=route.path[dock];F.x=point[0];F.z=point[1];if(AF.harbour.ferry){AF.harbour.ferry.st.dwell=25;place(0);}return F;};
 F.board=dock=>{if(AF.mode==='ferry-ride')return;F.waiting=dock;if(F.dock===dock){F.waiting=-1;AF.setMode('ferry-ride');}else AF.emit('toast','Solace Belle is on her way.');};
-F.skip=()=>{if(!F.rider)return;F.dock=F.from=F.to;F.to=1-F.dock;F.elapsed=0;AF.harbour.ferry.st.dwell=25;place(AF.clock.t);land(F.dock);};
+F.skip=()=>{if(!F.rider||AF.stream.traveling)return;F.dock=F.from=F.to;F.to=1-F.dock;F.elapsed=0;AF.harbour.ferry.st.dwell=25;place(AF.clock.t);const dock=F.dock;AF.stream.travel({label:dock?'Serena Isle':'Port Solace',go:()=>land(dock)});};
 function place(time){
  const mesh=AF.harbour.ferry.mesh,progress=F.dock<0?AF.smooth(0,1,F.elapsed/route.crossing):0,start=route.path[F.from],end=route.path[F.to];
  F.x=F.dock<0?AF.lerp(start[0],end[0],progress):route.path[F.dock][0];F.z=F.dock<0?AF.lerp(start[1],end[1],progress):route.path[F.dock][1];
@@ -19993,6 +20278,25 @@ AF.onTick('island-sea-lane',329,(dt,time)=>{const yachts=AF.land.yachts;if(!yach
 S.hotelWalk=[[-20,424],[-20,478],[-20,514],[-90,514],[-130,580],[-145,610],[-145,651]];
 AF.test('island: sites have solid colliders and beach palms',()=>{const names=['Hotel Serena',"Fisher's Landing",'Serena Point Light','Serena Airstrip','Crater Lookout'],missing=names.filter(name=>!S.sites.find(site=>site.name===name)?.props.some(prop=>prop.col));return{ok:!missing.length&&S.palms>=100&&S.walkers<=120,info:S.palms+' palms, '+S.walkers+' actors, missing '+missing.join(',')};});
 AF.test('island: pier to hotel walk is unobstructed',()=>{let blocked=0,samples=0;const hits=[];for(let index=1;index<S.hotelWalk.length;index++){const from=S.hotelWalk[index-1],to=S.hotelWalk[index],steps=Math.ceil(Math.hypot(to[0]-from[0],to[1]-from[1])/0.5);for(let part=0;part<=steps;part++){const x=AF.lerp(from[0],to[0],part/steps),z=AF.lerp(from[1],to[1],part/steps),y=feetY(x,z);samples++;if(AF.boxBlocked(x,y+0.05,z,0.3,1.7)){blocked++;if(hits.length<5)hits.push([x,y,z]);}}}return{ok:!blocked,info:blocked+'/'+samples+' blocked '+JSON.stringify(hits)};});
+AF.test('island: party, bonfire, volleyball and jet-ski hire are furnished and lit',()=>{
+ const spots=[fun.party,fun.bonfire,fun.court,fun.hire],bare=spots.filter(site=>!site||!site.props.length).length,lit=AF.lights.filter(light=>spots.some(site=>site&&Math.hypot(light.x-site.x,light.z-site.z)<12)).length;
+ const dancers=AF.walkers.paths.filter(path=>/^Serena party/.test(path.name)&&path.actors[0].look.pose==='dance').length;
+ return{ok:!bare&&lit>=4&&dancers>=20&&fun.docks.length===4&&fun.docks.every(d=>O.h(d.x,d.z)<-1.9&&O.h(d.land[0],d.land[1])>-1.25),info:'bare '+bare+', lights '+lit+', dancers '+dancers+', docks '+JSON.stringify(fun.docks.map(d=>[Math.round(d.x),Math.round(d.z),+O.h(d.land[0],d.land[1]).toFixed(1)]))};
+});
+AF.test('island: jet ski rides on open water, bumps off the shallows, hops off at a beach',()=>{
+ const k=JS.skis[0];if(!k)return{ok:false,info:'no jet skis'};
+ const I=AF.input,saved={mode:AF.mode,x:AF.player.x,y:AF.player.y,z:AF.player.z,yaw:AF.player.yaw},home={x:k.x,z:k.z,yaw:k.yaw},cam=AF.camera.position.clone(),modal=AF.ui&&AF.ui.modalOpen;
+ let wetAll=true,moved=0,stopped=false,landed=false;
+ try{
+  if(AF.ui)AF.ui.modalOpen=()=>false;
+  AF.setMode('jetski',{ski:k});k.yaw=0;
+  I.down.clear();I.down.add('KeyW');for(let f=0;f<150;f++){AF.modes.jetski.update(1/30);if(!wet(k.x,k.z))wetAll=false;}moved=Math.hypot(k.x-home.x,k.z-home.z);
+  k.yaw=Math.PI;for(let f=0;f<900&&!stopped;f++){const before=k.z;AF.modes.jetski.update(1/30);if(!wet(k.x,k.z))wetAll=false;if(f>30&&Math.abs(k.z-before)<0.01)stopped=true;}
+  I.down.clear();for(let f=0;f<60;f++)AF.modes.jetski.update(1/30);
+  I.pressed.add('KeyE');AF.modes.jetski.update(1/30);I.pressed.clear();landed=AF.mode==='walk'&&AF.player.y>SEA+0.3;
+ }finally{if(AF.ui)AF.ui.modalOpen=modal;I.down.clear();I.pressed.clear();k.x=home.x;k.z=home.z;k.yaw=home.yaw;k.v=0;AF.setMode(saved.mode==='walk'?'walk':'aerial',saved);AF.camera.position.copy(cam);}
+ return{ok:wetAll&&moved>20&&stopped&&landed,info:'moved '+moved.toFixed(0)+' m, stayed wet '+wetAll+', stopped at the shallows '+stopped+', hopped off '+landed};
+});
 AF.test('island: Cub runway is flat and clear for takeoff',()=>{const strip=I.airstrip;let lo=Infinity,hi=-Infinity,hits=0;for(let x=strip.x0+3;x<=strip.x1-3;x+=2)for(const dz of [-8,0,8]){const y=AF.W.groundY(x,strip.z+dz);lo=Math.min(lo,y);hi=Math.max(hi,y);if(AF.boxBlocked(x,y+0.1,strip.z+dz,1,2))hits++;}return{ok:strip.x1-strip.x0>=300&&hi-lo<=0.25&&!hits,info:(strip.x1-strip.x0)+' m, elevation '+lo+'..'+hi+', obstructions '+hits};});
 AF.test('island: island walkers stay on clear surfaces',()=>{const hits=[];for(const path of S.paths)for(const point of path.points)if(AF.boxBlocked(point[0],point[1]+0.1,point[2],0.18,1.4)&&hits.length<8)hits.push({path:path.name,point});return{ok:!hits.length&&S.walkers<=120,info:JSON.stringify(hits)};});
 AF.test('island: sea routes clear terrain and yield to ferry lane',()=>{let dry=0,samples=0;for(const ship of AF.sea.ships)for(let index=0;index<ship.route.N;index+=2){const x=ship.route.pts[index*2],z=ship.route.pts[index*2+1];samples++;if(O.h(x,z)>-1.25)dry++;}for(const yacht of AF.land.yachts)for(let x=-700;x<=700;x+=20){samples++;if(O.h(x,yacht.z+6)>-1.25)dry++;}return{ok:!dry&&AF.sea.ships.every(ship=>ship.name!=='island ferry'),info:dry+'/'+samples+' dry route samples; ornamental ferry removed, yachts hold outside lane during crossing'};});
@@ -20105,7 +20409,7 @@ function* build(){
  S.stats.ready=true;
 }
 const work=S.work=ms=>{if(!AF.ready||S.stats.ready)return false;const start=performance.now(),end=start+Math.min(ms,AF.MOBILE?2:3);if(!generator)generator=build();while(performance.now()<end&&!S.stats.ready){const slice=performance.now();generator.next();S.stats.maxStepMs=Math.max(S.stats.maxStepMs??0,performance.now()-slice);}const elapsed=performance.now()-start;S.stats.workMs+=elapsed;S.stats.maxSliceMs=Math.max(S.stats.maxSliceMs??0,elapsed);return !S.stats.ready;};
-S.settle=()=>{while(work(4));};AF.onIdle('outland-sites',work);
+S.settle=()=>{while(work(4));};AF.stream.register('outland-sites',{order:25,gen:true,work,near:()=>AF.ready&&!S.stats.ready});
 const matrix=new THREE.Matrix4(),pos=new THREE.Vector3(),rot=new THREE.Quaternion(),unit=new THREE.Vector3(1,1,1),axis=new THREE.Vector3(0,0,1);
 AF.onTick('outland-windmills',332,dt=>{if(!sails)return;const cp=AF.camera.position;let count=0,local=false;for(const mill of S.windmills)if((mill.x-cp.x)**2+(mill.y-cp.y)**2+(mill.z-cp.z)**2<=160000)local=true;if(!local){if(sails.count){sails.count=0;sails.layers.set(31);}return;}sailAngle+=dt*0.4;for(const mill of S.windmills){if((mill.x-cp.x)**2+(mill.y-cp.y)**2+(mill.z-cp.z)**2>160000)continue;pos.set(mill.x,mill.y,mill.z);rot.setFromAxisAngle(axis,sailAngle);matrix.compose(pos,rot,unit);sails.setMatrixAt(count++,matrix);}sails.count=count;sails.layers.set(count?0:31);sails.instanceMatrix.needsUpdate=true;});
 AF.onBuild('outland-walkers',665,()=>{
@@ -20126,7 +20430,7 @@ AF.test('outland: wheat fields carry shared instanced crops; hamlets furnished',
 AF.test('outland-sites: hikers and villagers leave island walker capacity',()=>{
  S.settle();const used=AF.walkers.paths.reduce((sum,path)=>sum+path.count,0),hits=[];let blocked=0,samples=0;
  for(const path of AF.walkers.paths){if(!/^(Lake Road hikers|Tamsin hikers|Westmoor villagers)$/.test(path.name))continue;for(let index=1;index<path.points.length;index++){const before=path.points[index-1],at=path.points[index],steps=Math.ceil(Math.hypot(at[0]-before[0],at[2]-before[2])/2);for(let part=0;part<=steps;part++){const fraction=part/steps,x=AF.lerp(before[0],at[0],fraction),z=AF.lerp(before[2],at[2],fraction),y=Math.max(AF.W.groundY(x,z),AF.lerp(before[1],at[1],fraction));samples++;if(AF.boxBlocked(x,y+0.4,z,0.18,1.2)){blocked++;if(hits.length<8){const boxes=AF.colliders.get(Math.floor(x/8)*100000+Math.floor(z/8))??[];hits.push({path:path.name,x:+x.toFixed(1),z:+z.toFixed(1),y:+y.toFixed(1),tags:boxes.filter(box=>x+0.18>box.x0&&x-0.18<box.x1&&z+0.18>box.z0&&z-0.18<box.z1&&y+1.6>box.y0&&y+0.4<box.y1).map(box=>box.tag??'untagged')});}}}}}
- return{ok:S.stats.walkers===22&&used<=212&&!blocked,info:used+'/'+AF.walkers.capacity+', outland '+S.stats.walkers+', path obstructions '+blocked+'/'+samples+' '+JSON.stringify(hits)};
+ return{ok:S.stats.walkers===22&&used<=AF.walkers.capacity-160&&!blocked,info:used+'/'+AF.walkers.capacity+', outland '+S.stats.walkers+', path obstructions '+blocked+'/'+samples+' '+JSON.stringify(hits)};
 });
 }catch(e){AF.partError('44-sites.js',e);}
 
@@ -20294,7 +20598,7 @@ const work = WS.work = (ms) => {
   WS.stats.workMs += performance.now() - start; return !WS.stats.ready;
 };
 WS.settle = () => { while (work(6)); };
-AF.onIdle('outland-wayside', work);
+AF.stream.register('outland-wayside', { order: 30, gen: true, work, near: () => AF.ready && !WS.stats.ready });
 AF.test('wayside: ring road stops are furnished and parked', () => {
   WS.settle();
   const kinds = new Set(O.wayside.map((poi) => poi.kind));
@@ -22891,8 +23195,9 @@ try {
 const O = AF.outland, W = AF.W, plan = AF.PLAN.world, fade = AF.world.fade;
 const group = new THREE.Group(); group.name = 'outland'; AF.scene.add(group);
 const roots = [], nodes = [], queue = [], empty = [];
-const R = O.renderer = { bootMs: 0, maxStepMs: 0, workMs: 0, maxNodes: 220, maxBytes: 48 * 1048576, bytes: 0, builds: 0, disposed: 0, active: 0 };
-let current = null, generator = null, stamp = 0, scanT = 0, lastX = 0, lastZ = 0, aheadX = 0, aheadZ = 0;
+const R = O.renderer = { bootMs: 0, maxStepMs: 0, workMs: 0, maxNodes: 320, maxBytes: 80 * 1048576, bytes: 0, builds: 0, disposed: 0, active: 0 };
+let current = null, generator = null, stamp = 0, scanT = 0;
+const ahead = AF.stream.ahead;
 const quadP = new Float64Array(12), quadUV = new Float64Array(8);
 const setP = (a, b, c, d, e, f, g, h, i, j, k, l) => { const q = quadP; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; q[8] = i; q[9] = j; q[10] = k; q[11] = l; };
 const setUV = (a, b, c, d, e, f, g, h) => { const q = quadUV; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; };
@@ -23083,15 +23388,28 @@ function frozen(entry) {
   if (entry.children) for (const child of entry.children) if (frozen(child)) return true;
   return false;
 }
-// split wanted? (hysteresis: a split tile merges back only 25 % farther out)
-function wants(entry, cp, split) {
+// split wanted? (hysteresis: a split tile merges back only 25 % farther out; reach > 1 = the prefetch radius)
+function wants(entry, cp, split, reach = 1) {
   if (entry.level <= 0) return false;
   const horizon = entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > 800;
   if (horizon) return false;
-  const k = (AF.MOBILE || AF.GFX.tier === 'low' ? 0.38 : AF.GFX.lite ? 0.48 : 0.7) * (AF.lodScale || 1);
-  const threshold = entry.level === 1 ? 40 : entry.size * k;
-  return Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, aheadX, cp.y, aheadZ) + 24) < threshold * (split ? 1.25 : 1);
+  const threshold = entry.level === 1 ? 40 * AF.LOD.view : entry.size * AF.LOD.outland;
+  return Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, ahead.x, cp.y, ahead.z) + 24) < threshold * (split ? 1.25 : 1) * reach;
 }
+// load ahead of display: every tile the view will split into within AF.LOD.prefetch x its split distance is built (all levels at
+// once, nearest first), so an approach only ever cross-fades to tiles that are already resident
+function prefetch(entry, cp) {
+  if (!wants(entry, cp, false, AF.LOD.prefetch)) return;
+  makeChildren(entry);
+  for (const child of entry.children) { child.used = stamp; enqueue(child); prefetch(child, cp); }
+}
+// the view is final: every shown tile is built and current, and none of them wants to split
+function settled(entry, cp) {
+  if (entry.fadeE || entry.busy) return false;
+  if (entry.split) { for (const child of entry.children) if (!settled(child, cp)) return false; return true; }
+  return entry.ready && !entry.dirty && !wants(entry, cp, false);
+}
+R.near = () => { if (!AF.ready || !roots.length) return false; const cp = AF.camera.position; for (const root of roots) if (!settled(root, cp)) return true; return false; };
 // what a tile about to split shows: each child, or straight away that child's own ready children when it wants to split too
 // (an approach never waits for one fade per quadtree level). Only for subtrees that are not on screen.
 function cover(entry, cp, output) {
@@ -23139,7 +23457,7 @@ function work(ms) {
       let best = -1, bestD = Infinity;
       const cp = AF.camera.position;
       for (let index = 0; index < queue.length; index++) {
-        const entry = queue[index], dist = Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, aheadX, cp.y, aheadZ) + 24);
+        const entry = queue[index], dist = Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, ahead.x, cp.y, ahead.z) + 24) + (entry.parent && !entry.parent.split ? 0 : -16);
         if (dist < bestD) { bestD = dist; best = index; }
       }
       if (best < 0) break;
@@ -23155,14 +23473,15 @@ function work(ms) {
   return !!generator || queue.length > 0;
 }
 function scan() {
-  const cp = AF.camera.position, reach = Math.max(1, (AF.lodScale || 1) ** 2); stamp++;
-  R.maxNodes = Math.round(220 * reach); R.maxBytes = Math.min(AF.MOBILE ? 64 : 128, 48 * reach) * 1048576;
+  const cp = AF.camera.position, reach = Math.max(1, AF.LOD.view ** 2); stamp++;
+  R.maxNodes = Math.round((AF.MOBILE ? 240 : 320) * reach); R.maxBytes = Math.min(AF.MOBILE ? 72 : 160, (AF.MOBILE ? 48 : 80) * reach) * 1048576;
   for (const entry of nodes) if (entry.dirty && entry.ready && !entry.fadeE && !entry.busy) {
     let parent = entry.parent, blocked = false;
     while (parent) { if (parent.fadeE || parent.busy) { blocked = true; break; } parent = parent.parent; }
     if (!blocked) { entry.ready = false; enqueue(entry); }
   }
   for (const root of roots) update(root, cp, false);
+  for (const root of roots) prefetch(root, cp);
   let kept = 0;
   for (const entry of nodes) if (entry.ready) kept++;
   while (kept > R.maxNodes || R.bytes > R.maxBytes) {
@@ -23173,18 +23492,14 @@ function scan() {
   }
   R.active = kept;
 }
-AF.onIdle('outland-build', (ms) => work(Math.min(ms, AF.MOBILE ? 4 : 6)));
+AF.stream.register('outland-build', { order: 20, work: (ms) => work(Math.min(ms, AF.MOBILE ? 4 : 6)), near: R.near });
 AF.onTick('outland-lod', 876, (dt) => {
   if (!AF.ready) return;
-  const cp = AF.camera.position, dx = cp.x - lastX, dz = cp.z - lastZ, length = Math.hypot(dx, dz);
-  const prediction = length < 40 && dt > 0 ? Math.min(1.5 / dt, 160 / Math.max(0.001, length)) : 0;
-  aheadX = cp.x + dx * prediction; aheadZ = cp.z + dz * prediction; lastX = cp.x; lastZ = cp.z;
-  scanT += dt; if (scanT >= 0.1) { scanT = 0; scan(); }
+  scanT += dt; if (scanT >= 0.1 || AF.stream.loading) { scanT = 0; scan(); }
   // a tile right around the camera is missing: the rendered frame helps, more so while the city streamer has nothing urgent
   work(R.urgent ? (AF.world.stream && AF.world.stream.urgent ? 1.5 : AF.MOBILE ? 2.5 : 3) : 1);
 });
 R.settle = () => {
-  aheadX = AF.camera.position.x; aheadZ = AF.camera.position.z;
   for (let pass = 0; pass < 7; pass++) {
     scan(); while (work(20)); AF.step(22, 1 / 30);
   }
@@ -23547,7 +23862,7 @@ const work = RD.work = (ms) => {
   RD.stats.ms += performance.now() - start; return !RD.stats.ready;
 };
 RD.settle = () => { while (work(8)); };
-AF.onIdle('outland-roads', work);
+AF.stream.register('outland-roads', { order: 22, gen: true, work, near: () => AF.ready && !RD.stats.ready });
 
 // ---------------------------------------------------------------- rural traffic: two-way loops, sparse away from the city
 function lanes(road, from, to, offset) {
@@ -24316,13 +24631,15 @@ const groundUnder = (car) => {
   GROUND.left = (GROUND_HEIGHTS[0] + GROUND_HEIGHTS[2]) / 2; GROUND.right = (GROUND_HEIGHTS[1] + GROUND_HEIGHTS[3]) / 2;
   return GROUND;
 };
+VV.SPEED_K = 0.82;
 function physics(car, dt, inp) {
   car.crunchCd = Math.max(0, (car.crunchCd || 0) - dt);
   carContacts(car, dt);
   const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), rx = -hz, rz = hx;   // right-hand (screen) vector = -local x
   let f = car.vx * hx + car.vz * hz, lat = car.vx * rx + car.vz * rz;
   const big = car.type.big ? 0.7 : 1;
-  const maxF = (car.type.vmax || 27) * (big < 1 ? 0.72 : 1), maxR = 7, pull = car.type.acc || 7.5;
+  // VV.SPEED_K: every vehicle runs a little slower than its rated top speed (more time for the streamers ahead of it)
+  const maxF = (car.type.vmax || 27) * (big < 1 ? 0.72 : 1) * VV.SPEED_K, maxR = 7, pull = (car.type.acc || 7.5) * (0.5 + VV.SPEED_K * 0.5);
   let acc = 0;
   if (inp.up) acc = f < 0 ? 14 : pull * big * (1 - Math.max(0, f) / maxF) * (inp.thr ?? 1);
   else if (inp.down) acc = f > 0.3 ? -15 : -4.5 * (1 + f / maxR);
@@ -25045,6 +25362,7 @@ function buildGraph() {
 function bindStop(lane, stop, kind, dwell, radius) { const dx = stop.x - lane.pts[0], dz = stop.z - lane.pts[1], s = dx * lane.dx + dz * lane.dz, lateral = dz * lane.dx - dx * lane.dz; if (s > 1 && s < lane.len - 6 && lateral > 0.5 && lateral < radius) lane.stops.push({ s, dwell, kind, target: stop }); }
 function pickNext(pc) { if (!pc.next.length) return null; if (rnd() < 0.55) for (const option of pc.next) if (option.turn === 'straight') return option; return pc.next[Math.floor(rnd() * pc.next.length)]; }
 function attach(car, pc, s, speed = 9) {
+  speed *= VV.SPEED_K;
   car.parked = false; car.active = true; car.ai = { piece: pc, s, v: 0, v0: speed, next: pickNext(pc), ahead: null, behind: null, wait: 0, dwell: 0, served: -1, cd: 0, acc: 0, node: null };
   VV.ai.push(car); pieceAt(pc, s, PP); car.x = PP.x; car.z = PP.z; car.yaw = Math.atan2(PP.dx, PP.dz);
 }
@@ -25250,6 +25568,10 @@ try {
         return { m, prop: [cx - 22, cy - 2, 66.5], prop2: [cx + 22, cy - 2, 66.5], blade: 6, pc: K }; } },
   };
   const geoCache = {};
+  // every plane flies ~15 % slower than its rated top speed (the streamers get more time ahead of it); take-off needs real speed:
+  // W lifts the nose from 1.25x stall, a full-throttle roll leaves the ground by itself at 1.45x stall
+  for (const T of Object.values(TYPES)) T.vmax = Math.round(T.vmax * 0.85 * 10) / 10;
+  const ROTATE_K = 1.25, LIFTOFF_K = 1.45, ROLL_DRAG = 0.7;
   PL.trafficGeometry = () => {
     const B = TYPES.airliner.build(), red = C(0xff3040, { emit: 0xff2030, emitK: 2, mode: 'always' }), green = C(0x30ff80, { emit: 0x20ff60, emitK: 2, mode: 'always' }), white = C(0xffffff, { emit: 0xffffff, emitK: 2, mode: 'always' });
     const gear = new AF.Model(B.m.w, B.m.h, B.m.d);
@@ -25280,6 +25602,9 @@ try {
     return pl;
   };
   const place = (pl) => { pl.root.position.set(pl.x, pl.y, pl.z); pl.root.rotation.set(-pl.pitch, pl.yaw, pl.roll, 'YXZ'); if (pl.interact) { pl.interact.x = pl.x; pl.interact.y = pl.y + 1; pl.interact.z = pl.z; } };
+  PL.make = make;
+  // approach guidance picks the nearest of these east-west strips { x0, x1, z } (the island adds its own)
+  PL.runways = [A.runway];
 
   // ---------------------------------------------------------------- the flight model
   // pitch = nose attitude, gam = flight-path angle (chases the nose: angle of attack settles quickly), v = airspeed along the path
@@ -25336,15 +25661,15 @@ try {
       pl.flaps = (pl.flaps || 0) + ((!pl.onGround && hAGL < 70 && pl.throttle < 0.45 ? 1 : 0) - (pl.flaps || 0)) * Math.min(1, dt * 1.5);
       const vs = T.stall * (1 - 0.22 * (pl.flaps || 0)), drag = T.thrust / (T.vmax * T.vmax) * (1 + 0.6 * (pl.flaps || 0));
       if (pl.onGround) {
-        const rotate = pitchIn > 0.2 && pl.v > vs, back = !rotate && rawP < -0.1;
-        pl.v += (pl.throttle * T.thrust * T.gk - drag * pl.v * Math.abs(pl.v)) * dt;
+        const rotate = pitchIn > 0.2 && pl.v > vs * ROTATE_K, back = !rotate && rawP < -0.1;
+        pl.v += (pl.throttle * T.thrust * T.gk - drag * ROLL_DRAG * pl.v * Math.abs(pl.v)) * dt;
         const fr = brake || (back && pl.v > 0) ? 8 : pl.throttle < 0.02 && pl.v > 2 ? 2.2 : 0.5;
         pl.v = Math.sign(pl.v) * Math.max(0, Math.abs(pl.v) - fr * dt);
         if (back && !brake && pl.throttle < 0.01 && pl.v <= 0) pl.v = Math.max(-3, pl.v - 2.5 * dt);
         pl.v = AF.clamp(pl.v, -3, T.vmax * 1.25);
         pl.yaw -= (rollIn + yawIn * 0.5) * 0.9 * AF.clamp(pl.v / 5, -1, 1) / (1 + Math.max(0, pl.v) / 20) * dt;
         pl.roll += -pl.roll * Math.min(1, dt * 6); pl.pitch += -pl.pitch * Math.min(1, dt * 5); pl.gam = pl.pr = pl.rr = 0;
-        if (rotate || (pl.throttle > 0.8 && pl.v > vs * 1.15)) { pl.onGround = false; pl.air = 0; pl.pitch = rotate ? 0.1 : 0.08; pl.pr = rotate ? T.pitch * 0.5 : 0; pl.gam = 0.05; AF.emit('toast', 'Wheels up!'); }
+        if (rotate || (pl.throttle > 0.8 && pl.v > vs * LIFTOFF_K)) { pl.onGround = false; pl.air = 0; pl.pitch = rotate ? 0.1 : 0.08; pl.pr = rotate ? T.pitch * 0.5 : 0; pl.gam = 0.05; AF.emit('toast', 'Wheels up!'); }
       } else {
         const lift = AF.clamp((pl.v - vs * 0.75) / (vs * 0.25), 0, 1), auth = 0.25 + 0.75 * AF.clamp((pl.v - vs) / vs, 0, 1);
         // pitch: rate scales with airspeed and eases in, softly limited toward +-PMAX; hands off slowly relaxes toward level
@@ -25406,8 +25731,11 @@ try {
       AF.camTarget.copy(look); AF.shadowFocus.set(pl.x, 0, pl.z); AF.shadowRadius = 90;
       // approach guidance to the Westgate runway (3-degree glideslope from the nearer threshold)
       let guide = '';
+      if (pl.onGround && pl.throttle > 0.05 && pl.v > 2) guide = pl.v < T.stall * ROTATE_K ? 'Take-off speed ' + Math.round(T.stall * ROTATE_K * 2.237) + ' mph' : 'Rotate! W to lift off';
       if (!pl.onGround && hAGL < 180) {
-        const RW = A.runway, thx = Math.abs(pl.x - RW.x0) < Math.abs(pl.x - RW.x1) ? RW.x0 + 30 : RW.x1 - 30, dx2 = thx - pl.x, dz2 = RW.z - pl.z, dist = Math.hypot(dx2, dz2);
+        let RW = PL.runways[0], rd = Infinity;
+        for (const rw of PL.runways) { const d = Math.hypot(Math.max(rw.x0 - pl.x, 0, pl.x - rw.x1), rw.z - pl.z); if (d < rd) { rd = d; RW = rw; } }
+        const thx = Math.abs(pl.x - RW.x0) < Math.abs(pl.x - RW.x1) ? RW.x0 + 30 : RW.x1 - 30, dx2 = thx - pl.x, dz2 = RW.z - pl.z, dist = Math.hypot(dx2, dz2);
         const toward = Math.cos(AF.angDiff(pl.yaw, Math.atan2(dx2, dz2))) > 0.85;
         if (toward && dist < 1800 && Math.abs(dz2) < Math.max(40, dist * 0.25)) {
           const want = dist * 0.0524, dh = hAGL - want;
@@ -25507,7 +25835,7 @@ try {
     const G = planeGeo('biplane'), root = new THREE.Group(), body = AF.modelMesh(G.geo), prop = AF.modelMesh(G.pgeo);
     body.castShadow = false; root.add(body); prop.position.copy(G.props[0]); root.add(prop); root.rotation.order = 'YXZ'; AF.scene.add(root);
     AF.onTick('plane-sightseer', 440, (dt, t) => {
-      const a = t * 0.028, R = 330, cx = -180, cz = -20;
+      const a = t * 0.024, R = 330, cx = -180, cz = -20;
       const x = cx + Math.cos(a) * R * 1.3, zz = cz + Math.sin(a) * R, y = 150 + Math.sin(a * 3) * 12;
       root.position.set(x, y, zz); root.rotation.set(0, Math.atan2(-Math.sin(a) * 1.3, Math.cos(a)), -0.35, 'YXZ'); prop.rotation.z = t * 40;
     });
@@ -25811,6 +26139,19 @@ try {
         const distance2=(actor.x-camera.x)**2+(actor.y-camera.y)**2+(actor.z-camera.z)**2;if(distance2>path.activeRadius**2)continue;
         actor.sin=Math.sin(actor.yaw);actor.cos=Math.cos(actor.yaw);
         if(distance2<3600||Math.floor(time*5)!==actor.frame){actor.frame=Math.floor(time*5);actor.stride=actor.moving?Math.sin(actor.ph)*0.42:0;actor.wave=Math.sin(time*3)*0.35;}
+        const pose=actor.look.pose;
+        // look.pose 'dance' (bounce, arms up, sway; full rate near, 5 Hz far) and 'ride' (seated astride: legs forward, hands on the bars)
+        if(pose==='dance'){
+          const beat=distance2<3600?time:actor.frame/5,b=beat*7.6+actor.ph,sway=actor.yaw+Math.sin(beat*1.3+actor.ph)*0.55,bob=Math.abs(Math.sin(b))*0.1,hip=bodyPlan.lh/16+bob,shoulder=hip+bodyPlan.th/16,arm=(bodyPlan.tw+bodyPlan.aw)/32,leg=(bodyPlan.lw+1)/32,up=-2.55+Math.sin(b)*0.45;
+          actor.sin=Math.sin(sway);actor.cos=Math.cos(sway);
+          put(WK.meshes[0],count,actor,0,hip,0,Math.sin(b*0.5)*0.08);put(WK.meshes[1],count*2,actor,arm,shoulder,0,up);put(WK.meshes[1],count*2+1,actor,-arm,shoulder,0,(actor.ph%2>1?up:-2.55-Math.sin(b)*0.45));
+          put(WK.meshes[2],count*2,actor,leg,hip,0,Math.sin(b)*0.28);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-Math.sin(b)*0.28);count++;continue;
+        }
+        if(pose==='ride'){
+          const hip=bodyPlan.lh/16*0.55,shoulder=hip+bodyPlan.th/16,arm=(bodyPlan.tw+bodyPlan.aw)/32,leg=(bodyPlan.lw+1)/32+0.04;
+          put(WK.meshes[0],count,actor,0,hip,0,0.25);put(WK.meshes[1],count*2,actor,arm,shoulder-0.05,0.12,-1.25);put(WK.meshes[1],count*2+1,actor,-arm,shoulder-0.05,0.12,-1.25);
+          put(WK.meshes[2],count*2,actor,leg,hip,0,-1.2);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-1.2);count++;continue;
+        }
         const stride=actor.stride||0,hip=bodyPlan.lh/16,shoulder=hip+bodyPlan.th/16,arm=(bodyPlan.tw+bodyPlan.aw)/32,leg=(bodyPlan.lw+1)/32,work=actor.look.pose==='marshal';
         put(WK.meshes[0],count,actor,0,hip,0);put(WK.meshes[1],count*2,actor,arm,shoulder,0,work?-1.5+(actor.wave||0):-stride*0.8);put(WK.meshes[1],count*2+1,actor,-arm,shoulder,0,work?-1.5-(actor.wave||0):actor.bag?-0.22:stride*0.8);
         put(WK.meshes[2],count*2,actor,leg,hip,0,stride);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-stride);
@@ -28351,10 +28692,10 @@ try {
     const F = (K.flocks || []).find((f) => !f.gull && f.members.length >= 4); if (!F) return { ok: false, info: 'no flock' };
     const P = AF.player, save = P ? { x: P.x, y: P.y, z: P.z } : null, mode = AF.mode;
     AF.mode = 'walk'; if (P) { P.x = F.members[0].hx + 1; P.z = F.members[0].hz; P.y = F.members[0].gy; }
-    for (let i = 0; i < 20; i++) animalsTick(1 / 30);
+    for (let i = 0; i < 20; i++) animalsTick(1 / 30, AF.clock.t);
     const flying = F.members.filter((a) => a.state === 'fly').length, up = F.members.filter((a) => a.root.position.y > a.gy + 0.8).length;
     if (P) { P.x = save.x; P.y = save.y; P.z = save.z; P.x = 9999; }
-    for (let i = 0; i < 400; i++) animalsTick(1 / 30);
+    for (let i = 0; i < 400; i++) animalsTick(1 / 30, AF.clock.t);
     if (P) { P.x = save.x; P.y = save.y; P.z = save.z; }
     AF.mode = mode;
     const back = F.members.filter((a) => a.state === 'ground').length;
@@ -30510,7 +30851,7 @@ try {
     const elapsed = performance.now() - start;
     WQ.worldMs += elapsed; WQ.worldMaxMs = Math.max(WQ.worldMaxMs, elapsed); return !!shoreJob;
   }
-  AF.onIdle('water-shore', shoreWork);
+  AF.stream.register('water-shore', { order: 60, gen: true, work: shoreWork, near: () => AF.ready && !!shoreJob });
   WQ.finish = async () => { while (shoreJob) { shoreWork(1); await AF.yield(); } };
   function makeShoreTex() {
     const t0 = performance.now();
@@ -31657,7 +31998,9 @@ try {
     const o = orbitFrom(pos, target);
     if (AF.mode !== 'aerial') AF.setMode('aerial', { keep: true, noSnap: true });
     const travel = Math.hypot(o.f.x - AE.f.x, o.f.z - AE.f.z);
-    AE.fly = { t: 0, dur: dur || AF.clamp(1.4 + travel / 180, 1.6, 3.6), f0: AE.f.clone(), d0: AE.d, y0: AE.y, p0: AE.p, o, bump: Math.max(0, travel * 0.55 - Math.max(AE.d, o.d) * 0.3) };
+    // long hops take a little longer: the streamers load the destination (AF.stream.focus) while the camera is on its way
+    AE.fly = { t: 0, dur: dur || AF.clamp(1.4 + travel / 150, 1.6, 5), f0: AE.f.clone(), d0: AE.d, y0: AE.y, p0: AE.p, o, bump: Math.max(0, travel * 0.55 - Math.max(AE.d, o.d) * 0.3) };
+    AF.stream.focus = { x: o.f.x, z: o.f.z };
     markInput();
   };
   PL.lookView = { pos: [150, 128, -300], target: [10, 8, -10] };
@@ -31683,7 +32026,7 @@ try {
       AF.interactTarget = null;
       applyAerialCamera();
     },
-    exit() { AE.fly = null; },
+    exit() { AE.fly = null; AF.stream.focus = null; },
     update(dt) {
       const I = AF.input, m = I.mouse, modal = inModal();
       const shift = I.key('ShiftLeft') || I.key('ShiftRight');
@@ -31745,6 +32088,7 @@ try {
         AE.y += AF.angDiff(AE.y, AE.yaw) * k;
         AE.p = AF.lerp(AE.p, AE.pitch, k);
       }
+      if (!AE.fly && AF.stream.focus) AF.stream.focus = null;
       applyAerialCamera();
       player.x = body.x; player.y = body.y; player.z = body.z;
       if (player.parts) AV.animate(player.parts, AN, dt, 0, true);
@@ -31794,7 +32138,7 @@ try {
 
   // ------------------------------------------------------------------ WALK (third person + first person)
   const WK = PL.walk = { camYaw: 0, camPitch: 0.22, boom: 3, fp: false, blend: 1, from: V3(), fromQ: new THREE.Quaternion(), lastMouse: 0, indoor: 0 };
-  const TMP = V3(), LOOK = V3();
+  const TMP = V3(), LOOK = V3(), QT = new THREE.Quaternion();
   const WALK = 5.8, RUN = 9.5;
   const vel = { x: 0, z: 0 };
   // nearest usable interaction; entries may supply dist(px,pz) (e.g. distance to a car's body, not its centre)
@@ -31816,9 +32160,32 @@ try {
     }
     return best;
   };
+  // boom ray (third person): 0.21 m strides with a five-probe cross, then a bisection back to ~3 cm (a third of the probes of the
+  // old 7 cm march); BR holds the frame's ray so nothing is allocated per frame
+  const BR = { px: 0, py: 0, pz: 0, dx: 0, dy: 0, dz: 0, rx: 0, rz: 0, max: 0 }, BOOM_LIFTS = [0.35, 0.7, 1.05], BOOM_MARGIN = 0.28;
+  const boomHit = (t, lift) => {
+    const x = BR.px + BR.dx * t, y = BR.py + lift + BR.dy * t, z = BR.pz + BR.dz * t, ox = BR.rx * 0.14, oz = BR.rz * 0.14;
+    return solid(x, y, z) || solid(x, y + 0.14, z) || solid(x, y - 0.14, z) || solid(x + ox, y, z + oz) || solid(x - ox, y, z - oz);
+  };
+  const boomMarch = (lift) => {
+    let prev = 0.1;
+    for (let t = 0.1; t <= BR.max + BOOM_MARGIN; t += 0.21) {
+      if (boomHit(t, lift)) {
+        let a = prev, b = t;
+        for (let i = 0; i < 3; i++) { const m = (a + b) / 2; if (boomHit(m, lift)) b = m; else a = m; }
+        return Math.max(0.12, a - BOOM_MARGIN);
+      }
+      prev = t;
+    }
+    return BR.max;
+  };
   const walkCamera = (dt) => {
     const c = cam();
-    const hx = body.x, hy = body.y + 1.58 * (player.look.height || 1), hz = body.z;
+    // pivot height eases over steps and kerbs (a 0.55 m step-up no longer jolts the view); teleports and jumps > 1.5 m snap
+    const eyeY = body.y + 1.58 * (player.look.height || 1);
+    if (!(Math.abs(eyeY - (WK.py ?? eyeY)) < 1.5) || WK.blend < 1) WK.py = eyeY;
+    else WK.py += (eyeY - WK.py) * (1 - Math.exp(-dt * (body.onGround ? 16 : 30)));
+    const hx = body.x, hy = WK.fp ? eyeY : WK.py, hz = body.z;
     if (WK.fp) {
       c.position.set(hx, hy + 0.04, hz);
       const p = -WK.camPitch, yaw = WK.camYaw + PI;
@@ -31828,33 +32195,29 @@ try {
     } else {
       const cp = Math.cos(WK.camPitch), dx = Math.sin(WK.camYaw) * cp, dy = Math.sin(WK.camPitch), dz = Math.cos(WK.camYaw) * cp;
       const rx = Math.cos(WK.camYaw), rz = -Math.sin(WK.camYaw);
-      let ceil = false;
-      for (let y = hy + 0.4; y < hy + 2.5; y += 0.25) if (solid(hx, y, hz)) { ceil = true; break; }
-      const inB = !!(AF.buildingAt && AF.buildingAt(hx, body.y + 1, hz));
-      WK.indoor = AF.lerp(WK.indoor, (ceil || inB) ? 1 : 0, 1 - Math.exp(-dt * 4));
+      // indoors (a ceiling overhead or inside a building box): re-tested only after moving 0.4 m (the building scan is linear)
+      if (!(Math.abs(hx - WK.inX) + Math.abs(hz - WK.inZ) + Math.abs(body.y - WK.inY) < 0.4)) {
+        WK.inX = hx; WK.inZ = hz; WK.inY = body.y; WK.inside = false;
+        for (let y = hy + 0.4; y < hy + 2.5; y += 0.3) if (solid(hx, y, hz)) { WK.inside = true; break; }
+        if (!WK.inside) WK.inside = !!(AF.buildingAt && AF.buildingAt(hx, body.y + 1, hz));
+      }
+      WK.indoor = AF.lerp(WK.indoor, WK.inside ? 1 : 0, 1 - Math.exp(-dt * 4));
       const maxBoom = AF.lerp(5.4 * (WK.zoom || 1), 2.8 * Math.min(1.2, WK.zoom || 1), WK.indoor);
       let shoulder = AF.lerp(0.62, 0.34, WK.indoor);
-      for (let s = 0.05; s <= shoulder; s += 0.05) if (solid(hx + rx * (s + 0.12), hy, hz + rz * (s + 0.12))) { shoulder = Math.max(0, s - 0.15); break; }
+      for (let s = 0.1; s <= shoulder; s += 0.1) if (solid(hx + rx * (s + 0.12), hy, hz + rz * (s + 0.12))) { shoulder = Math.max(0, s - 0.2); break; }
       const px = hx + rx * shoulder, py = hy, pz = hz + rz * shoulder;
-      const MARGIN = 0.28;
-      const march = (lift) => {
-        for (let t = 0.1; t <= maxBoom + MARGIN; t += 0.07) {
-          const x = px + dx * t, y = py + lift + dy * t, z = pz + dz * t;
-          if (solid(x, y, z) || solid(x, y + 0.14, z) || solid(x, y - 0.14, z) || solid(x + rx * 0.14, y, z + rz * 0.14) || solid(x - rx * 0.14, y, z - rz * 0.14)) return Math.max(0.12, t - MARGIN);
-        }
-        return maxBoom;
-      };
-      let want = march(0), wantLift = 0;
+      BR.px = px; BR.py = py; BR.pz = pz; BR.dx = dx; BR.dy = dy; BR.dz = dz; BR.rx = rx; BR.rz = rz; BR.max = maxBoom;
+      let want = boomMarch(0), wantLift = 0;
       if (want < maxBoom * 0.8) {
         const need = Math.min(maxBoom * 0.8, want + 1.2);
-        for (const L of [0.35, 0.7, 1.05]) {
+        for (const L of BOOM_LIFTS) {
           if (solid(hx, hy + L + 0.3, hz)) break;
-          const w = march(L);
+          const w = boomMarch(L);
           if (w >= need) { want = w; wantLift = L; break; }
         }
       }
       WK.lift = AF.lerp(WK.lift || 0, wantLift, 1 - Math.exp(-dt * (wantLift > (WK.lift || 0) ? 9 : 3)));
-      const hard = WK.lift > 0.02 ? march(WK.lift) : (wantLift ? march(0) : want);
+      const hard = WK.lift > 0.02 ? (Math.abs(WK.lift - wantLift) < 0.01 ? want : boomMarch(WK.lift)) : (wantLift ? boomMarch(0) : want);
       const tgt = Math.min(want, hard);
       WK.boom = AF.lerp(WK.boom, tgt, 1 - Math.exp(-dt * (tgt < WK.boom ? 10 : 2.5)));
       WK.boom = Math.min(WK.boom, hard + 0.15);
@@ -31866,11 +32229,15 @@ try {
         WK.blend = Math.min(1, WK.blend + dt / 1.5);
         const e = 1 - Math.pow(1 - WK.blend, 4);
         c.position.lerpVectors(WK.from, TMP, e);
-        c.lookAt(LOOK); const q = c.quaternion.clone(); c.quaternion.slerpQuaternions(WK.fromQ, q, e);
+        c.lookAt(LOOK); QT.copy(c.quaternion); c.quaternion.slerpQuaternions(WK.fromQ, QT, e);
       } else { c.position.copy(TMP); c.lookAt(LOOK); }
       PL.hideMesh = WK.boom < 0.7;
       if (player.mesh) player.mesh.visible = player.visible && !PL.hideMesh;
     }
+    // a running stride widens the view a touch (eased, outdoors only)
+    const fov = 50 + (WK.running && !WK.fp ? 4 * (1 - WK.indoor) : 0);
+    WK.fov = AF.lerp(WK.fov || 50, fov, 1 - Math.exp(-dt * 4));
+    if (Math.abs(c.fov - WK.fov) > 0.02) { c.fov = WK.fov; c.updateProjectionMatrix(); }
     AF.camTarget.set(hx, hy, hz);
     AF.shadowFocus.set(body.x, 0, body.z); AF.shadowRadius = 70;
   };
@@ -31889,7 +32256,7 @@ try {
       player.setVisible(true);
       AF.emit('hint', '');
     },
-    exit() { AF.interactTarget = null; PL.hideMesh = false; if (player.mesh) player.mesh.visible = player.visible; },
+    exit() { AF.interactTarget = null; PL.hideMesh = false; if (player.mesh) player.mesh.visible = player.visible; const c = cam(); WK.fov = 50; if (c.fov !== 50) { c.fov = 50; c.updateProjectionMatrix(); } },
     update(dt) {
       const I = AF.input, m = I.mouse, modal = inModal();
       const locked = !!document.pointerLockElement;
@@ -31923,6 +32290,7 @@ try {
       let wx = fx * iz + rx * ix, wz = fz * iz + rz * ix;
       const wl = Math.hypot(wx, wz);
       const sp = (run ? RUN : WALK) * (analog ? mag : 1);
+      WK.running = run && wl > 0;
       if (wl > 0) { wx = wx / wl * sp; wz = wz / wl * sp; }
       const acc = 1 - Math.exp(-dt * (body.onGround ? 18 : 3));
       vel.x = AF.lerp(vel.x, wx, acc); vel.z = AF.lerp(vel.z, wz, acc);
@@ -32620,7 +32988,7 @@ try {
       [IC.run, 'run', 'toggle', ['walk']], [IC.jump, 'Space', 'tap', ['walk'], 'big'],
       [IC.exit, 'KeyE', 'tap', ['drive']], [IC.brake, 'Space', 'hold', ['drive'], 'big'],
       [IC.down, 'thr-', 'hold', ['fly']], [IC.up, 'thr+', 'hold', ['fly'], 'big'], [IC.exit, 'KeyF', 'tap', ['fly']], [IC.brake, 'KeyB', 'hold', ['fly']],
-      [IC.walk, 'Tab', 'tap', ['aerial']], [IC.chute, 'Space', 'tap', ['skydive'], 'big'], [IC.exit, 'KeyE', 'tap', ['row', 'ride', 'funride'], 'big'],
+      [IC.walk, 'Tab', 'tap', ['aerial']], [IC.chute, 'Space', 'tap', ['skydive'], 'big'], [IC.exit, 'KeyE', 'tap', ['row', 'ride', 'funride', 'jetski'], 'big'],
     ];
     const rows = [document.createElement('div'), document.createElement('div')]; rows.forEach((r) => { r.className = 'tc-row'; pad.appendChild(r); });
     const btns = DEF.map(([label, key, kind, modes, cls], i) => {
@@ -32830,7 +33198,7 @@ try {
     const door = point.building && point.building.doors && point.building.doors[0];
     if (door) { yaw = door.yaw || 0; x = door.x - Math.sin(yaw) * 1.4; z = door.z - Math.cos(yaw) * 1.4; }
     const y = W.groundY(x, z); UI.toggleMap(false);
-    if (walk) AF.setMode('walk', { x, y, z, yaw, snap: true });
+    if (walk) AF.stream.travel({ label: point.name, go: () => AF.setMode('walk', { x, y, z, yaw, snap: true }) });
     else if (point.view) AF.flyTo(point.view.pos, point.view.target);
     else AF.flyTo([x + 70, y + 65, z + 90], [x, y + 2, z]);
   };
@@ -32976,7 +33344,7 @@ try {
 // Build order table (see CONTRACT.md):
 //  100 terrain heightmap · 150 water/roads painting · 200 rail bed · 300 buildings · 400 street furniture + nature
 //  500 MESH WORLD (core) · 600 dynamic actors (cars, trains, people) · 700 atmosphere/post · 800 player + UI · 900 final
-AF.onBuild('mesh-world', 500, async () => { await AF.meshWorld(async (f) => { AF.loader(0.55 + f * 0.3, 'raising the rooftops… ' + Math.round(f * 100) + '%'); await AF.yield(); }); });
+AF.onBuild('mesh-world', 500, async () => { await AF.meshWorld(async (f) => { AF.loader(0.5 + f * 0.25, 'raising the rooftops… ' + Math.round(f * 100) + '%'); await AF.yield(); }); });
 AF.loader = (f, msg) => {
   const fill = document.getElementById('ldfill'), m = document.getElementById('ldmsg');
   if (fill) fill.style.width = Math.round(f * 100) + '%';
@@ -32988,7 +33356,7 @@ AF.loader = (f, msg) => {
   AF.stageTimes = {};
   for (let i = 0; i < stages.length; i++) {
     const s = stages[i];
-    if (s.order !== 500) AF.loader(s.order < 500 ? 0.05 + 0.5 * i / stages.length : 0.85 + 0.15 * i / stages.length, s.name.replace(/-/g, ' ') + '…');
+    if (s.order !== 500) AF.loader(s.order < 500 ? 0.05 + 0.45 * i / stages.length : 0.75 + 0.1 * i / stages.length, s.name.replace(/-/g, ' ') + '…');
     await AF.yield();
     const ts = performance.now();
     try { await s.fn(); }
@@ -33004,7 +33372,10 @@ AF.loader = (f, msg) => {
   }
   AF.ready = true;
   AF.emit('ready');
-  const ld = document.getElementById('loader'); if (ld) { ld.classList.add('done'); setTimeout(() => ld.remove(), 1500); }
+  // every generator finishes and the opening view streams in + compiles behind the loader (01-stream): longer load, no pop-in
+  if (!AF.TEST) { try { await AF.stream.preload((f, msg) => AF.loader(0.85 + 0.15 * f, msg)); } catch (e) { console.error('[af] preload threw:', e); AF.errors.push({ part: 'preload', msg: String(e && e.stack || e) }); } }
+  AF.preloaded = true; AF.emit('preloaded');
+  const ld = document.getElementById('loader'); if (ld) ld.classList.add('done');
   if (AF.TEST) {
     AF.step(3);
     const res = []; let pass = 0;

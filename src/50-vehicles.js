@@ -719,13 +719,15 @@ const groundUnder = (car) => {
   GROUND.left = (GROUND_HEIGHTS[0] + GROUND_HEIGHTS[2]) / 2; GROUND.right = (GROUND_HEIGHTS[1] + GROUND_HEIGHTS[3]) / 2;
   return GROUND;
 };
+VV.SPEED_K = 0.82;
 function physics(car, dt, inp) {
   car.crunchCd = Math.max(0, (car.crunchCd || 0) - dt);
   carContacts(car, dt);
   const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), rx = -hz, rz = hx;   // right-hand (screen) vector = -local x
   let f = car.vx * hx + car.vz * hz, lat = car.vx * rx + car.vz * rz;
   const big = car.type.big ? 0.7 : 1;
-  const maxF = (car.type.vmax || 27) * (big < 1 ? 0.72 : 1), maxR = 7, pull = car.type.acc || 7.5;
+  // VV.SPEED_K: every vehicle runs a little slower than its rated top speed (more time for the streamers ahead of it)
+  const maxF = (car.type.vmax || 27) * (big < 1 ? 0.72 : 1) * VV.SPEED_K, maxR = 7, pull = (car.type.acc || 7.5) * (0.5 + VV.SPEED_K * 0.5);
   let acc = 0;
   if (inp.up) acc = f < 0 ? 14 : pull * big * (1 - Math.max(0, f) / maxF) * (inp.thr ?? 1);
   else if (inp.down) acc = f > 0.3 ? -15 : -4.5 * (1 + f / maxR);

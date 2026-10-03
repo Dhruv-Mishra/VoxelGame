@@ -162,7 +162,7 @@ const work = WS.work = (ms) => {
   WS.stats.workMs += performance.now() - start; return !WS.stats.ready;
 };
 WS.settle = () => { while (work(6)); };
-AF.onIdle('outland-wayside', work);
+AF.stream.register('outland-wayside', { order: 30, gen: true, work, near: () => AF.ready && !WS.stats.ready });
 AF.test('wayside: ring road stops are furnished and parked', () => {
   WS.settle();
   const kinds = new Set(O.wayside.map((poi) => poi.kind));

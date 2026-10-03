@@ -2,7 +2,7 @@ try {
 const O=AF.outland,W=AF.W,hash=AF.hash2;
 const F=AF.flora={kinds:{},records:[],meshes:[],stats:{total:0,biomes:{},near:0,far:0,draws:0,triangles:0,workMs:0,maxSliceMs:0,generated:false}};
 const buckets=new Map(),batches=[],slots=[],matrix=new THREE.Matrix4(),rotation=new THREE.Quaternion(),position=new THREE.Vector3(),scale=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
-const frustum=new THREE.Frustum(),projection=new THREE.Matrix4(),sphere=new THREE.Sphere();
+const frustum=new THREE.Frustum(),projection=new THREE.Matrix4(),sphere=new THREE.Sphere(),wide=new THREE.PerspectiveCamera();
 const group=new THREE.Group();group.name='flora';AF.scene.add(group);
 const uniforms={floraEye:{value:AF.camera.position},floraMid:{value:50},floraNear:{value:160},floraFar:{value:800},floraShadow:{value:55}};
 let generator=null,selection=null,lastX=Infinity,lastY=Infinity,lastZ=Infinity,lastQ=new THREE.Quaternion(),revision=0,selected=-1,ready=false;
@@ -123,11 +123,18 @@ function* generate(){
   else if((biome==='range'&&(height>48||slope>0.25)||biome==='forest'||biome==='valley')&&rnd>0.925)F.add('rock',px,pz,{scale:0.45+hash(x,z+98)*1.3,biome});
  }yield;}
  F.stats.phase='island';
- const isle=AF.PLAN.world.island;
- for(let x=isle.cx-isle.rx;x<isle.cx+isle.rx;x+=14)for(let z=isle.cz-isle.rz;z<isle.cz+isle.rz;z+=14){
+ // Serena Isle: palm groves on the lowland and beaches, a jungle of palms, broadleaves and shrubs up the cone's flanks, scrub and rocks
+ // on the basalt; never on the strip, the resort lawn, the pads or the crater trail
+ const isle=AF.PLAN.world.island,strip=isle.airstrip,trail=new Set();
+ for(const p of (AF.island&&AF.island.trail)||[])for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++)trail.add((Math.floor(p[0]/4)+dx)*10000+Math.floor(p[2]/4)+dz);
+ for(let x=isle.cx-isle.rx*1.1;x<isle.cx+isle.rx*1.1;x+=7)for(let z=isle.cz-isle.rz*1.1;z<isle.cz+isle.rz*1.1;z+=7){
   yield;
-  if(hash(x+47,z)>0.18||Math.abs(z-isle.airstrip.z)<20||blocked(x,z)||(x-isle.resort.x)**2+(z-isle.resort.z)**2<(isle.resort.r+8)**2)continue;
-  const height=O.h(x,z);if(height>3&&height<12)F.add('palm',x,z,{scale:0.7+hash(x,z+38)*0.25,biome:'island'});
+  const px=x+(hash(x,z+5)-0.5)*5,pz=z+(hash(x+9,z)-0.5)*5,height=O.h(px,pz);
+  if(height<1.6||height>40||Math.abs(pz-strip.z)<strip.w/2+12&&px>strip.x0-24&&px<strip.x1+24||blocked(px,pz)||trail.has(Math.floor(px/4)*10000+Math.floor(pz/4))||(px-isle.resort.x)**2+(pz-isle.resort.z)**2<(isle.resort.r+6)**2)continue;
+  const rnd=hash(x+47,z),size=0.7+hash(x,z+38)*0.45;
+  if(height<5){if(rnd<0.3)F.add('palm',px,pz,{scale:size,biome:'island'});else if(rnd<0.4)F.add('shrub',px,pz,{scale:0.6+size*0.3,biome:'island'});}
+  else if(height<24){if(rnd<0.24)F.add('palm',px,pz,{scale:size+0.1,biome:'island'});else if(rnd<0.4)F.add('elm-green',px,pz,{scale:size,biome:'island'});else if(rnd<0.62)F.add(rnd<0.5?'shrub':'shrub-berry',px,pz,{scale:0.7+size*0.4,biome:'island'});}
+  else if(rnd<0.1)F.add('dry-bush',px,pz,{scale:0.6+size*0.3,biome:'island'});else if(rnd<0.16)F.add('rock',px,pz,{scale:0.5+size,biome:'island'});
  }
  F.stats.generated=true;
 }
@@ -138,34 +145,36 @@ function put(batch,entry){
 function upload(attr,count){attr.clearUpdateRanges();attr.addUpdateRange(0,Math.max(1,count)*attr.itemSize);attr.needsUpdate=true;}
 function* select(){
  F.stats.phase='select';
- const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,view=AF.lodScale||1,near=Math.min(320,(AF.MOBILE||AF.GFX.tier==='low'?80:AF.GFX.lite?105:160)*view),mid=Math.min(near-30,(AF.MOBILE||AF.GFX.tier==='low'?28:AF.GFX.lite?45:65)*view),far=Math.min(1600,(AF.MOBILE||AF.GFX.tier==='low'?480:AF.GFX.lite?720:880)*view);
+ const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,L=AF.LOD,near=L.floraNear,mid=L.floraMid,far=L.floraFar;
  uniforms.floraMid.value=mid;uniforms.floraNear.value=near;uniforms.floraFar.value=far;uniforms.floraShadow.value=AF.MOBILE?25:55;
- AF.camera.updateMatrixWorld();projection.multiplyMatrices(AF.camera.projectionMatrix,AF.camera.matrixWorldInverse);frustum.setFromProjectionMatrix(projection);
+ // a wider frustum than the camera's: a turn of the head finds the trees already selected (no pop while the next pass runs)
+ AF.camera.updateMatrixWorld();wide.copy(AF.camera,false);wide.fov=Math.min(120,AF.camera.fov*1.4);wide.aspect=AF.camera.aspect*1.1;wide.updateProjectionMatrix();projection.multiplyMatrices(wide.projectionMatrix,AF.camera.matrixWorldInverse);frustum.setFromProjectionMatrix(projection);
  for(const batch of batches)batch.write=0;
- const radius=Math.ceil((far+64)/64),bx=Math.floor(cx/64),bz=Math.floor(cz/64);
+ const radius=Math.ceil((far+104)/64),bx=Math.floor(cx/64),bz=Math.floor(cz/64);
  for(let ix=bx-radius;ix<=bx+radius;ix++)for(let iz=bz-radius;iz<=bz+radius;iz++){
   const bucket=buckets.get(ix*10000+iz);if(!bucket)continue;
     let processed=0;
-    for(const entry of bucket){if(++processed%16===0)yield;const dx=entry.x-cx,dy=entry.y-cy,dz=entry.z-cz,distance=dx*dx+dy*dy+dz*dz,range=entry.range?Math.min(entry.range,far):far;if(distance>range*range)continue;sphere.center.set(entry.x,entry.y+8*entry.sy,entry.z);sphere.radius=24+10*entry.sx;if(distance>6400&&!frustum.intersectsSphere(sphere))continue;const slot=slots[entry.shape];if(slot.single)put(slot.single,entry);else {if(slot.mid){if(distance<(mid+30)**2)put(slot.near,entry);if(distance>(mid-30)**2&&distance<(near+32)**2)put(slot.mid,entry);}else if(distance<(near+32)**2)put(slot.near,entry);if(distance>(near-32)**2)put(slot.far,entry);}}
+    for(const entry of bucket){if(++processed%16===0)yield;const dx=entry.x-cx,dy=entry.y-cy,dz=entry.z-cz,distance=dx*dx+dy*dy+dz*dz,range=(entry.range?Math.min(entry.range,far):far)+24;if(distance>range*range)continue;sphere.center.set(entry.x,entry.y+8*entry.sy,entry.z);sphere.radius=24+10*entry.sx;if(distance>6400&&!frustum.intersectsSphere(sphere))continue;const slot=slots[entry.shape];if(slot.single)put(slot.single,entry);else {if(slot.mid){if(distance<(mid+30)**2)put(slot.near,entry);if(distance>(mid-30)**2&&distance<(near+32)**2)put(slot.mid,entry);}else if(distance<(near+32)**2)put(slot.near,entry);if(distance>(near-32)**2)put(slot.far,entry);}}
   yield;
  }
  F.stats.near=F.stats.mid=F.stats.far=F.stats.draws=F.stats.triangles=0;
  for(const batch of batches){const mesh=batch.mesh;mesh.count=batch.write;mesh.layers.set(mesh.count?0:31);mesh.instanceMatrix.needsUpdate=true;upload(mesh.geometry.attributes.floraPalette,mesh.count);upload(mesh.geometry.attributes.floraLimit,mesh.count);F.stats[batch.lod==='single'?'far':batch.lod]+=mesh.count;if(mesh.count){F.stats.draws++;F.stats.triangles+=mesh.count*mesh.geometry.index.count/3;}}
  lastX=cx;lastY=cy;lastZ=cz;lastQ.copy(AF.camera.quaternion);selected=revision;
 }
+const stale=()=>selected!==revision||(AF.camera.position.x-lastX)**2+(AF.camera.position.y-lastY)**2+(AF.camera.position.z-lastZ)**2>576||Math.abs(lastQ.dot(AF.camera.quaternion))<0.993;
 const work=F.work=ms=>{
  if(!AF.ready)return false;const start=performance.now(),end=start+Math.min(ms,AF.MOBILE?1.5:2);
  while(performance.now()<end){
   const slice=performance.now();
   if(!F.stats.generated){if(!generator)generator=generate();if(generator.next().done){generator=null;ready=true;}}
-    else {if(!selection&&(selected!==revision||(AF.camera.position.x-lastX)**2+(AF.camera.position.y-lastY)**2+(AF.camera.position.z-lastZ)**2>576||Math.abs(lastQ.dot(AF.camera.quaternion))<0.995))selection=select();if(!selection)break;if(selection.next().done)selection=null;}
+    else {if(!selection&&stale())selection=select();if(!selection)break;if(selection.next().done)selection=null;}
   const elapsed=performance.now()-slice;if(elapsed>F.stats.maxSliceMs){F.stats.maxSliceMs=elapsed;F.stats.maxSlicePhase=F.stats.phase;}
  }
  const elapsed=performance.now()-start;F.stats.workMs+=elapsed;F.stats.maxWorkMs=Math.max(F.stats.maxWorkMs??0,elapsed);return !ready||!!selection||selected!==revision;
 };
 F.settle=()=>{if(AF.outlandSites)AF.outlandSites.settle();while(work(6));};
 F.refresh=()=>{revision++;};
-AF.onIdle('flora-build',work);
+AF.stream.register('flora-build',{order:40,gen:true,work,near:()=>AF.ready&&(!F.stats.generated||!!selection||stale())});
 AF.test('flora: biome populations and reusable palm/shrub API',()=>{
  F.settle();const counts={range:0,forest:0,farmland:0,valley:0};for(const entry of F.records)if(entry.kind!=='rock'&&counts[entry.biome]!==undefined)counts[entry.biome]++;
  return{ok:!!(counts.range>100&&counts.range<13000&&counts.forest>150&&counts.forest<6000&&counts.farmland>30&&counts.farmland<2000&&counts.valley>5&&F.kinds.palm&&F.kinds.shrub&&F.kinds.cactus&&F.records.some(entry=>entry.sx!==entry.sy)),info:JSON.stringify(counts)};

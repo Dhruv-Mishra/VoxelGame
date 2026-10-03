@@ -221,7 +221,7 @@ const work = RD.work = (ms) => {
   RD.stats.ms += performance.now() - start; return !RD.stats.ready;
 };
 RD.settle = () => { while (work(8)); };
-AF.onIdle('outland-roads', work);
+AF.stream.register('outland-roads', { order: 22, gen: true, work, near: () => AF.ready && !RD.stats.ready });
 
 // ---------------------------------------------------------------- rural traffic: two-way loops, sparse away from the city
 function lanes(road, from, to, offset) {

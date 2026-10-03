@@ -3,8 +3,9 @@ try {
 const O = AF.outland, W = AF.W, plan = AF.PLAN.world, fade = AF.world.fade;
 const group = new THREE.Group(); group.name = 'outland'; AF.scene.add(group);
 const roots = [], nodes = [], queue = [], empty = [];
-const R = O.renderer = { bootMs: 0, maxStepMs: 0, workMs: 0, maxNodes: 220, maxBytes: 48 * 1048576, bytes: 0, builds: 0, disposed: 0, active: 0 };
-let current = null, generator = null, stamp = 0, scanT = 0, lastX = 0, lastZ = 0, aheadX = 0, aheadZ = 0;
+const R = O.renderer = { bootMs: 0, maxStepMs: 0, workMs: 0, maxNodes: 320, maxBytes: 80 * 1048576, bytes: 0, builds: 0, disposed: 0, active: 0 };
+let current = null, generator = null, stamp = 0, scanT = 0;
+const ahead = AF.stream.ahead;
 const quadP = new Float64Array(12), quadUV = new Float64Array(8);
 const setP = (a, b, c, d, e, f, g, h, i, j, k, l) => { const q = quadP; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; q[8] = i; q[9] = j; q[10] = k; q[11] = l; };
 const setUV = (a, b, c, d, e, f, g, h) => { const q = quadUV; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; };
@@ -195,15 +196,28 @@ function frozen(entry) {
   if (entry.children) for (const child of entry.children) if (frozen(child)) return true;
   return false;
 }
-// split wanted? (hysteresis: a split tile merges back only 25 % farther out)
-function wants(entry, cp, split) {
+// split wanted? (hysteresis: a split tile merges back only 25 % farther out; reach > 1 = the prefetch radius)
+function wants(entry, cp, split, reach = 1) {
   if (entry.level <= 0) return false;
   const horizon = entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > 800;
   if (horizon) return false;
-  const k = (AF.MOBILE || AF.GFX.tier === 'low' ? 0.38 : AF.GFX.lite ? 0.48 : 0.7) * (AF.lodScale || 1);
-  const threshold = entry.level === 1 ? 40 : entry.size * k;
-  return Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, aheadX, cp.y, aheadZ) + 24) < threshold * (split ? 1.25 : 1);
+  const threshold = entry.level === 1 ? 40 * AF.LOD.view : entry.size * AF.LOD.outland;
+  return Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, ahead.x, cp.y, ahead.z) + 24) < threshold * (split ? 1.25 : 1) * reach;
 }
+// load ahead of display: every tile the view will split into within AF.LOD.prefetch x its split distance is built (all levels at
+// once, nearest first), so an approach only ever cross-fades to tiles that are already resident
+function prefetch(entry, cp) {
+  if (!wants(entry, cp, false, AF.LOD.prefetch)) return;
+  makeChildren(entry);
+  for (const child of entry.children) { child.used = stamp; enqueue(child); prefetch(child, cp); }
+}
+// the view is final: every shown tile is built and current, and none of them wants to split
+function settled(entry, cp) {
+  if (entry.fadeE || entry.busy) return false;
+  if (entry.split) { for (const child of entry.children) if (!settled(child, cp)) return false; return true; }
+  return entry.ready && !entry.dirty && !wants(entry, cp, false);
+}
+R.near = () => { if (!AF.ready || !roots.length) return false; const cp = AF.camera.position; for (const root of roots) if (!settled(root, cp)) return true; return false; };
 // what a tile about to split shows: each child, or straight away that child's own ready children when it wants to split too
 // (an approach never waits for one fade per quadtree level). Only for subtrees that are not on screen.
 function cover(entry, cp, output) {
@@ -251,7 +265,7 @@ function work(ms) {
       let best = -1, bestD = Infinity;
       const cp = AF.camera.position;
       for (let index = 0; index < queue.length; index++) {
-        const entry = queue[index], dist = Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, aheadX, cp.y, aheadZ) + 24);
+        const entry = queue[index], dist = Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, ahead.x, cp.y, ahead.z) + 24) + (entry.parent && !entry.parent.split ? 0 : -16);
         if (dist < bestD) { bestD = dist; best = index; }
       }
       if (best < 0) break;
@@ -267,14 +281,15 @@ function work(ms) {
   return !!generator || queue.length > 0;
 }
 function scan() {
-  const cp = AF.camera.position, reach = Math.max(1, (AF.lodScale || 1) ** 2); stamp++;
-  R.maxNodes = Math.round(220 * reach); R.maxBytes = Math.min(AF.MOBILE ? 64 : 128, 48 * reach) * 1048576;
+  const cp = AF.camera.position, reach = Math.max(1, AF.LOD.view ** 2); stamp++;
+  R.maxNodes = Math.round((AF.MOBILE ? 240 : 320) * reach); R.maxBytes = Math.min(AF.MOBILE ? 72 : 160, (AF.MOBILE ? 48 : 80) * reach) * 1048576;
   for (const entry of nodes) if (entry.dirty && entry.ready && !entry.fadeE && !entry.busy) {
     let parent = entry.parent, blocked = false;
     while (parent) { if (parent.fadeE || parent.busy) { blocked = true; break; } parent = parent.parent; }
     if (!blocked) { entry.ready = false; enqueue(entry); }
   }
   for (const root of roots) update(root, cp, false);
+  for (const root of roots) prefetch(root, cp);
   let kept = 0;
   for (const entry of nodes) if (entry.ready) kept++;
   while (kept > R.maxNodes || R.bytes > R.maxBytes) {
@@ -285,18 +300,14 @@ function scan() {
   }
   R.active = kept;
 }
-AF.onIdle('outland-build', (ms) => work(Math.min(ms, AF.MOBILE ? 4 : 6)));
+AF.stream.register('outland-build', { order: 20, work: (ms) => work(Math.min(ms, AF.MOBILE ? 4 : 6)), near: R.near });
 AF.onTick('outland-lod', 876, (dt) => {
   if (!AF.ready) return;
-  const cp = AF.camera.position, dx = cp.x - lastX, dz = cp.z - lastZ, length = Math.hypot(dx, dz);
-  const prediction = length < 40 && dt > 0 ? Math.min(1.5 / dt, 160 / Math.max(0.001, length)) : 0;
-  aheadX = cp.x + dx * prediction; aheadZ = cp.z + dz * prediction; lastX = cp.x; lastZ = cp.z;
-  scanT += dt; if (scanT >= 0.1) { scanT = 0; scan(); }
+  scanT += dt; if (scanT >= 0.1 || AF.stream.loading) { scanT = 0; scan(); }
   // a tile right around the camera is missing: the rendered frame helps, more so while the city streamer has nothing urgent
   work(R.urgent ? (AF.world.stream && AF.world.stream.urgent ? 1.5 : AF.MOBILE ? 2.5 : 3) : 1);
 });
 R.settle = () => {
-  aheadX = AF.camera.position.x; aheadZ = AF.camera.position.z;
   for (let pass = 0; pass < 7; pass++) {
     scan(); while (work(20)); AF.step(22, 1 / 30);
   }

@@ -82,7 +82,7 @@ try {
     const elapsed = performance.now() - start;
     WQ.worldMs += elapsed; WQ.worldMaxMs = Math.max(WQ.worldMaxMs, elapsed); return !!shoreJob;
   }
-  AF.onIdle('water-shore', shoreWork);
+  AF.stream.register('water-shore', { order: 60, gen: true, work: shoreWork, near: () => AF.ready && !!shoreJob });
   WQ.finish = async () => { while (shoreJob) { shoreWork(1); await AF.yield(); } };
   function makeShoreTex() {
     const t0 = performance.now();

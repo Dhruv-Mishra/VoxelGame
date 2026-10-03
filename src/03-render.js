@@ -361,13 +361,15 @@ try {
   }
   if (AF.MOBILE) { G.tier = 'low'; G.cinema = false; G.auto = false; }
   // per-tier settings (read by R1 code every frame). near/far = shadow map sizes, lights = physical point lights, ao = SAO samples,
-  // regLod/farLod = metres to the 0.5 m coarse / 1 m far region copies, lod = near props, propCull = far props hidden beyond
+  // THE LOD TABLE (every system reads AF.LOD, filled from here): regLod/farLod = metres to the 0.5 m coarse / 1 m far region copies,
+  // lod = near props, propCull = far props hidden beyond, outland = quadtree split distance per tile size, flora = [mid, near, far]
+  // tree LOD distances. Loading runs AF.LOD.prefetch (01-stream) farther out than these display ranges.
   const TIER = {
-    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 70, propCull: 700 },
-    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 45, propCull: 300 },
-    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 2, pools: 8, regLod: 80, farLod: 240, lod: 35, propCull: 240 },
-    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 32, propCull: 200 },
-    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000 },
+    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 70, propCull: 700, outland: 0.8, flora: [70, 180, 960] },
+    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 45, propCull: 300, outland: 0.7, flora: [65, 160, 880] },
+    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 2, pools: 8, regLod: 80, farLod: 240, lod: 35, propCull: 240, outland: 0.48, flora: [45, 105, 720] },
+    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 32, propCull: 200, outland: 0.38, flora: [28, 80, 480] },
+    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000, outland: 1.0, flora: [90, 240, 1400] },
   };
   AF.gfx.TIER = TIER;
   const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 50, farLod: 125, lod: 40, propCull: 180, dynMin: 0.55 };
@@ -393,6 +395,8 @@ try {
     AF.REGION_LOD = (T.regLod || 130) * view;
     AF.FAR_LOD = (T.farLod || 1e9) * view;
     AF.PROP_CULL = (T.propCull || 900) * view;
+    const fl = T.flora, near = Math.min(320, fl[1] * view);
+    Object.assign(AF.LOD, { view, props: AF.LOD_DIST, region: AF.REGION_LOD, far: AF.FAR_LOD, cull: AF.PROP_CULL, outland: T.outland * view, floraMid: Math.min(near - 30, fl[0] * view), floraNear: near, floraFar: Math.min(1600, fl[2] * view), prefetch: AF.stream.PREFETCH });
     if (AF.gfx.pools) AF.gfx.pools.max = T.pools;
     if (AF.atmos && AF.atmos.setLights) AF.atmos.setLights(T.lights);
     AF.shadowDirty = true;
@@ -607,7 +611,7 @@ try {
   AF.test('renderer: mobile GPU budgets stay bounded', () => {
     if (!AF.MOBILE) return { ok: true, info: 'desktop profile' };
     const cfg = cur(), context = R.getContext().getContextAttributes();
-    const ok = R.getPixelRatio() <= Math.min(devicePixelRatio || 1, 1) + 1e-3 && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools <= 6 && AF.LOD_DIST === 40 && AF.REGION_LOD === 50 && AF.PROP_CULL === 180 && (!AF.atmos.pool || AF.atmos.pool.length === 0);
+    const ok = R.getPixelRatio() <= Math.min(devicePixelRatio || 1, 1) + 1e-3 && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools <= 6 && AF.LOD_DIST === mobileTier.lod * AF.lodScale && AF.REGION_LOD === mobileTier.regLod * AF.lodScale && AF.LOD.outland === mobileTier.outland * AF.lodScale && (!AF.atmos.pool || AF.atmos.pool.length === 0);
     return { ok, info: 'pr ' + R.getPixelRatio() + ', msaa ' + context.antialias + ', near ' + sunSize() + ', direct renderer, no far/env/AO/point lights, ' + cfg.pools + ' shader pools' };
   });
   function sunSize() { return AF.sun.shadow.mapSize.x; }

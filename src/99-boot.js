@@ -4,7 +4,7 @@ try {
 // Build order table (see CONTRACT.md):
 //  100 terrain heightmap · 150 water/roads painting · 200 rail bed · 300 buildings · 400 street furniture + nature
 //  500 MESH WORLD (core) · 600 dynamic actors (cars, trains, people) · 700 atmosphere/post · 800 player + UI · 900 final
-AF.onBuild('mesh-world', 500, async () => { await AF.meshWorld(async (f) => { AF.loader(0.55 + f * 0.3, 'raising the rooftops… ' + Math.round(f * 100) + '%'); await AF.yield(); }); });
+AF.onBuild('mesh-world', 500, async () => { await AF.meshWorld(async (f) => { AF.loader(0.5 + f * 0.25, 'raising the rooftops… ' + Math.round(f * 100) + '%'); await AF.yield(); }); });
 AF.loader = (f, msg) => {
   const fill = document.getElementById('ldfill'), m = document.getElementById('ldmsg');
   if (fill) fill.style.width = Math.round(f * 100) + '%';
@@ -16,7 +16,7 @@ AF.loader = (f, msg) => {
   AF.stageTimes = {};
   for (let i = 0; i < stages.length; i++) {
     const s = stages[i];
-    if (s.order !== 500) AF.loader(s.order < 500 ? 0.05 + 0.5 * i / stages.length : 0.85 + 0.15 * i / stages.length, s.name.replace(/-/g, ' ') + '…');
+    if (s.order !== 500) AF.loader(s.order < 500 ? 0.05 + 0.45 * i / stages.length : 0.75 + 0.1 * i / stages.length, s.name.replace(/-/g, ' ') + '…');
     await AF.yield();
     const ts = performance.now();
     try { await s.fn(); }
@@ -32,7 +32,10 @@ AF.loader = (f, msg) => {
   }
   AF.ready = true;
   AF.emit('ready');
-  const ld = document.getElementById('loader'); if (ld) { ld.classList.add('done'); setTimeout(() => ld.remove(), 1500); }
+  // every generator finishes and the opening view streams in + compiles behind the loader (01-stream): longer load, no pop-in
+  if (!AF.TEST) { try { await AF.stream.preload((f, msg) => AF.loader(0.85 + 0.15 * f, msg)); } catch (e) { console.error('[af] preload threw:', e); AF.errors.push({ part: 'preload', msg: String(e && e.stack || e) }); } }
+  AF.preloaded = true; AF.emit('preloaded');
+  const ld = document.getElementById('loader'); if (ld) ld.classList.add('done');
   if (AF.TEST) {
     AF.step(3);
     const res = []; let pass = 0;

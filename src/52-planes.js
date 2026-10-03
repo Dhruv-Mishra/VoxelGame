@@ -47,6 +47,10 @@ try {
         return { m, prop: [cx - 22, cy - 2, 66.5], prop2: [cx + 22, cy - 2, 66.5], blade: 6, pc: K }; } },
   };
   const geoCache = {};
+  // every plane flies ~15 % slower than its rated top speed (the streamers get more time ahead of it); take-off needs real speed:
+  // W lifts the nose from 1.25x stall, a full-throttle roll leaves the ground by itself at 1.45x stall
+  for (const T of Object.values(TYPES)) T.vmax = Math.round(T.vmax * 0.85 * 10) / 10;
+  const ROTATE_K = 1.25, LIFTOFF_K = 1.45, ROLL_DRAG = 0.7;
   PL.trafficGeometry = () => {
     const B = TYPES.airliner.build(), red = C(0xff3040, { emit: 0xff2030, emitK: 2, mode: 'always' }), green = C(0x30ff80, { emit: 0x20ff60, emitK: 2, mode: 'always' }), white = C(0xffffff, { emit: 0xffffff, emitK: 2, mode: 'always' });
     const gear = new AF.Model(B.m.w, B.m.h, B.m.d);
@@ -77,6 +81,9 @@ try {
     return pl;
   };
   const place = (pl) => { pl.root.position.set(pl.x, pl.y, pl.z); pl.root.rotation.set(-pl.pitch, pl.yaw, pl.roll, 'YXZ'); if (pl.interact) { pl.interact.x = pl.x; pl.interact.y = pl.y + 1; pl.interact.z = pl.z; } };
+  PL.make = make;
+  // approach guidance picks the nearest of these east-west strips { x0, x1, z } (the island adds its own)
+  PL.runways = [A.runway];
 
   // ---------------------------------------------------------------- the flight model
   // pitch = nose attitude, gam = flight-path angle (chases the nose: angle of attack settles quickly), v = airspeed along the path
@@ -133,15 +140,15 @@ try {
       pl.flaps = (pl.flaps || 0) + ((!pl.onGround && hAGL < 70 && pl.throttle < 0.45 ? 1 : 0) - (pl.flaps || 0)) * Math.min(1, dt * 1.5);
       const vs = T.stall * (1 - 0.22 * (pl.flaps || 0)), drag = T.thrust / (T.vmax * T.vmax) * (1 + 0.6 * (pl.flaps || 0));
       if (pl.onGround) {
-        const rotate = pitchIn > 0.2 && pl.v > vs, back = !rotate && rawP < -0.1;
-        pl.v += (pl.throttle * T.thrust * T.gk - drag * pl.v * Math.abs(pl.v)) * dt;
+        const rotate = pitchIn > 0.2 && pl.v > vs * ROTATE_K, back = !rotate && rawP < -0.1;
+        pl.v += (pl.throttle * T.thrust * T.gk - drag * ROLL_DRAG * pl.v * Math.abs(pl.v)) * dt;
         const fr = brake || (back && pl.v > 0) ? 8 : pl.throttle < 0.02 && pl.v > 2 ? 2.2 : 0.5;
         pl.v = Math.sign(pl.v) * Math.max(0, Math.abs(pl.v) - fr * dt);
         if (back && !brake && pl.throttle < 0.01 && pl.v <= 0) pl.v = Math.max(-3, pl.v - 2.5 * dt);
         pl.v = AF.clamp(pl.v, -3, T.vmax * 1.25);
         pl.yaw -= (rollIn + yawIn * 0.5) * 0.9 * AF.clamp(pl.v / 5, -1, 1) / (1 + Math.max(0, pl.v) / 20) * dt;
         pl.roll += -pl.roll * Math.min(1, dt * 6); pl.pitch += -pl.pitch * Math.min(1, dt * 5); pl.gam = pl.pr = pl.rr = 0;
-        if (rotate || (pl.throttle > 0.8 && pl.v > vs * 1.15)) { pl.onGround = false; pl.air = 0; pl.pitch = rotate ? 0.1 : 0.08; pl.pr = rotate ? T.pitch * 0.5 : 0; pl.gam = 0.05; AF.emit('toast', 'Wheels up!'); }
+        if (rotate || (pl.throttle > 0.8 && pl.v > vs * LIFTOFF_K)) { pl.onGround = false; pl.air = 0; pl.pitch = rotate ? 0.1 : 0.08; pl.pr = rotate ? T.pitch * 0.5 : 0; pl.gam = 0.05; AF.emit('toast', 'Wheels up!'); }
       } else {
         const lift = AF.clamp((pl.v - vs * 0.75) / (vs * 0.25), 0, 1), auth = 0.25 + 0.75 * AF.clamp((pl.v - vs) / vs, 0, 1);
         // pitch: rate scales with airspeed and eases in, softly limited toward +-PMAX; hands off slowly relaxes toward level
@@ -203,8 +210,11 @@ try {
       AF.camTarget.copy(look); AF.shadowFocus.set(pl.x, 0, pl.z); AF.shadowRadius = 90;
       // approach guidance to the Westgate runway (3-degree glideslope from the nearer threshold)
       let guide = '';
+      if (pl.onGround && pl.throttle > 0.05 && pl.v > 2) guide = pl.v < T.stall * ROTATE_K ? 'Take-off speed ' + Math.round(T.stall * ROTATE_K * 2.237) + ' mph' : 'Rotate! W to lift off';
       if (!pl.onGround && hAGL < 180) {
-        const RW = A.runway, thx = Math.abs(pl.x - RW.x0) < Math.abs(pl.x - RW.x1) ? RW.x0 + 30 : RW.x1 - 30, dx2 = thx - pl.x, dz2 = RW.z - pl.z, dist = Math.hypot(dx2, dz2);
+        let RW = PL.runways[0], rd = Infinity;
+        for (const rw of PL.runways) { const d = Math.hypot(Math.max(rw.x0 - pl.x, 0, pl.x - rw.x1), rw.z - pl.z); if (d < rd) { rd = d; RW = rw; } }
+        const thx = Math.abs(pl.x - RW.x0) < Math.abs(pl.x - RW.x1) ? RW.x0 + 30 : RW.x1 - 30, dx2 = thx - pl.x, dz2 = RW.z - pl.z, dist = Math.hypot(dx2, dz2);
         const toward = Math.cos(AF.angDiff(pl.yaw, Math.atan2(dx2, dz2))) > 0.85;
         if (toward && dist < 1800 && Math.abs(dz2) < Math.max(40, dist * 0.25)) {
           const want = dist * 0.0524, dh = hAGL - want;
@@ -304,7 +314,7 @@ try {
     const G = planeGeo('biplane'), root = new THREE.Group(), body = AF.modelMesh(G.geo), prop = AF.modelMesh(G.pgeo);
     body.castShadow = false; root.add(body); prop.position.copy(G.props[0]); root.add(prop); root.rotation.order = 'YXZ'; AF.scene.add(root);
     AF.onTick('plane-sightseer', 440, (dt, t) => {
-      const a = t * 0.028, R = 330, cx = -180, cz = -20;
+      const a = t * 0.024, R = 330, cx = -180, cz = -20;
       const x = cx + Math.cos(a) * R * 1.3, zz = cz + Math.sin(a) * R, y = 150 + Math.sin(a * 3) * 12;
       root.position.set(x, y, zz); root.rotation.set(0, Math.atan2(-Math.sin(a) * 1.3, Math.cos(a)), -0.35, 'YXZ'); prop.rotation.z = t * 40;
     });

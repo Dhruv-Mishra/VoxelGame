@@ -668,10 +668,10 @@ try {
     const F = (K.flocks || []).find((f) => !f.gull && f.members.length >= 4); if (!F) return { ok: false, info: 'no flock' };
     const P = AF.player, save = P ? { x: P.x, y: P.y, z: P.z } : null, mode = AF.mode;
     AF.mode = 'walk'; if (P) { P.x = F.members[0].hx + 1; P.z = F.members[0].hz; P.y = F.members[0].gy; }
-    for (let i = 0; i < 20; i++) animalsTick(1 / 30);
+    for (let i = 0; i < 20; i++) animalsTick(1 / 30, AF.clock.t);
     const flying = F.members.filter((a) => a.state === 'fly').length, up = F.members.filter((a) => a.root.position.y > a.gy + 0.8).length;
     if (P) { P.x = save.x; P.y = save.y; P.z = save.z; P.x = 9999; }
-    for (let i = 0; i < 400; i++) animalsTick(1 / 30);
+    for (let i = 0; i < 400; i++) animalsTick(1 / 30, AF.clock.t);
     if (P) { P.x = save.x; P.y = save.y; P.z = save.z; }
     AF.mode = mode;
     const back = F.members.filter((a) => a.state === 'ground').length;

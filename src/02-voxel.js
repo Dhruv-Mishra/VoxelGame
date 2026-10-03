@@ -1336,7 +1336,7 @@ const fadeMats = () => FADE.mats || (FADE.mats = {
 });
 const seenByCam = (m) => m.visible && (m.layers.mask & 1) !== 0 && !!m.parent;
 FADE.swap = (owner, outs, ins, done) => {
-  const live = AF.ready && FADE.on;
+  const live = AF.ready && FADE.on && !AF.stream.loading;
   const e = { owner, outs: [], ins: [], done };
   for (const m of outs) if (m && seenByCam(m)) e.outs.push(m);
   for (const m of ins) {
@@ -1373,6 +1373,7 @@ FADE.cancel = (owner) => {
 };
 AF.onTick('lod-fade', 881, (dt) => {
   const U = AF.mat.uniforms;
+  if (AF.stream.loading) { if (FADE.act.length) fadeEnd(); if (FADE.pend.length) { fadeStart(); fadeEnd(); } }
   if (FADE.act.length) { FADE.k += dt / FADE.dur; if (FADE.k >= 1) fadeEnd(); }
   if (!FADE.act.length && FADE.pend.length) fadeStart();
   U.uFadeK.value = Math.min(1, FADE.k);
@@ -1568,11 +1569,12 @@ function* meshRegionG(rx, rz, mode = 'both') {
   return nO / 4 + farQ;
 }
 // REGION STREAMING (not in ?test / ?shot / ?near / ?nostream): boot meshes only the regions around AF.PLAN.bootFocus plus the 1 m
-// clusters for the whole island. One scheduler (streamWork) then runs a single job at a time, always the best one over all regions:
-//   props  near props of a region within AF.LOD_DIST (score d - 8)
-//   full   0.25 m mesh for a region within REGION_LOD + 24 m of the camera or of the look-ahead point (score d)
-//   coarse 0.5 m copy for an empty region within FAR_LOD + 48 (score d + 32), back-fill for a full region moving away (score d)
-// Jobs near the camera are "urgent": they also get a slice of every rendered frame and preempt a running far job. Full meshes the
+// clusters for the whole island. One scheduler (streamWork) then runs a single job at a time, always the best one over all regions,
+// ranked by distance to the camera or to the shared look-ahead (AF.stream.ahead); P = AF.LOD.prefetch loads ahead of display:
+//   props  near props of a region within AF.LOD_DIST * P (score d - 8)
+//   full   0.25 m mesh for a region within REGION_LOD * P + 24 m (score d)
+//   coarse 0.5 m copy for an empty region within FAR_LOD * P + 48 (score d + 32), back-fill for a full region moving away (score d)
+// Jobs inside the display ranges are "urgent": they also get a slice of every rendered frame and preempt a running far job. Full meshes the
 // camera left behind stay resident until a byte budget is used up (zipping back is instant); then the farthest drop to their 0.5 m
 // copy, and whole clusters showing their 1 m copy unload farthest first (always beyond FAR_LOD + 600 m, phones + 300 m).
 const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, kind: '', phase: '', urgent: false, rest: 0, chk: 0, done: 0, unloaded: 0, demoted: 0, aborted: 0, t: 0, maxStep: 0, maxPhase: '', ms: {}, bytes: 0, fullBytes: 0, jobs: { full: 0, coarse: 0, props: 0 } };
@@ -1587,21 +1589,11 @@ function setMissing(k, miss) {
   else if (STR.pending.delete(k)) cl.pending = Math.max(0, cl.pending - 1);
 }
 const ALL = [];   // every region { k, x, z } (centre), filled by meshWorld
-// Look-ahead (PERF.md §5): a 1.5 s velocity-predicted point, so regions ahead of a car or plane load before it gets there.
-const LA = { x: 0, z: 0, px: 0, pz: 0, vx: 0, vz: 0, init: false };
-AF.onTick('stream-look', 877, (dt) => {
-  const c = AF.camera.position;
-  if (!LA.init || dt <= 0) { LA.px = c.x; LA.pz = c.z; LA.init = true; }
-  const k = Math.min(1, dt * 3), vx = (c.x - LA.px) / Math.max(dt, 1e-3), vz = (c.z - LA.pz) / Math.max(dt, 1e-3);
-  if (Math.hypot(vx, vz) < 400) { LA.vx += (vx - LA.vx) * k; LA.vz += (vz - LA.vz) * k; }     // ignore teleports
-  LA.px = c.x; LA.pz = c.z;
-  const s = Math.min(1, 250 / (Math.hypot(LA.vx, LA.vz) * 1.5 + 1e-3));
-  LA.x = c.x + LA.vx * 1.5 * s; LA.z = c.z + LA.vz * 1.5 * s;
-});
+const LA = AF.stream.ahead;   // shared look-ahead (01-stream): 2.5 s of camera velocity, or the travel destination
 const PK = { k: -1, t: 0, s: 0, fresh: false };   // best job of the last scan: t 1 full, 2 coarse, 3 props
 function pickJob() {
-  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, LOD = AF.world.lod;
-  const RD = AF.REGION_LOD, FD = Math.min(AF.FAR_LOD || 1e9, 5000), D = AF.LOD_DIST;
+  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, LOD = AF.world.lod, P = AF.LOD.prefetch;
+  const RD = AF.REGION_LOD * P, FD = Math.min(AF.FAR_LOD || 1e9, 5000) * P, D = AF.LOD_DIST * P;
   PK.k = -1; PK.t = 0; PK.s = 1e9;
   for (let i = 0; i < ALL.length; i++) {
     const g = ALL[i], k = g.k, d = Math.hypot(g.x - c.x, g.z - c.z, vy), de = Math.min(d, Math.hypot(g.x - LA.x, g.z - LA.z, vy) + 16);
@@ -1610,17 +1602,24 @@ function pickJob() {
     let s = 1e9, t = 0;
     if (STR.on) {
       if (!r || !r.fullOk) { if (de < RD + 24) { s = de; t = 1; } else if (!r && de < FD + 48) { s = de + 32; t = 2; } }
-      else if (!r.coarseOk && COARSE_ON && de > RD - 24 && de < FD + 48) { s = de; t = 2; }   // full mesh shown too far out: as urgent as its distance
+      else if (!r.coarseOk && COARSE_ON && de > AF.REGION_LOD - 24 && de < FD + 48) { s = de; t = 2; }   // full mesh shown too far out: as urgent as its distance
     }
     const reg = LOD.get(k);
-    if (reg && !reg.nearBuilt && d < D && d - 8 < s && !(r && r.hid)) { s = d - 8; t = 3; }
+    if (reg && !reg.nearBuilt && de < D && de - 8 < s && !(r && r.hid)) { s = de - 8; t = 3; }
     if (s < PK.s) { PK.s = s; PK.k = k; PK.t = t; }
   }
   PK.fresh = PK.k >= 0;
   if (!PK.fresh) STR.rest = AF.clock.t + 0.15;   // nothing to do: no rescans for a moment
   return PK.fresh;
 }
-const isUrgent = () => PK.t === 3 || (PK.t === 1 && PK.s < AF.REGION_LOD);
+const isUrgent = () => (PK.t === 3 && PK.s < AF.LOD_DIST) || (PK.t === 1 && PK.s < AF.REGION_LOD);
+// the view still lacks detail it shows (or is about to): urgent work, or any full / props job, or a coarse copy inside 2x REGION_LOD
+STR.near = () => {
+  if (!AF.world.regLod) return false;
+  if (STR.gen && STR.urgent) return true;
+  if (!pickJob()) return !!STR.gen && STR.kind !== 'coarse';
+  return PK.t !== 2 || PK.s < AF.REGION_LOD * 2;
+};
 const streamWork = (budget) => {
   if (!AF.ready || !AF.world.regLod) return false;
   const t0 = performance.now();
@@ -1643,7 +1642,7 @@ const streamWork = (budget) => {
   return true;
 };
 function evict() {
-  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, RD = AF.REGION_LOD, FD = Math.min(AF.FAR_LOD || 1e9, 5000), MB = 1048576;
+  const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, RD = AF.REGION_LOD * AF.LOD.prefetch, FD = Math.min(AF.FAR_LOD || 1e9, 5000), MB = 1048576;
   let bF = 0, bA = 0;
   for (const r of RL.values()) { bF += r.bF; bA += r.bF + r.bC; }
   const busy = STR.gen ? STR.key : -1;
@@ -1668,7 +1667,7 @@ function evict() {
   }
   STR.bytes = bA; STR.fullBytes = bF;
 }
-AF.onIdle('region-stream', (ms) => streamWork(ms));
+AF.stream.register('region-stream', { order: 10, work: (ms) => streamWork(ms), near: STR.near });
 AF.onTick('region-stream', 878, (dt) => {
   if (!AF.ready || !AF.world.regLod) return;
   // a far job yields to an urgent one (nothing is attached before its last step, so dropping it is safe)
@@ -1803,7 +1802,7 @@ AF.onTick('prop-lod', 880, () => {
     const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
     if (hid) { if (r.nearBuilt) { FADE.cancel(r); freeNear(r); } }
     else if (!r.nearBuilt && d < D) { if (sync) buildNear(r); }
-    else if (r.nearBuilt && d > D + 70) { FADE.cancel(r); freeNear(r); }
+    else if (r.nearBuilt && d > D * AF.LOD.prefetch + 70) { FADE.cancel(r); freeNear(r); }
     const showNear = !hid && r.nearBuilt && d < D + 25, farSeen = !!r.far && !showNear && d < PC;
     // near <-> far props and the far-prop cull cross-fade (PERF.md §4); the first decision for a region just sets the state
     if (!r.fadeE && r.showNear !== undefined && (r.showNear !== showNear || r.farSeen !== farSeen)) {

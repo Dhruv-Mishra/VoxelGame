@@ -139,7 +139,7 @@ try {
     const door = point.building && point.building.doors && point.building.doors[0];
     if (door) { yaw = door.yaw || 0; x = door.x - Math.sin(yaw) * 1.4; z = door.z - Math.cos(yaw) * 1.4; }
     const y = W.groundY(x, z); UI.toggleMap(false);
-    if (walk) AF.setMode('walk', { x, y, z, yaw, snap: true });
+    if (walk) AF.stream.travel({ label: point.name, go: () => AF.setMode('walk', { x, y, z, yaw, snap: true }) });
     else if (point.view) AF.flyTo(point.view.pos, point.view.target);
     else AF.flyTo([x + 70, y + 65, z + 90], [x, y + 2, z]);
   };

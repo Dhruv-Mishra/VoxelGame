@@ -90,6 +90,19 @@ try {
         const distance2=(actor.x-camera.x)**2+(actor.y-camera.y)**2+(actor.z-camera.z)**2;if(distance2>path.activeRadius**2)continue;
         actor.sin=Math.sin(actor.yaw);actor.cos=Math.cos(actor.yaw);
         if(distance2<3600||Math.floor(time*5)!==actor.frame){actor.frame=Math.floor(time*5);actor.stride=actor.moving?Math.sin(actor.ph)*0.42:0;actor.wave=Math.sin(time*3)*0.35;}
+        const pose=actor.look.pose;
+        // look.pose 'dance' (bounce, arms up, sway; full rate near, 5 Hz far) and 'ride' (seated astride: legs forward, hands on the bars)
+        if(pose==='dance'){
+          const beat=distance2<3600?time:actor.frame/5,b=beat*7.6+actor.ph,sway=actor.yaw+Math.sin(beat*1.3+actor.ph)*0.55,bob=Math.abs(Math.sin(b))*0.1,hip=bodyPlan.lh/16+bob,shoulder=hip+bodyPlan.th/16,arm=(bodyPlan.tw+bodyPlan.aw)/32,leg=(bodyPlan.lw+1)/32,up=-2.55+Math.sin(b)*0.45;
+          actor.sin=Math.sin(sway);actor.cos=Math.cos(sway);
+          put(WK.meshes[0],count,actor,0,hip,0,Math.sin(b*0.5)*0.08);put(WK.meshes[1],count*2,actor,arm,shoulder,0,up);put(WK.meshes[1],count*2+1,actor,-arm,shoulder,0,(actor.ph%2>1?up:-2.55-Math.sin(b)*0.45));
+          put(WK.meshes[2],count*2,actor,leg,hip,0,Math.sin(b)*0.28);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-Math.sin(b)*0.28);count++;continue;
+        }
+        if(pose==='ride'){
+          const hip=bodyPlan.lh/16*0.55,shoulder=hip+bodyPlan.th/16,arm=(bodyPlan.tw+bodyPlan.aw)/32,leg=(bodyPlan.lw+1)/32+0.04;
+          put(WK.meshes[0],count,actor,0,hip,0,0.25);put(WK.meshes[1],count*2,actor,arm,shoulder-0.05,0.12,-1.25);put(WK.meshes[1],count*2+1,actor,-arm,shoulder-0.05,0.12,-1.25);
+          put(WK.meshes[2],count*2,actor,leg,hip,0,-1.2);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-1.2);count++;continue;
+        }
         const stride=actor.stride||0,hip=bodyPlan.lh/16,shoulder=hip+bodyPlan.th/16,arm=(bodyPlan.tw+bodyPlan.aw)/32,leg=(bodyPlan.lw+1)/32,work=actor.look.pose==='marshal';
         put(WK.meshes[0],count,actor,0,hip,0);put(WK.meshes[1],count*2,actor,arm,shoulder,0,work?-1.5+(actor.wave||0):-stride*0.8);put(WK.meshes[1],count*2+1,actor,-arm,shoulder,0,work?-1.5-(actor.wave||0):actor.bag?-0.22:stride*0.8);
         put(WK.meshes[2],count*2,actor,leg,hip,0,stride);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-stride);

@@ -212,7 +212,7 @@ function* crops() {
   FM.stats.records = N;
 }
 // ---------------------------------------------------------------- selection (idle slots; camera moves > 3 m or turns)
-const frustum = new THREE.Frustum(), projection = new THREE.Matrix4(), sphere = new THREE.Sphere(), lastQ = new THREE.Quaternion();
+const frustum = new THREE.Frustum(), projection = new THREE.Matrix4(), sphere = new THREE.Sphere(), lastQ = new THREE.Quaternion(), wide = new THREE.PerspectiveCamera();
 let lastX = Infinity, lastY = Infinity, lastZ = Infinity, revision = 0, selected = -1, selection = null, generator = null;
 const tierIndex = () => AF.MOBILE || AF.GFX.tier === 'low' ? 0 : AF.GFX.lite ? 1 : 2;
 function put(batch, index, sx, sy, sz, lift, p0, p1, p2, p3, radius) {
@@ -226,12 +226,12 @@ function put(batch, index, sx, sy, sz, lift, p0, p1, p2, p3, radius) {
 function upload(attr, count) { attr.clearUpdateRanges(); attr.addUpdateRange(0, Math.max(1, count) * attr.itemSize); attr.needsUpdate = true; }
 const radii = [0, 0, 0, 0, 0];
 function* select(eye = AF.camera.position, cull = true) {
-  const cx = eye.x, cy = eye.y, cz = eye.z, view = AF.lodScale || 1, tier = tierIndex();
+  const cx = eye.x, cy = eye.y, cz = eye.z, view = AF.LOD.view, tier = tierIndex();
   // from the street inside the city grid the fields are > 110 m away behind buildings: keep the canopy boxes off
   const far = AF.W.col(cx, cz) >= 0 && cy - O.h(cx, cz) < 40 ? 110 : Math.min(400, FAR[tier] * view);
   for (let kind = 0; kind < 5; kind++) radii[kind] = Math.min(90, KS[kind].R[tier] * view);
   uniforms.cropFar.value = far;
-  if (cull) { AF.camera.updateMatrixWorld(); projection.multiplyMatrices(AF.camera.projectionMatrix, AF.camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projection); }
+  if (cull) { AF.camera.updateMatrixWorld(); wide.copy(AF.camera, false); wide.fov = Math.min(120, AF.camera.fov * 1.4); wide.aspect = AF.camera.aspect * 1.1; wide.updateProjectionMatrix(); projection.multiplyMatrices(wide.projectionMatrix, AF.camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projection); }
   for (const name in batches) batches[name].n = 0;
   const reach = Math.ceil((far + 64) / 64), bx = Math.floor(cx / 64), bz = Math.floor(cz / 64), far2 = far * far;
   for (let ix = bx - reach; ix <= bx + reach; ix++) for (let iz = bz - reach; iz <= bz + reach; iz++) {
@@ -269,7 +269,7 @@ function stale() {
   const cp = AF.camera.position;
   // nothing drawn and the camera is well east of the farmland: keep sleeping
   if (!FM.stats.draws && cp.x > -660 + FAR[2] * 2.6) return false;
-  return (cp.x - lastX) ** 2 + (cp.y - lastY) ** 2 + (cp.z - lastZ) ** 2 > 9 || Math.abs(lastQ.dot(AF.camera.quaternion)) < 0.996;
+  return (cp.x - lastX) ** 2 + (cp.y - lastY) ** 2 + (cp.z - lastZ) ** 2 > 9 || Math.abs(lastQ.dot(AF.camera.quaternion)) < 0.993;
 }
 // ---------------------------------------------------------------- machine and prop models
 const col = (hex, opts = {}) => AF.col(hex, { jitter: 0.4, edge: 0.2, ...opts });
@@ -573,7 +573,7 @@ const work = FM.work = (ms) => {
   return !FM.stats.ready || !!selection || stale();
 };
 FM.settle = () => { while (work(8)); };
-AF.onIdle('farms', work);
+AF.stream.register('farms', { order: 35, gen: true, work, near: () => AF.ready && !!AF.outlandSites && (!FM.stats.ready || !!selection || stale()) });
 // ---------------------------------------------------------------- tests
 AF.test('farms: field mirror matches the outland field function', () => {
   let bad = 0, checked = 0;

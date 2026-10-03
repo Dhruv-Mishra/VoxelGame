@@ -295,7 +295,9 @@ try {
     const o = orbitFrom(pos, target);
     if (AF.mode !== 'aerial') AF.setMode('aerial', { keep: true, noSnap: true });
     const travel = Math.hypot(o.f.x - AE.f.x, o.f.z - AE.f.z);
-    AE.fly = { t: 0, dur: dur || AF.clamp(1.4 + travel / 180, 1.6, 3.6), f0: AE.f.clone(), d0: AE.d, y0: AE.y, p0: AE.p, o, bump: Math.max(0, travel * 0.55 - Math.max(AE.d, o.d) * 0.3) };
+    // long hops take a little longer: the streamers load the destination (AF.stream.focus) while the camera is on its way
+    AE.fly = { t: 0, dur: dur || AF.clamp(1.4 + travel / 150, 1.6, 5), f0: AE.f.clone(), d0: AE.d, y0: AE.y, p0: AE.p, o, bump: Math.max(0, travel * 0.55 - Math.max(AE.d, o.d) * 0.3) };
+    AF.stream.focus = { x: o.f.x, z: o.f.z };
     markInput();
   };
   PL.lookView = { pos: [150, 128, -300], target: [10, 8, -10] };
@@ -321,7 +323,7 @@ try {
       AF.interactTarget = null;
       applyAerialCamera();
     },
-    exit() { AE.fly = null; },
+    exit() { AE.fly = null; AF.stream.focus = null; },
     update(dt) {
       const I = AF.input, m = I.mouse, modal = inModal();
       const shift = I.key('ShiftLeft') || I.key('ShiftRight');
@@ -383,6 +385,7 @@ try {
         AE.y += AF.angDiff(AE.y, AE.yaw) * k;
         AE.p = AF.lerp(AE.p, AE.pitch, k);
       }
+      if (!AE.fly && AF.stream.focus) AF.stream.focus = null;
       applyAerialCamera();
       player.x = body.x; player.y = body.y; player.z = body.z;
       if (player.parts) AV.animate(player.parts, AN, dt, 0, true);
@@ -432,7 +435,7 @@ try {
 
   // ------------------------------------------------------------------ WALK (third person + first person)
   const WK = PL.walk = { camYaw: 0, camPitch: 0.22, boom: 3, fp: false, blend: 1, from: V3(), fromQ: new THREE.Quaternion(), lastMouse: 0, indoor: 0 };
-  const TMP = V3(), LOOK = V3();
+  const TMP = V3(), LOOK = V3(), QT = new THREE.Quaternion();
   const WALK = 5.8, RUN = 9.5;
   const vel = { x: 0, z: 0 };
   // nearest usable interaction; entries may supply dist(px,pz) (e.g. distance to a car's body, not its centre)
@@ -454,9 +457,32 @@ try {
     }
     return best;
   };
+  // boom ray (third person): 0.21 m strides with a five-probe cross, then a bisection back to ~3 cm (a third of the probes of the
+  // old 7 cm march); BR holds the frame's ray so nothing is allocated per frame
+  const BR = { px: 0, py: 0, pz: 0, dx: 0, dy: 0, dz: 0, rx: 0, rz: 0, max: 0 }, BOOM_LIFTS = [0.35, 0.7, 1.05], BOOM_MARGIN = 0.28;
+  const boomHit = (t, lift) => {
+    const x = BR.px + BR.dx * t, y = BR.py + lift + BR.dy * t, z = BR.pz + BR.dz * t, ox = BR.rx * 0.14, oz = BR.rz * 0.14;
+    return solid(x, y, z) || solid(x, y + 0.14, z) || solid(x, y - 0.14, z) || solid(x + ox, y, z + oz) || solid(x - ox, y, z - oz);
+  };
+  const boomMarch = (lift) => {
+    let prev = 0.1;
+    for (let t = 0.1; t <= BR.max + BOOM_MARGIN; t += 0.21) {
+      if (boomHit(t, lift)) {
+        let a = prev, b = t;
+        for (let i = 0; i < 3; i++) { const m = (a + b) / 2; if (boomHit(m, lift)) b = m; else a = m; }
+        return Math.max(0.12, a - BOOM_MARGIN);
+      }
+      prev = t;
+    }
+    return BR.max;
+  };
   const walkCamera = (dt) => {
     const c = cam();
-    const hx = body.x, hy = body.y + 1.58 * (player.look.height || 1), hz = body.z;
+    // pivot height eases over steps and kerbs (a 0.55 m step-up no longer jolts the view); teleports and jumps > 1.5 m snap
+    const eyeY = body.y + 1.58 * (player.look.height || 1);
+    if (!(Math.abs(eyeY - (WK.py ?? eyeY)) < 1.5) || WK.blend < 1) WK.py = eyeY;
+    else WK.py += (eyeY - WK.py) * (1 - Math.exp(-dt * (body.onGround ? 16 : 30)));
+    const hx = body.x, hy = WK.fp ? eyeY : WK.py, hz = body.z;
     if (WK.fp) {
       c.position.set(hx, hy + 0.04, hz);
       const p = -WK.camPitch, yaw = WK.camYaw + PI;
@@ -466,33 +492,29 @@ try {
     } else {
       const cp = Math.cos(WK.camPitch), dx = Math.sin(WK.camYaw) * cp, dy = Math.sin(WK.camPitch), dz = Math.cos(WK.camYaw) * cp;
       const rx = Math.cos(WK.camYaw), rz = -Math.sin(WK.camYaw);
-      let ceil = false;
-      for (let y = hy + 0.4; y < hy + 2.5; y += 0.25) if (solid(hx, y, hz)) { ceil = true; break; }
-      const inB = !!(AF.buildingAt && AF.buildingAt(hx, body.y + 1, hz));
-      WK.indoor = AF.lerp(WK.indoor, (ceil || inB) ? 1 : 0, 1 - Math.exp(-dt * 4));
+      // indoors (a ceiling overhead or inside a building box): re-tested only after moving 0.4 m (the building scan is linear)
+      if (!(Math.abs(hx - WK.inX) + Math.abs(hz - WK.inZ) + Math.abs(body.y - WK.inY) < 0.4)) {
+        WK.inX = hx; WK.inZ = hz; WK.inY = body.y; WK.inside = false;
+        for (let y = hy + 0.4; y < hy + 2.5; y += 0.3) if (solid(hx, y, hz)) { WK.inside = true; break; }
+        if (!WK.inside) WK.inside = !!(AF.buildingAt && AF.buildingAt(hx, body.y + 1, hz));
+      }
+      WK.indoor = AF.lerp(WK.indoor, WK.inside ? 1 : 0, 1 - Math.exp(-dt * 4));
       const maxBoom = AF.lerp(5.4 * (WK.zoom || 1), 2.8 * Math.min(1.2, WK.zoom || 1), WK.indoor);
       let shoulder = AF.lerp(0.62, 0.34, WK.indoor);
-      for (let s = 0.05; s <= shoulder; s += 0.05) if (solid(hx + rx * (s + 0.12), hy, hz + rz * (s + 0.12))) { shoulder = Math.max(0, s - 0.15); break; }
+      for (let s = 0.1; s <= shoulder; s += 0.1) if (solid(hx + rx * (s + 0.12), hy, hz + rz * (s + 0.12))) { shoulder = Math.max(0, s - 0.2); break; }
       const px = hx + rx * shoulder, py = hy, pz = hz + rz * shoulder;
-      const MARGIN = 0.28;
-      const march = (lift) => {
-        for (let t = 0.1; t <= maxBoom + MARGIN; t += 0.07) {
-          const x = px + dx * t, y = py + lift + dy * t, z = pz + dz * t;
-          if (solid(x, y, z) || solid(x, y + 0.14, z) || solid(x, y - 0.14, z) || solid(x + rx * 0.14, y, z + rz * 0.14) || solid(x - rx * 0.14, y, z - rz * 0.14)) return Math.max(0.12, t - MARGIN);
-        }
-        return maxBoom;
-      };
-      let want = march(0), wantLift = 0;
+      BR.px = px; BR.py = py; BR.pz = pz; BR.dx = dx; BR.dy = dy; BR.dz = dz; BR.rx = rx; BR.rz = rz; BR.max = maxBoom;
+      let want = boomMarch(0), wantLift = 0;
       if (want < maxBoom * 0.8) {
         const need = Math.min(maxBoom * 0.8, want + 1.2);
-        for (const L of [0.35, 0.7, 1.05]) {
+        for (const L of BOOM_LIFTS) {
           if (solid(hx, hy + L + 0.3, hz)) break;
-          const w = march(L);
+          const w = boomMarch(L);
           if (w >= need) { want = w; wantLift = L; break; }
         }
       }
       WK.lift = AF.lerp(WK.lift || 0, wantLift, 1 - Math.exp(-dt * (wantLift > (WK.lift || 0) ? 9 : 3)));
-      const hard = WK.lift > 0.02 ? march(WK.lift) : (wantLift ? march(0) : want);
+      const hard = WK.lift > 0.02 ? (Math.abs(WK.lift - wantLift) < 0.01 ? want : boomMarch(WK.lift)) : (wantLift ? boomMarch(0) : want);
       const tgt = Math.min(want, hard);
       WK.boom = AF.lerp(WK.boom, tgt, 1 - Math.exp(-dt * (tgt < WK.boom ? 10 : 2.5)));
       WK.boom = Math.min(WK.boom, hard + 0.15);
@@ -504,11 +526,15 @@ try {
         WK.blend = Math.min(1, WK.blend + dt / 1.5);
         const e = 1 - Math.pow(1 - WK.blend, 4);
         c.position.lerpVectors(WK.from, TMP, e);
-        c.lookAt(LOOK); const q = c.quaternion.clone(); c.quaternion.slerpQuaternions(WK.fromQ, q, e);
+        c.lookAt(LOOK); QT.copy(c.quaternion); c.quaternion.slerpQuaternions(WK.fromQ, QT, e);
       } else { c.position.copy(TMP); c.lookAt(LOOK); }
       PL.hideMesh = WK.boom < 0.7;
       if (player.mesh) player.mesh.visible = player.visible && !PL.hideMesh;
     }
+    // a running stride widens the view a touch (eased, outdoors only)
+    const fov = 50 + (WK.running && !WK.fp ? 4 * (1 - WK.indoor) : 0);
+    WK.fov = AF.lerp(WK.fov || 50, fov, 1 - Math.exp(-dt * 4));
+    if (Math.abs(c.fov - WK.fov) > 0.02) { c.fov = WK.fov; c.updateProjectionMatrix(); }
     AF.camTarget.set(hx, hy, hz);
     AF.shadowFocus.set(body.x, 0, body.z); AF.shadowRadius = 70;
   };
@@ -527,7 +553,7 @@ try {
       player.setVisible(true);
       AF.emit('hint', '');
     },
-    exit() { AF.interactTarget = null; PL.hideMesh = false; if (player.mesh) player.mesh.visible = player.visible; },
+    exit() { AF.interactTarget = null; PL.hideMesh = false; if (player.mesh) player.mesh.visible = player.visible; const c = cam(); WK.fov = 50; if (c.fov !== 50) { c.fov = 50; c.updateProjectionMatrix(); } },
     update(dt) {
       const I = AF.input, m = I.mouse, modal = inModal();
       const locked = !!document.pointerLockElement;
@@ -561,6 +587,7 @@ try {
       let wx = fx * iz + rx * ix, wz = fz * iz + rz * ix;
       const wl = Math.hypot(wx, wz);
       const sp = (run ? RUN : WALK) * (analog ? mag : 1);
+      WK.running = run && wl > 0;
       if (wl > 0) { wx = wx / wl * sp; wz = wz / wl * sp; }
       const acc = 1 - Math.exp(-dt * (body.onGround ? 18 : 3));
       vel.x = AF.lerp(vel.x, wx, acc); vel.z = AF.lerp(vel.z, wz, acc);

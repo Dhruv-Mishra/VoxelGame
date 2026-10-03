@@ -100,7 +100,7 @@ function* build(){
  S.stats.ready=true;
 }
 const work=S.work=ms=>{if(!AF.ready||S.stats.ready)return false;const start=performance.now(),end=start+Math.min(ms,AF.MOBILE?2:3);if(!generator)generator=build();while(performance.now()<end&&!S.stats.ready){const slice=performance.now();generator.next();S.stats.maxStepMs=Math.max(S.stats.maxStepMs??0,performance.now()-slice);}const elapsed=performance.now()-start;S.stats.workMs+=elapsed;S.stats.maxSliceMs=Math.max(S.stats.maxSliceMs??0,elapsed);return !S.stats.ready;};
-S.settle=()=>{while(work(4));};AF.onIdle('outland-sites',work);
+S.settle=()=>{while(work(4));};AF.stream.register('outland-sites',{order:25,gen:true,work,near:()=>AF.ready&&!S.stats.ready});
 const matrix=new THREE.Matrix4(),pos=new THREE.Vector3(),rot=new THREE.Quaternion(),unit=new THREE.Vector3(1,1,1),axis=new THREE.Vector3(0,0,1);
 AF.onTick('outland-windmills',332,dt=>{if(!sails)return;const cp=AF.camera.position;let count=0,local=false;for(const mill of S.windmills)if((mill.x-cp.x)**2+(mill.y-cp.y)**2+(mill.z-cp.z)**2<=160000)local=true;if(!local){if(sails.count){sails.count=0;sails.layers.set(31);}return;}sailAngle+=dt*0.4;for(const mill of S.windmills){if((mill.x-cp.x)**2+(mill.y-cp.y)**2+(mill.z-cp.z)**2>160000)continue;pos.set(mill.x,mill.y,mill.z);rot.setFromAxisAngle(axis,sailAngle);matrix.compose(pos,rot,unit);sails.setMatrixAt(count++,matrix);}sails.count=count;sails.layers.set(count?0:31);sails.instanceMatrix.needsUpdate=true;});
 AF.onBuild('outland-walkers',665,()=>{
@@ -121,6 +121,6 @@ AF.test('outland: wheat fields carry shared instanced crops; hamlets furnished',
 AF.test('outland-sites: hikers and villagers leave island walker capacity',()=>{
  S.settle();const used=AF.walkers.paths.reduce((sum,path)=>sum+path.count,0),hits=[];let blocked=0,samples=0;
  for(const path of AF.walkers.paths){if(!/^(Lake Road hikers|Tamsin hikers|Westmoor villagers)$/.test(path.name))continue;for(let index=1;index<path.points.length;index++){const before=path.points[index-1],at=path.points[index],steps=Math.ceil(Math.hypot(at[0]-before[0],at[2]-before[2])/2);for(let part=0;part<=steps;part++){const fraction=part/steps,x=AF.lerp(before[0],at[0],fraction),z=AF.lerp(before[2],at[2],fraction),y=Math.max(AF.W.groundY(x,z),AF.lerp(before[1],at[1],fraction));samples++;if(AF.boxBlocked(x,y+0.4,z,0.18,1.2)){blocked++;if(hits.length<8){const boxes=AF.colliders.get(Math.floor(x/8)*100000+Math.floor(z/8))??[];hits.push({path:path.name,x:+x.toFixed(1),z:+z.toFixed(1),y:+y.toFixed(1),tags:boxes.filter(box=>x+0.18>box.x0&&x-0.18<box.x1&&z+0.18>box.z0&&z-0.18<box.z1&&y+1.6>box.y0&&y+0.4<box.y1).map(box=>box.tag??'untagged')});}}}}}
- return{ok:S.stats.walkers===22&&used<=212&&!blocked,info:used+'/'+AF.walkers.capacity+', outland '+S.stats.walkers+', path obstructions '+blocked+'/'+samples+' '+JSON.stringify(hits)};
+ return{ok:S.stats.walkers===22&&used<=AF.walkers.capacity-160&&!blocked,info:used+'/'+AF.walkers.capacity+', outland '+S.stats.walkers+', path obstructions '+blocked+'/'+samples+' '+JSON.stringify(hits)};
 });
 }catch(e){AF.partError('44-sites.js',e);}

@@ -51,6 +51,7 @@ function buildGraph() {
 function bindStop(lane, stop, kind, dwell, radius) { const dx = stop.x - lane.pts[0], dz = stop.z - lane.pts[1], s = dx * lane.dx + dz * lane.dz, lateral = dz * lane.dx - dx * lane.dz; if (s > 1 && s < lane.len - 6 && lateral > 0.5 && lateral < radius) lane.stops.push({ s, dwell, kind, target: stop }); }
 function pickNext(pc) { if (!pc.next.length) return null; if (rnd() < 0.55) for (const option of pc.next) if (option.turn === 'straight') return option; return pc.next[Math.floor(rnd() * pc.next.length)]; }
 function attach(car, pc, s, speed = 9) {
+  speed *= VV.SPEED_K;
   car.parked = false; car.active = true; car.ai = { piece: pc, s, v: 0, v0: speed, next: pickNext(pc), ahead: null, behind: null, wait: 0, dwell: 0, served: -1, cd: 0, acc: 0, node: null };
   VV.ai.push(car); pieceAt(pc, s, PP); car.x = PP.x; car.z = PP.z; car.yaw = Math.atan2(PP.dx, PP.dz);
 }

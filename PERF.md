@@ -68,11 +68,29 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
   prop cull) is a **dithered cross-fade** (`AF.world.fade`, 0.3 s, shared `uFadeK` uniform, `fadeIn`/`fadeOut` material
   variants with `discard` only in those variants). Do not toggle `.visible` directly for those meshes; call the fade.
 - Fade programs are precompiled (`AF.world.fade.warm()`) so the first swap never hitches.
+- While `AF.stream.loading` (boot preload, travel veil) every swap is instant: nothing is on screen to fade.
 
-## 5. Streaming (locked)
-- Pending clusters are ranked by distance to the camera **and** to a 1.5 s velocity-predicted point (planes).
-- Budget per frame is small (1.5 ms when idle slots run); the rest runs in idle slots of the fps cap (≤ 60 % of a display
-  interval, max 10 ms desktop / 6 ms phone).
+## 5. Streaming (locked) — one engine: `01-stream.js` (`AF.stream`)
+- Every system that builds content after boot registers once: `AF.stream.register(name, { work(ms), near(), gen, order })`
+  (city regions, outland quadtree, flora, farms, sites, wayside, roads, shore). `work` runs in idle slots of the fps cap;
+  `near()` says whether the current view still misses something; `gen: true` = one-time content generation.
+- **One LOD table**: every display range lives in `TIER` (03-render: regLod, farLod, lod, propCull, outland, flora) and is
+  published as `AF.LOD` (x view distance). Systems read `AF.LOD`, never their own tier switch.
+- **Load ahead of display**: every system loads `AF.LOD.prefetch` (1.3) x its display range, so an LOD change is always a
+  dithered fade of something already resident. The outland quadtree builds the whole wanted subtree (all levels, nearest
+  first) inside the prefetch radius instead of descending one level per build + fade.
+- One shared look-ahead `AF.stream.ahead` (2.5 s of camera velocity, capped at 400 m; or `AF.stream.focus` = the fly-to
+  destination) ranks every streamer's queue.
+- **Boot preload** (`AF.stream.preload`, behind the loader, not in `?test`): every `gen` system finishes (no prop is ever added
+  to a tile on screen later), the opening view streams in, then `AF.stream.warm()` compiles every program (~8-12 s extra
+  boot). `AF.preloaded` / the `preloaded` event mark the end; harnesses that measure play should wait for it.
+- **Travel** (`AF.stream.travel({ label, go })`, map walk-to, ferry skip): veil (the loader), move, pump all systems with
+  ~60 ms per frame until `AF.stream.near()` is empty for 3 frames, warm, reveal. Island / range arrivals 0.5-1.5 s.
+- **Shader warm-up** compiles against the post chain's scene target (linear, untoned = different programs from the canvas),
+  for both night-light-pool variants, plus one throw-away shadow caster per custom depth material. A 40 s flight over city,
+  range, farms and island now compiles 7 new programs (was 45 after the old ready-time compile).
+- City budget per frame is small (1.5 ms when idle slots run); the rest runs in idle slots of the fps cap (<= 60 % of a
+  display interval, max 10 ms desktop / 6 ms phone).
 - **Partial reveal**: a pending cluster within view range shows each region as soon as it is meshed and hides that
   region's slice of the merged 1 m copy (geometry groups + an invisible material); the cluster only pays one extra draw
   per slice while half-loaded. `meshRegionG` must keep `hid: cl.lvl === 1 && !cl.part`.
@@ -99,12 +117,15 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
 - Lights for idle-built content must be registered at build time: night light pools snapshot `AF.lights` once.
 
 ## 5c. Traffic, walkers, airport (locked)
+- Every vehicle runs at `AF.vehicles.SPEED_K` (0.82) of its rated speed (player cars/bikes, AI and rural traffic, jet skis);
+  planes fly at 0.85 of their rated top speed and need 1.25x stall to rotate (1.45x for a hands-off lift-off).
 - `51-traffic.js`: lane graph (nodes split at crossings, directed lanes, sampled connectors), intrusive per-lane queues,
   persistent junction ownership, fixed 15 Hz step with render interpolation; full rate within 240 m, 1/4 beyond in
   view, 1/8 off screen. Was 0.4–1.2 ms/frame, now 0.09–0.19 ms. Add drivers with `AF.vehicles.addRoute` (gated by
   `activeRadius`) and parked cars with `AF.vehicles.placeParked` (merged static, promoted to a car on use).
 - `54-walkers.js`: `AF.walkers.addPath(name, points, opts)` — all path pedestrians (airport, island, outland) share four
-  instanced draws, 512-actor cap, inactive paths freeze, limbs at 5 Hz beyond 60 m.
+  instanced draws, 512-actor cap, inactive paths freeze, limbs at 5 Hz beyond 60 m. `look.pose` 'dance' / 'ride' poses
+  (island party, jet-ski riders) use the same batches.
 - Airport: fenced perimeter (security is the only walk-in route), parked cars are merged props, drop-off routes and
   passenger/staff paths gate at 350 m; the busy 600 s timetable (4 flights) runs only within 900 m, else the light
   480 s timetable. Airport hooks ≈ 0.17 ms near, < 0.02 ms elsewhere.
@@ -139,6 +160,9 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
   Rock is a supported stepped outcrop (lions rest on the sampled surface).
 - Airfield: terminal/forecourt/jet bridges are voxels + static props (zero extra draws); AI traffic (`53-airtraffic.js`)
   is five InstancedMeshes, frustum-culled by instance bounds, hidden when nothing is within 2 km, zero per-frame allocation
+- Serena Isle (`44-island.js`): party stage, dance floor, bonfire, volleyball, umbrellas, raft, hire hut and runway paint are
+  merged outland props (zero extra draws); dancers / bathers / riders are path walkers; all seven jet skis (4 rideable, 3 AI)
+  are one InstancedMesh hidden beyond ~500 m of the island; four tier-pooled lights (party x2, bonfire, hire).
 - Self-test `voxel: one LOD copy per region on screen` guards §4/§5; `tools/lod-check.js` (`afLodCheck`) checks a live page.
 
 ## 6. Phone profile (`AF.MOBILE`)
