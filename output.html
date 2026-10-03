@@ -2520,6 +2520,12 @@ try {
   R.toneMappingExposure = 1.0;
   R.shadowMap.enabled = true;
   R.shadowMap.type = THREE.PCFSoftShadowMap;
+  // shadow quality (menu): off / low (near map only, <= 1024, Standard cadence) / high (tier default); phones default to low
+  AF.shadowQ = (() => {
+    const SQ = ['off', 'low', 'high'], q = AF.Q.get('shadows'); if (SQ.includes(q)) return q;
+    if (!AF.TEST && !AF.SHOT) try { const v = localStorage.getItem('portSolace.shadows'); if (SQ.includes(v)) return v; } catch (e) {}
+    return AF.MOBILE ? 'low' : 'high';
+  })();
   AF.maxAniso = R.capabilities.getMaxAnisotropy();
 
   const S = AF.scene = new THREE.Scene();
@@ -2531,7 +2537,7 @@ try {
 
   // Baseline lights — the atmosphere part (60-atmos.js) takes these over (AF.sun, AF.hemi, AF.amb) and drives them.
   const sun = AF.sun = new THREE.DirectionalLight(0xfff0d8, 2.6);
-  sun.position.set(120, 180, 80); sun.castShadow = true;
+  sun.position.set(120, 180, 80); sun.castShadow = AF.shadowQ !== 'off';
   sun.shadow.mapSize.set(AF.MOBILE ? 1024 : 4096, AF.MOBILE ? 1024 : 4096);
   const sc = sun.shadow.camera; sc.left = -140; sc.right = 140; sc.top = 140; sc.bottom = -140; sc.near = 1; sc.far = 900;
   sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.06;
@@ -2558,7 +2564,7 @@ try {
       r = AF.lerp(rs, Math.min(AF.shadowRadius, AF.GFX.lite || AF.GFX.tier === 'low' ? 80 : 110), k);   // beyond: the far cascade (similar texel size from the air)
       fx = AF.lerp(cxs, fx, k); fz = AF.lerp(czs, fz, k);
       r = Math.round(r / 4) * 4;
-    } else if (AF.MOBILE) r = Math.min(r, alt < 30 ? 36 : 72);   // phones: a small near map (fewer casters, sharper texels)
+    } else if (AF.MOBILE || AF.shadowQ === 'low') r = Math.min(r, alt < 30 ? (AF.MOBILE ? 30 : 36) : 72);   // phones / Low: a small near map (fewer casters, sharper texels)
     AF.shadowNear.r = r; AF.shadowNear.cx = fx; AF.shadowNear.cz = fz; AF.shadowNear.k = far ? AF.smooth(12, 60, alt) : 0;
     const fy = AF.shadowFocus.y || 0;
     if (sc.right !== r || sc.far !== 400 + r + 60) { sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.far = 400 + r + 60; sc.updateProjectionMatrix(); sun.shadow.bias = -0.36 / (sc.far - sc.near); }
@@ -2667,6 +2673,7 @@ try {
   const shadowView = AF.shadowView = new THREE.Camera(); shadowView.layers.enable(1);
   const smRender = R.shadowMap.render.bind(R.shadowMap);
   R.shadowMap.render = (lights, scene, camera) => { if (scene !== S) return smRender(lights, scene, camera); shadowView.layers.mask = camera.layers.mask | 2; return smRender(lights, scene, shadowView); };
+  const lastSF = { x: 0, z: 0 };
   const frame = (dt) => {
     if (graphicsReset) return;
     AF.clock.dt = dt; AF.clock.t += dt; AF.clock.frame++;
@@ -2675,9 +2682,12 @@ try {
       catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (AF.MOBILE) AF.reportError(e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
     }
     // near map refresh in Hz, not frames: at the 30 fps cap High + Balanced refresh every frame, Standard + Low every 2nd
-    const base = AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' && !AF.GFX.lite ? 2 : 3;
+    const base = AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' && !AF.GFX.lite && AF.shadowQ !== 'low' ? 2 : 3;
     const every = AF.SHOT || AF.TEST ? 1 : (AF.frameStats && AF.frameStats.capped && AF.fpsCap <= 30 ? Math.ceil(base / 2) : base) * (AF.shadowNear.k > 0.8 ? 2 : 1);
-    if (AF.clock.frame % every === 0 || AF.shadowDirty) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
+    // a moving subject (car, plane, runner) must never see its own stale shadow: that lag read as jitter on phones
+    const sf = AF.shadowFocus, moved = Math.abs(sf.x - lastSF.x) + Math.abs(sf.z - lastSF.z) > 0.05 && AF.mode !== 'aerial' && AF.mode !== 'cine';
+    lastSF.x = sf.x; lastSF.z = sf.z;
+    if (AF.shadowQ !== 'off' && (moved || AF.clock.frame % every === 0 || AF.shadowDirty)) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
     try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
   };
@@ -2884,9 +2894,10 @@ try {
     if (G.cinema) G.scale = 1;
     const pr = AF.basePR() * G.scale; if (Math.abs(R.getPixelRatio() - pr) > 1e-3) { R.setPixelRatio(pr); if (AF.ready) AF.resize(); }
     if (AF.ready) { try { sharpenTextures(); } catch (e) { AF.warnOnce('aniso', e); } }
-    if (sun && sun.shadow.mapSize.x !== T.near) { sun.shadow.mapSize.set(T.near, T.near); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
+    const nearSize = AF.shadowQ === 'low' ? Math.min(T.near, 1024) : T.near;
+    if (sun && sun.shadow.mapSize.x !== nearSize) { sun.shadow.mapSize.set(nearSize, nearSize); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
     U.uPatK.value = T.pat; U.uWinK.value = T.win;
-    U.uShadowFast.value = !G.cinema && (AF.MOBILE || G.tier === 'low' || G.lite) ? 1 : 0;
+    U.uShadowFast.value = !G.cinema && (AF.MOBILE || G.tier === 'low' || G.lite || AF.shadowQ === 'low') ? 1 : 0;
     if (AF.gfx.far) AF.gfx.far.resize(T.far, T.farR);
   };
   G.onChange(applyTier);
@@ -2922,7 +2933,7 @@ try {
   // A second, wide sun depth map (±farR m) rendered by R1 from the static world only (region base + far-LOD meshes), refreshed when
   // the sun turns > 0.2° or the view centre moves > 32 m (never per frame). The voxel shader blends three's near map into it.
   {
-    const F = AF.gfx.far = { on: !AF.MOBILE && !AF.Q.has('nofar'), size: 0, R: 380, rt: null, renders: 0, ms: 0, dir: new THREE.Vector3(), cx: 1e9, cz: 1e9, dirty: true, frameN: 0 };
+    const F = AF.gfx.far = { on: !AF.MOBILE && !AF.Q.has('nofar') && AF.shadowQ === 'high', size: 0, R: 380, rt: null, renders: 0, ms: 0, dir: new THREE.Vector3(), cx: 1e9, cz: 1e9, dirty: true, frameN: 0 };
     const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.BackSide });
     const fcam = F.cam = new THREE.OrthographicCamera(-380, 380, 380, -380, 1, 1600); fcam.layers.enable(1);
     const fscene = new THREE.Scene(); fscene.overrideMaterial = depthMat; fscene.matrixWorldAutoUpdate = false;
@@ -2976,6 +2987,13 @@ try {
     AF.on('ready', () => { try { F.update(true); } catch (e) { AF.warnOnce('far shadow failed', e); } });
   }
   applyTier();
+  AF.gfx.setShadows = (q) => {
+    if (!['off', 'low', 'high'].includes(q) || q === AF.shadowQ) return;
+    AF.shadowQ = q; try { localStorage.setItem('portSolace.shadows', q); } catch (e) {}
+    AF.sun.castShadow = q !== 'off';
+    const F = AF.gfx.far; F.on = q === 'high' && !AF.MOBILE && !AF.Q.has('nofar'); F.dirty = true; if (!F.on) U.uFarOn.value = 0;
+    applyTier();
+  };
   AF.on('ready', () => { try { sharpenTextures(); } catch (e) { AF.warnOnce('aniso', e); } });
 
   // ---------------------------------------------------------------- environment reflections (PMREM of R2's AF.sky.envScene; analytic fallback)
@@ -3540,6 +3558,15 @@ AF.PLAN = (() => {
       { name: 'Coast Road', w: 10, surface: 'asphalt', points: [[-660, 0], [-820, -10], [-1000, -40]], heights: [0, 5, 10] },
       { name: 'Eastwood Road', w: 10, surface: 'asphalt', points: [[460, 0], [700, -40], [980, -120]], heights: [0, 10, 19] },
       { name: 'Lake Road', w: 10, surface: 'gravel', points: [[258, -284], [258, -300], [230, -360], [160, -420], [50, -480], [-40, -560], [-40, -590]], heights: [30, 40, 44, 38, 23, 22, 23] },
+      { name: 'West Coast Drive', w: 10, surface: 'asphalt', points: [[-1000, -40], [-1210, -40], [-1220, -220], [-1180, -280]], heights: [10, 9, 7, 9] },
+      { name: 'Beach Lane', w: 10, surface: 'gravel', points: [[-1210, -40], [-1210, 60], [-1200, 120], [-1150, 164]], heights: [9, 9, 8, 7] },
+      { name: 'Alder Lane', w: 10, surface: 'gravel', points: [[-820, -10], [-855, -85], [-915, -108], [-974, -110], [-1020, -120], [-1100, -155], [-1170, -150]], heights: [5, 7, 9, 10, 10, 11, 10] },
+      { name: 'Foxglove Lane', w: 10, surface: 'gravel', points: [[-1100, -155], [-1140, -205], [-1145, -260], [-1180, -280]], heights: [11, 10, 10, 9] },
+      { name: 'Mill Lane', w: 10, surface: 'gravel', points: [[-820, -10], [-865, 0], [-880, 50], [-980, 50], [-1040, 70], [-1138, 70], [-1200, 120]], heights: [5, 6, 8, 10, 11, 10, 8] },
+      { name: 'Eastwood Loop', w: 10, surface: 'asphalt', points: [[700, -40], [720, 10], [820, 20], [970, 0], [1020, -60], [980, -120]], heights: [10, 15, 17, 14, 17, 19] },
+      { name: 'Mirror Lane', w: 10, surface: 'gravel', points: [[700, -40], [730, -90], [750, -130], [800, -120], [920, -115]], heights: [10, 14, 15, 14, 16] },
+      { name: 'Ochre Trail', w: 10, surface: 'gravel', points: [[820, 20], [840, 80], [920, 110], [990, 150]], heights: [17, 16, 15, 13] },
+      { name: 'Birch Lane', w: 10, surface: 'gravel', points: [[920, -115], [940, -180], [960, -250]], heights: [16, 19, 18] },
     ],
   };
   P.west = {
@@ -3594,9 +3621,10 @@ AF.PLAN = (() => {
 try {
 const W = AF.W, P = AF.PLAN.world, smooth = AF.smooth, clamp = AF.clamp, noise = AF.noise2;
 const O = AF.outland = { bounds: P.bounds, play: P.play, props: [], pads: [], edgeReady: false };
-const tiles = new Map(), edges = new Map(), segments = [];
+const tiles = new Map(), edges = new Map(), segments = [], roadGrid = new Map();
 const hex = [AF.PAL.hex[AF.col('grass')], 0x5d8a37, 0x6f797c, 0xf5f8f9, 0xcabe9f, 0xa19b70, 0x85916b, 0x929078, 0x807363, 0x48573d, 0x4a4a4f, 0xe8dfb5, 0xada084, 0x948166, 0x536455,
-  0x88a049, 0x7da646, 0x566467, 0x807e73, 0x414d51, 0x5e574c, 0xb9ae91, 0xd4c5a6, 0x557a34, 0x7a745e, 0x8b816b, 0x8e8862, 0x747e5c, 0x867c6b];
+  0x88a049, 0x7da646, 0x566467, 0x807e73, 0x414d51, 0x5e574c, 0xb9ae91, 0xd4c5a6, 0x557a34, 0x7a745e, 0x8b816b, 0x8e8862, 0x747e5c, 0x867c6b,
+  0xc8ac72, 0xd9bf87, 0xb29668, 0xc9a64c, 0xb18e3c];
 const pal = hex.map((value) => AF.col(value, { jitter: 0.9, edge: 0, pat: 'none' }));
 const waters = O.waters = [P.lake, { name: 'Mirror Lake', cx: 828, cz: -198, rx: 64, rz: 35, waterY: 13 }, { name: 'Westmoor Pond', cx: -1040, cz: -178, rx: 17, rz: 12, waterY: 8 }, { name: 'Mill Pond', cx: -912, cz: 92, rx: 23, rz: 14, waterY: 6 }];
 function waterE(x, z, lake) { return Math.hypot((x - lake.cx) / lake.rx, (z - lake.cz) / lake.rz) + (noise(x * 0.045 + 2, z * 0.045) - 0.5) * 0.08; }
@@ -3618,6 +3646,7 @@ function ridges(x, z) {
   return sum / 1.71;
 }
 O.coastX = (z, east = false) => east ? 1090 + Math.sin(z * 0.012) * 16 + (noise(z * 0.022 + 19, 6) - 0.5) * 38 : -1285 + Math.sin(z * 0.009) * 18 + (noise(z * 0.016, 3) - 0.5) * 28;
+O.dryWeight = (x, z) => smooth(610, 740, x + (noise(x * 0.015, z * 0.015 + 51) - 0.5) * 70) * smooth(-100, 5, z + (noise(x * 0.012 + 29, z * 0.012) - 0.5) * 60) * (1 - smooth(1060, 1140, x)) * (1 - smooth(240, 300, z));
 function islandE(x, z) {
   const isle = P.island, dx = (x - isle.cx) / isle.rx, dz = (z - isle.cz) / isle.rz;
   return Math.hypot(dx, dz) + (noise(x * 0.018 + 20, z * 0.018) - 0.5) * 0.13
@@ -3655,6 +3684,10 @@ function raw(x, z) {
     farmAt(x, z); height += (1 - smooth(0.7, 2.4, fieldD)) * 0.75;
     if (laneD < 3.5) height -= (1 - smooth(2, 3.5, laneD)) * 0.35;
   }
+  if (x > 610 && z > -100) {
+    const dry = O.dryWeight(x, z), mesa = smooth(0.57, 0.73, noise(x * 0.014 + 64, z * 0.014 - 12));
+    height = AF.lerp(height, 9 + noise(x * 0.007 + 7, z * 0.007) * 7 + mesa * 7, dry);
+  }
   for (const lake of waters) {
     if (Math.abs(x - lake.cx) > lake.rx * 1.4 || Math.abs(z - lake.cz) > lake.rz * 1.4) continue;
     const radius = waterE(x, z, lake);
@@ -3691,13 +3724,16 @@ function edge(x, z) {
   return height;
 }
 let roadD = Infinity, roadY = 0, roadS = 0, roadKind = 0;
-function roadAt(x, z) {
-  roadD = Infinity;
-  for (const segment of segments) {
+function roadAt(x, z, brute = false) {
+  roadD = Infinity; let nearest = Infinity;
+  const candidates = brute ? segments : roadGrid.get(Math.floor(x / 64) * 10000 + Math.floor(z / 64));
+  if (!candidates) return;
+  for (const segment of candidates) {
     const along = clamp(((x - segment.x) * segment.dx + (z - segment.z) * segment.dz) / segment.len2, 0, 1);
-    const distance = Math.hypot(x - segment.x - segment.dx * along, z - segment.z - segment.dz * along);
-    if (distance < roadD) { roadD = distance; roadY = AF.lerp(segment.y0, segment.y1, along); roadS = segment.acc + Math.sqrt(segment.len2) * along; roadKind = segment.kind; }
+    const dx = x - segment.x - segment.dx * along, dz = z - segment.z - segment.dz * along, distance = dx * dx + dz * dz;
+    if (distance < nearest) { nearest = distance; roadY = AF.lerp(segment.y0, segment.y1, along); roadS = segment.acc + segment.length * along; roadKind = segment.kind; }
   }
+  roadD = Math.sqrt(nearest);
 }
 O.h = (x, z) => {
   if (W.col(x, z) >= 0) return W.H[W.col(x, z)] * 0.25;
@@ -3726,9 +3762,14 @@ function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
   if (z <= 300) { roadAt(x, z); if (roadD < 5) return roadKind ? 12 : roadD < 0.35 && roadS % 10 < 4 ? 11 : 10; }
   const patch = noise(x * 0.035 + 11, z * 0.035 - 4), tone = patch < 0.38 ? 0 : patch < 0.66 ? 1 : 2;
   if (height < -1.25) return 14;
+  for (const pad of O.pads) if (pad.kind === 'hamlet' && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) {
+    if (Math.abs(x - pad.x) < 2 || Math.abs(z - pad.z) < 2) return 12;
+    return O.dryWeight(x, z) > 0.5 ? [29, 30, 31][tone] : patch < 0.55 ? 23 : 15;
+  }
   if (z > 300) { const strip = P.island.airstrip; if (x >= strip.x0 && x <= strip.x1 && Math.abs(z - strip.z) < strip.w / 2) return 6; return islandE(x, z) > 0.78 ? 4 : height > 28 ? 2 : 0; }
   const inland = Math.min(O.coastZ(x) - z, x - O.coastX(z), O.coastX(z, true) - x);
   if (inland < 19) return x < -660 ? [21, 4, 22][tone] : [17, 2, 18][tone];
+  if (x > 610 && z > -100 && patch < O.dryWeight(x, z)) return [29, 30, 31][tone];
   if (z < -300) {
     const snowline = 185 + (noise(x * 0.017 - 9, z * 0.017) - 0.5) * 24;
     if (height > snowline && slope < 0.28 && patch > 0.45) return 3;
@@ -3741,23 +3782,50 @@ function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
     farmAt(x, z);
     if (laneD < 2.3) return 12;
     if (fieldD < 1.6) return 9;
-    return fieldId < 0.3 ? step > 1 ? 8 : fieldRow ? 8 : 28 : fieldId < 0.58 ? step > 1 ? 5 : fieldRow ? 5 : 26 : fieldId < 0.8 ? step > 1 ? 6 : fieldRow ? 6 : 27 : [15, 0, 16][tone];
+    return fieldId < 0.3 ? step > 1 ? 32 : fieldRow ? 32 : 33 : fieldId < 0.58 ? step > 1 ? 5 : fieldRow ? 5 : 26 : fieldId < 0.8 ? step > 1 ? 6 : fieldRow ? 6 : 27 : [15, 0, 16][tone];
   }
   return noise(x * 0.012 + 31, z * 0.012) > 0.6 ? [15, 0, 16][tone] : [24, 13, 25][tone];
 }
 O.colTop = (x, z, height, slope, step) => pal[colorIndex(x, z, height, slope, step)];
 O.colSide = (x, z, height = O.h(x, z)) => pal[height > 70 ? ((Math.floor(height / 12 + noise(x * 0.04, z * 0.04)) % 3 + 3) % 3 === 0 ? 19 : 20) : 8];
 O.colorAt = (x, z) => hex[colorIndex(x, z)];
-O.biome = (x, z) => O.h(x, z) < -1.25 ? 'sea' : z > 300 ? 'island' : z < -300 ? Math.abs(x + 40) < 110 && z > -710 ? 'valley' : 'range' : x < -660 ? 'farmland' : 'forest';
+O.biome = (x, z) => O.h(x, z) < -1.25 ? 'sea' : z > 300 ? 'island' : z < -300 ? Math.abs(x + 40) < 110 && z > -710 ? 'valley' : 'range' : x < -660 ? 'farmland' : O.dryWeight(x, z) > 0.5 ? 'desert' : 'forest';
 O.waterY = (x, z) => { for (const lake of waters) if (Math.abs(x - lake.cx) <= lake.rx * 1.08 && Math.abs(z - lake.cz) <= lake.rz * 1.08 && waterE(x, z, lake) <= 1.04) return lake.waterY; return O.h(x, z) < -1.25 ? -1.25 : null; };
 O.forestDensity = (x, z) => {
   if (z > 300 || O.h(x, z) < 3 || O.h(x, z) > 120 || x < -660 && z > -300) return 0;
   roadAt(x, z); if (roadD < 14 || O.waterY(x, z) !== null) return 0;
-  return smooth(0.25, 0.8, noise(x * 0.015 + 30, z * 0.015)) * (1 - smooth(78, 118, O.h(x, z))) * 0.85;
+  return smooth(0.25, 0.8, noise(x * 0.015 + 30, z * 0.015)) * (1 - smooth(78, 118, O.h(x, z))) * 0.85 * (1 - O.dryWeight(x, z));
 };
 O.roadDistance = (x, z) => { roadAt(x, z); return roadD; };
 O.fieldEdge = (x, z) => { farmAt(x, z); return fieldD; };
 O.fieldMeadow = (x, z) => { farmAt(x, z); return fieldId >= 0.8; };
+O.fieldWheat = (x, z) => { farmAt(x, z); return x < -660 && z > -300 && z < O.coastZ(x) - 30 && fieldId < 0.3 && fieldD > 7 && laneD > 7; };
+AF.test('outland: road grid matches brute force within sixteen metres', () => {
+  let checked = 0, worst = 0;
+  for (const segment of segments) for (let index = 0; index < 32; index++) {
+    const along = AF.hash2(index, segment.x), side = (AF.hash2(index + 73, segment.z) * 2 - 1) * 20;
+    const x = segment.x + segment.dx * along - segment.dz / segment.length * side, z = segment.z + segment.dz * along + segment.dx / segment.length * side;
+    roadAt(x, z, true); const exact = roadD, height = roadY, kind = roadKind, stripe = roadS;
+    roadAt(x, z);
+    if (exact <= 16) { checked++; worst = Math.max(worst, Math.abs(exact - roadD), Math.abs(height - roadY), Math.abs(stripe - roadS), kind === roadKind ? 0 : 1); }
+    else if (roadD < 16) worst = Infinity;
+  }
+  return { ok: checked > 500 && worst < 0.000001, info: checked + ' samples, worst error ' + worst };
+});
+AF.test('outland: dry scrub blends continuously into Eastwood', () => {
+  let jump = 0;
+  for (let x = 600; x < 1080; x += 2) for (let z = -100; z < 250; z += 10) jump = Math.max(jump, Math.abs(O.dryWeight(x, z) - O.dryWeight(x + 0.25, z)));
+  return { ok: O.biome(940, 80) === 'desert' && O.biome(700, -150) === 'forest' && jump < 0.02, info: 'maximum blend step ' + jump };
+});
+AF.test('outland: new lanes avoid water and retain bounded grades', () => {
+  let water = 0, city = 0, grade = 0, checked = 0;
+  for (const road of P.roads.slice(3)) for (let index = 1; index < road.points.length; index++) {
+    const start = road.points[index - 1], end = road.points[index], length = Math.hypot(end[0] - start[0], end[1] - start[1]), steps = Math.ceil(length / 8);
+    grade = Math.max(grade, Math.abs(road.heights[index] - road.heights[index - 1]) / length);
+    for (let sample = 0; sample <= steps; sample++) { const x = AF.lerp(start[0], end[0], sample / steps), z = AF.lerp(start[1], end[1], sample / steps); checked++; if (O.waterY(x, z) !== null) water++; if (W.col(x, z) >= 0) city++; }
+  }
+  return { ok: !water && !city && grade <= 0.120001, info: checked + ' samples, water/city ' + water + '/' + city + ', grade ' + grade };
+});
 AF.test('outland: south coast has coves and anchored city joins', () => {
   let lo = Infinity, hi = -Infinity;
   for (let distance = 80; distance < 550; distance += 10) { const value = O.coastZ(W.X0 - distance); lo = Math.min(lo, value); hi = Math.max(hi, value); }
@@ -3766,20 +3834,26 @@ AF.test('outland: south coast has coves and anchored city joins', () => {
 });
 O.cacheStats = () => ({ tiles: tiles.size, bytes: tiles.size * 2048, edges: edges.size });
 AF.onBuild('outland-boundary', 496, () => {
-  O.edgeReady = true; tiles.clear(); edges.clear(); segments.length = 0;
+  O.edgeReady = true; tiles.clear(); edges.clear(); segments.length = 0; roadGrid.clear();
   for (const road of P.roads) {
     let acc = 0;
-    road.heights[0] = W.groundY(road.points[0][0], road.points[0][1]);
+    if (W.col(road.points[0][0], road.points[0][1]) >= 0) road.heights[0] = W.groundY(road.points[0][0], road.points[0][1]);
     for (let index = 1; index < road.points.length; index++) {
       const start = road.points[index - 1], end = road.points[index], dx = end[0] - start[0], dz = end[1] - start[1], len2 = dx * dx + dz * dz;
       road.heights[index] = clamp(road.heights[index], road.heights[index - 1] - Math.sqrt(len2) * 0.12, road.heights[index - 1] + Math.sqrt(len2) * 0.12);
-      segments.push({ x: start[0], z: start[1], dx, dz, len2, y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.surface === 'gravel' ? 1 : 0 }); acc += Math.sqrt(len2);
+      segments.push({ x: start[0], z: start[1], dx, dz, len2, length: Math.sqrt(len2), y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.surface === 'gravel' ? 1 : 0 }); acc += Math.sqrt(len2);
     }
+  }
+  for (const segment of segments) {
+    const x0 = Math.floor((Math.min(segment.x, segment.x + segment.dx) - 16) / 64), x1 = Math.floor((Math.max(segment.x, segment.x + segment.dx) + 16) / 64);
+    const z0 = Math.floor((Math.min(segment.z, segment.z + segment.dz) - 16) / 64), z1 = Math.floor((Math.max(segment.z, segment.z + segment.dz) + 16) / 64);
+    for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) { const key = ix * 10000 + iz; let bucket = roadGrid.get(key); if (!bucket) { bucket = []; roadGrid.set(key, bucket); } bucket.push(segment); }
   }
   tiles.clear();
 });
 for (const entry of [['Solace Range', 220, -780], ['Park Valley', -40, -440], ['Lake Tamsin', -40, -650], ['Westmoor', -1000, -100], ['Eastwood', 800, -160], ['Serena Isle', -60, 600]]) AF.addLabel(entry[0], entry[1], entry[2]);
 AF.addLabel('Mirror Lake', 828, -198);
+AF.addLabel('Ochre Flats', 930, 70);
 for (const road of P.roads) { const point = road.points[1]; AF.addLabel(road.name, point[0], point[1], 'street'); }
 } catch (e) { AF.partError('07-outland.js', e); }
 
@@ -18464,7 +18538,7 @@ try {
 try {
 const O=AF.outland,W=AF.W,hash=AF.hash2;
 const F=AF.flora={kinds:{},records:[],meshes:[],stats:{total:0,biomes:{},near:0,far:0,draws:0,triangles:0,workMs:0,maxSliceMs:0,generated:false}};
-const buckets=new Map(),batches=[],matrix=new THREE.Matrix4(),rotation=new THREE.Quaternion(),position=new THREE.Vector3(),scale=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
+const buckets=new Map(),batches=[],slots=[],matrix=new THREE.Matrix4(),rotation=new THREE.Quaternion(),position=new THREE.Vector3(),scale=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
 const frustum=new THREE.Frustum(),projection=new THREE.Matrix4(),sphere=new THREE.Sphere();
 const group=new THREE.Group();group.name='flora';AF.scene.add(group);
 const uniforms={floraEye:{value:AF.camera.position},floraNear:{value:160},floraFar:{value:800},floraShadow:{value:55}};
@@ -18472,16 +18546,20 @@ let generator=null,selection=null,lastX=Infinity,lastY=Infinity,lastZ=Infinity,l
 const palette=colors=>colors.map(hex=>AF.col(hex,{jitter:0.7,edge:0.15,solid:false,pat:'none'}));
 for(const spec of AF.land.treeSpecs)F.kinds[spec.id]={shape:spec.shape==='pine'||spec.shape==='cone'?1:0,palette:palette(spec.leaves),spec};
 F.kinds.palm={shape:2,palette:palette([0x36754e,0x53935c,0x275a42,0x74a567])};
-F.kinds.shrub={shape:0,palette:palette([0x477344,0x689452,0x365739,0x7b9e57]),scale:0.13};
+F.kinds.shrub={shape:5,palette:palette([0x477344,0x689452,0x365739,0x7b9e57])};
+F.kinds['dry-bush']={shape:5,palette:palette([0x8e955c,0xa5a46b,0x747b4f,0xb4ad7b])};
+F.kinds.cactus={shape:4,palette:palette([0x568864,0x73976b,0x3c6d50,0x96a579])};
 F.kinds.rock={shape:3,palette:palette([0x8a8c82,0xa3a296,0x6f756b,0xb2ac9d])};
 const blocked=(x,z)=>O.roadDistance(x,z)<14||O.waterY(x,z)!==null||O.pads.some(pad=>Math.abs(x-pad.x)<pad.rx+4&&Math.abs(z-pad.z)<pad.rz+4);
 F.add=(kind,x,z,opts={})=>{
  const design=F.kinds[kind];if(!design)throw new Error('Unknown flora kind: '+kind);
  if(!Number.isFinite(x)||!Number.isFinite(z)||!Number.isFinite(opts.scale??1)||(opts.scale??1)<=0||!Number.isFinite(opts.rot??0)||!Number.isFinite(opts.y??0))throw new Error('Invalid flora position/scale');
  if(O.roadDistance(x,z)<14||O.waterY(x,z)!==null)return null;
- if(opts.planted!==true&&(O.pads.some(pad=>Math.abs(x-pad.x)<pad.rx+4&&Math.abs(z-pad.z)<pad.rz+4)||O.biome(x,z)==='farmland'&&O.fieldEdge(x,z)>5))return null;
+ const beach=x<-660&&x-O.coastX(z)<55;
+ if(opts.planted!==true&&(O.pads.some(pad=>Math.abs(x-pad.x)<pad.rx+4&&Math.abs(z-pad.z)<pad.rz+4)||!beach&&O.biome(x,z)==='farmland'&&O.fieldEdge(x,z)>5&&!(design.shape===5&&O.fieldMeadow(x,z))))return null;
  const y=opts.y??(W.col(x,z)>=0?W.groundY(x,z):Math.round(O.h(x,z)*4)/4),biome=opts.biome??O.biome(x,z);
- const entry={kind,shape:design.shape,x,y,z,scale:(opts.scale??1)*(design.scale??1),rot:opts.rot??hash(x*4,z*4)*Math.PI*2,pal:design.palette,biome,planted:!!opts.planted};
+ const base=(opts.scale??1)*(design.scale??1),sx=base*(0.85+hash(x+109,z)*0.3),sy=base*(0.85+hash(x,z+211)*0.45);
+ const entry={kind,shape:design.shape,x,y,z,scale:base,sx,sy,rot:opts.rot??hash(x*4,z*4)*Math.PI*2,pal:design.palette,biome,planted:!!opts.planted,range:design.shape===5?145:hash(x+371,z+89)<0.28?0:300};
  const key=Math.floor(x/64)*10000+Math.floor(z/64);let bucket=buckets.get(key);if(!bucket){bucket=[];buckets.set(key,bucket);}bucket.push(entry);F.records.push(entry);
  F.stats.total++;F.stats.biomes[biome]=(F.stats.biomes[biome]??0)+1;revision++;
  if(opts.collide)entry.col=AF.addCollider(x-0.3,y,z-0.3,x+0.3,y+entry.scale*3,z+0.3,'flora-trunk');
@@ -18491,19 +18569,22 @@ F.scatter=(kind,{x0,z0,x1,z1,spacing=12,density=0.5,seed=44,...opts})=>{
  if(!(spacing>0)||!Number.isFinite(spacing)||![x0,z0,x1,z1,density].every(Number.isFinite))throw new Error('Invalid flora scatter');
  let count=0;for(let x=x0;x<x1;x+=spacing)for(let z=z0;z<z1;z+=spacing){if(hash(x+seed,z)>density)continue;const px=x+(hash(x,z+seed)-0.5)*spacing*0.7,pz=z+(hash(x+seed,z+7)-0.5)*spacing*0.7;if(F.add(kind,px,pz,opts))count++;}return count;
 };
-function palm(){
- const m=new AF.Model(25,32,25),bark=AF.col(0x786348,{jitter:0.6,edge:0.2}),leaves=F.kinds.palm.palette;
- for(let height=0;height<25;height++)m.box(12+Math.floor(height/12),height,12,13+Math.floor(height/12),height+1,13,bark);
- for(let branch=0;branch<8;branch++){const angle=branch*Math.PI/4;for(let length=0;length<11;length++){const x=14+Math.cos(angle)*length,z=12+Math.sin(angle)*length,y=27+Math.sin(length/11*Math.PI)*2-length*0.35;m.box(x-1,y,z-1,x+2,y+1,z+2,leaves[branch%4]);}}
- return {m,vs:0.4};
+function crown(shape,design){
+ const leaves=design.palette,bark=AF.col(shape===2?0x786348:0x594736,{jitter:0.5,pat:'none'}),m=new AF.Model(shape===2?24:20,shape===1?34:28,shape===2?24:20);
+ if(shape===0){m.box(9,0,9,11,13,11,bark);m.box(3,10,4,17,18,16,leaves[2]);m.box(1,14,6,19,21,14,leaves[0]);m.box(5,13,2,15,22,18,leaves[0]);m.box(4,21,5,16,24,15,leaves[1]);m.box(7,24,7,13,26,13,leaves[3]);}
+ else if(shape===1){m.box(9,0,9,11,30,11,bark);for(let layer=0;layer<5;layer++){const inset=2+layer;m.box(inset,6+layer*5,inset,20-inset,10+layer*5,20-inset,leaves[layer%4]);m.box(inset+2,10+layer*5,inset+2,18-inset,12+layer*5,18-inset,leaves[layer%4]);}}
+ else {m.box(11,0,11,13,14,13,bark);m.box(12,14,11,14,24,13,bark);m.box(3,24,10,21,25,14,leaves[0]);m.box(10,25,3,14,26,21,leaves[1]);m.box(6,25,6,18,27,18,leaves[2]);for(const edge of [3,18]){m.box(edge,22,10,edge+3,24,14,leaves[0]);m.box(10,23,edge,14,25,edge+3,leaves[1]);}}
+ return {m,vs:shape===1?0.5:shape===2?0.4:0.45};
 }
 function hull(shape,design){
  const leaf=design.palette[0],bark=AF.col(0x594736,{jitter:0.5,pat:'none'}),m=new AF.Model(12,20,12);
  if(shape===3){m.box(3,0,2,9,2,10,leaf);m.box(2,1,3,10,3,9,leaf);return{m,vs:0.5};}
+ if(shape===4){m.box(5,0,5,7,14,7,leaf);m.box(2,6,5,10,8,7,leaf);m.box(2,7,5,4,11,7,leaf);m.box(8,7,5,10,13,7,leaf);return{m,vs:0.3};}
+ if(shape===5){m.box(2,0,3,10,2,9,design.palette[2]);m.box(3,2,2,9,4,10,leaf);m.box(4,4,4,8,5,8,design.palette[1]);return{m,vs:0.3};}
  m.box(5,0,5,6,shape===2?16:13,6,bark);
- if(shape===1){for(let layer=0;layer<3;layer++){const inset=layer*2;m.box(inset+1,4+layer*5,inset+1,11-inset,9+layer*5,11-inset,leaf);}}
+ if(shape===1){m.box(1,5,1,11,12,11,leaf);m.box(3,12,3,9,19,9,leaf);}
  else if(shape===2){m.box(1,16,5,11,17,7,leaf);m.box(5,17,1,7,18,11,leaf);m.box(3,17,3,9,18,9,leaf);}
- else {m.box(2,6,2,10,13,10,leaf);m.box(3,5,3,9,15,9,leaf);}
+ else {m.box(2,6,2,10,14,10,leaf);}
  return{m,vs:shape===2?0.6:0.85};
 }
 function remap(geo,pal){const attr=geo.attributes.aPal,values=new Float32Array(attr.count),colors=pal.map(value=>AF.PAL.hex[value]);for(let index=0;index<values.length;index++){const value=attr.getX(index),slot=colors.indexOf(AF.PAL.hex[value]);values[index]=slot<0?value:-slot-1;}geo.setAttribute('aPal',new THREE.BufferAttribute(values,1));return geo;}
@@ -18511,50 +18592,68 @@ function material(lod){
  const mat=AF.mat.patchVoxel(AF.mat.voxelInst.clone(),'flora-'+lod),compile=mat.onBeforeCompile;
  mat.onBeforeCompile=(shader,renderer)=>{
   compile(shader,renderer);Object.assign(shader.uniforms,uniforms);
-  shader.vertexShader='attribute vec4 floraPalette; uniform vec3 floraEye; varying float floraDistance;\n'+shader.vertexShader;
-  shader.vertexShader=shader.vertexShader.replace('vec2 pUV =','float floraPal=aPal < -3.5 ? floraPalette.w : aPal < -2.5 ? floraPalette.z : aPal < -1.5 ? floraPalette.y : aPal < -0.5 ? floraPalette.x : aPal;\nvec2 pUV =').replace('mod(aPal,','mod(floraPal,').replace('floor(aPal /','floor(floraPal /').replace('#include <begin_vertex>','#include <begin_vertex>\nfloraDistance=distance((modelMatrix * instanceMatrix * vec4(0.,0.,0.,1.)).xyz,floraEye);');
-  shader.fragmentShader='uniform float floraNear; uniform float floraFar; varying float floraDistance;\n'+shader.fragmentShader;
-  shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\n{float floraD=fract(52.9829189*fract(dot(floor(gl_FragCoord.xy),vec2(0.06711056,0.00583715))));float floraN=1.-smoothstep(floraNear-16.,floraNear+16.,floraDistance);float floraF=1.-smoothstep(floraFar-55.,floraFar,floraDistance);if('+ (lod===0?'floraD>=min(floraN,floraF)':'floraD<floraN||floraD>=floraF') +')discard;}');
+  shader.vertexShader='attribute vec4 floraPalette; attribute float floraLimit; uniform vec3 floraEye; varying float floraDistance; varying float floraExtent;\n'+shader.vertexShader;
+  shader.vertexShader=shader.vertexShader.replace('vec2 pUV =','float floraPal=aPal < -3.5 ? floraPalette.w : aPal < -2.5 ? floraPalette.z : aPal < -1.5 ? floraPalette.y : aPal < -0.5 ? floraPalette.x : aPal;\nvec2 pUV =').replace('mod(aPal,','mod(floraPal,').replace('floor(aPal /','floor(floraPal /').replace('#include <begin_vertex>','#include <begin_vertex>\nfloraExtent=floraLimit;floraDistance=distance((modelMatrix * instanceMatrix * vec4(0.,0.,0.,1.)).xyz,floraEye);');
+  shader.fragmentShader='uniform float floraNear; uniform float floraFar; varying float floraDistance; varying float floraExtent;\n'+shader.fragmentShader;
+  shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\n{float floraD=fract(52.9829189*fract(dot(floor(gl_FragCoord.xy),vec2(0.06711056,0.00583715))));float floraN=1.-smoothstep(floraNear-16.,floraNear+16.,floraDistance);float floraEnd=min(floraFar,floraExtent);float floraF=1.-smoothstep(floraEnd-55.,floraEnd,floraDistance);if('+ (lod===0?'floraD>=min(floraN,floraF)':lod===1?'floraD<floraN||floraD>=floraF':'floraD>=floraF') +')discard;}');
  };
  mat.customProgramCacheKey=()=> 'flora-'+lod;return mat;
 }
 function* models(){
- const designs=[F.kinds['maple-orange'],F.kinds.pine,F.kinds.palm,F.kinds.rock],materials=[material(0),material(1)];
+ const designs=[F.kinds['maple-orange'],F.kinds.pine,F.kinds.palm,F.kinds.rock,F.kinds.cactus,F.kinds.shrub],materials=[material(0),material(1),material(2)];
  const depth=AF.mat.depthInst.clone();depth.onBeforeCompile=shader=>{Object.assign(shader.uniforms,uniforms);shader.vertexShader='uniform vec3 floraEye; varying float floraDistance;\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nfloraDistance=distance((modelMatrix * instanceMatrix * vec4(0.,0.,0.,1.)).xyz,floraEye);');shader.fragmentShader='uniform float floraShadow; varying float floraDistance;\n'+shader.fragmentShader;shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\nif(floraDistance>floraShadow)discard;');};depth.customProgramCacheKey=()=> 'flora-depth';
- for(let shape=0;shape<4;shape++){
-  const design=designs[shape],source=shape<2?{m:AF.land.makeTree(design.spec,44+shape,0.75).m,vs:0.75}:shape===2?palm():{m:AF.land.makeBoulder(44,4,true),vs:0.25},far=hull(shape,design);
+ for(let shape=0;shape<6;shape++){
+  const design=designs[shape],source=shape<3?crown(shape,design):hull(shape,design),far=hull(shape,design),single=shape===3||shape===5;
+  slots[shape]={near:null,far:null,single:null};
   yield;
   const geometry=remap(yield* AF.meshModelG(source.m,{vs:source.vs,flat:true}),design.palette);
   yield;
-  const farGeo=remap(yield* AF.meshModelG(far.m,{vs:far.vs,flat:true}),design.palette);
+  const farGeo=single?geometry:remap(yield* AF.meshModelG(far.m,{vs:far.vs,flat:true}),design.palette);
   yield;
   for(let lod=0;lod<2;lod++){
-   const geo=lod?farGeo:geometry,capacity=lod?6000:1400,pal=new THREE.InstancedBufferAttribute(new Float32Array(capacity*4),4);pal.setUsage(THREE.DynamicDrawUsage);geo.setAttribute('floraPalette',pal);
-   const mesh=new THREE.InstancedMesh(geo,materials[lod],capacity);mesh.name='flora-'+shape+'-'+lod;mesh.count=0;mesh.frustumCulled=false;mesh.castShadow=lod===0&&shape!==3;mesh.receiveShadow=true;mesh.customDepthMaterial=depth;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);group.add(mesh);F.meshes.push(mesh);batches.push({shape,lod,mesh,capacity,write:0});
+    if(single&&lod===1)continue;
+    const geo=lod?farGeo:geometry,capacity=lod?6000:2200,pal=new THREE.InstancedBufferAttribute(new Float32Array(capacity*4),4),limit=new THREE.InstancedBufferAttribute(new Float32Array(capacity),1);pal.setUsage(THREE.DynamicDrawUsage);limit.setUsage(THREE.DynamicDrawUsage);geo.setAttribute('floraPalette',pal);geo.setAttribute('floraLimit',limit);
+    const mesh=new THREE.InstancedMesh(geo,materials[single?2:lod],capacity);mesh.name='flora-'+shape+'-'+lod;mesh.count=0;mesh.frustumCulled=false;mesh.castShadow=lod===0&&!single;mesh.receiveShadow=true;mesh.customDepthMaterial=depth;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);group.add(mesh);F.meshes.push(mesh);const batch={shape,lod,mesh,capacity,write:0};batches.push(batch);slots[shape][single?'single':lod?'far':'near']=batch;
   }
   yield;
  }
 }
 function* generate(){
+ F.stats.phase='models';
  yield* models();
+ F.stats.phase='scatter';
  const choices=['maple-scarlet','maple-orange','maple-gold','elm-green','maple-turning','birch','oak'];
- for(let x=-1260;x<1080;x+=13){for(let z=-1150;z<270;z+=13){
-  const px=x+(hash(x,z+11)-0.5)*9,pz=z+(hash(x+13,z)-0.5)*9;
+ for(let x=-1280;x<1080;x+=7){for(let z=-1150;z<270;z+=7){
+  const px=x+(hash(x,z+11)-0.5)*5,pz=z+(hash(x+13,z)-0.5)*5;
   yield;
   if(W.col(px,pz)>=0||blocked(px,pz))continue;
   const biome=O.biome(px,pz),height=O.h(px,pz);if(height<3)continue;
   const slope=Math.max(Math.abs(O.h(px+4,pz)-O.h(px-4,pz)),Math.abs(O.h(px,pz+4)-O.h(px,pz-4)))/8;
-  const rnd=hash(x+991,z),density=biome==='farmland'?(O.fieldEdge(px,pz)<4.5?0.6:0):O.forestDensity(px,pz)*0.9+(height<78?0.035:0);
-  if(height<118&&slope<1.1&&rnd<density){const conifer=biome==='range'&&hash(x+91,z)>0.18;F.add(conifer?'pine':choices[Math.floor(hash(x,z+55)*choices.length)],px,pz,{scale:0.8+hash(x+4,z)*0.45,biome});}
+  const rnd=hash(x+991,z),beach=px<-660&&px-O.coastX(pz)<55;
+  if(beach){if(rnd<0.45)F.add('palm',px,pz,{scale:0.7+hash(x,z+83)*0.3,biome:'beach'});else if(rnd>0.8)F.add('shrub',px,pz,{scale:0.65,biome:'beach'});continue;}
+  if(biome==='desert'){if(rnd<0.13&&slope<0.6)F.add('cactus',px,pz,{scale:0.85+hash(x+4,z)*0.45,biome});else if(rnd<0.42)F.add('dry-bush',px,pz,{scale:0.6+hash(x,z+98)*0.7,biome});else if(rnd>0.91)F.add('rock',px,pz,{scale:0.35+hash(x,z+98)*0.5,biome});continue;}
+  const density=biome==='farmland'?(O.fieldEdge(px,pz)<4.5?0.68:0):O.forestDensity(px,pz)*0.9+(height<78?0.035:0);
+  if(biome==='farmland'&&O.fieldMeadow(px,pz)&&rnd<0.035&&slope<0.5){F.add('shrub',px,pz,{scale:0.6,biome});continue;}
+  if(height<118&&slope<1.1&&rnd<density){const conifer=biome==='range'&&hash(x+91,z)>0.18;F.add(biome==='farmland'&&rnd>0.32?'shrub':conifer?'pine':choices[Math.floor(hash(x,z+55)*choices.length)],px,pz,{scale:0.8+hash(x+4,z)*0.45,biome});}
+  else if(height<100&&slope<0.7&&biome!=='farmland'&&rnd<density+0.13)F.add('shrub',px,pz,{scale:0.65+hash(x,z+39)*0.4,biome});
   else if((biome==='range'&&height>48&&slope>0.35||biome==='forest')&&rnd>0.91)F.add('rock',px,pz,{scale:0.65+hash(x,z+98)*1.1,biome});
  }yield;}
+ F.stats.phase='island';
+ const isle=AF.PLAN.world.island;
+ for(let x=isle.cx-isle.rx;x<isle.cx+isle.rx;x+=14)for(let z=isle.cz-isle.rz;z<isle.cz+isle.rz;z+=14){
+  yield;
+  if(hash(x+47,z)>0.18||Math.abs(z-isle.airstrip.z)<20||blocked(x,z)||(x-isle.resort.x)**2+(z-isle.resort.z)**2<(isle.resort.r+8)**2)continue;
+  const height=O.h(x,z);if(height>3&&height<12)F.add('palm',x,z,{scale:0.7+hash(x,z+38)*0.25,biome:'island'});
+ }
  F.stats.generated=true;
 }
 function put(batch,entry){
  if(batch.write>=batch.capacity)return;const index=batch.write++,mesh=batch.mesh;
- position.set(entry.x,entry.y,entry.z);rotation.setFromAxisAngle(up,entry.rot);scale.setScalar(entry.scale);matrix.compose(position,rotation,scale);mesh.setMatrixAt(index,matrix);mesh.geometry.attributes.floraPalette.array.set(entry.pal,index*4);
+ position.set(entry.x,entry.y,entry.z);rotation.setFromAxisAngle(up,entry.rot);scale.set(entry.sx,entry.sy,entry.sx);matrix.compose(position,rotation,scale);mesh.setMatrixAt(index,matrix);mesh.geometry.attributes.floraPalette.array.set(entry.pal,index*4);mesh.geometry.attributes.floraLimit.array[index]=entry.range||uniforms.floraFar.value;
 }
+function upload(attr,count){attr.clearUpdateRanges();attr.addUpdateRange(0,Math.max(1,count)*attr.itemSize);attr.needsUpdate=true;}
 function* select(){
+ F.stats.phase='select';
  const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,near=AF.MOBILE||AF.GFX.tier==='low'?80:AF.GFX.lite?125:190,far=AF.MOBILE||AF.GFX.tier==='low'?480:AF.GFX.lite?720:880;
  uniforms.floraNear.value=near;uniforms.floraFar.value=far;uniforms.floraShadow.value=AF.MOBILE?25:55;
  AF.camera.updateMatrixWorld();projection.multiplyMatrices(AF.camera.projectionMatrix,AF.camera.matrixWorldInverse);frustum.setFromProjectionMatrix(projection);
@@ -18562,34 +18661,35 @@ function* select(){
  const radius=Math.ceil((far+64)/64),bx=Math.floor(cx/64),bz=Math.floor(cz/64);
  for(let ix=bx-radius;ix<=bx+radius;ix++)for(let iz=bz-radius;iz<=bz+radius;iz++){
   const bucket=buckets.get(ix*10000+iz);if(!bucket)continue;
-    for(const entry of bucket){const distance=Math.hypot(entry.x-cx,entry.y-cy,entry.z-cz);if(distance>far+64)continue;sphere.center.set(entry.x,entry.y+8*entry.scale,entry.z);sphere.radius=32+12*entry.scale;if(distance>80&&!frustum.intersectsSphere(sphere))continue;const offset=entry.shape*2;if(distance<near+48)put(batches[offset],entry);if(distance>near-48)put(batches[offset+1],entry);}
+    let processed=0;
+    for(const entry of bucket){if(++processed%16===0)yield;const dx=entry.x-cx,dy=entry.y-cy,dz=entry.z-cz,distance=dx*dx+dy*dy+dz*dz,range=entry.range?Math.min(entry.range,far):far;if(distance>range*range)continue;sphere.center.set(entry.x,entry.y+8*entry.sy,entry.z);sphere.radius=24+10*entry.sx;if(distance>6400&&!frustum.intersectsSphere(sphere))continue;const slot=slots[entry.shape];if(slot.single)put(slot.single,entry);else {if(distance<(near+32)**2)put(slot.near,entry);if(distance>(near-32)**2)put(slot.far,entry);}}
   yield;
  }
  F.stats.near=F.stats.far=F.stats.draws=F.stats.triangles=0;
- for(const batch of batches){const mesh=batch.mesh;mesh.count=batch.write;mesh.layers.set(mesh.count?0:31);mesh.instanceMatrix.needsUpdate=true;const attr=mesh.geometry.attributes.floraPalette;attr.clearUpdateRanges();attr.addUpdateRange(0,Math.max(1,mesh.count)*4);attr.needsUpdate=true;F.stats[batch.lod?'far':'near']+=mesh.count;if(mesh.count){F.stats.draws++;F.stats.triangles+=mesh.count*mesh.geometry.index.count/3;}}
+ for(const batch of batches){const mesh=batch.mesh;mesh.count=batch.write;mesh.layers.set(mesh.count?0:31);mesh.instanceMatrix.needsUpdate=true;upload(mesh.geometry.attributes.floraPalette,mesh.count);upload(mesh.geometry.attributes.floraLimit,mesh.count);F.stats[batch.lod?'far':'near']+=mesh.count;if(mesh.count){F.stats.draws++;F.stats.triangles+=mesh.count*mesh.geometry.index.count/3;}}
  lastX=cx;lastY=cy;lastZ=cz;lastQ.copy(AF.camera.quaternion);selected=revision;
 }
 const work=F.work=ms=>{
- if(!AF.ready)return false;const start=performance.now(),end=start+Math.min(ms,AF.MOBILE?2.5:4);
+ if(!AF.ready)return false;const start=performance.now(),end=start+Math.min(ms,AF.MOBILE?1.5:2);
  while(performance.now()<end){
   const slice=performance.now();
   if(!F.stats.generated){if(!generator)generator=generate();if(generator.next().done){generator=null;ready=true;}}
-    else {if(!selection&&(selected!==revision||Math.hypot(AF.camera.position.x-lastX,AF.camera.position.y-lastY,AF.camera.position.z-lastZ)>24||Math.abs(lastQ.dot(AF.camera.quaternion))<0.995))selection=select();if(!selection)break;if(selection.next().done)selection=null;}
-  F.stats.maxSliceMs=Math.max(F.stats.maxSliceMs,performance.now()-slice);
+    else {if(!selection&&(selected!==revision||(AF.camera.position.x-lastX)**2+(AF.camera.position.y-lastY)**2+(AF.camera.position.z-lastZ)**2>576||Math.abs(lastQ.dot(AF.camera.quaternion))<0.995))selection=select();if(!selection)break;if(selection.next().done)selection=null;}
+  const elapsed=performance.now()-slice;if(elapsed>F.stats.maxSliceMs){F.stats.maxSliceMs=elapsed;F.stats.maxSlicePhase=F.stats.phase;}
  }
- F.stats.workMs+=performance.now()-start;return !ready||!!selection||selected!==revision;
+ const elapsed=performance.now()-start;F.stats.workMs+=elapsed;F.stats.maxWorkMs=Math.max(F.stats.maxWorkMs??0,elapsed);return !ready||!!selection||selected!==revision;
 };
 F.settle=()=>{if(AF.outlandSites)AF.outlandSites.settle();while(work(6));};
 AF.onIdle('flora-build',work);
 AF.test('flora: biome populations and reusable palm/shrub API',()=>{
  F.settle();const counts={range:0,forest:0,farmland:0,valley:0};for(const entry of F.records)if(entry.kind!=='rock'&&counts[entry.biome]!==undefined)counts[entry.biome]++;
- return{ok:!!(counts.range>100&&counts.range<7000&&counts.forest>150&&counts.forest<4000&&counts.farmland>30&&counts.farmland<2000&&counts.valley>5&&F.kinds.palm&&F.kinds.shrub),info:JSON.stringify(counts)};
+ return{ok:!!(counts.range>100&&counts.range<13000&&counts.forest>150&&counts.forest<6000&&counts.farmland>30&&counts.farmland<2000&&counts.valley>5&&F.kinds.palm&&F.kinds.shrub&&F.kinds.cactus&&F.records.some(entry=>entry.sx!==entry.sy)),info:JSON.stringify(counts)};
 });
 AF.test('flora: natural trees avoid roads, water and crop interiors',()=>{
- F.settle();let bad=0,checked=0;for(const entry of F.records){if(entry.kind==='rock')continue;checked++;if(O.roadDistance(entry.x,entry.z)<14||O.waterY(entry.x,entry.z)!==null||!entry.planted&&entry.biome==='farmland'&&O.fieldEdge(entry.x,entry.z)>5)bad++;}return{ok:checked>300&&!bad,info:checked+' trees/shrubs, '+bad+' exclusions violated'};
+ F.settle();let bad=0,checked=0;for(const entry of F.records){if(entry.kind==='rock')continue;checked++;if(O.roadDistance(entry.x,entry.z)<14||O.waterY(entry.x,entry.z)!==null||!entry.planted&&entry.biome==='farmland'&&O.fieldEdge(entry.x,entry.z)>5&&!(entry.shape===5&&O.fieldMeadow(entry.x,entry.z)))bad++;}return{ok:checked>300&&!bad,info:checked+' trees/shrubs, '+bad+' exclusions violated'};
 });
-AF.test('flora: eight shared LOD draws with bounded triangle load',()=>{
- F.settle();return{ok:F.meshes.length===8&&F.stats.draws<=8&&F.stats.triangles<350000&&F.meshes.every(mesh=>mesh.frustumCulled===false&&mesh.material.customProgramCacheKey().startsWith('flora-')),info:F.stats.draws+' draws, '+F.stats.triangles+' triangles'};
+AF.test('flora: ten shared draws for six shapes with bounded triangle load',()=>{
+ F.settle();return{ok:F.meshes.length===10&&F.stats.draws<=10&&F.stats.triangles<350000&&F.meshes.every(mesh=>mesh.frustumCulled===false&&mesh.material.customProgramCacheKey().startsWith('flora-')),info:F.stats.draws+' draws, '+F.stats.triangles+' triangles'};
 });
 }catch(e){AF.partError('44-flora.js',e);}
 
@@ -18708,15 +18808,18 @@ AF.test('island: ferry round trip and safe pier height',()=>{
 }catch(error){AF.partError('44-island.js',error);}
 
 try {
-const O=AF.outland,F=AF.flora,S=AF.outlandSites={sites:[],windmills:[],stats:{ready:false,workMs:0,props:0,walkers:0}},cache=new Map();
+const O=AF.outland,F=AF.flora,S=AF.outlandSites={sites:[],windmills:[],wheat:[],stats:{ready:false,workMs:0,props:0,walkers:0,hamlets:0,houses:0,wheat:0}},cache=new Map();
 const color=(hex,opts={})=>AF.col(hex,{jitter:0.45,edge:0.2,...opts});
 const wood=color(0x72513b,{pat:'plank'}),trim=color(0xe9e2cd),stone=color(0x8a8981,{pat:'stone'}),red=color(0x9e3e35),slate=color(0x52676a),gold=color(0xc4a25a),dark=color(0x313a3c),pane=color(0x9aaea9),grass=color(0x637d4b),glow=color(0xffdf9a,{emit:0xffbf69,emitK:2,mode:'night'});
+const adobe=color(0xcbb58d),clay=color(0xb27655),wheatGold=color(0xd5b34f),wheatShade=color(0xb79a40);
 const specs=[
  ['Alder Farm','farm',-944,-145,32,24],['Foxglove Farm','farm',-1110,-250,32,24],['Southfield Farm','farm',-820,48,32,24],['Bramble Farm','farm',-1100,108,32,24],
  ['Westmoor Windmill','windmill',-1145,-38,6,6],['Southfield Windmill','windmill',-780,126,6,6],['Mill Pond Mill','mill',-938,90,9,7],
  ['St Agnes Church','church',-1030,-65,8,12],['The Red Fox','pub',-1024,-14,10,7],['Coast Road Cottages','cottage',-1065,-24,7,6],['Rose Cottage','cottage',-1055,12,7,6],['Westmoor Fuel','fuel',-980,-16,9,7],
  ['Tamsin Lodge','lodge',-10,-575,13,8],['Tamsin Boathouse','boathouse',40,-610,7,5],['Tamsin Picnic','picnic',-98,-596,10,7],
- ['Eastwood Cabin','cabin',720,-112,7,6],['Birch Cabin','cabin',924,-246,7,6],['Eastwood Lookout','tower',910,-342,6,6],['Mirror Lake Camp','camp',780,-147,13,9]
+ ['Eastwood Cabin','cabin',720,-112,7,6],['Birch Cabin','cabin',924,-246,7,6],['Eastwood Lookout','tower',910,-342,6,6],['Mirror Lake Camp','camp',780,-147,13,9],
+ ['Reedwick','hamlet',-1170,-110,22,18],['Dune End','hamlet',-1178,14,22,18],['Willow Green','hamlet',-1020,120,22,18],['Mallow Cross','hamlet',-850,105,22,18],
+ ['Ash Hollow','hamlet',660,-85,22,18],['Birch Fold','hamlet',988,-215,22,18],['Ochre Wells','hamlet',882,58,22,18],['Saltbush','hamlet',988,105,22,18]
 ];
 let generator=null,sails=null,sailAngle=0;
 function pad(name,kind,x,z,rx,rz,y){
@@ -18728,7 +18831,7 @@ AF.onBuild('outland-site-pads',496.2,()=>{
  let best={x:200,z:-820,y:0};for(let x=120;x<=340;x+=20)for(let z=-900;z<=-720;z+=20){const y=O.h(x,z);if(y>best.y)best={x,z,y};}pad('Ridge Refuge','hut',best.x,best.z,7,5,best.y);
  // night pools snapshot AF.lights once after build, so lamp lights must exist before the idle site builder runs
  const lamps={church:[10,12],fuel:[11,8],pub:[12,8]};
- for(const site of S.sites){const at=lamps[site.kind];if(at)AF.addLight({x:site.x+at[0],y:site.y+5,z:site.z+at[1],color:0xffc878,intensity:1,range:12,kind:'street'});}
+ for(const site of S.sites){const at=lamps[site.kind]??(site.kind==='hamlet'&&['Reedwick','Dune End','Ochre Wells','Saltbush'].includes(site.name)?[0,0]:null);if(at)AF.addLight({x:site.x+at[0],y:site.y+5,z:site.z+at[1],color:0xffc878,intensity:1,range:12,kind:'street'});}
 });
 function* geometry(key,build){let geo=cache.get(key);if(geo)return geo;const model=build();yield;geo=yield* AF.meshModelG(model,{vs:0.5,flat:true});const coarse=new AF.Model(Math.ceil(model.w/2),Math.ceil(model.h/2),Math.ceil(model.d/2));for(let x=0;x<coarse.w;x++){for(let y=0;y<coarse.h;y++)for(let z=0;z<coarse.d;z++){let value=0;for(let dx=0;dx<2&&!value;dx++)for(let dy=0;dy<2&&!value;dy++)for(let dz=0;dz<2&&!value;dz++)value=model.get(x*2+dx,y*2+dy,z*2+dz);if(value)coarse.set(x,y,z,value);}yield;}geo.userData.lod=yield* AF.meshModelG(coarse,{vs:1,flat:true});cache.set(key,geo);return geo;}
 function* house(key,width,depth,height,wall=trim,roof=slate){return yield* geometry(key,()=>{
@@ -18763,9 +18866,37 @@ function* farm(site){
 function* windmill(site){
  prop(site,yield* geometry('windmill-tower',()=>{const m=new AF.Model(14,34,14);for(let level=0;level<28;level++){const inset=Math.floor(level/9);m.box(inset+1,level,inset+1,13-inset,level+1,13-inset,level%5?trim:stone);}for(let layer=0;layer<6;layer++)m.box(layer,28+layer,layer,14-layer,29+layer,14-layer,slate);m.box(5,0,12,9,6,13,dark);return m;}));S.windmills.push({x:site.x,y:site.y+11,z:site.z+3.8});
 }
+function* hamlet(site){
+ const dry=O.biome(site.x,site.z)==='desert',layouts=[[-11,-5,0],[7,-5,0],[0,9,2]];
+ for(let index=0;index<layouts.length;index++){
+  const [dx,dz,rot]=layouts[index],small=index===2;
+  prop(site,yield* house('hamlet-'+(dry?'adobe':'rural')+'-'+(small?'small':'large'),small?14:18,small?12:14,small?8:10,dry?adobe:trim,dry?clay:slate),dx,dz,rot);S.stats.houses++;yield;
+ }
+ if(['Reedwick','Dune End','Ochre Wells','Saltbush'].includes(site.name))yield* lamp(site,0,0);
+ yield* picnic(site);
+ for(const dx of [-18,18])for(const dz of [-12,12]){F.add(dry?'dry-bush':'shrub',site.x+dx,site.z+dz,{y:site.y,planted:true,scale:0.8});yield;}
+ S.stats.hamlets++;
+}
+function* wheat(){
+ const model=new AF.Model(32,4,32),coarse=new AF.Model(16,1,16);
+ for(let row=1;row<32;row+=4)for(let stalk=1;stalk<32;stalk+=4){model.box(stalk,0,row,stalk+1,3,row+1,wheatShade);model.box(stalk,3,row,stalk+2,4,row+2,wheatGold);}
+ for(let row=1;row<16;row+=4)coarse.box(1,0,row,15,1,row+1,wheatShade);
+ const geo=yield* AF.meshModelG(model,{vs:0.25,flat:true});yield;
+ geo.userData.lod=yield* AF.meshModelG(coarse,{vs:0.5,flat:true});yield;
+ for(let x=-1210;x<-730;x+=14)for(let z=-280;z<170;z+=14){
+  yield;
+  if(!O.fieldWheat(x,z)||O.roadDistance(x,z)<20||O.waterY(x,z)!==null||O.pads.some(pad=>Math.abs(x-pad.x)<pad.rx+pad.bank+5&&Math.abs(z-pad.z)<pad.rz+pad.bank+5))continue;
+  let low=Infinity,high=-Infinity,clear=true;
+  for(const dx of [-4,0,4])for(const dz of [-4,0,4]){if(!O.fieldWheat(x+dx,z+dz)||O.waterY(x+dx,z+dz)!==null||O.roadDistance(x+dx,z+dz)<16)clear=false;const height=O.h(x+dx,z+dz);low=Math.min(low,height);high=Math.max(high,height);}
+  if(!clear||high-low>0.5||low<3)continue;
+  const y=low-0.25;O.addProp(geo,x,y,z,0,{collide:false,tag:'outland-wheat'});S.wheat.push({x,y,z});S.stats.wheat++;yield;
+ }
+ S.stats.wheatTriangles=geo.index.count/3;S.stats.wheatFarTriangles=geo.userData.lod.index.count/3;
+}
 function* build(){
  for(const site of S.sites){
     if(site.kind==='farm')yield* farm(site);
+  else if(site.kind==='hamlet')yield* hamlet(site);
   else if(site.kind==='windmill')yield* windmill(site);
   else if(site.kind==='church'){prop(site,yield* house('church',14,28,14,stone,slate));prop(site,yield* geometry('church-tower',()=>{const m=new AF.Model(10,37,10);m.box(1,0,1,9,26,9,stone);m.box(3,20,8,7,24,9,dark);for(let layer=0;layer<7;layer++)m.box(1+Math.floor(layer/2),26+layer,1+Math.floor(layer/2),9-Math.floor(layer/2),27+layer,9-Math.floor(layer/2),slate);m.box(4,32,4,5,37,5,trim);m.box(3,34,4,6,35,5,trim);return m;}),0,10);yield* lamp(site,10,12);}
   else if(site.kind==='fuel'){prop(site,yield* house('fuel-office',12,8,7,trim,red),-5,-2);prop(site,yield* geometry('fuel-canopy',()=>{const m=new AF.Model(24,12,16);m.box(0,10,0,24,12,16,red);for(const x of [1,22])for(const z of [1,14])m.box(x,0,z,x+1,10,z+1,trim);for(const x of [8,15]){m.box(x,0,7,x+2,5,9,trim);m.box(x,3,9,x+2,4,10,dark);}return m;}),4,3,0,{collide:false});for(const dx of [2,6])prop(site,yield* box('fuel-pump',2,5,2,trim),dx,3);yield* lamp(site,11,8);}
@@ -18773,11 +18904,12 @@ function* build(){
   else if(site.kind==='camp'){const tent=yield* geometry('tent',()=>{const m=new AF.Model(8,7,12);for(let layer=0;layer<6;layer++)m.box(Math.floor(layer/2),layer,0,8-Math.floor(layer/2),layer+1,12,layer%2?gold:red);m.box(3,0,11,5,4,12,dark);return m;});for(const dx of [-7,0,7])prop(site,tent,dx,-2);prop(site,yield* box('camp-fire',3,1,3,stone),0,5,0,{collide:false});yield* picnic(site);yield* jetty(site,797,-168,13.75,1);}
   else if(site.kind==='picnic')yield* picnic(site);
   else {const kind=site.kind;prop(site,yield* house(kind,kind==='lodge'?42:kind==='pub'?30:kind==='mill'?24:20,kind==='lodge'?22:16,kind==='pub'?15:11,kind==='cottage'?trim:wood,kind==='pub'?red:slate));if(kind==='mill'){prop(site,yield* geometry('mill-wheel',()=>{const m=new AF.Model(2,16,16);for(let y=0;y<16;y++)for(let z=0;z<16;z++){const radius=Math.hypot(y-7.5,z-7.5);if(radius>5.5&&radius<7.5||Math.abs(y-7.5)<0.8||Math.abs(z-7.5)<0.8)m.box(0,y,z,2,y+1,z+1,wood);}return m;}),7,0,0,{y:site.y-1});}if(kind==='lodge'){yield* picnic(site);yield* jetty(site,-35,-608,22.75);for(let index=0;index<2;index++)prop(site,yield* boat(),-36-index*5,-48,0,{y:22,collide:false});}if(kind==='boathouse')yield* jetty(site,site.x-4,site.z-4,22.75,1);if(kind==='pub'){yield* lamp(site,12,8);prop(site,yield* box('pub-sign',5,3,1,red),0,5,0,{y:site.y+4,collide:false});}}
-  if(site.kind!=='camp'&&site.kind!=='picnic'&&site.kind!=='tower')for(const dx of [-site.rx-2,site.rx+2])F.add('elm-green',site.x+dx,site.z+site.rz+2,{planted:true,scale:0.7});
+  if(site.kind!=='camp'&&site.kind!=='picnic'&&site.kind!=='tower')for(const dx of [-site.rx-2,site.rx+2])F.add(O.biome(site.x,site.z)==='desert'?'cactus':'elm-green',site.x+dx,site.z+site.rz+2,{planted:true,scale:0.7});
   yield;
  }
  for(const [x,z]of [[-230,-785],[290,-880],[475,-715],[-1180,225],[930,235]]){O.addProp(yield* box('cairn',3,4,3,stone),x,O.h(x,z),z,0,{tag:'outland-cairn'});yield;}
  const sign=yield* geometry('signpost',()=>{const m=new AF.Model(8,7,2);m.box(3,0,0,4,7,1,wood);m.box(0,5,0,8,7,2,trim);return m;});for(const road of AF.PLAN.world.roads)for(let index=1;index<road.points.length;index+=2){const [x,z]=road.points[index];O.addProp(sign,x+9,O.h(x+9,z),z,0,{tag:'outland-signpost'});yield;}
+ yield* wheat();
  const sailGeo=(yield* geometry('windmill-sails',()=>{const m=new AF.Model(30,30,1);m.box(13,0,0,16,30,1,trim);m.box(0,13,0,30,16,1,trim);for(let index=0;index<30;index+=3){m.box(12,index,0,17,index+1,1,wood);m.box(index,12,0,index+1,17,1,wood);}return m;})).clone().translate(0,-7.5,0);
  sails=new THREE.InstancedMesh(sailGeo,AF.mat.voxelInst,2);sails.name='outland-windmill-sails';sails.count=0;sails.frustumCulled=false;sails.castShadow=false;sails.customDepthMaterial=AF.mat.depthInst;AF.scene.add(sails);
  S.stats.ready=true;
@@ -18797,6 +18929,10 @@ AF.onBuild('outland-walkers',665,()=>{
  add('Westmoor villagers',[[-1004,-39],[-992,-39],[-992,-28],[-1004,-28]],8);
 });
 AF.test('outland-sites: named rural sites have merged solid colliders',()=>{S.settle();const bad=S.sites.filter(site=>!site.props.length||!site.props.some(prop=>prop.col));return{ok:S.sites.length>=20&&!bad.length&&S.windmills.length===2,info:S.sites.length+' sites, '+S.stats.props+' merged props, missing solids '+bad.map(site=>site.name).join(',')};});
+AF.test('outland: wheat patches use shared LODs and clear field interiors',()=>{
+ S.settle();let bad=0;for(const patch of S.wheat)if(!O.fieldWheat(patch.x,patch.z)||O.roadDistance(patch.x,patch.z)<20||O.waterY(patch.x,patch.z)!==null||O.h(patch.x,patch.z)<patch.y)bad++;
+ return{ok:S.stats.wheat>15&&S.stats.wheat<250&&!bad&&S.stats.wheatFarTriangles<S.stats.wheatTriangles&&S.stats.hamlets===8&&S.stats.houses===24,info:S.stats.wheat+' patches, '+S.stats.wheatTriangles+'/'+S.stats.wheatFarTriangles+' triangles, '+bad+' invalid, '+S.stats.hamlets+' hamlets / '+S.stats.houses+' houses'};
+});
 AF.test('outland-sites: hikers and villagers leave island walker capacity',()=>{
  S.settle();const used=AF.walkers.paths.reduce((sum,path)=>sum+path.count,0),hits=[];let blocked=0,samples=0;
  for(const path of AF.walkers.paths){if(!/^(Lake Road hikers|Tamsin hikers|Westmoor villagers)$/.test(path.name))continue;for(let index=1;index<path.points.length;index++){const before=path.points[index-1],at=path.points[index],steps=Math.ceil(Math.hypot(at[0]-before[0],at[2]-before[2])/2);for(let part=0;part<=steps;part++){const fraction=part/steps,x=AF.lerp(before[0],at[0],fraction),z=AF.lerp(before[2],at[2],fraction),y=Math.max(AF.W.groundY(x,z),AF.lerp(before[1],at[1],fraction));samples++;if(AF.boxBlocked(x,y+0.4,z,0.18,1.2)){blocked++;if(hits.length<8){const boxes=AF.colliders.get(Math.floor(x/8)*100000+Math.floor(z/8))??[];hits.push({path:path.name,x:+x.toFixed(1),z:+z.toFixed(1),y:+y.toFixed(1),tags:boxes.filter(box=>x+0.18>box.x0&&x-0.18<box.x1&&z+0.18>box.z0&&z-0.18<box.z1&&y+1.6>box.y0&&y+0.4<box.y1).map(box=>box.tag??'untagged')});}}}}}
@@ -30246,6 +30382,7 @@ try {
   const menu = h('div', 'sheet pe', `<div class="panel"><h2>PAUSED</h2>
     <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="lite" title="Default: Balanced without AO, god rays and MSAA">Standard</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
     <div class="row"><label>Resolution</label><div class="seg" data-k="res"><button data-v="0">Auto</button><button data-v="0.75">75%</button><button data-v="0.9">90%</button><button data-v="1">100%</button></div></div>
+    <div class="row"><label>Shadows</label><div class="seg" data-k="shadows"><button data-v="off">Off</button><button data-v="low" title="Near shadows only (default on phones)">Low</button><button data-v="high">High</button></div></div>
     <div class="row"><label></label><small class="rr" style="opacity:.75"></small></div>
     <div class="row"><label>Time of day</label><input data-k="hour" type="range" min="0" max="23.95" step="0.05"></div>
     <div class="row"><label>Clock</label><div class="seg" data-k="clock"><button data-v="run">Running</button><button data-v="stop">Stopped</button></div></div>
@@ -30483,6 +30620,7 @@ try {
   const syncMenu = () => {
     menu.querySelectorAll('[data-k=gfx] button').forEach((b) => b.classList.toggle('on', b.dataset.v === G.name));
     menu.querySelectorAll('[data-k=res] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === G.res));
+    menu.querySelectorAll('[data-k=shadows] button').forEach((b) => b.classList.toggle('on', b.dataset.v === AF.shadowQ));
     const cv = AF.renderer.domElement, pr = AF.renderer.getPixelRatio();
     text(menu.querySelector('.rr'), `Render ${cv.width}\u00d7${cv.height} (${pr.toFixed(2)}\u00d7 CSS px${devicePixelRatio > pr + 0.01 ? ', ' + Math.round(pr / devicePixelRatio * 100) + '% of display' : ''})${G.auto ? ' \u00b7 auto ' + G.name : ''}`);
     menu.querySelectorAll('[data-k=clock] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'stop') === !!AF.time.paused));
@@ -30513,6 +30651,7 @@ try {
     }
     else if (seg === 'clock') AF.time.paused = b.dataset.v === 'stop';
     else if (seg === 'fps') AF.setFpsCap(b.dataset.v);
+    else if (seg === 'shadows') AF.gfx.setShadows(b.dataset.v);
     else if (b.dataset.k === 'resume') toggleMenu(false);
     else if (b.dataset.k === 'map') { toggleMenu(false, false); toggleMap(true); }
     else if (b.dataset.k === 'help') { toggleMenu(false, false); toggleHelp(true); }

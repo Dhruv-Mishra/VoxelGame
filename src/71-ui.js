@@ -179,6 +179,7 @@ try {
   const menu = h('div', 'sheet pe', `<div class="panel"><h2>PAUSED</h2>
     <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="lite" title="Default: Balanced without AO, god rays and MSAA">Standard</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
     <div class="row"><label>Resolution</label><div class="seg" data-k="res"><button data-v="0">Auto</button><button data-v="0.75">75%</button><button data-v="0.9">90%</button><button data-v="1">100%</button></div></div>
+    <div class="row"><label>Shadows</label><div class="seg" data-k="shadows"><button data-v="off">Off</button><button data-v="low" title="Near shadows only (default on phones)">Low</button><button data-v="high">High</button></div></div>
     <div class="row"><label></label><small class="rr" style="opacity:.75"></small></div>
     <div class="row"><label>Time of day</label><input data-k="hour" type="range" min="0" max="23.95" step="0.05"></div>
     <div class="row"><label>Clock</label><div class="seg" data-k="clock"><button data-v="run">Running</button><button data-v="stop">Stopped</button></div></div>
@@ -416,6 +417,7 @@ try {
   const syncMenu = () => {
     menu.querySelectorAll('[data-k=gfx] button').forEach((b) => b.classList.toggle('on', b.dataset.v === G.name));
     menu.querySelectorAll('[data-k=res] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === G.res));
+    menu.querySelectorAll('[data-k=shadows] button').forEach((b) => b.classList.toggle('on', b.dataset.v === AF.shadowQ));
     const cv = AF.renderer.domElement, pr = AF.renderer.getPixelRatio();
     text(menu.querySelector('.rr'), `Render ${cv.width}\u00d7${cv.height} (${pr.toFixed(2)}\u00d7 CSS px${devicePixelRatio > pr + 0.01 ? ', ' + Math.round(pr / devicePixelRatio * 100) + '% of display' : ''})${G.auto ? ' \u00b7 auto ' + G.name : ''}`);
     menu.querySelectorAll('[data-k=clock] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'stop') === !!AF.time.paused));
@@ -446,6 +448,7 @@ try {
     }
     else if (seg === 'clock') AF.time.paused = b.dataset.v === 'stop';
     else if (seg === 'fps') AF.setFpsCap(b.dataset.v);
+    else if (seg === 'shadows') AF.gfx.setShadows(b.dataset.v);
     else if (b.dataset.k === 'resume') toggleMenu(false);
     else if (b.dataset.k === 'map') { toggleMenu(false, false); toggleMap(true); }
     else if (b.dataset.k === 'help') { toggleMenu(false, false); toggleHelp(true); }

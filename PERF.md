@@ -34,7 +34,11 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
   until the next 1/cap slot; skipped callbacks run **idle work** (`AF.onIdle(name, fn(budgetMs))`) — region streaming
   and far-cluster builds use that spare time instead of the rendered frame.
 - Auto-tier and dynamic resolution compare frame time against the cap interval, never against 16.7 ms.
-- Sun-shadow refresh cadence is time based (≈30 Hz High/Balanced, ≈15 Hz Standard/Low at the 30 fps cap).
+- Sun-shadow refresh cadence is time based (≈30 Hz High/Balanced, ≈15 Hz Standard/Low at the 30 fps cap), but the near map
+  re-renders **every frame while the shadow subject moves** (> 0.05 m/frame, not aerial/cine): a stale map made the driven
+  car's own shadow lag and jitter on phones.
+- Shadows setting (`AF.shadowQ`, menu Off / Low / High, `localStorage['portSolace.shadows']`, `?shadows=`): Low = near map
+  only (≤ 1024, fast 4-tap compare, no far cascade, Standard cadence); phones default to Low. `AF.gfx.setShadows(q)`.
 - Simulation code must use `dt` (≤ 0.1 s); nothing may assume 60 Hz.
 
 ## 2b. Renderer CPU (locked)
@@ -82,7 +86,9 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
 - Tiles are 64×64 cells, built in idle slots (`outland-build`), swapped with `AF.world.fade`. Tile edges share a
   world-anchored 8 m boundary profile (no skirts); `AF.outland.renderer.diagnose()` checks gaps/overlaps on demand.
 - Budget: outland ≤ 20 draws and ≤ 250 k triangles in city poses. Outland props go through `AF.outland.addProp`
-  (merged per tile, coarse LOD), vegetation through `44-flora.js` (one instanced batch per LOD, ~3.5 k records, 3 draws).
+  (merged per tile, coarse LOD), vegetation through `44-flora.js` (six shapes — broadleaf, conifer, palm, rock, cactus,
+  shrub — in ≤ 10 shared instanced draws, ~13.6 k records with per-instance non-uniform scale/yaw/palette; near models
+  44–172 triangles). Outland roads are looked up through a 64 m segment grid (`roadAt`), never a scan of every segment.
 - All outland water (Lake Tamsin, Mirror Lake, ponds) is one mesh; the island lagoon is one more.
 - Lights for idle-built content must be registered at build time: night light pools snapshot `AF.lights` once.
 

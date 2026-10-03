@@ -219,6 +219,15 @@ AF.PLAN = (() => {
       { name: 'Coast Road', w: 10, surface: 'asphalt', points: [[-660, 0], [-820, -10], [-1000, -40]], heights: [0, 5, 10] },
       { name: 'Eastwood Road', w: 10, surface: 'asphalt', points: [[460, 0], [700, -40], [980, -120]], heights: [0, 10, 19] },
       { name: 'Lake Road', w: 10, surface: 'gravel', points: [[258, -284], [258, -300], [230, -360], [160, -420], [50, -480], [-40, -560], [-40, -590]], heights: [30, 40, 44, 38, 23, 22, 23] },
+      { name: 'West Coast Drive', w: 10, surface: 'asphalt', points: [[-1000, -40], [-1210, -40], [-1220, -220], [-1180, -280]], heights: [10, 9, 7, 9] },
+      { name: 'Beach Lane', w: 10, surface: 'gravel', points: [[-1210, -40], [-1210, 60], [-1200, 120], [-1150, 164]], heights: [9, 9, 8, 7] },
+      { name: 'Alder Lane', w: 10, surface: 'gravel', points: [[-820, -10], [-855, -85], [-915, -108], [-974, -110], [-1020, -120], [-1100, -155], [-1170, -150]], heights: [5, 7, 9, 10, 10, 11, 10] },
+      { name: 'Foxglove Lane', w: 10, surface: 'gravel', points: [[-1100, -155], [-1140, -205], [-1145, -260], [-1180, -280]], heights: [11, 10, 10, 9] },
+      { name: 'Mill Lane', w: 10, surface: 'gravel', points: [[-820, -10], [-865, 0], [-880, 50], [-980, 50], [-1040, 70], [-1138, 70], [-1200, 120]], heights: [5, 6, 8, 10, 11, 10, 8] },
+      { name: 'Eastwood Loop', w: 10, surface: 'asphalt', points: [[700, -40], [720, 10], [820, 20], [970, 0], [1020, -60], [980, -120]], heights: [10, 15, 17, 14, 17, 19] },
+      { name: 'Mirror Lane', w: 10, surface: 'gravel', points: [[700, -40], [730, -90], [750, -130], [800, -120], [920, -115]], heights: [10, 14, 15, 14, 16] },
+      { name: 'Ochre Trail', w: 10, surface: 'gravel', points: [[820, 20], [840, 80], [920, 110], [990, 150]], heights: [17, 16, 15, 13] },
+      { name: 'Birch Lane', w: 10, surface: 'gravel', points: [[920, -115], [940, -180], [960, -250]], heights: [16, 19, 18] },
     ],
   };
   P.west = {

@@ -20,6 +20,12 @@ try {
   R.toneMappingExposure = 1.0;
   R.shadowMap.enabled = true;
   R.shadowMap.type = THREE.PCFSoftShadowMap;
+  // shadow quality (menu): off / low (near map only, <= 1024, Standard cadence) / high (tier default); phones default to low
+  AF.shadowQ = (() => {
+    const SQ = ['off', 'low', 'high'], q = AF.Q.get('shadows'); if (SQ.includes(q)) return q;
+    if (!AF.TEST && !AF.SHOT) try { const v = localStorage.getItem('portSolace.shadows'); if (SQ.includes(v)) return v; } catch (e) {}
+    return AF.MOBILE ? 'low' : 'high';
+  })();
   AF.maxAniso = R.capabilities.getMaxAnisotropy();
 
   const S = AF.scene = new THREE.Scene();
@@ -31,7 +37,7 @@ try {
 
   // Baseline lights — the atmosphere part (60-atmos.js) takes these over (AF.sun, AF.hemi, AF.amb) and drives them.
   const sun = AF.sun = new THREE.DirectionalLight(0xfff0d8, 2.6);
-  sun.position.set(120, 180, 80); sun.castShadow = true;
+  sun.position.set(120, 180, 80); sun.castShadow = AF.shadowQ !== 'off';
   sun.shadow.mapSize.set(AF.MOBILE ? 1024 : 4096, AF.MOBILE ? 1024 : 4096);
   const sc = sun.shadow.camera; sc.left = -140; sc.right = 140; sc.top = 140; sc.bottom = -140; sc.near = 1; sc.far = 900;
   sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.06;
@@ -58,7 +64,7 @@ try {
       r = AF.lerp(rs, Math.min(AF.shadowRadius, AF.GFX.lite || AF.GFX.tier === 'low' ? 80 : 110), k);   // beyond: the far cascade (similar texel size from the air)
       fx = AF.lerp(cxs, fx, k); fz = AF.lerp(czs, fz, k);
       r = Math.round(r / 4) * 4;
-    } else if (AF.MOBILE) r = Math.min(r, alt < 30 ? 36 : 72);   // phones: a small near map (fewer casters, sharper texels)
+    } else if (AF.MOBILE || AF.shadowQ === 'low') r = Math.min(r, alt < 30 ? (AF.MOBILE ? 30 : 36) : 72);   // phones / Low: a small near map (fewer casters, sharper texels)
     AF.shadowNear.r = r; AF.shadowNear.cx = fx; AF.shadowNear.cz = fz; AF.shadowNear.k = far ? AF.smooth(12, 60, alt) : 0;
     const fy = AF.shadowFocus.y || 0;
     if (sc.right !== r || sc.far !== 400 + r + 60) { sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.far = 400 + r + 60; sc.updateProjectionMatrix(); sun.shadow.bias = -0.36 / (sc.far - sc.near); }
@@ -167,6 +173,7 @@ try {
   const shadowView = AF.shadowView = new THREE.Camera(); shadowView.layers.enable(1);
   const smRender = R.shadowMap.render.bind(R.shadowMap);
   R.shadowMap.render = (lights, scene, camera) => { if (scene !== S) return smRender(lights, scene, camera); shadowView.layers.mask = camera.layers.mask | 2; return smRender(lights, scene, shadowView); };
+  const lastSF = { x: 0, z: 0 };
   const frame = (dt) => {
     if (graphicsReset) return;
     AF.clock.dt = dt; AF.clock.t += dt; AF.clock.frame++;
@@ -175,9 +182,12 @@ try {
       catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (AF.MOBILE) AF.reportError(e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
     }
     // near map refresh in Hz, not frames: at the 30 fps cap High + Balanced refresh every frame, Standard + Low every 2nd
-    const base = AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' && !AF.GFX.lite ? 2 : 3;
+    const base = AF.GFX.tier === 'ultra' ? 1 : AF.GFX.tier === 'high' && !AF.GFX.lite && AF.shadowQ !== 'low' ? 2 : 3;
     const every = AF.SHOT || AF.TEST ? 1 : (AF.frameStats && AF.frameStats.capped && AF.fpsCap <= 30 ? Math.ceil(base / 2) : base) * (AF.shadowNear.k > 0.8 ? 2 : 1);
-    if (AF.clock.frame % every === 0 || AF.shadowDirty) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
+    // a moving subject (car, plane, runner) must never see its own stale shadow: that lag read as jitter on phones
+    const sf = AF.shadowFocus, moved = Math.abs(sf.x - lastSF.x) + Math.abs(sf.z - lastSF.z) > 0.05 && AF.mode !== 'aerial' && AF.mode !== 'cine';
+    lastSF.x = sf.x; lastSF.z = sf.z;
+    if (AF.shadowQ !== 'off' && (moved || AF.clock.frame % every === 0 || AF.shadowDirty)) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
     try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
   };
@@ -384,9 +394,10 @@ try {
     if (G.cinema) G.scale = 1;
     const pr = AF.basePR() * G.scale; if (Math.abs(R.getPixelRatio() - pr) > 1e-3) { R.setPixelRatio(pr); if (AF.ready) AF.resize(); }
     if (AF.ready) { try { sharpenTextures(); } catch (e) { AF.warnOnce('aniso', e); } }
-    if (sun && sun.shadow.mapSize.x !== T.near) { sun.shadow.mapSize.set(T.near, T.near); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
+    const nearSize = AF.shadowQ === 'low' ? Math.min(T.near, 1024) : T.near;
+    if (sun && sun.shadow.mapSize.x !== nearSize) { sun.shadow.mapSize.set(nearSize, nearSize); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
     U.uPatK.value = T.pat; U.uWinK.value = T.win;
-    U.uShadowFast.value = !G.cinema && (AF.MOBILE || G.tier === 'low' || G.lite) ? 1 : 0;
+    U.uShadowFast.value = !G.cinema && (AF.MOBILE || G.tier === 'low' || G.lite || AF.shadowQ === 'low') ? 1 : 0;
     if (AF.gfx.far) AF.gfx.far.resize(T.far, T.farR);
   };
   G.onChange(applyTier);
@@ -422,7 +433,7 @@ try {
   // A second, wide sun depth map (±farR m) rendered by R1 from the static world only (region base + far-LOD meshes), refreshed when
   // the sun turns > 0.2° or the view centre moves > 32 m (never per frame). The voxel shader blends three's near map into it.
   {
-    const F = AF.gfx.far = { on: !AF.MOBILE && !AF.Q.has('nofar'), size: 0, R: 380, rt: null, renders: 0, ms: 0, dir: new THREE.Vector3(), cx: 1e9, cz: 1e9, dirty: true, frameN: 0 };
+    const F = AF.gfx.far = { on: !AF.MOBILE && !AF.Q.has('nofar') && AF.shadowQ === 'high', size: 0, R: 380, rt: null, renders: 0, ms: 0, dir: new THREE.Vector3(), cx: 1e9, cz: 1e9, dirty: true, frameN: 0 };
     const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.BackSide });
     const fcam = F.cam = new THREE.OrthographicCamera(-380, 380, 380, -380, 1, 1600); fcam.layers.enable(1);
     const fscene = new THREE.Scene(); fscene.overrideMaterial = depthMat; fscene.matrixWorldAutoUpdate = false;
@@ -476,6 +487,13 @@ try {
     AF.on('ready', () => { try { F.update(true); } catch (e) { AF.warnOnce('far shadow failed', e); } });
   }
   applyTier();
+  AF.gfx.setShadows = (q) => {
+    if (!['off', 'low', 'high'].includes(q) || q === AF.shadowQ) return;
+    AF.shadowQ = q; try { localStorage.setItem('portSolace.shadows', q); } catch (e) {}
+    AF.sun.castShadow = q !== 'off';
+    const F = AF.gfx.far; F.on = q === 'high' && !AF.MOBILE && !AF.Q.has('nofar'); F.dirty = true; if (!F.on) U.uFarOn.value = 0;
+    applyTier();
+  };
   AF.on('ready', () => { try { sharpenTextures(); } catch (e) { AF.warnOnce('aniso', e); } });
 
   // ---------------------------------------------------------------- environment reflections (PMREM of R2's AF.sky.envScene; analytic fallback)
