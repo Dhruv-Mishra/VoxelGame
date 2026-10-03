@@ -84,10 +84,11 @@ function raw(x, z) {
     height = AF.lerp(lake.waterY - 3 + radius * 1.4, height, smooth(0.87, 1.3, radius));
     if (radius >= 1 && radius < 1.35) height = Math.max(height, lake.waterY + 0.3);
   }
-  if (inland < 35) {
-    const beach = x < -660, shore = -1.25 + inland * (beach ? 0.16 : 0.8);
+  if (inland < 60) {
+    // the shore curve steepens inland until it clears the land, so the coast never ends in a cliff
+    const beach = x < -660, shore = -1.25 + inland * (beach ? 0.16 : 0.8) + Math.max(0, inland - 18) ** 2 * 0.03;
     height = Math.min(height, Math.max(-4, shore));
-    if (beach && inland > 9) height += Math.sin(inland * 0.17) ** 2 * smooth(9, 30, inland) * 1.5;
+    if (beach && inland > 9) height += Math.sin(inland * 0.17) ** 2 * smooth(9, 20, inland) * (1 - smooth(28, 40, inland)) * 1.5;
   }
   if (z < -1350) height = AF.lerp(height, -4, smooth(-1350, -1708, z));
   return height;
@@ -453,6 +454,8 @@ const RIVERS = [
   { name: 'Upper Solace', w: 9, endY: AF.PLAN.river.headY, pts: [[318, -905], [340, -820], [372, -735], [392, -640], [402, -560], [396, -470], [390, -440], [388, -390], [386, -330], [AF.PLAN.river.x(-300), -300]] },
   { name: 'Tamsin River', w: 10, startY: P.lake.waterY, pts: [[-112, -648], [-150, -640], [-220, -625], [-330, -600], [-450, -575], [-570, -535], [-660, -490], [-705, -455], [-735, -380], [-745, -290], [-752, -200], [-748, -110], [-742, -30], [-748, 40], [-758, 110], [-752, 190], [-750, 300]] },
   { name: 'Ochre River', w: 8, startY: waters[1].waterY, pts: [[840, -170], [846, -150], [862, -110], [892, -50], [928, 10], [938, 70], [944, 130], [948, 200], [950, 310]] },
+  // a mountain stream that cascades down the range into Lake Tamsin's north shore (49-outland draws its steep reach as falls)
+  { name: 'Tamsin Falls', w: 6, endY: P.lake.waterY, pts: [[-28, -822], [-40, -804], [-31, -786], [-44, -766], [-36, -746], [-46, -726], [-42, -703]] },
 ];
 function buildRivers() {
   riverReady = false; riverSegs.length = 0; riverGrid.clear(); O.rivers.length = 0;
@@ -569,7 +572,7 @@ function wayside(ring, done) {
         for (const other of done) if (other !== ring && nearestOn(other, cx, cz).d < R * 1.42 + other.w / 2 + 8) bad = true;
         if (bad) continue;
         const face = Math.abs(nx) > Math.abs(nz) ? [-Math.sign(nx), 0] : [0, -Math.sign(nz)];
-        placed = { name, kind, x: Math.round(cx), z: Math.round(cz), rx: R, rz: R, y: Math.round(y * 4) / 4, bank: 12, props: [], face, rot: face[1] > 0 ? 0 : face[0] < 0 ? 1 : face[1] < 0 ? 2 : 3, ringS: cum[index], roadX: pts[index][0], roadZ: pts[index][1] };
+        placed = { name, kind, x: Math.round(cx), z: Math.round(cz), rx: R, rz: R, y: Math.round(y * 4) / 4, bank: 12, props: [], face, rot: face[1] > 0 ? 0 : face[0] > 0 ? 1 : face[1] < 0 ? 2 : 3, ringS: cum[index], roadX: pts[index][0], roadZ: pts[index][1] };
         // the drive stops at the forecourt edge of the pad (bays, buildings and picnic tables stand behind it)
         const start = [pts[index][0] + nx * (ring.w / 2 - 0.5), pts[index][1] + nz * (ring.w / 2 - 0.5)], stop = [placed.x + face[0] * R, placed.z + face[1] * R];
         const rise = (ring.heights[index + 1] - ring.heights[index - 1]) / (tl * tl), dl = Math.hypot(stop[0] - start[0], stop[1] - start[1]) || 1;

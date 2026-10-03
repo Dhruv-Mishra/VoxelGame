@@ -579,12 +579,23 @@ AF.mat = {};
         vec3 c = vec3(1.0 + sp * 0.2 * kFine + mid * 0.1 + big * 0.16) * (1.0 - 0.14 * rep);
         afRough = 0.05 - 0.4 * uNight * (1.0 - smoothstep(0.35, 0.6, afVN(uv * 0.35)));   // damp patches at night
         return c;
-      } else if (id < 10.5) {   // grass: blades + clumps + dry patches
+      } else if (id < 10.5) {   // grass: blades + clumps + dry patches, lush / yellow meadow tones at range, pebbles and flowers up close
         float bl = afH2(floor(vec2(uv.x * 55.0, uv.y * 55.0)));
         float cl = afVN(uv * 2.2);
         float dry = smoothstep(0.35, 0.8, afVN(uv * 0.15 + 5.0));
-        vec3 c = vec3(0.8 + 0.4 * bl * kFine + (cl - 0.5) * 0.25);
+        float mead = afVN(uv * 0.04 + 2.0) * 0.6 + afVN(uv * 0.11 + 9.0) * 0.4;
+        float mot = afVN(uv * 0.35 + 4.0) + (afVN(uv * 1.1 + 8.0) - 0.5) * 0.4;
+        vec3 c = vec3(0.78 + 0.5 * bl * kFine + (cl - 0.5) * 0.35);
+        c *= mix(vec3(0.9, 0.97, 0.86), vec3(1.08, 1.04, 0.88), smoothstep(0.3, 0.7, mead));
+        c *= mix(vec3(0.84, 0.93, 0.86), vec3(1.07, 1.05, 0.86), smoothstep(0.32, 0.68, mot));
         c *= mix(vec3(1.0), vec3(1.22, 1.08, 0.6), dry * 0.5);
+        vec2 pc = floor(uv * 8.0); float ph = afH2(pc + 31.0);
+        if (kFine > 0.01 && ph > 0.965) {
+          float pr = length(fract(uv * 8.0) - 0.5 + (vec2(afH2(pc + 3.0), afH2(pc + 7.0)) - 0.5) * 0.3);
+          float dot1 = (1.0 - smoothstep(0.14, 0.2, pr)) * kFine;
+          vec3 tint = ph > 0.992 ? (afH2(pc + 5.0) > 0.5 ? vec3(0.95, 0.93, 0.85) : vec3(0.95, 0.8, 0.25)) : vec3(0.5 + 0.25 * afH2(pc + 9.0));
+          c = mix(c, min(tint / max(alb, vec3(0.03)), vec3(5.0)), dot1);
+        }
         return c;
       } else if (id < 11.5) {   // wood panelling: 0.5 x 0.75 panels with darker frames, vertical grain
         vec2 cell = floor(uv / vec2(0.5, 0.75)); vec2 f = uv - cell * vec2(0.5, 0.75);

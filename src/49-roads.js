@@ -11,7 +11,7 @@ function palette() {
   const col = (hex, o) => AF.col(hex, Object.assign({ jitter: 0.25, edge: 0.3 }, o));
   K = {
     asph: [34, 35, 36, 37].map((index) => O.pal[index]), gutter: O.pal[38], yellow: O.pal[39], white: AF.col(0xdcd6c6, { jitter: 0.3, edge: 0.03 }),
-    gravel: O.pal[12], trail: O.pal[44], cover: O.pal[1], conc: col(0xb9b3a6, { pat: 'slab' }), concD: col(0x8f8a80, { pat: 'stone' }),
+    gravel: O.pal[12], trail: O.pal[44], conc: col(0xb9b3a6, { pat: 'slab' }), concD: col(0x8f8a80, { pat: 'stone' }),
     rail: col(0x8b9097, { metal: 0.6, rough: 0.45 }), plank: col(0x8a6a44, { pat: 'none', patTop: 'plank' }), tile: col(0xd8d2c2, { pat: 'tile' }),
     lamp: AF.col(0xfff1c9, { emit: 0xffd48a, emitK: 2.4, mode: 'always', jitter: 0, edge: 0 }),
   };
@@ -139,22 +139,35 @@ function* buildAll() {
         }
         if (flags[i - 2] !== 1) RD.stats.bridges++;
       } else if (tunnel) {
-        const wx = hw + 0.4;
+        const wx = hw + 0.4, CUT = hw + 2.2;
         wall(struct, frame, i, -wx, -0.2, TH, k.tile, 1); wall(struct, frame, i, wx, -0.2, TH, k.tile, -1);
         const r0 = at(frame, i - 1, -wx, TH), r1 = at(frame, i, -wx, TH), q0 = at(frame, i - 1, wx, TH), q1 = at(frame, i, wx, TH);
         quad(struct, r0, r1, q1, q0, k.concD, 0, -1, 0);
-        strip(struct, frame, i, -wx - 1.2, wx + 1.2, TH + 0.6, k.cover);
-        wall(struct, frame, i, -wx - 1.2, TH - 0.2, TH + 0.6, k.concD, -1); wall(struct, frame, i, wx + 1.2, TH - 0.2, TH + 0.6, k.concD, 1);
+        // the trench over the gallery is refilled to the mountain's own surface (07 cuts a slot hw + 1.6 wide): terrain-coloured
+        // top, rock sides, so the road runs inside the hill instead of under a thin lid
+        const lm = (frame.x[i - 1] + frame.x[i]) / 2, zm = (frame.z[i - 1] + frame.z[i]) / 2, nx = frame.nx[i], nz = frame.nz[i];
+        // portal vertices sit in the approach cut: their cover takes the inner neighbour's ground
+        const ground = (index, side) => { const k = flags[index - 1] !== 2 ? index + 1 : flags[index + 1] !== 2 ? index - 1 : index; return Math.max(TH + 0.6, O.h(frame.x[k] + frame.nx[k] * side * (CUT + 0.6), frame.z[k] + frame.nz[k] * side * (CUT + 0.6)) + 0.05 - frame.y[index] - frame.b[index] * side * CUT); };
+        const L0 = ground(i - 1, -1), L1 = ground(i, -1), R0 = ground(i - 1, 1), R1 = ground(i, 1);
+        const topL = O.colTop(lm - nx * (CUT + 0.6), zm - nz * (CUT + 0.6), frame.y[i] + L1, 0.3, 1), topR = O.colTop(lm + nx * (CUT + 0.6), zm + nz * (CUT + 0.6), frame.y[i] + R1, 0.3, 1);
+        const c0 = at(frame, i - 1, 0, (L0 + R0) / 2), c1 = at(frame, i, 0, (L1 + R1) / 2);
+        quad(struct, at(frame, i - 1, -CUT, L0), at(frame, i, -CUT, L1), c1, c0, topL, 0, 1, 0); quad(struct, c0, c1, at(frame, i, CUT, R1), at(frame, i - 1, CUT, R0), topR, 0, 1, 0);
+        const rock = O.colSide(lm, zm, frame.y[i] + TH + 8);
+        quad(struct, at(frame, i - 1, -CUT, TH - 0.2), at(frame, i, -CUT, TH - 0.2), at(frame, i, -CUT, L1), at(frame, i - 1, -CUT, L0), rock, -nx, 0, -nz);
+        quad(struct, at(frame, i - 1, CUT, TH - 0.2), at(frame, i, CUT, TH - 0.2), at(frame, i, CUT, R1), at(frame, i - 1, CUT, R0), rock, nx, 0, nz);
         if (i % 2 === 0) { const l0 = at(frame, i - 1, -0.4, TH - 0.06), l1 = at(frame, i, -0.4, TH - 0.06), m0 = at(frame, i - 1, 0.4, TH - 0.06), m1 = at(frame, i, 0.4, TH - 0.06), mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2]; quad(struct, mid(l0, l1), l1, m1, mid(m0, m1), k.lamp, 0, -1, 0); }
         for (const [end, dir] of [[i - 1, -1], [i, 1]]) {
           if (flags[end + dir] === 2) continue;
           RD.stats.tunnels += dir < 0 ? 1 : 0;
-          const tx = -frame.nz[end] * dir, tz = frame.nx[end] * dir, ox = frame.x[end] + tx * 0.6, oz = frame.z[end] + tz * 0.6, y = frame.y[end];
-          const p = (o, h) => [ox + frame.nx[end] * o, y + h, oz + frame.nz[end] * o];
+          const tx = frame.nz[end] * dir, tz = -frame.nx[end] * dir, ox = frame.x[end] + tx * 0.6, oz = frame.z[end] + tz * 0.6, y = frame.y[end];
+          const p = (o, h) => [ox + frame.nx[end] * o, y + h + frame.b[end] * o, oz + frame.nz[end] * o];
           quad(struct, p(-wx - 3, TH), p(wx + 3, TH), p(wx + 3, TH + 3.2), p(-wx - 3, TH + 3.2), k.conc, tx, 0, tz);
           quad(struct, p(-wx - 3, -0.4), p(-wx, -0.4), p(-wx, TH), p(-wx - 3, TH), k.conc, tx, 0, tz);
           quad(struct, p(wx, -0.4), p(wx + 3, -0.4), p(wx + 3, TH), p(wx, TH), k.conc, tx, 0, tz);
           quad(struct, p(-wx - 3, TH + 3.2), p(wx + 3, TH + 3.2), [p(wx + 3, 0)[0] - tx * 1.2, y + TH + 3.2, p(wx + 3, 0)[2] - tz * 1.2], [p(-wx - 3, 0)[0] - tx * 1.2, y + TH + 3.2, p(-wx - 3, 0)[2] - tz * 1.2], k.concD, 0, 1, 0);
+          // rock face above the portal up to the refilled hill
+          const left = end === i ? L1 : L0, right = end === i ? R1 : R0, q = (o, h) => [frame.x[end] + tx * 0.5 + frame.nx[end] * o, y + h + frame.b[end] * o, frame.z[end] + tz * 0.5 + frame.nz[end] * o];
+          quad(struct, q(-CUT, TH + 3.2), q(CUT, TH + 3.2), q(CUT, Math.max(TH + 3.2, right)), q(-CUT, Math.max(TH + 3.2, left)), rock, tx, 0, tz);
         }
       }
       if (!bridge && !tunnel && asphalt) {

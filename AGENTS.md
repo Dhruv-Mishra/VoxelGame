@@ -14,6 +14,7 @@ Single-page three.js (r160, CDN importmap) voxel city game. **Edit `src/`, never
 ## Build / run
 - `node tools/build.mjs --check` — syntax-checks each part, concatenates `shell.html` + `src/*.js` (sorted) into `output.html` (`--out=x.html` writes a private copy).
 - `node tools/serve.mjs 8765` → http://127.0.0.1:8765/output.html. `?test` runs `AF.test` self-tests (title shows `passed/total`); add `&v=<n>` to dodge cache.
+- World map = baked images in `assets/` (`node tools/map-bake.mjs` with the server running); re-bake after terrain / road / building changes.
 - Parts are plain scripts in one module, each wrapped in `try{}catch(e){AF.partError(...)}`. Numeric prefix = load order.
 
 ## Architecture (global `AF`)
@@ -24,9 +25,9 @@ Single-page three.js (r160, CDN importmap) voxel city game. **Edit `src/`, never
 
 ## Parts map
 - Engine: 00 prologue, 01 core/input/pointer lock, 02 voxel + region LOD, 03 renderer + tiers, 60 atmosphere/fog, 61 post, 62 water, 63 sky.
-- World: 07 outland height/colour fn (`AF.outland`, everything outside the `AF.W` grid), 10 terrain/coast (`AF.land.coastS(x,z)` = m inland, < 0 sea), 11 streets, 12 nature + ground cover, 13–43 districts, 44-flora (outland vegetation: trees, palms, cacti, shrubs, rocks; instanced), 44-island (Serena Isle + ferry), 44-sites (farms, villages, hamlets, wheat patches; `S.lib` geometry helpers with 3 LODs), 44-wayside (ring road stops), 45 friends colony/homes, 46 zoo, 47 airfield (fenced perimeter; security at x -490/-484 z 56 is the only walk-in route; parked cars, drop-off routes, passengers/staff; jet bridges to stands x -450/-360), 48 sea, 49 outland quadtree mesher (`AF.outland.addProp`, `renderer.diagnose()`), 49-roads (road ribbons, bridges, tunnels, rural traffic, hikers; see PERF.md §5e).
+- World: 07 outland height/colour fn (`AF.outland`, everything outside the `AF.W` grid), 10 terrain/coast (`AF.land.coastS(x,z)` = m inland, < 0 sea), 11 streets, 12 nature + ground cover, 13–43 districts, 44-flora (outland vegetation: trees, palms, cacti, shrubs, rocks; instanced), 44-island (Serena Isle + ferry), 44-sites (farms, villages, hamlets, wheat patches; `S.lib` geometry helpers with 3 LODs), 44-wayside (ring road stops; shops, motel rooms and WCs are enterable shells with per-wall colliders), 45 friends colony/homes, 46 zoo, 47 airfield (fenced perimeter; security at x -490/-484 z 56 is the only walk-in route; parked cars, drop-off routes, passengers/staff; jet bridges to stands x -450/-360), 48 sea, 49 outland quadtree mesher (`AF.outland.addProp`, `renderer.diagnose()`), 49-roads (road ribbons, bridges, tunnels, rural traffic, hikers; see PERF.md §5e).
 - Actors: 50 vehicle models/player driving/parking (`AF.vehicles.placeParked`), 51 traffic sim (lane graph, 15 Hz, `AF.vehicles.addRoute`), 52 planes, 53 AI airliners (`AF.airTraffic`; busy 600 s timetable within 900 m of the airport, else 480 s), 54 path walkers (`AF.walkers.addPath`, 4 shared draws), 55 pedestrians/crowd, 56 animals, 56-wild (outland deer/rabbits/sheep/cows/hawks, instanced), 57 friends (cast, dialogue, NPCs; `visual:false` reuses walkers).
-- Player/UI: 70 avatar + walk/aerial, 71 UI (title, HUD, menu, dialogue), 72 touch, 74 map (whole-world raster in idle slots, minimap, `AF.ui.toggleMap`), 98 tests, 99 boot.
+- Player/UI: 70 avatar + walk/aerial, 71 UI (title, HUD, menu, dialogue), 72 touch, 74 map (baked static images + labels, minimap, `AF.ui.toggleMap`), 98 tests, 99 boot.
 - Title avatar turntable is drawn by the main renderer (viewport + scissor); never add a second WebGLRenderer.
 - Pointer lock is held across modes; Escape releases + pauses and never exits vehicles (E/F do).
 

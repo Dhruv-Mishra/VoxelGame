@@ -27,86 +27,19 @@ try {
   const sea = '#779ca7', TAU = Math.PI * 2, DIR = new THREE.Vector3();
   const map = UI.map = { bounds: B, ready: false, revision: 0, x: (B.x0 + B.x1) / 2, z: (B.z0 + B.z1) / 2, scale: 1, tx: 0, tz: 0, ts: 1, width: 1, height: 1, fitScale: 1 };
   const focus = () => AF.mode === 'aerial' ? AF.camTarget : AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes.cur ? AF.planes.cur : AF.player || AF.camTarget;
-  const layer = (bounds, px) => {
-    const canvas = document.createElement('canvas'); canvas.width = Math.ceil((bounds.x1 - bounds.x0) * px); canvas.height = Math.ceil((bounds.z1 - bounds.z0) * px);
-    const ctx = canvas.getContext('2d'); ctx.fillStyle = sea; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    return { canvas, ctx, bounds, px, row: 0, col: 0, strip: ctx.createImageData(canvas.width, 1) };
-  };
-  const land = layer(B, 0.1), city = layer(P.bounds, 1.5), layers = [land, city];
-  let layerIndex = 0, rasterMs = 0, worstSlice = 0, decorations = null;
-  const rasterWork = (budget) => {
-    if (!AF.ready || map.ready) return false;
-    const start = performance.now(), end = start + Math.min(1.5, Math.max(0.1, budget));
-    while (layerIndex < layers.length) {
-      if (decorations) { if (decorations.next().done) { decorations = null; layerIndex++; } if (performance.now() >= end) break; continue; }
-      const L = layers[layerIndex], data = L.strip.data, bounds = L.bounds;
-      for (let batch = 0; batch < 8 && L.col < L.canvas.width; batch++, L.col++) {
-        const x = bounds.x0 + (L.col + 0.5) / L.px, z = bounds.z0 + (L.row + 0.5) / L.px, index = W.col(x, z), offset = L.col * 4;
-        let height, west, north, color, water;
-        if (index >= 0) {
-          const bx = W.bx(x), bz = W.bz(z);
-          height = W.H[index] * 0.25; west = W.H[Math.max(0, bx - 4) * W.NZ + bz] * 0.25; north = W.H[bx * W.NZ + Math.max(0, bz - 4)] * 0.25;
-          color = AF.PAL.hex[W.C[index]] || 0x83916b; water = height < -1.1;
-        } else {
-          height = O.h(x, z); west = O.h(x - 10, z); north = O.h(x, z - 10);
-          color = AF.PAL.hex[O.colTop(x, z, height, (Math.abs(height - west) + Math.abs(height - north)) / 20, 10)];
-          water = height < -1.25;
-          if (!water) for (const lake of O.waters) if (Math.hypot((x - lake.cx) / lake.rx, (z - lake.cz) / lake.rz) <= 1.04 && height <= lake.waterY) { water = true; break; }
-        }
-        if (water) { data[offset] = 119; data[offset + 1] = 156; data[offset + 2] = 167; }
-        else {
-          const step = index >= 0 ? 1 : 10, shade = AF.clamp(1 + (height - west) / step * 0.12 + (height - north) / step * 0.09, 0.72, 1.14), mix = 0.55;
-          data[offset] = (182 * (1 - mix) + (color >> 16 & 255) * mix) * shade;
-          data[offset + 1] = (193 * (1 - mix) + (color >> 8 & 255) * mix) * shade;
-          data[offset + 2] = (170 * (1 - mix) + (color & 255) * mix) * shade;
-        }
-        data[offset + 3] = 255;
-      }
-      if (L.col === L.canvas.width) {
-        L.ctx.putImageData(L.strip, 0, L.row++); L.col = 0; map.revision++;
-        if (L.row === L.canvas.height) { decorations = decorate(L); L.strip = null; }
-      }
-      if (performance.now() >= end) break;
-    }
-    const duration = performance.now() - start; rasterMs += duration; worstSlice = Math.max(worstSlice, duration);
-    map.ready = layerIndex === layers.length; return !map.ready;
-  };
-  const decorate = function* (L) {
-    const ctx = L.ctx, px = L.px, bounds = L.bounds, wx = x => (x - bounds.x0) * px, wz = z => (z - bounds.z0) * px;
-    const roads = L === city ? P.roads : P.world.roads;
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    for (const road of roads) {
-      ctx.beginPath();
-      if (road.points) for (let index = 0; index < road.points.length; index++) { const point = road.points[index]; if (index) ctx.lineTo(wx(point[0]), wz(point[1])); else ctx.moveTo(wx(point[0]), wz(point[1])); }
-      else { ctx.moveTo(wx(road.a[0]), wz(road.a[1])); ctx.lineTo(wx(road.b[0]), wz(road.b[1])); }
-      ctx.strokeStyle = '#a5ae9d'; ctx.lineWidth = (road.w || 9) * px + 2; ctx.stroke(); ctx.strokeStyle = '#edf0df'; ctx.lineWidth = (road.w || 7) * px; ctx.stroke();
-      yield;
-    }
-    if (L === city) {
-      ctx.fillStyle = sea; ctx.beginPath(); ctx.ellipse(wx(P.lake.cx), wz(P.lake.cz), P.lake.rx * px, P.lake.rz * px, 0, 0, TAU); ctx.fill();
-      ctx.fillStyle = '#919f96';
-      for (const building of AF.buildings) { yield; const box = building.box; if (!box || building.kind === 'zoo') continue; ctx.fillRect(wx(Math.min(box[0], box[3])), wz(Math.min(box[2], box[5])), Math.abs(box[3] - box[0]) * px, Math.abs(box[5] - box[2]) * px); }
-      ctx.beginPath(); for (let distance = 0; distance <= P.rail.length; distance += 4) { const point = P.railPoint(distance); if (distance) ctx.lineTo(wx(point.x), wz(point.z)); else ctx.moveTo(wx(point.x), wz(point.z)); if (distance % 256 === 0) yield; }
-      ctx.closePath(); ctx.strokeStyle = '#687e77'; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
-    } else {
-      ctx.fillStyle = '#919f96';
-      for (const building of AF.buildings) { yield; const box = building.box; if (!box || W.col((box[0] + box[3]) / 2, (box[2] + box[5]) / 2) >= 0) continue; ctx.fillRect(wx(Math.min(box[0], box[3])), wz(Math.min(box[2], box[5])), Math.abs(box[3] - box[0]) * px, Math.abs(box[5] - box[2]) * px); }
-      const strip = island.airstrip; if (strip) { ctx.fillStyle = '#7d8d88'; ctx.fillRect(wx(strip.x0), wz(strip.z - strip.w / 2), (strip.x1 - strip.x0) * px, strip.w * px); }
-      if (island.landing) {
-        const pier = island.landing.pier, landing = island.landing;
-        if (pier) { ctx.fillStyle = '#edf0df'; ctx.fillRect(wx(pier.x0), wz(pier.z0), (pier.x1 - pier.x0) * px, (pier.z1 - pier.z0) * px); }
-        ctx.beginPath(); ctx.moveTo(wx(0), wz(P.harbour.coastZ)); ctx.lineTo(wx(landing.x), wz(pier ? pier.z0 : landing.z));
-        ctx.strokeStyle = '#e0e9e5'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
-      }
-    }
-  };
-  AF.onIdle('map-raster', rasterWork);
-  const fallback = deadline => { if (!map.ready) { if (!AF.fpsCap || AF.fpsCap >= 60) rasterWork(Math.min(1, deadline.timeRemaining())); requestIdleCallback(fallback); } };
-  AF.on('ready', () => { if (window.requestIdleCallback) requestIdleCallback(fallback); });
-  map.finish = async () => { while (!map.ready) { rasterWork(1.5); await AF.yield(); } };
-  map.memory = () => (land.canvas.width * land.canvas.height + city.canvas.width * city.canvas.height + mini.width * mini.height + cv.width * cv.height) * 4;
-  map.stats = () => ({ bytes: map.memory(), rasterMs, worstSlice, ready: map.ready, world: [land.canvas.width, land.canvas.height], city: [city.canvas.width, city.canvas.height] });
-  map.pixel = (x, z) => { const L = W.col(x, z) >= 0 ? city : land; return Array.from(L.ctx.getImageData(Math.floor((x - L.bounds.x0) * L.px), Math.floor((z - L.bounds.z0) * L.px), 1, 1).data); };
+  // the world and city layers are static images baked offline (`node tools/map-bake.mjs`, rerun after world changes); decoded
+  // after `ready` so they never compete with boot
+  const layer = (bounds, src) => ({ bounds, src, img: null, px: 1 });
+  const land = layer(B, 'assets/map-world.webp'), city = layer(P.bounds, 'assets/map-city.webp'), layers = [land, city];
+  let loading = null;
+  const load = () => loading || (loading = Promise.all(layers.map(async (L) => {
+    const img = new Image(); img.src = L.src;
+    try { await img.decode(); L.img = img; L.px = img.width / (L.bounds.x1 - L.bounds.x0); } catch (e) { AF.warnOnce('map image ' + L.src, e); }
+  })).then(() => { map.ready = true; map.revision++; }));
+  AF.on('ready', () => setTimeout(load, 4000));
+  map.finish = load;
+  map.memory = () => layers.reduce((sum, L) => sum + (L.img ? L.img.width * L.img.height * 4 : 0), 0) + (mini.width * mini.height + cv.width * cv.height) * 4;
+  map.stats = () => ({ bytes: map.memory(), ready: map.ready, world: land.img && [land.img.width, land.img.height], city: city.img && [city.img.width, city.img.height] });
   map.worldToScreen = (x, z) => ({ x: (x - map.x) * map.scale + map.width / 2, y: (z - map.z) * map.scale + map.height / 2 });
   map.screenToWorld = (x, y) => ({ x: (x - map.width / 2) / map.scale + map.x, z: (y - map.height / 2) / map.scale + map.z });
   let dirty = true, boundsRect = null, selection = null, mapTimer = 0, miniTimer = 0, miniX = NaN, miniZ = NaN, miniYaw = NaN, miniSpan = 0, miniRevision = -1, labelCount = -1;
@@ -121,7 +54,7 @@ try {
   addEventListener('resize', resize);
   UI.toggleMap = (on, resume = true) => {
     S.map = on ?? !S.map; el.classList.toggle('open', S.map); root.classList.toggle('mapping', S.map);
-    if (S.map) { UI.toggleMenu(false, false); if (S.help) UI.toggleHelp(false); AF.input.releaseLock(); resize(); drawMap(); cv.focus({ preventScroll: true }); }
+    if (S.map) { load(); UI.toggleMenu(false, false); if (S.help) UI.toggleHelp(false); AF.input.releaseLock(); resize(); drawMap(); cv.focus({ preventScroll: true }); }
     else { pointers.clear(); selection = null; pick.classList.add('hide'); if (resume) AF.input.requestLock(); }
   };
   const constrain = () => { map.ts = AF.clamp(map.ts, map.fitScale, map.fitScale * 24); map.tx = AF.clamp(map.tx, B.x0, B.x1); map.tz = AF.clamp(map.tz, B.z0, B.z1); dirty = true; };
@@ -132,10 +65,10 @@ try {
   map.zoom = zoom; map.pan = (x, z) => { map.tx += x; map.tz += z; constrain(); };
   const drawLayers = (ctx, cx, cz, scale, width, height) => {
     ctx.fillStyle = sea; ctx.fillRect(0, 0, width, height);
-    for (let index = 0; index < layers.length; index++) {
-      const L = layers[index], bounds = L.bounds, dx = (bounds.x0 - cx) * scale + width / 2, dy = (bounds.z0 - cz) * scale + height / 2;
-      if (index === 1 && !L.row) continue;
-      ctx.drawImage(L.canvas, 0, 0, L.canvas.width, Math.max(1, L.row), dx, dy, L.canvas.width / L.px * scale, Math.max(1, L.row) / L.px * scale);
+    for (const L of layers) {
+      if (!L.img) continue;
+      const bounds = L.bounds;
+      ctx.drawImage(L.img, (bounds.x0 - cx) * scale + width / 2, (bounds.z0 - cz) * scale + height / 2, (bounds.x1 - bounds.x0) * scale, L.img.height / L.px * scale);
     }
   };
   const playerMarker = (ctx, x, y, yaw) => {
@@ -253,7 +186,8 @@ try {
     if (S.map) {
       const ease = 1 - Math.exp(-dt * 18), dx = map.tx - map.x, dz = map.tz - map.z, ds = map.ts - map.scale;
       if (Math.abs(dx) + Math.abs(dz) > 0.02 || Math.abs(ds) > 0.00001) { map.x += dx * ease; map.z += dz * ease; map.scale += ds * ease; dirty = true; }
-      if (mapTimer >= 0.1 && (dirty || src.x !== lastX || src.z !== lastZ || yaw !== lastYaw || map.revision !== lastRevision || labelCount !== AF.labels.length)) {
+      // pan / zoom easing redraws every frame; following the player alone stays at 10 Hz
+      if (dirty || mapTimer >= 0.1 && (src.x !== lastX || src.z !== lastZ || yaw !== lastYaw || map.revision !== lastRevision || labelCount !== AF.labels.length)) {
         mapTimer = 0; lastX = src.x; lastZ = src.z; lastYaw = yaw; lastRevision = map.revision; drawMap();
       }
       return;
@@ -265,10 +199,9 @@ try {
     miniX = src.x; miniZ = src.z; miniYaw = yaw; miniSpan = span; miniRevision = map.revision;
     drawLayers(mg, src.x, src.z, mini.width / span, mini.width, mini.height); playerMarker(mg, mini.width / 2, mini.height / 2, yaw);
   });
-  AF.test('map: island, sea gap and mountain raster', async () => {
-    await map.finish(); const isle = map.pixel(island.cx, island.cz), gap = map.pixel(-120, 400), mountain = map.pixel(-400, -800);
-    const water = pixel => pixel[0] === 119 && pixel[1] === 156 && pixel[2] === 167;
-    return { ok: !water(isle) && water(gap) && !water(mountain) && map.memory() < 40 * 1024 * 1024, info: JSON.stringify({ isle, gap, mountain, bytes: map.memory() }) };
+  AF.test('map: baked world and city images load', async () => {
+    await map.finish();
+    return { ok: !!(land.img && city.img) && map.memory() < 40 * 1024 * 1024, info: JSON.stringify(map.stats()) };
   });
   AF.test('map: M toggles map', () => {
     const title = S.title, open = S.map, hook = AF.hooks.tick.find(item => item.name === 'ui'); S.title = false;

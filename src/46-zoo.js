@@ -131,8 +131,10 @@ try {
       W.fill(bx0 - 0.125, 0.25, bz0 - 0.125, bx0 + 0.125, 1.25, bz0 + 0.125, boardC);
       W.fill(Math.min(bx0, bx0 + fx * 0.25), 1.25, bz0 - 1.1, Math.max(bx0, bx0 + fx * 0.25), 2.25, bz0 + 1.1, boardC);
       W.fill(Math.min(bx0 + fx * 0.25, bx0 + fx * 0.5), 1.35, bz0 - 1.0, Math.max(bx0 + fx * 0.25, bx0 + fx * 0.5), 2.15, bz0 + 1.0, paper);
-      AF.placeStatic(fitText(H.name.toUpperCase(), 0x2f4a3a, 2.0, 'deco'), bx0 + fx * 0.55, 1.8, bz0, face, { collide: false });
-      AF.placeStatic(fitText(H.animals.map((q) => q[0]).join(' \u00b7 '), 0x6a4a2a, 1.6), bx0 + fx * 0.55, 1.5, bz0, face, { collide: false });
+      // letters stand 4 cm proud of the paper's grid-snapped face
+      const paperX = Math.round((bx0 + fx * 0.5) * 4) / 4 + fx * 0.045;
+      AF.placeStatic(fitText(H.name.toUpperCase(), 0x2f4a3a, 2.0, 'deco'), paperX, 1.8, bz0, face, { collide: false });
+      AF.placeStatic(fitText(H.animals.map((q) => q[0]).join(' \u00b7 '), 0x6a4a2a, 1.6), paperX, 1.5, bz0, face, { collide: false });
       AF.addInteract({ x: bx0 + fx * 1.2, y: 1.2, z: bz0, r: 2.2, label: 'Read: ' + H.name, act: () => AF.emit('dialogue', { name: H.name, role: 'Solace Zoo', lines: H.sign }) });
       AF.addLabel(H.name, (a + c) / 2, (b + d) / 2, 'place');
       // onlookers lean on the rail along the path side (the crowd's instanced extras fill these)

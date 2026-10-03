@@ -333,7 +333,7 @@ O.addProp = (geo, x, y, z, rot = 0, opts = {}) => {
   if (!geo || !geo.attributes.aPal || !geo.index || !geo.attributes.position.array) throw new Error('outland props need retained voxel geometry');
   const prop = { geo, x, y, z, rot: ((rot % 4) + 4) % 4 }; O.props.push(prop);
   if (opts.collide !== false) {
-    const box = geo.boundingBox || (geo.computeBoundingBox(), geo.boundingBox), transform = new THREE.Matrix4().makeRotationY(-prop.rot * Math.PI / 2);
+    const box = geo.boundingBox || (geo.computeBoundingBox(), geo.boundingBox), transform = new THREE.Matrix4().makeRotationY(prop.rot * Math.PI / 2);
     const bounds = box.clone().applyMatrix4(transform);
     prop.col = AF.addCollider(x + bounds.min.x, y + bounds.min.y, z + bounds.min.z, x + bounds.max.x, y + bounds.max.y, z + bounds.max.z, opts.tag);
   }
@@ -375,6 +375,34 @@ AF.onBuild('outland-lake', 498, () => {
   if (RV.headY) { const pts = [], levels = []; for (let z = W.Z0; z <= RV.z0 - 14; z += 2) { pts.push([RV.x(z), z]); levels.push(AF.lerp(RV.headY, 16, (z - W.Z0) / (RV.z0 - 14 - W.Z0))); } ribbon(pts, levels, 5); }
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(points, 3)); geo.setIndex(indices); geo.computeVertexNormals(); geo.computeBoundingBox(); geo.computeBoundingSphere();
   geo.userData.kind = 'lake'; geo.userData.waterY = plan.lake.waterY; geo.userData.outland = true; AF.addWater(geo);
+  // falls: white water over every steep river reach (> 20 % fall), one opaque ribbon with foam bands streaming downhill
+  const fp = [], fuv = [], fi = [];
+  for (const river of O.rivers) {
+    let prev = -1, along = 0;
+    const vertex = (end) => {
+      const point = river.pts[end], before = river.pts[Math.max(0, end - 1)], after = river.pts[Math.min(river.pts.length - 1, end + 1)], tx = after[0] - before[0], tz = after[1] - before[1], tl = Math.hypot(tx, tz) || 1, half = river.hw + 0.8, base = fp.length / 3;
+      fp.push(point[0] - tz / tl * half, river.levels[end] + 0.12, point[1] + tx / tl * half, point[0] + tz / tl * half, river.levels[end] + 0.12, point[1] - tx / tl * half); fuv.push(-half, along, half, along);
+      return base;
+    };
+    for (let index = 1; index < river.pts.length; index++) {
+      const a = river.pts[index - 1], b = river.pts[index], length = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      if ((river.levels[index - 1] - river.levels[index]) / length <= 0.2) { prev = -1; continue; }
+      if (prev < 0) { along = 0; prev = vertex(index - 1); }
+      along += length; const base = vertex(index); fi.push(prev, base, prev + 1, prev + 1, base, base + 1); prev = base;
+    }
+  }
+  if (fi.length) {
+    const fg = new THREE.BufferGeometry(); fg.setAttribute('position', new THREE.Float32BufferAttribute(fp, 3)); fg.setAttribute('fallUV', new THREE.Float32BufferAttribute(fuv, 2)); fg.setIndex(fi); fg.computeVertexNormals();
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uAfTime = AF.mat.uniforms.uAfTime;
+      shader.vertexShader = 'attribute vec2 fallUV; varying vec2 vFall;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvFall = fallUV;');
+      shader.fragmentShader = 'uniform float uAfTime; varying vec2 vFall;\n' + shader.fragmentShader.replace('vec4 diffuseColor = vec4( diffuse, opacity );',
+        'float fallS = fract(vFall.y * 0.3 - uAfTime * 1.4 + sin(vFall.x * 1.9 + vFall.y * 0.2) * 0.35); float fallK = smoothstep(0.0, 0.2, fallS) * (1.0 - smoothstep(0.5, 0.85, fallS)) * (1.0 - smoothstep(0.6, 1.0, abs(vFall.x) / 3.8));\nvec4 diffuseColor = vec4(mix(vec3(0.3, 0.52, 0.6), vec3(0.93, 0.97, 1.0), 0.12 + 0.78 * fallK), 1.0);');
+    };
+    mat.customProgramCacheKey = () => 'outland-falls';
+    const falls = new THREE.Mesh(fg, mat); falls.name = 'outland-falls'; falls.receiveShadow = true; AF.scene.add(falls);
+  }
 });
 AF.test('outland: seam continuity along 200 non-building border samples', () => {
   let worst = 0, checked = 0;

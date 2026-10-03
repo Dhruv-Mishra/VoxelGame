@@ -79,7 +79,7 @@ const quad = (a, b, c, d) => [pc(a), pc(b), pc(c), pc(d ?? c)];
 // canopy boxes: [row centre, row edge]
 const pair = (a, b) => [pc(a), pc(b)];
 const PALS = {
-  wheat: [quad(0xd6b24e, 0xa9883a, 0xe2c262), quad(0xe0c26a, 0xb89c4c, 0xead07c), quad(0xc4b04a, 0x8f9440, 0xd2bf58)], wheatSlab: [pair(0xb8a05a, 0x9c8648), pair(0xc2aa64, 0xa48e50), pair(0xae9c54, 0x8e8a44)],
+  wheat: [quad(0xd8b048, 0x9a8a46, 0xe6c46a, 0xc99a38), quad(0xe2c264, 0xa4934e, 0xeacc78, 0xd0a84a), quad(0xc8b44a, 0x8a8c42, 0xdcc464, 0xb89e3c)], wheatSlab: [pair(0xb8a05a, 0x9c8648), pair(0xc2aa64, 0xa48e50), pair(0xae9c54, 0x8e8a44)],
   corn: [quad(0x5f8a3a, 0x4a7830, 0x56843a, 0xd9c47a)], cornSlab: [pair(0x5a8a3a, 0x3f6a2c)],
   sunflower: [quad(0x5a8a34, 0x46752c, 0xf2c21e, 0x5a3a1e), quad(0x5f8f38, 0x4a7a30, 0xf5d040, 0x6a4422)], sunflowerSlab: [pair(0xb89a2e, 0x5f7a30), pair(0xbea236, 0x627e34)],
   vine: [quad(0x4f7d34, 0x6a9a40, 0x4c2c5e, 0x34203f), quad(0x557f36, 0x739c44, 0xb6c25a, 0x98a848)], vineSlab: [pair(0x4f7d34, 0x3c6a2a), pair(0x557f36, 0x426e2c)],
@@ -88,7 +88,7 @@ const PALS = {
 };
 // per kind: near radius by tier [low/phone, laptop, balanced+], canopy box height (m) / width (x 2.5 m) / lift (m)
 const KS = [
-  { mesh: 'wheat', R: [24, 40, 48], h: 0.8, w: 1, y: 0 },
+  { mesh: 'wheat', R: [22, 34, 42], h: 0.9, w: 1, y: 0 },
   { mesh: 'tall', R: [20, 32, 40], h: 2.0, w: 1, y: 0 },
   { mesh: 'tall', R: [20, 32, 40], h: 1.95, w: 1, y: 0 },
   { mesh: 'vine', R: [22, 36, 44], h: 1.5, w: 0.26, y: 0.15 },
@@ -102,10 +102,14 @@ const poppy = pc(0xc8301e), cornflower = pc(0x4a6ad0), postWood = pc(0x6a5038), 
 const rnd = (index, salt) => hash(index * 31 + salt, salt * 17 + 5);
 const CROP_MODELS = {
   wheat() {
-    const m = new AF.Model(32, 8, 20); m.box(0, 0, 0, 32, 5, 20, S1);
-    for (let z = 1; z < 20; z += 2) m.box(0, 5, z, 32, 6, z + 1, S0);
-    for (let index = 0; index < 22; index++) { const x = Math.floor(rnd(index, 1) * 32), z = 1 + 2 * Math.floor(rnd(index, 2) * 10); m.set(x, 6, z, S0); if (rnd(index, 3) < 0.4) m.set(x, 7, z, S2); }
-    for (let index = 0; index < 5; index++) m.set(Math.floor(rnd(index, 4) * 32), 5, 2 * Math.floor(rnd(index, 5) * 10), index % 3 ? poppy : cornflower);
+    // 24 single stalks per segment (3 staggered rows): thin stem and a three-voxel ear, some nodding; a low stubble bed between
+    const m = new AF.Model(32, 10, 20); m.box(0, 0, 0, 32, 1, 20, S1);
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 8; col++) {
+      const index = row * 8 + col, x = col * 4 + (row & 1) * 2 + Math.floor(rnd(index, 1) * 2), z = 3 + row * 6 + Math.floor(rnd(index, 2) * 2), h = 4 + Math.floor(rnd(index, 3) * 3);
+      const lean = rnd(index, 4) < 0.35 ? 1 : 0, ear = rnd(index, 5);
+      m.box(x, 1, z, x + 1, h, z + 1, S1); m.box(x + lean, h, z, x + lean + 1, h + 3, z + 1, ear < 0.45 ? S0 : ear < 0.75 ? S3 : S2);
+    }
+    for (let index = 0; index < 3; index++) m.set(Math.floor(rnd(index, 6) * 32), 1, Math.floor(rnd(index, 7) * 20), index % 2 ? poppy : cornflower);
     return m;
   },
   tall() {

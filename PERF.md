@@ -89,7 +89,9 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
   (merged per tile, three LODs), vegetation through `44-flora.js`: the zoo/park tree generator (12-nature `makeTree`) re-meshed
   at 0.5 m (near, < 45-65 m) and 0.75 m (mid, to the old near range) plus a box hull far; five tree crowns (round, pine, cone,
   column, spread) + palm, shrub (12-nature bush), rock, cactus = 21 shared instanced meshes, ~15-17 drawn in a forest, near trees
-  650-1240 tris, forest pose ~260 k tris. ~25 palettes for variety. Mountain stands are clumped and thinned (`range`/`valley`).
+  650-1240 tris, forest pose ~260 k tris. ~25 palettes for variety. Mountain stands are clumped conifer forests to a 100-138 m
+  tree line (Oct 2026: 62 % of trees draw their far hull to the full flora range, the rest to 460 m, rocks 240 m, shrubs 145 m;
+  mid -> far hull at 105 m Laptop / 160 m Balanced+). Lake-road pose 72 k -> 239 k flora tris, draws flat.
   Outland fauna (`56-wild`): five InstancedMeshes (deer, rabbit, sheep, cow, hawk), herds wake within 260 m (hawks 700 m), 15 Hz.
   Particles were trimmed (Oct 2026): 140 falling leaves, 14 smoking chimneys x 8 puffs, 8 manhole vents x 8 (skipped when far),
   4 puffs per cart, half the quay spray. Outland roads are looked up through a 64 m segment grid (`roadAt`), never a scan of every segment.
@@ -123,9 +125,11 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
   `O.deckY` = highest ribbon at or under the wheel (never a hidden one), all ribbons sit at `road.lift` 0.05 m.
 
 ## 5d. UI / map
-- `74-map.js` rasterises the whole world (0.1 px/m) and the city (1.5 px/m) in idle slots (≤ 1.5 ms slices) after
-  `ready`; canvases total ≈ 10–15 MB. Minimap redraws ≤ 10 Hz and only when the view changed. HUD text updates on
-  change only. No backdrop blur on phones.
+- The world map is two static images baked offline (`node tools/map-bake.mjs`, server running, after `build.mjs`):
+  `assets/map-world.webp` (0.6 px/m) and `assets/map-city.webp` (1.5 px/m), ~300 KB total, decoded 4 s after `ready`
+  (or when the map opens). No runtime raster. **Re-bake after changing terrain, roads or buildings.** The open map redraws
+  every frame only while panning / zooming (≈0.3 ms), else at 10 Hz; the minimap ≤ 10 Hz and only when the view changed.
+  HUD text updates on change only. No backdrop blur on phones.
 
 ## 6b. Content already optimised (keep it that way)
 - Central Park actors: shared per-part InstancedMeshes + merged far poses (`park-life-parts`, `park-life-far`,

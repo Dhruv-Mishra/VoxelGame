@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/(\w:)/, '$1')), '..');
 const port = +process.argv[2] || 8765;
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.json': 'application/json', '.png': 'image/png' };
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.webp': 'image/webp' };
 http.createServer((req, res) => {
   const p = path.join(root, decodeURIComponent(new URL(req.url, 'http://x').pathname));
   if (!p.startsWith(root)) { res.writeHead(403); res.end(); return; }

@@ -27,7 +27,7 @@ F.add=(kind,x,z,opts={})=>{
  if(opts.planted!==true&&(O.pads.some(pad=>Math.abs(x-pad.x)<pad.rx+4&&Math.abs(z-pad.z)<pad.rz+4)||!beach&&O.biome(x,z)==='farmland'&&O.fieldEdge(x,z)>5&&!(design.shape===5&&O.fieldMeadow(x,z))))return null;
  const y=opts.y??(W.col(x,z)>=0?W.groundY(x,z):Math.round(O.h(x,z)*4)/4),biome=opts.biome??O.biome(x,z);
  const base=(opts.scale??1)*(design.scale??1),sx=base*(0.85+hash(x+109,z)*0.3),sy=base*(0.85+hash(x,z+211)*0.45);
- const entry={kind,shape:design.shape,x,y,z,scale:base,sx,sy,rot:opts.rot??hash(x*4,z*4)*Math.PI*2,pal:design.palette,biome,planted:!!opts.planted,range:design.shape===5?145:hash(x+371,z+89)<0.28?0:300};
+ const entry={kind,shape:design.shape,x,y,z,scale:base,sx,sy,rot:opts.rot??hash(x*4,z*4)*Math.PI*2,pal:design.palette,biome,planted:!!opts.planted,range:design.shape===5?145:design.shape===3?240:hash(x+371,z+89)<0.62?0:460};
  const key=Math.floor(x/64)*10000+Math.floor(z/64);let bucket=buckets.get(key);if(!bucket){bucket=[];buckets.set(key,bucket);}bucket.push(entry);F.records.push(entry);
  F.stats.total++;F.stats.biomes[biome]=(F.stats.biomes[biome]??0)+1;revision++;
  if(opts.collide)entry.col=AF.addCollider(x-0.3,y,z-0.3,x+0.3,y+entry.scale*3,z+0.3,'flora-trunk');
@@ -112,14 +112,15 @@ function* generate(){
   if(beach){if(rnd<0.45)F.add('palm',px,pz,{scale:0.7+hash(x,z+83)*0.3,biome:'beach'});else if(rnd>0.8)F.add('shrub',px,pz,{scale:0.65,biome:'beach'});continue;}
   if(biome==='desert'){if(rnd<0.13&&slope<0.6)F.add('cactus',px,pz,{scale:0.85+hash(x+4,z)*0.45,biome});else if(rnd<0.42)F.add('dry-bush',px,pz,{scale:0.6+hash(x,z+98)*0.7,biome});else if(rnd>0.91)F.add('rock',px,pz,{scale:0.35+hash(x,z+98)*0.5,biome});continue;}
   let density=biome==='farmland'?(O.fieldEdge(px,pz)<4.5?0.68:0):O.forestDensity(px,pz)*0.9+(height<78?0.035:0);
-  // mountains: thinner, clumped stands with open meadows between them, thinning out toward the tree line
-  if(biome==='range'||biome==='valley')density*=0.5*AF.smooth(0.3,0.62,AF.noise2(px*0.018+5,pz*0.018-3))*(1-AF.smooth(60,105,height)*0.6);
+  // mountains: clumped conifer stands on the slopes up to the tree line, open meadows between them
+  if(biome==='range'||biome==='valley')density=0.5*AF.smooth(0.24,0.5,AF.noise2(px*0.018+5,pz*0.018-3))*(1-AF.smooth(100,138,height));
   const shrub=shrubs[Math.floor(hash(x+3,z+71)*shrubs.length)];
   if(biome==='jungle'){if(height<110&&slope<1.1&&rnd<density)F.add(hash(x+17,z)<0.45?'palm':'elm-green',px,pz,{scale:0.95+hash(x+4,z)*0.55,biome});else if(slope<0.9&&rnd<density+0.3)F.add('shrub',px,pz,{scale:0.8+hash(x,z+39)*0.5,biome});continue;}
   if(biome==='farmland'&&O.fieldMeadow(px,pz)&&rnd<0.035&&slope<0.5){F.add('shrub',px,pz,{scale:0.6,biome});continue;}
-  if(height<118&&slope<1.1&&rnd<density){const conifer=biome==='range'&&hash(x+91,z)>0.3,pick=hash(x,z+55);F.add(biome==='farmland'&&rnd>0.32?shrub:conifer?conifers[Math.floor(pick*conifers.length)]:biome==='range'||biome==='valley'?upland[Math.floor(pick*upland.length)]:choices[Math.floor(pick*choices.length)],px,pz,{scale:0.7+hash(x+4,z)*0.6,biome});}
+  const mountain=biome==='range'||biome==='valley';
+  if((mountain?height<138&&slope<1.7:height<118&&slope<1.1)&&rnd<density){const conifer=biome==='range'&&hash(x+91,z)>0.12||biome==='valley'&&height>40&&hash(x+91,z)>0.35,pick=hash(x,z+55);F.add(biome==='farmland'&&rnd>0.32?shrub:conifer?conifers[Math.floor(pick*conifers.length)]:biome==='range'||biome==='valley'?upland[Math.floor(pick*upland.length)]:choices[Math.floor(pick*choices.length)],px,pz,{scale:0.7+hash(x+4,z)*0.6,biome});}
   else if(height<100&&slope<0.7&&biome!=='farmland'&&rnd<density+0.13)F.add(shrub,px,pz,{scale:0.6+hash(x,z+39)*0.6,biome});
-  else if((biome==='range'&&height>48&&slope>0.35||biome==='forest')&&rnd>0.91)F.add('rock',px,pz,{scale:0.65+hash(x,z+98)*1.1,biome});
+  else if((biome==='range'&&(height>48||slope>0.25)||biome==='forest'||biome==='valley')&&rnd>0.925)F.add('rock',px,pz,{scale:0.45+hash(x,z+98)*1.3,biome});
  }yield;}
  F.stats.phase='island';
  const isle=AF.PLAN.world.island;
@@ -137,7 +138,7 @@ function put(batch,entry){
 function upload(attr,count){attr.clearUpdateRanges();attr.addUpdateRange(0,Math.max(1,count)*attr.itemSize);attr.needsUpdate=true;}
 function* select(){
  F.stats.phase='select';
- const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,view=AF.lodScale||1,near=Math.min(320,(AF.MOBILE||AF.GFX.tier==='low'?80:AF.GFX.lite?125:190)*view),mid=Math.min(near-30,(AF.MOBILE||AF.GFX.tier==='low'?28:AF.GFX.lite?45:65)*view),far=Math.min(1600,(AF.MOBILE||AF.GFX.tier==='low'?480:AF.GFX.lite?720:880)*view);
+ const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,view=AF.lodScale||1,near=Math.min(320,(AF.MOBILE||AF.GFX.tier==='low'?80:AF.GFX.lite?105:160)*view),mid=Math.min(near-30,(AF.MOBILE||AF.GFX.tier==='low'?28:AF.GFX.lite?45:65)*view),far=Math.min(1600,(AF.MOBILE||AF.GFX.tier==='low'?480:AF.GFX.lite?720:880)*view);
  uniforms.floraMid.value=mid;uniforms.floraNear.value=near;uniforms.floraFar.value=far;uniforms.floraShadow.value=AF.MOBILE?25:55;
  AF.camera.updateMatrixWorld();projection.multiplyMatrices(AF.camera.projectionMatrix,AF.camera.matrixWorldInverse);frustum.setFromProjectionMatrix(projection);
  for(const batch of batches)batch.write=0;
