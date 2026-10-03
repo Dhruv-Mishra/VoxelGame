@@ -34,6 +34,56 @@ try {
 
   // ------------------------------------------------------------ shore distance (R, 0..16 m) + depth (G, 0..4 m) over the map, 0.5 m cells
   const SB = { x0: AF.W.X0, z0: AF.W.Z0, x1: AF.W.x1, z1: AF.W.z1, res: 0.5 };
+  const WB = AF.PLAN.world.bounds;
+  let shoreJob = null;
+  function* worldShore(data, nx, nz) {
+    const O = AF.outland, W = AF.W, seaY = AF.PLAN.harbour.waterY, dist = new Float32Array(nx * nz), dx = (WB.x1 - WB.x0) / nx, dz = (WB.z1 - WB.z0) / nz;
+    for (let index = 0; index < dist.length; index++) {
+      const x = WB.x0 + (index % nx + 0.5) * dx, z = WB.z0 + (Math.floor(index / nx) + 0.5) * dz;
+      const height = O.h(x, z), grid = W.col(x, z) >= 0;
+      let level = seaY;
+      if (grid) {
+        const lake = AF.PLAN.lake, pond = AF.PLAN.pond;
+        if (Math.hypot((x - lake.cx) / lake.rx, (z - lake.cz) / lake.rz) < 1.15) level = AF.land.LAKE_Y ?? lake.waterY;
+        else if (Math.hypot(x - pond.cx, z - pond.cz) < pond.r + 6) level = AF.land.POND_Y ?? -0.5;
+      } else for (const lake of O.waters) if (Math.abs(x - lake.cx) < lake.rx * 1.3 && Math.abs(z - lake.cz) < lake.rz * 1.3) { level = lake.waterY; break; }
+      dist[index] = height >= level ? 0 : 128;
+      data[index * 4 + 1] = Math.min(255, Math.max(0, Math.round((level - height) / 4 * 255)));
+      if ((index & 15) === 15) yield;
+    }
+    const diagonal = Math.hypot(dx, dz);
+    for (let index = 0; index < dist.length; index++) {
+      const col = index % nx;
+      if (col) dist[index] = Math.min(dist[index], dist[index - 1] + dx);
+      if (index >= nx) {
+        dist[index] = Math.min(dist[index], dist[index - nx] + dz);
+        if (col) dist[index] = Math.min(dist[index], dist[index - nx - 1] + diagonal);
+        if (col < nx - 1) dist[index] = Math.min(dist[index], dist[index - nx + 1] + diagonal);
+      }
+      if ((index & 255) === 255) yield;
+    }
+    for (let index = dist.length - 1; index >= 0; index--) {
+      const col = index % nx;
+      if (col < nx - 1) dist[index] = Math.min(dist[index], dist[index + 1] + dx);
+      if (index < dist.length - nx) {
+        dist[index] = Math.min(dist[index], dist[index + nx] + dz);
+        if (col) dist[index] = Math.min(dist[index], dist[index + nx - 1] + diagonal);
+        if (col < nx - 1) dist[index] = Math.min(dist[index], dist[index + nx + 1] + diagonal);
+      }
+      data[index * 4] = Math.round(Math.min(128, dist[index]) / 128 * 255);
+      if ((index & 255) === 0) yield;
+    }
+    WQ.worldTex.needsUpdate = true; WQ.worldReady = true;
+  }
+  function shoreWork(ms) {
+    if (!AF.ready || !shoreJob) return false;
+    const start = performance.now(), end = start + Math.min(ms, 1);
+    do { if (shoreJob.next().done) { shoreJob = null; break; } } while (performance.now() < end);
+    const elapsed = performance.now() - start;
+    WQ.worldMs += elapsed; WQ.worldMaxMs = Math.max(WQ.worldMaxMs, elapsed); return !!shoreJob;
+  }
+  AF.onIdle('water-shore', shoreWork);
+  WQ.finish = async () => { while (shoreJob) { shoreWork(1); await AF.yield(); } };
   function makeShoreTex() {
     const t0 = performance.now();
     const W = AF.W, P = AF.PLAN, L = AF.land || {};
@@ -101,7 +151,7 @@ try {
   const FS = `
     #include <common>
     #include <fog_pars_fragment>
-    uniform sampler2D tN; uniform sampler2D tShore; uniform vec4 uShoreBox; uniform float uHasShore;
+    uniform sampler2D tN; uniform sampler2D tShore; uniform sampler2D tWorld; uniform vec4 uShoreBox; uniform vec4 uWorldBox; uniform float uHasShore;
     uniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uMoonDir; uniform float uSunK; uniform float uMoonK; uniform float uNight; uniform float uT;
     uniform vec3 uDeep; uniform vec3 uShallow; uniform vec3 uFoamCol; uniform float uLight; uniform vec2 uFlow; uniform float uChop; uniform float uSea; uniform float uOct;
     uniform float uAlpha; uniform float uDepthMax; uniform float uSmall; uniform float uDepthK;
@@ -129,11 +179,14 @@ try {
       // --- shore data
       float shoreD = 16.0, depthM = uDepthMax;
       if (uHasShore > 0.5) {
-        vec2 suv = (p - uShoreBox.xy) / (uShoreBox.zw - uShoreBox.xy), cuv = clamp(suv, 0.0, 1.0);
-        vec4 s = texture2D(tShore, cuv);
-        float od = length((suv - cuv) * (uShoreBox.zw - uShoreBox.xy));   // metres past the map edge: the island shallows fade into open ocean
-        shoreD = mix(s.r * 16.0, 16.0, smoothstep(0.0, 8.0, od));
-        depthM = mix(s.g * 4.0 + (s.g > 0.99 ? uDepthMax : 0.0), uDepthMax, smoothstep(0.0, 90.0, od));
+        vec4 coarse = texture2D(tWorld, clamp((p - uWorldBox.xy) / (uWorldBox.zw - uWorldBox.xy), 0.0, 1.0));
+        vec4 fine = texture2D(tShore, clamp((p - uShoreBox.xy) / (uShoreBox.zw - uShoreBox.xy), 0.0, 1.0));
+        float edgeD = min(min(p.x - uShoreBox.x, uShoreBox.z - p.x), min(p.y - uShoreBox.y, uShoreBox.w - p.y));
+        float fineK = smoothstep(0.0, 16.0, edgeD);
+        shoreD = mix(coarse.r * 128.0, mix(fine.r * 16.0, coarse.r * 128.0, smoothstep(0.85, 1.0, fine.r)), fineK);
+        float dep = mix(coarse.g, fine.g, fineK);
+        depthM = dep * 4.0 + (dep > 0.99 ? uDepthMax : 0.0);
+        depthM = max(depthM, smoothstep(8.0, 65.0, shoreD) * uDepthMax * uSea);
       }
       float calm = mix(0.55, 1.0, smoothstep(0.0, 6.0, shoreD));   // flatter in sheltered water along walls
       float str = uChop * calm * mix(0.10, 0.16, uSea);
@@ -239,6 +292,11 @@ try {
     const tN = WQ.normalTex = makeNormalTex();
     let tS = null;
     try { tS = WQ.shoreTex = makeShoreTex(); } catch (e) { AF.warnOnce('water2: shore texture failed', e); }
+    const nx = Math.ceil((WB.x1 - WB.x0) / 4), nz = Math.ceil((WB.z1 - WB.z0) / 4), data = new Uint8Array(nx * nz * 4); data.fill(255);
+    const tWorld = WQ.worldTex = new THREE.DataTexture(data, nx, nz, THREE.RGBAFormat, THREE.UnsignedByteType);
+    tWorld.magFilter = tWorld.minFilter = THREE.LinearFilter; tWorld.generateMipmaps = false; tWorld.needsUpdate = true;
+    WQ.worldN = [nx, nz]; WQ.worldBytes = data.byteLength; WQ.worldMs = WQ.worldMaxMs = 0; WQ.worldReady = false;
+    shoreJob = worldShore(data, nx, nz);
     WQ.mats = [];
     const lin = (h) => new THREE.Color(h);
     WQ.light = { value: 1 };
@@ -257,6 +315,7 @@ try {
       }[kind] || { deep: 0x1d4a5a, shallow: 0x4a9a98, flow: [0.02, 0.01], chop: 0.8, alpha: 0.75, dmax: 2 };
       const U = Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), THREE.UniformsLib.fog, {
         tN: { value: tN }, tShore: { value: tS }, uShoreBox: { value: new THREE.Vector4(SB.x0, SB.z0, SB.x1, SB.z1) }, uHasShore: { value: tS && !small ? 1 : 0 },
+        tWorld: { value: tWorld }, uWorldBox: { value: new THREE.Vector4(WB.x0, WB.z0, WB.x1, WB.z1) },
         uSunDir: SU.uSunDir, uSunCol: SU.uSunCol, uMoonDir: SU.uMoonDir, uSunK: SU.uSunK, uMoonK: SU.uMoonK, uNight: SU.uNight, uT: SU.uT,
         uDeep: { value: lin(cfg.deep) }, uShallow: { value: lin(cfg.shallow) }, uFoamCol: { value: lin(0xf4f1ea) }, uLight: WQ.light,
         uFlow: { value: new THREE.Vector2(cfg.flow[0], cfg.flow[1]) }, uChop: { value: cfg.chop }, uSea: { value: isSea ? 1 : 0 }, uOct: { value: 4 },

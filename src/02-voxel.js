@@ -103,8 +103,8 @@ W.walls = (x0, y0, z0, x1, y1, z1, c, t = 0.25) => {
 
 // ---- heightmap
 W.col = (x, z) => { const bx = W.bx(x), bz = W.bz(z); return (bx < 0 || bz < 0 || bx >= NX || bz >= NZ) ? -1 : bx * NZ + bz; };
-W.hB = (bx, bz) => (bx < 0 || bz < 0 || bx >= NX || bz >= NZ) ? 0 : W.H[bx * NZ + bz];
-W.groundY = (x, z) => { const i = W.col(x, z); return i < 0 ? 0 : W.H[i] * VS; };
+W.hB = (bx, bz) => (bx < 0 || bz < 0 || bx >= NX || bz >= NZ) ? (AF.outland ? AF.outland.hB(bx, bz) : 0) : W.H[bx * NZ + bz];
+W.groundY = (x, z) => { const i = W.col(x, z); return i < 0 ? (AF.outland ? AF.outland.groundY(x, z) : 0) : W.H[i] * VS; };
 // set ground rect [x0,x1) x [z0,z1) to height hBlocks with top colour c (and optional side colour s)
 W.ground = (x0, z0, x1, z1, hBlocks, c, s) => {
   const a = rb(Math.min(x0, x1), X0), b = rb(Math.max(x0, x1), X0), d = rb(Math.min(z0, z1), Z0), e = rb(Math.max(z0, z1), Z0);
@@ -204,8 +204,30 @@ class GeoBuf {
     g.computeBoundingSphere(); g.computeBoundingBox();
     return g;
   }
+  *geometryG(floatUV = false) {
+    const geo = new THREE.BufferGeometry();
+    for (const [name, values, Type, size, factor] of [['position', this.p, Float32Array, 3, 1], ['aBU', this.uv, floatUV ? Float32Array : Int16Array, 2, floatUV ? 0.25 : 1], ['aPal', this.pal, Uint16Array, 1, 1], ['aAN', this.an, Uint8Array, 1, 1], ['index', this.idx, this.n > 65535 ? Uint32Array : Uint16Array, 1, 1]]) {
+      const array = new Type(values.length); yield;
+      for (let offset = 0; offset < values.length; offset += 2048) { const end = Math.min(values.length, offset + 2048); for (let index = offset; index < end; index++) array[index] = values[index] * factor; yield; }
+      const attr = new THREE.BufferAttribute(array, size);
+      if (name === 'index') geo.setIndex(attr); else geo.setAttribute(name, attr);
+    }
+    yield* geometryBoundsG(geo); return geo;
+  }
 }
 AF.GeoBuf = GeoBuf;
+function* geometryBoundsG(geo) {
+  const values = geo.attributes.position.array, box = new THREE.Box3();
+  for (let offset = 0; offset < values.length; offset += 6144) {
+    const end = Math.min(values.length, offset + 6144);
+    for (let index = offset; index < end; index += 3) { box.min.x = Math.min(box.min.x, values[index]); box.max.x = Math.max(box.max.x, values[index]); box.min.y = Math.min(box.min.y, values[index + 1]); box.max.y = Math.max(box.max.y, values[index + 1]); box.min.z = Math.min(box.min.z, values[index + 2]); box.max.z = Math.max(box.max.z, values[index + 2]); }
+    yield;
+  }
+  const sphere = new THREE.Sphere(); box.getCenter(sphere.center); let radius2 = 0;
+  for (let offset = 0; offset < values.length; offset += 6144) { const end = Math.min(values.length, offset + 6144); for (let index = offset; index < end; index += 3) radius2 = Math.max(radius2, (values[index] - sphere.center.x) ** 2 + (values[index + 1] - sphere.center.y) ** 2 + (values[index + 2] - sphere.center.z) ** 2); yield; }
+  sphere.radius = Math.sqrt(radius2); geo.boundingBox = box; geo.boundingSphere = sphere;
+}
+AF.geometryBoundsG = geometryBoundsG;
 
 // Greedy mesher over a padded dense grid accessor.
 // dims [sx,sy,sz]; get(x,y,z) valid for -1..s (padding); scale (m per voxel); origin [ox,oy,oz] (metres of voxel 0 corner);
@@ -214,7 +236,8 @@ const AOK = [0, 1, 2, 3];
 const QP = new Float64Array(12), QT = new Float64Array(8);
 // pad: Uint16Array of (sx+2)*(sy+2)*(sz+2) with a 1-voxel border, index ((x+1)*(sy+2)+(y+1))*(sz+2)+(z+1).
 // 65535 in the pad = "solid, never drawn" (underground). sliceCnt (optional): [[per-x count],[per-y],[per-z]] of drawable voxels.
-function greedyPad(sx, sy, sz, pad, scale, origin, uvOff, out, flat, sliceCnt, uvScale = 1) {
+function greedyPad(...args) { const gen = greedyPadG(...args); while (!gen.next().done); }
+function* greedyPadG(sx, sy, sz, pad, scale, origin, uvOff, out, flat, sliceCnt, uvScale = 1) {
   const P = AF.PAL, OP = P.opaque, GL = P.glass, dims = [sx, sy, sz];
   const SZ = sz + 2, SX = (sy + 2) * SZ, stride = [SX, SZ, 1];
   const I0 = SX + SZ + 1;
@@ -227,6 +250,7 @@ function greedyPad(sx, sy, sz, pad, scale, origin, uvOff, out, flat, sliceCnt, u
       const dir = side === 0 ? 1 : -1, off = sd * dir;
       const nIdx = d * 2 + side;
       for (let k = 0; k < dims[d]; k++) {
+        yield;
         if (cnt && !cnt[k]) continue;
         let any = false;
         const base = I0 + k * sd;
@@ -340,6 +364,13 @@ AF.meshModel = (m, o = {}) => {
   g.userData.vs = vs; g.userData.src = { m, vs, anchor: an };
   if (out.glass.n) g.userData.glass = out.glass.geometry();
   return g;   // g.userData.glass holds the transparent part (if any)
+};
+AF.meshModelG = function* (m, o = {}) {
+  const vs = o.vs ?? 1 / 16, an = o.anchor ?? [0.5, 0, 0.5], out = { opaque: new GeoBuf(), glass: new GeoBuf() }, H2 = m.h + 2, D2 = m.d + 2, pad = new Uint16Array((m.w + 2) * H2 * D2);
+  for (let x = 0; x < m.w; x++) { for (let y = 0; y < m.h; y++) { const src = (x * m.h + y) * m.d, dst = ((x + 1) * H2 + y + 1) * D2 + 1; for (let z = 0; z < m.d; z++) pad[dst + z] = m.v[src + z]; } yield; }
+  yield* greedyPadG(m.w, m.h, m.d, pad, vs, [-m.w * vs * an[0], -m.h * vs * an[1], -m.d * vs * an[2]], [0, 0, 0], out, o.flat);
+  const geo = yield* out.opaque.geometryG(); geo.userData.vs = vs; geo.userData.src = { m, vs, anchor: an };
+  if (out.glass.n) geo.userData.glass = yield* out.glass.geometryG(); return geo;
 };
 // Build a THREE.Mesh (with glass child) from a model; castShadow on by default
 AF.modelMesh = (m, o = {}) => {
@@ -890,7 +921,8 @@ AF.removeStatic = (pr) => {
 };
 AF.addWater = (geo, mat) => { AF.world.water.push({ geo, mat }); };
 
-function meshTerrainRegion(rx, rz, buf) {
+function meshTerrainRegion(rx, rz, buf) { runSync(meshTerrainRegionG(rx, rz, buf)); }
+function* meshTerrainRegionG(rx, rz, buf) {
   const H = W.H, C = W.C, S = W.S, dirtI = AF.col('dirt');
   const bx0 = rx * REG, bz0 = rz * REG, bx1 = Math.min(NX, bx0 + REG), bz1 = Math.min(NZ, bz0 + REG);
   const w = bx1 - bx0, d = bz1 - bz0;
@@ -898,7 +930,7 @@ function meshTerrainRegion(rx, rz, buf) {
   const occCol = (bx, bz, h) => (W.hB(bx, bz) > h) || vox(bx, h + GOFF, bz);
   // top faces, greedy over (h, colour, ao)
   const key = new Float64Array(w * d);
-  for (let i = 0; i < w; i++) for (let k = 0; k < d; k++) {
+  for (let i = 0; i < w; i++) { for (let k = 0; k < d; k++) {
     const bx = bx0 + i, bz = bz0 + k, ci = bx * NZ + bz, h = H[ci];
     if (vox(bx, h + GOFF, bz)) { key[i * d + k] = 0; continue; }   // covered by a voxel floor: hidden
     const s10 = occCol(bx - 1, bz, h) ? 1 : 0, s12 = occCol(bx + 1, bz, h) ? 1 : 0, s01 = occCol(bx, bz - 1, h) ? 1 : 0, s21 = occCol(bx, bz + 1, h) ? 1 : 0;
@@ -910,8 +942,8 @@ function meshTerrainRegion(rx, rz, buf) {
       ao = A(s10, s01, c00) | (A(s12, s01, c20) << 2) | (A(s12, s21, c22) << 4) | (A(s10, s21, c02) << 6);
     }
     key[i * d + k] = ((h + 32768) * 8192 + C[ci]) * 256 + ao + 1;
-  }
-  for (let i = 0; i < w; i++) for (let k = 0; k < d;) {
+  } yield; }
+  for (let i = 0; i < w; i++) { for (let k = 0; k < d;) {
     const kk = key[i * d + k]; if (!kk) { k++; continue; }
     const lit = ((kk - 1) % 256) === 255;
     let len = 1; if (lit) while (k + len < d && key[i * d + k + len] === kk) len++;
@@ -925,9 +957,9 @@ function meshTerrainRegion(rx, rz, buf) {
     buf.quad([xa, y, za], [xa, y, zb], [xb, y, zb], [xb, y, za], [u0, v0], [u0, v0 + len], [u0 + wid, v0 + len], [u0 + wid, v0], c, 2, [ao[0], ao[3], ao[2], ao[1]]);
     for (let a = 0; a < wid; a++) for (let t = 0; t < len; t++) key[(i + a) * d + k + t] = 0;
     k += len;
-  }
+  } yield; }
   // side faces: for each column edge where the neighbour is lower
-  const side = (dx, dz, nIdx) => {
+  const side = function* (dx, dz, nIdx) {
     // run along the axis perpendicular to (dx,dz)
     const alongX = dz !== 0;
     const nA = alongX ? w : d, nB = alongX ? d : w;
@@ -964,9 +996,10 @@ function meshTerrainRegion(rx, rz, buf) {
         } else if (sideC === topC) emit(nh, h, topC, h - nh <= 2 ? 32 : 0); else { emit(nh, h - 1, sideC); emit(h - 1, h, topC); }
         a += run;
       }
+      yield;
     }
   };
-  side(1, 0, 0); side(-1, 0, 1); side(0, 1, 4); side(0, -1, 5);
+  yield* side(1, 0, 0); yield* side(-1, 0, 1); yield* side(0, 1, 4); yield* side(0, -1, 5);
 }
 
 // region meshers are generators (yield after every chunk) so regions can be streamed in a few ms per frame; runSync drives one to the end
@@ -1182,12 +1215,14 @@ const ROTN = [[0, 1, 2, 3, 4, 5], [5, 4, 2, 3, 0, 1], [1, 0, 2, 3, 5, 4], [4, 5,
 AF.world.propsByRegion = new Map();
 const regionKeyOf = (x, z) => { const bx = W.bx(x), bz = W.bz(z); if (bx < 0 || bz < 0 || bx >= NX || bz >= NZ) return -1; return (bx >> 7) * 64 + (bz >> 7); };
 AF.world.indexProp = (pr) => { const k = regionKeyOf(pr.x, pr.z); if (k < 0) return; let a = AF.world.propsByRegion.get(k); if (!a) AF.world.propsByRegion.set(k, a = []); a.push(pr); };
-function mergeProps(list, pick) {
+function mergeProps(list, pick) { const gen = mergePropsG(list, pick); let step; do { step = gen.next(); } while (!step.done); return step.value; }
+function* mergePropsG(list, pick, floatUV = false) {
   let nv = 0, ni = 0;
   const parts = [];
   for (const pr of list) { const g = pick(pr); if (!g) continue; parts.push([pr, g]); nv += g.attributes.position.count; ni += g.index.count; }
   if (!nv) return null;
-  const P = new Float32Array(nv * 3), U = new Int16Array(nv * 2), L = new Uint16Array(nv), N = new Uint8Array(nv), I = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+  const P = new Float32Array(nv * 3); yield;
+  const U = floatUV ? new Float32Array(nv * 2) : new Int16Array(nv * 2), L = new Uint16Array(nv), N = new Uint8Array(nv), I = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni); yield;
   let vo = 0, io = 0;
   for (const [pr, g] of parts) {
     const p = g.attributes.position.array, uv = g.attributes.aBU.array, pal = g.attributes.aPal.array, an = g.attributes.aAN.array, ix = g.index.array, r = pr.rot, rn = ROTN[r];
@@ -1200,8 +1235,9 @@ function mergeProps(list, pick) {
       P[j * 3] = pr.x + x; P[j * 3 + 1] = pr.y + p[i * 3 + 1] * positionScale; P[j * 3 + 2] = pr.z + z;
       U[j * 2] = uv[i * 2]; U[j * 2 + 1] = uv[i * 2 + 1]; L[j] = pal[i];
       const a = an[i], nidx = a % 8; N[j] = a - nidx + rn[nidx];
+      if ((i & 255) === 255) yield;
     }
-    for (let i = 0; i < ix.length; i++) I[io + i] = vo + ix[i];
+    for (let i = 0; i < ix.length; i++) { I[io + i] = vo + ix[i]; if ((i & 2047) === 2047) yield; }
     vo += n; io += ix.length;
   }
   const geo = new THREE.BufferGeometry();
@@ -1210,10 +1246,22 @@ function mergeProps(list, pick) {
   geo.setAttribute('aPal', new THREE.BufferAttribute(L, 1));
   geo.setAttribute('aAN', new THREE.BufferAttribute(N, 1));
   geo.setIndex(new THREE.BufferAttribute(I, 1));
-  geo.computeBoundingSphere();
+  yield* geometryBoundsG(geo);
   return geo;
 }
 function afDisposeArray() { this.array = null; }
+AF.world.mergeProps = mergeProps;
+AF.world.mergePropsG = mergePropsG;
+AF.test('voxel: resumable model and prop buffers match synchronous meshing', () => {
+  const drain = gen => { let step; do { step = gen.next(); } while (!step.done); return step.value; };
+  const model = new AF.Model(12, 16, 10).box(1, 0, 1, 10, 14, 9, AF.col('grass'));
+  const sync = AF.meshModel(model, { flat: true }), asyncGeo = drain(AF.meshModelG(model, { flat: true }));
+  const same = (left, right) => ['position', 'aBU', 'aPal', 'aAN'].every(name => { const values = left.attributes[name].array, other = right.attributes[name].array; return values.length === other.length && values.every((value, index) => value === other[index]); }) && left.index.array.every((value, index) => value === right.index.array[index]);
+  const props = [0, 1, 2, 3].map(rot => ({ geo: sync, x: rot * 20, y: 2, z: -12, rot })), merged = mergeProps(props, prop => prop.geo), resumed = drain(mergePropsG(props, prop => prop.geo));
+  const ok = same(sync, asyncGeo) && same(merged, resumed) && asyncGeo.boundingSphere.radius === sync.boundingSphere.radius;
+  for (const geo of [sync, asyncGeo, merged, resumed]) geo.dispose();
+  return { ok, info: 'model attributes, four rotations, indices and bounds' };
+});
 function afDisposeRegionArray() { if (this.array) AF.regionArrayBytesFreed = (AF.regionArrayBytesFreed || 0) + this.array.byteLength; this.array = null; }
 AF.staticUploadQueue = [];
 AF.releaseStaticGeometry = (geo) => {
@@ -1403,7 +1451,7 @@ function* meshRegionG(rx, rz) {
   const out = { opaque: new GeoBuf(), glass: new GeoBuf() };
   const T = AF.stats.meshT || (AF.stats.meshT = { terrain: 0, voxel: 0, coarse: 0, far: 0, gpu: 0 });
   let tt = performance.now();
-  meshTerrainRegion(rx, rz, out.opaque);
+  yield* meshTerrainRegionG(rx, rz, out.opaque);
   const terrainQ = out.opaque.n;
   T.terrain += performance.now() - tt;
   yield;
@@ -1421,10 +1469,10 @@ function* meshRegionG(rx, rz) {
   const keepC = COARSE_ON && out.opaque.n - terrainQ > 400 && cout.opaque.n < out.opaque.n * 0.8;
   // typed-array conversion happens here: one geometry per step so a dense block never costs a streamed frame much
   const nO = out.opaque.n, nC = cout.opaque.n;
-  const gO = nO ? out.opaque.geometry() : null; out.opaque = null; yield;
-  const gG = out.glass.n ? out.glass.geometry() : null; yield;
-  const gCO = keepC && cout.opaque.n ? cout.opaque.geometry() : null; yield;
-  const gCG = keepC && cout.glass.n ? cout.glass.geometry() : null;
+  const gO = nO ? yield* out.opaque.geometryG() : null; out.opaque = null; yield;
+  const gG = out.glass.n ? yield* out.glass.geometryG() : null; yield;
+  const gCO = keepC && cout.opaque.n ? yield* cout.opaque.geometryG() : null; yield;
+  const gCG = keepC && cout.glass.n ? yield* cout.glass.geometryG() : null;
   if (gO) { const m = regMesh(gO, AF.mat.voxel, true); m.userData.region = k; meshes.push(m); }
   if (gG) meshes.push(regMesh(gG, AF.mat.glass, false));
   // only keep a coarse copy when it actually saves something
@@ -1443,7 +1491,7 @@ function* meshRegionG(rx, rz) {
     for (const pr of props) { farPick(pr); if (performance.now() - tw > 3) { yield; tw = performance.now(); } }
     const reg = { cx: X0 + (rx + 0.5) * REG * VS, cz: Z0 + (rz + 0.5) * REG * VS, props, far: null, near: null, nearGlass: null, nearBuilt: false };
     const tf = performance.now();
-    const fg = mergeProps(props, farPick);
+    const fg = yield* mergePropsG(props, farPick);
     T.far += performance.now() - tf;
     if (fg) { reg.far = regMesh(fg, AF.mat.voxel, true); farQ = fg.attributes.position.count / 4; }
     AF.world.lod.set(k, reg);

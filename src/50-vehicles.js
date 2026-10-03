@@ -575,8 +575,9 @@ function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   };
   car.y = AF.surfaceBelow(x, z, (o.y ?? 0) + 2.5, 6);
   VV.cars.push(car);
+  if (WHEEL_IM) { let count = 4; for (const existing of VV.cars) if (existing.type.id === typeId) count++; ensureIM(typeId, count); }
   if (!o.noDrive && !T.horse) car.interact = AF.addInteract({ x, y: car.y + 0.6, z, r: 1.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => bodyDist(car, px, pz), prio: 0.1,
-    can: () => AF.mode === 'walk' && !car.player && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
+    can: () => AF.mode === 'walk' && car.active !== false && !car.player && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
   placeMesh(car);
   return car;
 }
@@ -586,316 +587,6 @@ function placeMesh(car) {
   m.rotation.set(car.pitch, car.yaw, car.roll, 'YXZ');
   m.updateMatrix();
 }
-
-// ---------------------------------------------------------------- lane graph
-const G = VV.graph = { nodes: [], lanes: [], conns: [], pieces: [] };
-function buildGraph() {
-  const segs = [];
-  for (const r of VP.roads) {
-    if (r.name === 'Harvest Road' || r.name === 'Lakeshore Drive') continue;
-    let a = r.a.slice(), b = r.b.slice();
-    if (r.name === 'Covered Bridge Road') b = [178, 0];
-    if (r.name === 'Depot Road') b = [0, 158];
-    segs.push({ a, b, name: r.name, w: r.w || 10 });
-  }
-  const pts = [];
-  const addPt = (p) => { if (!pts.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 0.5)) pts.push(p); };
-  for (const s of segs) { addPt(s.a); addPt(s.b); }
-  const edges = [];
-  for (const s of segs) {
-    const dx = s.b[0] - s.a[0], dz = s.b[1] - s.a[1], L2 = dx * dx + dz * dz;
-    const cuts = [0, 1];
-    for (const p of pts) {
-      const t = ((p[0] - s.a[0]) * dx + (p[1] - s.a[1]) * dz) / L2;
-      if (t <= 0.001 || t >= 0.999) continue;
-      if (Math.hypot(s.a[0] + dx * t - p[0], s.a[1] + dz * t - p[1]) < 0.5) cuts.push(t);
-    }
-    cuts.sort((p, q) => p - q);
-    for (let i = 0; i + 1 < cuts.length; i++) edges.push({ a: [s.a[0] + dx * cuts[i], s.a[1] + dz * cuts[i]], b: [s.a[0] + dx * cuts[i + 1], s.a[1] + dz * cuts[i + 1]], name: s.name, w: s.w });
-  }
-  const nodeOf = (p) => { let n = G.nodes.find((q) => Math.hypot(q.x - p[0], q.z - p[1]) < 0.5); if (!n) { n = { x: p[0], z: p[1], id: G.nodes.length, inL: [], outL: [], deg: 0 }; G.nodes.push(n); } return n; };
-  for (const e of edges) { e.A = nodeOf(e.a); e.B = nodeOf(e.b); e.A.deg++; e.B.deg++; e.A.wmax = Math.max(e.A.wmax || 0, e.w); e.B.wmax = Math.max(e.B.wmax || 0, e.w); }
-  const lights = (AF.trafficLight && AF.trafficLight.at) || [];
-  for (const n of G.nodes) n.light = lights.some((l) => Math.hypot(l[0] - n.x, l[1] - n.z) < 1);
-  const setback = (n) => (n.wmax || 10) / 2 + (n.deg >= 3 ? 4.5 : 3);
-  const samplePiece = (pc) => {
-    const cum = [0]; for (let i = 1; i < pc.pts.length / 2; i++) cum.push(cum[i - 1] + Math.hypot(pc.pts[i * 2] - pc.pts[i * 2 - 2], pc.pts[i * 2 + 1] - pc.pts[i * 2 - 1]));
-    pc.cum = cum; pc.len = cum[cum.length - 1]; pc.id = G.pieces.length; G.pieces.push(pc); return pc;
-  };
-  for (const e of edges) {
-    const off = e.w >= 20 ? 6.5 : e.w >= 14 ? 3.2 : 2.2;
-    for (const [A, B] of [[e.A, e.B], [e.B, e.A]]) {
-      const L = Math.hypot(B.x - A.x, B.z - A.z), dx = (B.x - A.x) / L, dz = (B.z - A.z) / L, rx = -dz, rz = dx;
-      const sa = setback(A), sb = setback(B);
-      const pc = samplePiece({ kind: 'lane', A, B, dx, dz, off, name: e.name, pts: [A.x + dx * sa + rx * off, A.z + dz * sa + rz * off, B.x - dx * sb + rx * off, B.z - dz * sb + rz * off], next: [] });
-      G.lanes.push(pc); A.outL.push(pc); B.inL.push(pc);
-    }
-  }
-  for (const n of G.nodes) {
-    for (const li of n.inL) for (const lo of n.outL) {
-      const uturn = lo.B === li.A;
-      if (uturn && n.deg > 1) continue;
-      const P0 = [li.pts[2], li.pts[3]], P3 = [lo.pts[0], lo.pts[1]];
-      const d0 = [li.dx, li.dz], d3 = [lo.dx, lo.dz];
-      const cross = d0[0] * d3[1] - d0[1] * d3[0], dot = d0[0] * d3[0] + d0[1] * d3[1];
-      const dist = Math.hypot(P3[0] - P0[0], P3[1] - P0[1]);
-      const kk = uturn ? 5.5 : dist * 0.5;
-      const P1 = [P0[0] + d0[0] * kk, P0[1] + d0[1] * kk], P2 = [P3[0] - d3[0] * kk, P3[1] - d3[1] * kk];
-      const pts = [];
-      const N = dot > 0.9 ? 2 : 14;
-      for (let i = 0; i <= N; i++) {
-        const t = i / N, u = 1 - t;
-        if (N === 2 && i === 1) continue;
-        pts.push(u * u * u * P0[0] + 3 * u * u * t * P1[0] + 3 * u * t * t * P2[0] + t * t * t * P3[0], u * u * u * P0[1] + 3 * u * u * t * P1[1] + 3 * u * t * t * P2[1] + t * t * t * P3[1]);
-      }
-      // turn type: in this frame (x east, z south) a right turn has cross < 0? right of (dx,dz) is (-dz,dx): d3 = right -> cross = dx*dx - dz*(-dz) ... = 1 > 0
-      const turn = uturn ? 'u' : dot > 0.9 ? 'straight' : cross > 0 ? 'right' : 'left';
-      const pc = samplePiece({ kind: 'conn', node: n, turn, from: li, to: lo, pts, next: [lo], turnV: turn === 'straight' ? 99 : turn === 'right' ? 5 : turn === 'left' ? 6.5 : 3.2 });
-      li.next.push(pc); G.conns.push(pc);
-    }
-  }
-}
-const pieceAt = (pc, s, out) => {
-  const c = pc.cum, n = c.length;
-  let i = 1; while (i < n - 1 && c[i] < s) i++;
-  const s0 = c[i - 1], s1 = c[i], t = s1 > s0 ? AF.clamp((s - s0) / (s1 - s0), 0, 1) : 0;
-  const x0 = pc.pts[(i - 1) * 2], z0 = pc.pts[(i - 1) * 2 + 1], x1 = pc.pts[i * 2], z1 = pc.pts[i * 2 + 1];
-  const L = Math.hypot(x1 - x0, z1 - z0) || 1;
-  out.x = x0 + (x1 - x0) * t; out.z = z0 + (z1 - z0) * t; out.dx = (x1 - x0) / L; out.dz = (z1 - z0) / L;
-  return out;
-};
-
-// ---------------------------------------------------------------- AI traffic
-const PP = { x: 0, z: 0, dx: 0, dz: 1 };
-const pickNext = (pc, rnd) => {
-  const opts = pc.next; if (!opts.length) return null;
-  const straight = opts.find((o) => o.turn === 'straight');
-  if (straight && rnd() < 0.55) return straight;
-  return opts[Math.floor(rnd() * opts.length)];
-};
-const trafficRnd = AF.rng(1952);
-const PED = { ped: true };
-function aiStep(car, dt, all) {
-  const A = car.ai; let pc = A.piece;
-  const recovering = (A.pushT || 0) > 0 || Math.abs(A.offsetX || 0) + Math.abs(A.offsetZ || 0) > 0.05;
-  if ((A.pushT || 0) > 0) {
-    A.pushT = Math.max(0, A.pushT - dt);
-    A.stuck = A.stuckLong = A.ghost = 0; A.ghostAll = false; A.blocker = null;
-    car.v = A.v;
-    stepPush(car, dt);
-    return;
-  }
-  if (!A.next) A.next = pickNext(pc, trafficRnd);
-  const toEnd = pc.len - A.s;
-  let vT = A.v0;
-  // intersections: slow for the coming turn
-  if (pc.kind === 'lane' && A.next) {
-    const nv = A.next.turnV;
-    if (nv < vT) vT = Math.min(vT, Math.sqrt(nv * nv + 2 * 2.2 * Math.max(0, toEnd - 1)));
-    // traffic light
-    if (pc.B.light && AF.trafficLight && typeof AF.trafficLight.state === 'function') {
-      const st = AF.trafficLight.state(pc.B.x, pc.B.z, [pc.dx, pc.dz]);
-      const stopD = toEnd - car.halfL + 0.4;
-      if (st !== 'green' && stopD > -0.3) {
-        const need = (A.v * A.v) / (2 * Math.max(0.1, stopD));
-        if (st === 'red' || need < 4.5) { vT = Math.min(vT, stopD < 0.25 ? 0 : Math.sqrt(2 * 3.5 * Math.max(0, stopD - 0.2))); A.light = true; }
-      }
-    }
-  } else if (pc.kind === 'conn') vT = Math.min(vT, pc.turnV);
-  // double-deckers pull up at AF.busStops (streets part) for a few seconds
-  if (car.type.id === 'bus' && AF.busStops && AF.busStops.length) {
-    A.busCd = (A.busCd || 0) - dt;
-    if (A.dwell > 0) { A.dwell -= dt; vT = 0; if (A.dwell <= 0) A.busCd = 25; }
-    else if (A.busCd <= 0 && pc.kind === 'lane') {
-      const hx0 = Math.sin(car.yaw), hz0 = Math.cos(car.yaw);
-      for (const b of AF.busStops) {
-        const rx = b.x - car.x, rz = b.z - car.z, al = rx * hx0 + rz * hz0, lat = Math.abs(rx * hz0 - rz * hx0);
-        if (al > -0.5 && al < 18 && lat < 4.5) { vT = Math.min(vT, Math.sqrt(2 * 1.8 * Math.max(0, al - 0.5))); if (al < 1.2) { A.dwell = 7; vT = 0; busRiders(car); } break; }
-      }
-    }
-  }
-  // v2 r2: cabs pull up outside the hotel / theatres / the Terminal, a fare steps out and walks in
-  if (car.type.cab && VV.cabDrops && VV.cabDrops.length) {
-    A.cabCd = (A.cabCd || 20 + trafficRnd() * 40) - dt;
-    if (A.drop > 0) { A.drop -= dt; vT = 0; if (A.drop <= 0) A.cabCd = 70 + trafficRnd() * 60; }
-    else if (A.cabCd <= 0 && pc.kind === 'lane') {
-      const hx0 = Math.sin(car.yaw), hz0 = Math.cos(car.yaw);
-      for (const q of VV.cabDrops) {
-        if (q.cd > VV.clockT) continue;
-        const rx = q.x - car.x, rz = q.z - car.z, al = rx * hx0 + rz * hz0, lat = -(rx * hz0 - rz * hx0);   // lat > 0: on the right (kerb) side
-        if (al > -0.5 && al < 20 && lat > 1 && lat < 9) {
-          vT = Math.min(vT, Math.sqrt(2 * 2.2 * Math.max(0, al - 0.3)));
-          if (al < 1) { A.drop = 6; vT = 0; q.cd = VV.clockT + 25 + trafficRnd() * 25; cabFare(car, q); }
-          break;
-        }
-      }
-    }
-  }
-  // obstacles ahead (cars, the player)
-  const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw);
-  let gap = 1e9, blocker = null;
-  for (const o of all) {
-    if (o === car) continue;
-    const rx = o.x - car.x, rz = o.z - car.z;
-    if (rx * rx + rz * rz > 900) continue;
-    const fwd = rx * hx + rz * hz; if (fwd <= 0) continue;
-    const lat = Math.abs(rx * hz - rz * hx);
-    const ohx = Math.sin(o.yaw), ohz = Math.cos(o.yaw), align = ohx * hx + ohz * hz;
-    const tol = 1.25 + Math.abs(align) * 0.25 + (1 - Math.abs(align)) * (o.halfL * 0.9);
-    if (lat > tol) continue;
-    if (A.ghost > 0 && (align < 0.7 || A.ghostAll)) continue;
-    if (o.ai && o.ai.blocker === car && align < 0.7 && car.id < o.id) continue;   // mutual crossing standoff: lower id goes
-    const g = fwd - car.halfL - (Math.abs(align) > 0.5 ? o.halfL : o.halfW);
-    if (g < gap) { gap = g; blocker = o; }
-  }
-  const P = AF.player;
-  if (P && AF.mode === 'walk') {
-    const px = P.body ? P.body.x : P.x, pz = P.body ? P.body.z : P.z;
-    const rx = px - car.x, rz = pz - car.z, fwd = rx * hx + rz * hz;
-    if (fwd > 0 && fwd < 16 && Math.abs(rx * hz - rz * hx) < 1.7) { const g = fwd - car.halfL - 0.4; if (g < gap) { gap = g; blocker = P; } }
-  }
-  // residents crossing ahead (only cars near the camera; cheap distance test; give up after 7 s so nobody jams)
-  const cam = AF.camera && AF.camera.position, PPL = AF.people;
-  if (PPL && PPL.length && cam && (car.x - cam.x) ** 2 + (car.z - cam.z) ** 2 < 22500 && !(A.pedIgnore > 0)) {
-    let pedG = 1e9;
-    for (const q of PPL) {
-      if (!q || q.hidden || q.visible === false || !isFinite(q.x)) continue;
-      const rx = q.x - car.x, rz = q.z - car.z; if (rx * rx + rz * rz > 256) continue;
-      const fwd = rx * hx + rz * hz; if (fwd <= 0) continue;
-      if (Math.abs(rx * hz - rz * hx) < car.halfW + 0.8) { const g = fwd - car.halfL - 0.6; if (g < pedG) pedG = g; }
-    }
-    if (pedG < gap) { gap = pedG; blocker = PED; }
-  }
-  // v2 r2: streetcar / bus riders crossing to the sidewalk (AF.rail.walkers) — every car yields, not just the ones near the camera
-  const WKL = AF.rail && AF.rail.walkers && AF.rail.walkers.list;
-  if (WKL && !(A.pedIgnore > 0)) {
-    let pedG = 1e9;
-    for (const q of WKL) {
-      if (q.st !== 'walk') continue;
-      const rx = q.x - car.x, rz = q.z - car.z; if (rx * rx + rz * rz > 256) continue;
-      const fwd = rx * hx + rz * hz; if (fwd <= 0) continue;
-      if (Math.abs(rx * hz - rz * hx) < car.halfW + 1.0) { const g = fwd - car.halfL - 0.8; if (g < pedG) pedG = g; }
-    }
-    if (pedG < gap) { gap = pedG; blocker = PED; }
-  }
-  if (A.pedIgnore > 0) A.pedIgnore -= dt;
-  if (blocker === PED && A.v < 0.2) { A.pedWait = (A.pedWait || 0) + dt; if (A.pedWait > 7) { A.pedIgnore = 3; A.pedWait = 0; } } else if (blocker !== PED) A.pedWait = 0;
-  A.blocker = blocker;
-  if (blocker) vT = Math.min(vT, gap < 1.2 ? 0 : Math.sqrt(2 * 4 * Math.max(0, gap - 1.2)));
-  // stuck -> briefly ignore crossing traffic
-  if (!recovering && A.v < 0.2 && blocker && blocker !== P && blocker !== PED && !A.light) { A.stuck += dt; A.stuckLong = (A.stuckLong || 0) + dt; if (A.stuck > 4) { A.ghost = 2.5; A.stuck = 0; A.ghostAll = A.stuckLong > 12; } } else if (recovering || A.v > 3) { A.stuck = 0; A.stuckLong = 0; }
-  if (A.ghost > 0) A.ghost -= dt; else A.ghostAll = false;
-  A.light = false;
-  // speed
-  if (A.v < vT) A.v = Math.min(vT, A.v + 2.6 * dt); else A.v = Math.max(vT, A.v - 8 * dt);
-  A.s += A.v * dt;
-  while (A.s > pc.len) {
-    A.s -= pc.len;
-    pc = A.piece = A.next || pickNext(pc, trafficRnd) || pc; A.next = null;
-    if (!A.next) A.next = pickNext(pc, trafficRnd);
-  }
-  pieceAt(pc, A.s, PP);
-  const newYaw = Math.atan2(PP.dx, PP.dz);
-  const dy = AF.angDiff(car.yaw, newYaw);
-  const yawRate = dt > 0 ? dy / dt : 0;
-  const previousYaw = car.yaw;
-  car.yaw = car.yaw + dy;
-  if (recovering) {
-    const ease = Math.exp(-dt * 0.75), nx = PP.x + (A.offsetX || 0) * ease, nz = PP.z + (A.offsetZ || 0) * ease;
-    const pushYaw = (A.pushYaw || 0) * Math.exp(-dt * 1.5);
-    if (!worldHits(car, nx, nz, newYaw + pushYaw)) { car.x = nx; car.z = nz; car.yaw = newYaw + pushYaw; A.pushYaw = pushYaw; }
-    else { car.yaw = previousYaw; A.pushYaw = AF.angDiff(newYaw, previousYaw); }
-    A.offsetX = car.x - PP.x; A.offsetZ = car.z - PP.z;
-  } else { car.x = PP.x; car.z = PP.z; }
-  car.v = A.v;
-  stepPush(car, dt);
-  if ((A.yT = (A.yT || 0) + 1) % 4 === 0) { const gy = AF.surfaceBelow(car.x, car.z, car.y + 1.2, 2.5); car.y += (gy - car.y) * 0.5; }
-  const st = A.v > 0.5 ? Math.atan(car.wheelbase * yawRate / A.v) : 0;
-  car.steer += (AF.clamp(st, -0.6, 0.6) - car.steer) * Math.min(1, dt * 8);
-}
-// v2 r2: at a bus stop 1-2 riders step down off the open rear platform and walk off along the sidewalk; sometimes someone hops on
-function busRiders(car) {
-  const WK = AF.rail && AF.rail.walkers; if (!WK || !WK.spawn) return;
-  const cam = AF.camera && AF.camera.position; if (cam && (car.x - cam.x) ** 2 + (car.z - cam.z) ** 2 > 250 * 250) return;
-  const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), rx = -hz, rz = hx;   // right = kerb side
-  const at = (along, lat) => [car.x + hx * along + rx * lat, car.z + hz * along + rz * lat];
-  const n = 1 + (trafficRnd() < 0.5 ? 1 : 0);
-  for (let i = 0; i < n; i++) {
-    const [x0, z0] = at(-car.halfL + 0.5, car.halfW - 0.4), [x1, z1] = at(-car.halfL + 0.2 - i * 0.6, car.halfW + 1.9), e = trafficRnd() < 0.5 ? -1 : 1, [x2, z2] = at(e * (12 + trafficRnd() * 14), car.halfW + 2.4 + trafficRnd() * 0.8);
-    WK.spawn(x0, z0, car.yaw, { y: car.y + 0.45, path: [x1, z1, x2, z2], wait: 0.8 + i * 1.3, onEnd: (q) => WK.off(q) });
-  }
-  if (trafficRnd() < 0.55) {
-    const [x0, z0] = at(-car.halfL - 9, car.halfW + 2.3), [x1, z1] = at(-car.halfL + 0.3, car.halfW + 1.0), [x2, z2] = at(-car.halfL + 0.5, car.halfW - 0.6);
-    WK.spawn(x0, z0, car.yaw, { path: [x1, z1, x2, z2], v: 2.6, wait: 1.5, onEnd: (q) => WK.off(q) });
-  }
-}
-function cabFare(car, q) {
-  const WK = AF.rail && AF.rail.walkers; if (!WK || !WK.spawn) return;
-  const cam = AF.camera && AF.camera.position; if (cam && (car.x - cam.x) ** 2 + (car.z - cam.z) ** 2 > 250 * 250) return;
-  const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), rx = -hz, rz = hx;
-  const x0 = car.x - hx * 0.4 + rx * (car.halfW - 0.3), z0 = car.z - hz * 0.4 + rz * (car.halfW - 0.3);
-  const x1 = car.x - hx * 0.4 + rx * (car.halfW + 1.2), z1 = car.z - hz * 0.4 + rz * (car.halfW + 1.2);
-  const n = trafficRnd() < 0.4 ? 2 : 1;
-  for (let i = 0; i < n; i++) WK.spawn(x0, z0, car.yaw, { y: car.y + 0.3, path: [x1 - hx * i * 0.7, z1 - hz * i * 0.7, q.x + (i ? 0.6 : 0), q.z, q.ix, q.iz], wait: 1.2 + i * 0.9, v: 1.25, onEnd: (w) => WK.off(w) });
-}
-VV.clockT = 0;
-// v2 r2: after dark the private cars go home and the cabs come out — half the AI sedans/coupes turn into cabs (swapped out of sight, > 110 m)
-const NIGHT_CABS = ['taxi', 'gullcab', 'taxi', 'beaconcab'];
-let cabSwapT = 0;
-function nightCabs() {
-  const tm = AF.time || {}, h = tm.hours, night = h != null && (h > 19.6 || h < 5.5);
-  const cam = AF.camera && AF.camera.position; if (!cam) return;
-  const need = {};
-  for (const c of VV.ai) {
-    const want = night && c.id % 2 === 0 && (c.nightCab || /^(sedan|coupe|wagon|stream|convertible)$/.test(c.type.id));
-    if (want === !!c.isNightCab) continue;
-    if ((c.x - cam.x) ** 2 + (c.z - cam.z) ** 2 < 110 * 110) continue;
-    if (want) { c.dayType = c.type; c.dayKey = c.key; const T = TYPES.find((t) => t.id === NIGHT_CABS[c.id % 4]); c.type = T; c.key = getGeo(T, 0).key; c.nightCab = true; c.isNightCab = true; }
-    else { c.type = c.dayType; c.key = c.dayKey; c.isNightCab = false; }
-    need[c.key] = 1;
-  }
-  for (const key in need) { let n = 2; for (const c of VV.cars) if (c.key === key) n++; ensureIM(key, n + 6); }
-}
-VV.simTraffic = (dt) => {
-  VV.clockT += dt;
-  if ((cabSwapT -= dt) <= 0) { cabSwapT = 3; nightCabs(); }
-  const all = VV.cars, cam = AF.camera && AF.camera.position, fr = VV.simN = (VV.simN || 0) + 1;
-  // cars far from the camera tick at a quarter rate with the accumulated time (nobody can see them take bigger steps);
-  // far cars outside the view (last frame's frustum) tick at an eighth
-  for (const c of VV.ai) {
-    if (!c.ai) continue;
-    c.aiAcc = (c.aiAcc || 0) + dt;
-    if (cam && (c.x - cam.x) ** 2 + (c.z - cam.z) ** 2 > 240 * 240) {
-      const slot = fr + c.id;
-      if ((slot & 3) !== 0) continue;
-      if ((slot & 7) !== 0) { SIM_S.center.set(c.x, c.y + 1, c.z); SIM_S.radius = c.halfL + 1.5; if (!FRUSTUM.intersectsSphere(SIM_S)) continue; }
-    }
-    aiStep(c, Math.min(c.aiAcc, 0.25), all); c.aiAcc = 0;
-  }
-  for (const car of all) if (!car.ai && !car.player && car.pushLife > 0) stepPush(car, dt);
-};
-const spawnTraffic = (n) => {
-  const rnd = AF.rng(777);
-  const aiTypes = ['taxi', 'sedan', 'bus', 'coupe', 'gullcab', 'stream', 'milk', 'sedan', 'wagon', 'police', 'taxi', 'sedan', 'beaconcab', 'icecream', 'sedan', 'mail', 'coupe', 'taxi', 'laundry', 'stream', 'pickup', 'convertible', 'sedan', 'bus', 'gullcab', 'wagon', 'sedan', 'taxi', 'coupe', 'sedan', 'cord', 'duesy', 'speedster'];
-  const carts = ['dairycart', 'icecart', 'dairycart'];   // v2 r2: 3 horse-drawn wagons among the fleet, on the side streets
-  const lanes = G.lanes.filter((l) => l.len > 16);
-  const wOf = (l) => /Grand|Meridian/.test(l.name) ? 6 : /Park Row|Harbour Boulevard/.test(l.name) ? 4 : /Terminal|Lantern|Broad|Charter|Bay/.test(l.name) ? 1.4 : 1;   // v2 r2: the main avenues carry the dense flow
-  const cum = []; let tot = 0; for (const l of lanes) cum.push(tot += wOf(l) * l.len);
-  const pickLane = () => { const r = rnd() * tot; let i = 0; while (cum[i] < r) i++; return lanes[i]; };
-  let tries = 0;
-  while (VV.ai.length < n && tries++ < 4000) {
-    const pc = pickLane();
-    const s = 3 + rnd() * (pc.len - 6);
-    pieceAt(pc, s, PP);
-    if (VV.cars.some((c) => Math.abs(c.x - PP.x) < 8.5 && Math.abs(c.z - PP.z) < 8.5)) continue;
-    const nCart = VV.ai.filter((c) => c.type.horse).length, nBike = VV.ai.filter((c) => c.type.kind === 'bike').length, tid = (VV.ai.length % 29 === 11 && nBike < 2) ? 'sidecar' : (VV.ai.length % 23 === 5 && nCart < carts.length && !/Grand|Meridian/.test(pc.name)) ? carts[nCart] : aiTypes[VV.ai.length % aiTypes.length], T = TYPES.find((q) => q.id === tid);
-    const car = makeCar(tid, pickPaint(T, rnd), PP.x, PP.z, Math.atan2(PP.dx, PP.dz));
-    car.parked = false;
-    car.ai = { piece: pc, s, v: 6, v0: T.horse ? 2.6 + rnd() * 0.5 : tid === 'bus' ? 8 : 8.5 + rnd() * 3.5, next: null, stuck: 0, ghost: 0, blocker: null };
-    car.driver = T.kind === 'bike' ? -1 : Math.floor(rnd() * 3);
-    VV.ai.push(car);
-  }
-};
 
 // ---------------------------------------------------------------- drive mode
 const DR = { car: null, camPos: new THREE.Vector3(), camLook: new THREE.Vector3(), want: new THREE.Vector3(), orbit: 0, orbitP: 0, dist: 8.5, init: false };
@@ -933,7 +624,7 @@ const overlap = (car, x, z, yaw, other) => {
   CONTACT[0] = normalX; CONTACT[1] = normalZ; CONTACT[2] = depth;
   return depth;
 };
-const nearby = (car, x, z, other) => other !== car && Math.abs(other.x - x) < car.halfL + other.halfL + 1 && Math.abs(other.z - z) < car.halfL + other.halfL + 1 && Math.abs((other.y || 0) - car.y) < 2;
+const nearby = (car, x, z, other) => other !== car && other.active !== false && Math.abs(other.x - x) < car.halfL + other.halfL + 1 && Math.abs(other.z - z) < car.halfL + other.halfL + 1 && Math.abs((other.y || 0) - car.y) < 2;
 const carBlocked = (car, x, z, yaw) => {
   if (worldHits(car, x, z, yaw)) return 'world';
   for (const o of VV.cars) {
@@ -954,6 +645,7 @@ const moveAllowed = (car, x, z, yaw) => {
   }
   return true;
 };
+const PUSH_POS = { x: 0, z: 0, dx: 0, dz: 1 };
 function stepPush(car, dt) {
   if (car.player || !(car.pushLife > 0)) return;
   car.pushLife = Math.max(0, car.pushLife - dt);
@@ -966,9 +658,9 @@ function stepPush(car, dt) {
   const decay = Math.exp(-dt * 3);
   car.pushX *= decay; car.pushZ *= decay; car.pushSpin *= decay;
   if (car.ai) {
-    pieceAt(car.ai.piece, car.ai.s, PP);
-    car.ai.offsetX = car.x - PP.x; car.ai.offsetZ = car.z - PP.z;
-    car.ai.pushYaw = AF.angDiff(Math.atan2(PP.dx, PP.dz), car.yaw);
+    VV.pieceAt(car.ai.piece, car.ai.s, PUSH_POS);
+    car.ai.offsetX = car.x - PUSH_POS.x; car.ai.offsetZ = car.z - PUSH_POS.z;
+    car.ai.pushYaw = AF.angDiff(Math.atan2(PUSH_POS.dx, PUSH_POS.dz), car.yaw);
   } else car.v = (car.pushX || 0) * Math.sin(car.yaw) + (car.pushZ || 0) * Math.cos(car.yaw);
   if (car.interact) { car.interact.x = car.x; car.interact.z = car.z; }
   placeMesh(car);
@@ -1111,8 +803,8 @@ AF.modes.drive = {
     const car = opts.car || VV.cars.find((c) => c.parked) || VV.cars[0];
     if (!car) { AF.setMode(from || 'aerial'); return; }
     DR.car = car; VV.player = car;
-    if (car.ai) { VV.ai.splice(VV.ai.indexOf(car), 1); car.ai = null; }
-    car.player = true; car.parked = false; car.driver = -1;
+    if (car.ai) { VV.detachTraffic(car); VV.ai.splice(VV.ai.indexOf(car), 1); car.ai = null; }
+    car.player = true; car.active = true; car.parked = false; car.driver = -1;
     car.pushLife = car.pushX = car.pushZ = car.pushSpin = 0;
     car.vx = Math.sin(car.yaw) * car.v; car.vz = Math.cos(car.yaw) * car.v;
     DR.bike = car.type.kind === 'bike' && !!car.type.solo;
@@ -1191,20 +883,40 @@ AF.modes.drive = {
 // ---------------------------------------------------------------- per-frame: instanced bodies + wheels + drivers + night lamps
 let WHEEL_IM = null, DRV_IM = null;
 const tmpObj = new THREE.Object3D();
-const FRUSTUM = new THREE.Frustum(), FR_M = new THREE.Matrix4(), FR_S = new THREE.Sphere(), SIM_S = new THREE.Sphere();
+const FRUSTUM = new THREE.Frustum(), FR_M = new THREE.Matrix4(), FR_S = new THREE.Sphere();
 const IMS = VV.ims = new Map();          // model key -> { full, glass, lod, cap, n, nl }
 const LOD_D = 90, FAR_D = 300, LAMP_D = 720, DETAIL_D = 110;
+const REAR_Q = new THREE.Quaternion(), FRONT_Q = new THREE.Quaternion();
+const BATCHES = new Map(), DRIVER_COUNTS = new Uint16Array(3);
+let PAINT_MAT = null;
+function batchGeo(tid) {
+  if (BATCHES.has(tid)) return BATCHES.get(tid);
+  const T = TYPES.find(type => type.id === tid), slots = [AF.col(0x010203), AF.col(0x020304), AF.col(0x030405)];
+  const m = T.build({ a: slots[0], b: slots[1], f: slots[2], seat: kcols()[T.seat] }), geo = AF.meshModel(m, { vs: CVS, anchor: [0.5, 0, 0.5] }), lod = AF.lodOf(geo);
+  for (const geometry of [geo, lod]) if (geometry) { const source = geometry.getAttribute('aPal'), values = new Float32Array(source.count); for (let index = 0; index < source.count; index++) { const value = source.getX(index), slot = slots.indexOf(value); values[index] = slot < 0 ? value : -slot - 1; } geometry.setAttribute('aPal', new THREE.BufferAttribute(values, 1)); }
+  const result = { geo, lod }; BATCHES.set(tid, result); return result;
+}
+function paintMaterial() {
+  if (PAINT_MAT) return PAINT_MAT;
+  PAINT_MAT = AF.mat.patchVoxel(AF.mat.voxelInst.clone(), 'car-paint'); const compile = PAINT_MAT.onBeforeCompile;
+  PAINT_MAT.onBeforeCompile = (shader, renderer) => {
+    compile(shader, renderer);
+    shader.vertexShader = shader.vertexShader.replace('attribute float aPal;', 'attribute float aPal; attribute vec3 carPaint;').replace('vec2 pUV =', 'float carPal = aPal < -2.5 ? carPaint.z : aPal < -1.5 ? carPaint.y : aPal < -0.5 ? carPaint.x : aPal;\nvec2 pUV =').replace('mod(aPal,', 'mod(carPal,').replace('floor(aPal /', 'floor(carPal /');
+  }; return PAINT_MAT;
+}
 function ensureIM(key, cap) {
+  key = key.split(':')[0];
   let r = IMS.get(key);
   if (r && r.cap >= cap) return r;
-  const G = VV.models[key]; if (!G) return null;
+  const G = batchGeo(key);
   if (r) for (const o of [r.full, r.glass, r.lod]) if (o) { AF.scene.remove(o); o.dispose && o.dispose(); }
-  const mk = (geo, mat, shadow) => { const im = new THREE.InstancedMesh(geo, mat, cap); im.castShadow = shadow; im.receiveShadow = true; im.frustumCulled = false; im.count = 0; im.name = 'cars:' + key; AF.scene.add(im); return im; };
-  const full = mk(G.geo, AF.mat.voxel, true);
+  const mk = (geo, mat, shadow) => { const im = new THREE.InstancedMesh(geo, mat, cap); im.castShadow = shadow; im.customDepthMaterial = AF.mat.depthInst; im.receiveShadow = true; im.frustumCulled = false; im.count = 0; im.name = 'cars:' + key; AF.scene.add(im); return im; };
+  const full = mk(G.geo, paintMaterial(), true);
   const glass = G.geo.userData.glass ? mk(G.geo.userData.glass, AF.mat.glass, false) : null; if (glass) glass.renderOrder = 2;
-  const lg = AF.lodOf ? AF.lodOf(G.geo) : null;
-  const lod = lg ? mk(lg, AF.mat.voxel, false) : null;
-  r = { full, glass, lod, cap, n: 0, nl: 0 }; IMS.set(key, r);
+  const lod = G.lod ? mk(G.lod, paintMaterial(), false) : null;
+  const paint = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3), farPaint = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
+  full.geometry.setAttribute('carPaint', paint); if (lod) lod.geometry.setAttribute('carPaint', farPaint);
+  r = { full, glass, lod, paint, farPaint, paintRange: { start: 0, count: 0 }, farRange: { start: 0, count: 0 }, cap, n: 0, nl: 0 }; IMS.set(key, r);
   return r;
 }
 // night lamps: one additive Points cloud (2 head + 2 tail per car) + instanced headlight pools on the road
@@ -1228,39 +940,40 @@ function buildLamps(maxCars) {
 const LV3 = new THREE.Vector3();
 function syncInstances(dt) {
   if (!WHEEL_IM) return;
-  let wi = 0, li = 0, pi = 0; const dc = [0, 0, 0];
+  let wi = 0, li = 0, pi = 0; const dc = DRIVER_COUNTS; dc.fill(0);
   const camO = AF.camera, cam = camO.position;
   camO.updateMatrixWorld();
   FR_M.multiplyMatrices(camO.projectionMatrix, camO.matrixWorldInverse); FRUSTUM.setFromProjectionMatrix(FR_M);
   for (const r of IMS.values()) { r.n = 0; r.nl = 0; }
   if (LEG_IM) LEG_IM.count0 = 0;
-  const tm = AF.time || {}, night = tm.night != null ? tm.night : ((tm.hours < 6.3 || tm.hours > 18.9) ? 1 : 0);
+  const tm = AF.time, night = tm?.night ?? ((tm?.hours < 6.3 || tm?.hours > 18.9) ? 1 : 0);
   const lampsOn = night > 0.15 && LAMP.pts, lampK = Math.min(1, (night - 0.15) / 0.35);
   for (const car of VV.cars) {
+    if (car.active === false) { car.inView = false; continue; }
     car.spin += (car.v * dt) / car.wr;
     if (dt > 0) { const dv = (car.v - car.vPrev) / dt, want = (dv < -1.2 || (car.v < 0.3 && car.ai)) ? 1 : 0; car.brake = want > car.brake ? Math.min(1, car.brake + dt * 8) : Math.max(0, car.brake - dt * 3); car.vPrev = car.v; }
     const d = Math.hypot(car.x - cam.x, car.y - cam.y, car.z - cam.z);
     FR_S.center.set(car.x, car.y + 1, car.z); FR_S.radius = car.halfL + 1.5;
     const inView = FRUSTUM.intersectsSphere(FR_S), far = d > FAR_D || !inView;
-    if (!car.player && car.interact && car.ai) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; }
-    if (!car.player) { const m = car.mesh; m.position.set(car.x, car.y + car.bob, car.z); m.rotation.set(car.pitch, car.yaw, car.roll, 'YXZ'); }
+    car.inView = inView;
+    if (!car.player && car.interact && car.ai && d < 60) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; }
     if (far && (!lampsOn || !inView || d > LAMP_D)) continue;
-    tmpE.set(car.pitch, car.yaw, car.roll, 'YXZ'); tmpQ.setFromEuler(tmpE);
-    tmpM.compose(tmpV.set(car.x, car.y + car.bob, car.z), tmpQ, tmpS.set(1, 1, 1));
-    const r = IMS.get(car.key) || ensureIM(car.key, 4);
+    const alpha = VV.renderAlpha ?? 1, interpolate = car.ai && car.renderNear && car.prevX != null;
+    const drawX = interpolate ? car.prevX + (car.x - car.prevX) * alpha : car.x, drawZ = interpolate ? car.prevZ + (car.z - car.prevZ) * alpha : car.z, drawYaw = interpolate ? car.prevYaw + AF.angDiff(car.prevYaw, car.yaw) * alpha : car.yaw;
+    if (!car.player) { const m = car.mesh; m.position.set(drawX, car.y + car.bob, drawZ); m.rotation.set(car.pitch, drawYaw, car.roll, 'YXZ'); }
+    if (!car.pitch && !car.roll) tmpQ.set(0, Math.sin(drawYaw / 2), 0, Math.cos(drawYaw / 2)); else { tmpE.set(car.pitch, drawYaw, car.roll, 'YXZ'); tmpQ.setFromEuler(tmpE); }
+    tmpM.compose(tmpV.set(drawX, car.y + car.bob, drawZ), tmpQ, tmpS.set(1, 1, 1));
+    const r = IMS.get(car.type.id) || ensureIM(car.type.id, 4), pal = VV.models[car.key].pal;
     if (!r) continue;
     if (far) { /* lamps only */ }
     else if (d < LOD_D || !r.lod) {
-      if (r.n < r.cap) { r.full.setMatrixAt(r.n, tmpM); if (r.glass) r.glass.setMatrixAt(r.n, tmpM); r.n++; }
-    } else if (r.nl < r.cap) r.lod.setMatrixAt(r.nl++, tmpM);
+      if (r.n < r.cap) { r.full.setMatrixAt(r.n, tmpM); r.paint.setXYZ(r.n, pal.a, pal.b, pal.f); if (r.glass) r.glass.setMatrixAt(r.n, tmpM); r.n++; }
+    } else if (r.nl < r.cap) { r.lod.setMatrixAt(r.nl, tmpM); r.farPaint.setXYZ(r.nl++, pal.a, pal.b, pal.f); }
     if (!far && d < DETAIL_D) {
+      tmpE.set(car.spin, 0, 0, 'YXZ'); REAR_Q.setFromEuler(tmpE); tmpE.set(car.spin, car.steer, 0, 'YXZ'); FRONT_Q.setFromEuler(tmpE);
       for (const w of car.wheels) {
         if (wi >= WHEEL_IM.userData.max) break;
-        tmpObj.position.set(w.lx, w.ly - car.bob, w.lz);
-        tmpObj.rotation.set(car.spin, w.front ? car.steer : 0, 0, 'YXZ');
-        tmpObj.scale.setScalar(car.ws);
-        tmpObj.updateMatrix();
-        tmpM2.multiplyMatrices(tmpM, tmpObj.matrix);
+        tmpM2.compose(tmpV.set(w.lx, w.ly - car.bob, w.lz), w.front ? FRONT_Q : REAR_Q, tmpS.setScalar(car.ws)).premultiply(tmpM);
         WHEEL_IM.setMatrixAt(wi++, tmpM2);
       }
       if (car.type.horse && LEG_IM) {
@@ -1278,8 +991,7 @@ function syncInstances(dt) {
         if (i < im.userData.max) {
           const seatY = car.type.kind === 'cart' ? 1.3 : car.type.kind === 'car' ? 0.4 : car.type.big ? 0.45 : 0.42;
           const lz = car.type.kind === 'cart' ? -0.45 : car.type.kind === 'car' ? (car.type.id === 'convertible' ? 0.2 : 0.35) : car.halfL - (car.type.big ? car.type.id === 'bus' ? 2.1 : 2.6 : 1.3);
-          tmpObj.position.set(car.halfW - 0.62, seatY, lz); tmpObj.rotation.set(0, 0, 0); tmpObj.scale.setScalar(1); tmpObj.updateMatrix();
-          tmpM2.multiplyMatrices(tmpM, tmpObj.matrix); im.setMatrixAt(i, tmpM2); dc[car.driver]++;
+          tmpM2.makeTranslation(car.halfW - 0.62, seatY, lz).premultiply(tmpM); im.setMatrixAt(i, tmpM2); dc[car.driver]++;
         }
       }
     }
@@ -1287,7 +999,8 @@ function syncInstances(dt) {
     if (lampsOn && (car.ai || car.player) && !car.type.horse && li + 4 <= LAMP.max * 4) {
       const hy = car.type.big ? 0.95 : 0.78, hw = car.halfW - 0.22;
       const far2 = d > 220 ? 1.6 : 1;   // far lamps a touch brighter so the avenues read as rivers of light
-      for (const [lx, ly, lz, cr, cg, cb] of [[hw, hy, car.halfL + 0.05, 1, 0.86, 0.6], [-hw, hy, car.halfL + 0.05, 1, 0.86, 0.6], [hw, 0.7, -car.halfL - 0.05, 0.9, 0.08, 0.04], [-hw, 0.7, -car.halfL - 0.05, 0.9, 0.08, 0.04]]) {
+      for (let lamp = 0; lamp < 4; lamp++) {
+        const tail = lamp > 1, lx = lamp % 2 ? -hw : hw, ly = tail ? 0.7 : hy, lz = (tail ? -1 : 1) * (car.halfL + 0.05), cr = tail ? 0.9 : 1, cg = tail ? 0.08 : 0.86, cb = tail ? 0.04 : 0.6;
         LV3.set(lx, ly, lz).applyMatrix4(tmpM); const i3 = li * 3;
         LAMP.pos[i3] = LV3.x; LAMP.pos[i3 + 1] = LV3.y; LAMP.pos[i3 + 2] = LV3.z;
         const kk = lampK * far2 * (lz < 0 ? 0.55 + car.brake * 0.9 : 1);
@@ -1297,9 +1010,11 @@ function syncInstances(dt) {
     }
   }
   for (const r of IMS.values()) {
-    r.full.count = r.n; r.full.instanceMatrix.needsUpdate = true;
-    if (r.glass) { r.glass.count = r.n; r.glass.instanceMatrix.needsUpdate = true; }
-    if (r.lod) { r.lod.count = r.nl; r.lod.instanceMatrix.needsUpdate = true; }
+    if (r.n) { r.paint.clearUpdateRanges(); r.paintRange.count = r.n * 3; r.paint.updateRanges.push(r.paintRange); r.paint.needsUpdate = true; }
+    if (r.nl) { r.farPaint.clearUpdateRanges(); r.farRange.count = r.nl * 3; r.farPaint.updateRanges.push(r.farRange); r.farPaint.needsUpdate = true; }
+    r.full.count = r.n; if (r.n) r.full.instanceMatrix.needsUpdate = true;
+    if (r.glass) { r.glass.count = r.n; if (r.n) r.glass.instanceMatrix.needsUpdate = true; }
+    if (r.lod) { r.lod.count = r.nl; if (r.nl) r.lod.instanceMatrix.needsUpdate = true; }
   }
   WHEEL_IM.count = wi; WHEEL_IM.instanceMatrix.needsUpdate = true;
   if (LEG_IM) { LEG_IM.count = LEG_IM.count0; LEG_IM.instanceMatrix.needsUpdate = true; }
@@ -1325,6 +1040,20 @@ const pickPaint = (T, rnd) => {
   return Math.floor(rnd() * P.length);
 };
 VV.pickPaint = pickPaint;
+const NIGHT_CABS = ['taxi', 'gullcab', 'taxi', 'beaconcab'];
+VV.nightCabs = () => {
+  const hours = AF.time?.hours, night = hours != null && (hours > 19.6 || hours < 5.5), cam = AF.camera.position;
+  for (const car of VV.ai) {
+    if (car.ai?.piece.kind === 'route') continue;
+    const want = night && car.id % 2 === 0 && (car.nightCab || /^(sedan|coupe|wagon|stream|convertible)$/.test(car.type.id));
+    if (want === !!car.isNightCab || (car.x - cam.x) ** 2 + (car.z - cam.z) ** 2 < 12100) continue;
+    if (want) { car.dayType = car.type; car.dayKey = car.key; car.type = TYPES.find(type => type.id === NIGHT_CABS[car.id % 4]); car.key = getGeo(car.type, 0).key; car.nightCab = true; }
+    else { car.type = car.dayType; car.key = car.dayKey; }
+    const wheel = WHEELS[car.type.id]; car.halfL = wheel.L * CVS / 2; car.halfW = wheel.W * CVS / 2; car.wr = wheel.wr * CVS; car.ws = car.wr / 0.37; car.height = VV.models[car.key].spec.H; car.wheelbase = (wheel.axles[1] - wheel.axles[0]) * CVS;
+    for (let index = 0; index < car.wheels.length; index++) { const spec = car.wheels[index]; spec.lx = spec.side * (car.halfW - 0.17); spec.ly = car.wr; spec.lz = (wheel.axles[index >> 1] + 0.5) * CVS - car.halfL; }
+    car.isNightCab = want; let count = 4; for (const existing of VV.cars) if (existing.type === car.type) count++; ensureIM(car.type.id, count);
+  }
+};
 
 // ---------------------------------------------------------------- static kerb parking (build 480: merged into the region meshes, collide, LOD-streamed)
 // wheels baked into the body model (no instanced wheels needed); one geometry per type:paint
@@ -1350,6 +1079,18 @@ const staticGeo = (tid, pi) => {
   return (staticGeos[key] = g);
 };
 VV.parkedStatic = [];
+VV.placeParked = (typeId, x, z, yaw = 0, opts = {}) => {
+  const random = AF.rng(opts.seed ?? ((x * 113 + z * 997) | 0)), tid = typeId ?? ['coupe', 'sedan', 'wagon', 'stream'][Math.floor(random() * 4)], T = TYPES.find(type => type.id === tid);
+  if (!T || !Number.isFinite(x + z + yaw)) throw new Error('Invalid parked vehicle');
+  const pi = opts.paint ?? opts.pi ?? pickPaint(T, random), rot = ((Math.round(yaw / (Math.PI / 2)) % 4) + 4) % 4, y = opts.y ?? AF.W.groundY(x, z), wheel = WHEELS[T.id];
+  if (!Number.isInteger(pi) || pi < 0 || !Number.isFinite(y)) throw new Error('Invalid parked vehicle paint or height');
+  const outland = x < AF.W.X0 || x >= AF.W.x1 || z < AF.W.Z0 || z >= AF.W.z1, geo = staticGeo(T.id, pi);
+  if (outland && !AF.outland?.addProp) throw new Error('Outland renderer is required for parking outside the voxel grid');
+  const pr = outland ? AF.outland.addProp(geo, x, y, z, rot, { collide: opts.collide !== false }) : AF.placeStatic(geo, x, y, z, rot, { collide: opts.collide !== false });
+  const parked = { static: true, pr, outland, pi, x, z, y, yaw: rot * Math.PI / 2, type: T, name: T.name, kind: T.kind, parked: true, halfL: wheel.L * CVS / 2, halfW: wheel.W * CVS / 2, noDrive: opts.noDrive || T.horse };
+  if (AF.ready && !outland) AF.W.dirty.add((AF.W.bx(x) >> 7) * 64 + (AF.W.bz(z) >> 7));
+  VV.parkedStatic.push(parked); if (AF.ready) VV.parked.push(parked); return parked;
+};
 AF.onBuild('vehicles-parking', 480, () => {
   const t0 = performance.now();
   kcols();
@@ -1428,10 +1169,8 @@ AF.onBuild('vehicles-parking', 480, () => {
         if (AF.W.groundY && AF.W.groundY(x, z) > 0.12) { rej.ground = (rej.ground || 0) + 1; t += step; continue; }
         if (carBlocked(probe, x, z, yaw)) { rej.blocked = (rej.blocked || 0) + 1; t += 2; continue; }
         const tid = pickType(), T = TYPES.find((q) => q.id === tid), pi = pickPaint(T, rnd);
-        const rot = ((Math.round(yaw / (Math.PI / 2)) % 4) + 4) % 4;
         const gy = AF.W.groundY ? AF.W.groundY(x, z) : 0;
-        const pr = AF.placeStatic(staticGeo(tid, pi), x, gy, z, rot, { collide: true });
-        perRoad[r.name] = (perRoad[r.name] || 0) + 1; out.push({ static: true, pr, pi, x, z, y: gy, yaw: rot * Math.PI / 2, type: T, name: T.name, kind: T.kind, parked: true, halfL: 2.5, halfW: 0.9 });
+        VV.placeParked(tid, x, z, yaw, { paint: pi, y: gy }); perRoad[r.name] = (perRoad[r.name] || 0) + 1;
         t += step;
       }
     }
@@ -1444,7 +1183,9 @@ AF.onBuild('vehicles-parking', 480, () => {
     can: () => AF.mode === 'walk' && !!proxy.target,
     act: () => {
       const s = proxy.target; if (!s) return;
-      AF.removeStatic(s.pr);
+      if (!s.outland) AF.removeStatic(s.pr);
+      else if (AF.outland.removeProp) AF.outland.removeProp(s.pr);
+      else { const props = AF.outland.props; props.splice(props.indexOf(s.pr), 1); if (s.pr.col) AF.removeCollider(s.pr.col); AF.outland.addProp(s.pr.geo, s.x, s.y, s.z, s.pr.rot, { collide: false }); props.pop(); }
       const i = VV.parkedStatic.indexOf(s); if (i >= 0) VV.parkedStatic.splice(i, 1);
       const j = VV.parked.indexOf(s); if (j >= 0) VV.parked.splice(j, 1);
       proxy.target = null; proxy.y = -999;
@@ -1455,7 +1196,7 @@ AF.onBuild('vehicles-parking', 480, () => {
   AF.onTick('park-proxy', 170, () => {
     if (AF.mode !== 'walk' || (pf++ % 5)) return;
     const p = AF.player; let best = null, bd = 36;
-    for (const s of VV.parkedStatic) { const d = (s.x - p.x) ** 2 + (s.z - p.z) ** 2; if (d < bd) { bd = d; best = s; } }
+    for (const s of VV.parkedStatic) { if (s.noDrive) continue; const d = (s.x - p.x) ** 2 + (s.z - p.z) ** 2; if (d < bd) { bd = d; best = s; } }
     proxy.target = best;
     if (best) { proxy.x = best.x; proxy.z = best.z; proxy.y = best.y + 0.6; proxy.label = 'Drive the ' + best.name; } else proxy.y = -999;
   });
@@ -1536,7 +1277,7 @@ const stepDelivery = (dt) => {
 AF.onBuild('vehicles', 600, async () => {
   const t0 = performance.now();
   kcols();
-  buildGraph();
+  VV.stepPush = stepPush; VV.worldHits = worldHits; VV.overlap = overlap;
   const park = (tid, pi, x, z, yaw) => { const c = makeCar(tid, pi, x, z, yaw); VV.parked.push(c); return c; };
   // cab ranks (drivable): Union Terminal (Terminal Ave, west kerb) + the Grand Solace Hotel (Grand Ave); one of each company
   const rankCabs = ['taxi', 'gullcab', 'taxi', 'beaconcab', 'taxi', 'gullcab', 'taxi'];
@@ -1555,23 +1296,23 @@ AF.onBuild('vehicles', 600, async () => {
     const d = b.doors[0], ix = d.x + Math.sin(d.yaw || 0) * 1.6, iz = d.z + Math.cos(d.yaw || 0) * 1.6;
     VV.cabDrops.push({ name: b.name, x: d.x, z: d.z, ix, iz, cd: 0 });
   }
-  spawnTraffic(VV.AI_N || 150);
+  VV.buildTraffic();
   for (const D of (VV.deliv || [])) { try { buildDelivery(D); } catch (e) { console.warn('[af] delivery', D.name, e); } }
   // the static kerb cars count as parked for the probes (after the drivable ones, so find() hits a drivable car first)
   for (const c of VV.parkedStatic) VV.parked.push(c);
   // instanced bodies (sized to the fleet), wheels, drivers, lamps
-  const per = {}; for (const c of VV.cars) per[c.key] = (per[c.key] || 0) + 1;
+  const per = {}; for (const c of VV.cars) per[c.type.id] = (per[c.type.id] || 0) + 1;
   for (const key in per) ensureIM(key, per[key] + 2);
   const nW = VV.cars.reduce((n, c) => n + c.wheels.length, 0) + 16;
-  WHEEL_IM = new THREE.InstancedMesh(wheelGeo(), AF.mat.voxel, nW + 64); WHEEL_IM.userData.max = nW + 64;
+  WHEEL_IM = new THREE.InstancedMesh(wheelGeo(), AF.mat.voxelInst, nW + 64); WHEEL_IM.customDepthMaterial = AF.mat.depthInst; WHEEL_IM.userData.max = nW + 64;
   WHEEL_IM.castShadow = true; WHEEL_IM.receiveShadow = true; WHEEL_IM.frustumCulled = false;
   AF.scene.add(WHEEL_IM);
-  LEG_IM = new THREE.InstancedMesh(legGeo(), AF.mat.voxel, 64); LEG_IM.userData.max = 64; LEG_IM.castShadow = true; LEG_IM.receiveShadow = true; LEG_IM.frustumCulled = false; LEG_IM.count = 0; LEG_IM.count0 = 0; LEG_IM.name = 'horse-legs'; AF.scene.add(LEG_IM);
-  DRV_IM = driverGeos().map((g) => { const im = new THREE.InstancedMesh(g, AF.mat.voxel, 120); im.userData.max = 120; im.castShadow = true; im.frustumCulled = false; im.count = 0; AF.scene.add(im); return im; });
+  LEG_IM = new THREE.InstancedMesh(legGeo(), AF.mat.voxelInst, 64); LEG_IM.customDepthMaterial = AF.mat.depthInst; LEG_IM.userData.max = 64; LEG_IM.castShadow = true; LEG_IM.receiveShadow = true; LEG_IM.frustumCulled = false; LEG_IM.count = 0; LEG_IM.count0 = 0; LEG_IM.name = 'horse-legs'; AF.scene.add(LEG_IM);
+  DRV_IM = driverGeos().map((g) => { const im = new THREE.InstancedMesh(g, AF.mat.voxelInst, 120); im.customDepthMaterial = AF.mat.depthInst; im.userData.max = 120; im.castShadow = true; im.frustumCulled = false; im.count = 0; AF.scene.add(im); return im; });
   buildLamps(VV.cars.length + 8);
   syncInstances(0);
   VV.buildMs = Math.round(performance.now() - t0);
-  console.log('[af] vehicles:', VV.cars.length, 'cars (', VV.ai.length, 'AI ) + static parked', VV.parkedStatic.length, 'models', Object.keys(VV.models).length, 'lanes', G.lanes.length, 'conns', G.conns.length, 'in', VV.buildMs, 'ms', 'deliveries', DLV.map((D) => D.name + '@' + D.x.toFixed(0) + ',' + D.z.toFixed(0)).join(' | '));
+  console.log('[af] vehicles:', VV.cars.length, 'cars (', VV.ai.length, 'AI ) + static parked', VV.parkedStatic.length, 'models', Object.keys(VV.models).length, 'lanes', VV.graph.lanes.length, 'conns', VV.graph.conns.length, 'in', VV.buildMs, 'ms', 'deliveries', DLV.map((D) => D.name + '@' + D.x.toFixed(0) + ',' + D.z.toFixed(0)).join(' | '));
 });
 AF.onTick('traffic', 200, (dt) => {
   if (!WHEEL_IM) return;
@@ -1585,10 +1326,11 @@ AF.test('vehicles: 60+ AI cars run 60 s (no NaN, stay on the asphalt)', () => {
   if (VV.ai.length < 60) return { ok: false, info: 'ai cars ' + VV.ai.length };
   let worst = 0, nan = 0, moved = 0;
   const start = VV.ai.map((c) => [c.x, c.z]);
-  for (let i = 0; i < 1800; i++) {
-    VV.simTraffic(1 / 30);
-    if (i % 10 === 0) for (const c of VV.ai) { if (!isFinite(c.x) || !isFinite(c.z) || !isFinite(c.yaw)) nan++; else worst = Math.max(worst, VP.nearestRoad(c.x, c.z).edge + 1); }
-  }
+  const clock = AF.clock.t;
+  try { for (let i = 0; i < 1800; i++) {
+    AF.clock.t += 1 / 30; VV.simTraffic(1 / 30);
+    if (i % 10 === 0) for (const c of VV.ai) { if (!isFinite(c.x) || !isFinite(c.z) || !isFinite(c.yaw)) nan++; else if (c.ai.piece.kind !== 'route') worst = Math.max(worst, VP.nearestRoad(c.x, c.z).edge + 1); }
+  } } finally { AF.clock.t = clock; }
   VV.ai.forEach((c, i) => { if (Math.hypot(c.x - start[i][0], c.z - start[i][1]) > 20) moved++; });
   syncInstances(0);
   return { ok: nan === 0 && worst < 1.3 && moved >= VV.ai.length * 0.6, info: `nan ${nan}, max past kerb+1 ${worst.toFixed(2)} m, moved ${moved}/${VV.ai.length}` };
@@ -1620,7 +1362,7 @@ AF.test('vehicles: player bump displaces AI and can drive away', () => {
     VV.cars = [player, other]; VV.parkedStatic = [];
     AF.boxBlocked = () => false; AF.surfaceBelow = () => 0; AF.emit = () => {};
     for (let frame = 0; frame < 120; frame++) {
-      physics(player, 1 / 60, input); aiStep(other, 1 / 60, VV.cars);
+      physics(player, 1 / 60, input); VV.aiStep(other, 1 / 60);
       offset = Math.max(offset, Math.hypot(other.ai.offsetX || 0, other.ai.offsetZ || 0));
       if (frame === 89) afterContact = player.z;
     }

@@ -276,6 +276,7 @@ try {
     }
     return m;
   }
+  L.makeBush = makeBush; L.makeBoulder = makeBoulder;
   function makeFlowers(seed, kind) {         // vs 1/16, a 1.25 m patch
     const R = AF.rng(seed + 77);
     const S = 20, m = new AF.Model(S, 12, S);

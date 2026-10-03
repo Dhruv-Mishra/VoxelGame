@@ -75,11 +75,11 @@ try {
   // dynamic near plane (PERF.md §3, locked): 24-bit depth precision is ~ d^2 / (near * 2^24), so a fixed 0.08 m near plane
   // z-fights from ~150 m on Windows (ANGLE / D3D11). On foot / driving 0.1 m; from the air it grows with altitude and the
   // distance to the followed target (plane, orbit centre) up to 6 m.
-  const HIGH_MODES = new Set(['fly', 'skydive', 'aerial', 'cine', 'probe']);
+  const HIGH_MODES = new Set(['fly', 'skydive', 'aerial', 'cine', 'probe', 'ferry-ride']);
   AF.onTick('cam-near', 886, () => {
     let n = 0.1;
     if (HIGH_MODES.has(AF.mode)) {
-      const cp = cam.position; let gy = 0; try { gy = AF.W ? Math.max(0, AF.W.groundY(cp.x, cp.z) || 0) : 0; } catch (e) { gy = 0; }
+      const cp = cam.position; let gy = 0; try { gy = AF.W ? Math.max(0, (AF.W.col(cp.x, cp.z) < 0 && AF.outland ? AF.outland.h(cp.x, cp.z) : AF.W.groundY(cp.x, cp.z)) || 0) : 0; } catch (e) { gy = 0; }
       const alt = cp.y - gy, dT = cp.distanceTo(AF.camTarget);
       n = AF.clamp(Math.min(alt * 0.04, dT > 0.5 ? dT * 0.15 : 6), 0.1, 6);
     }
@@ -184,21 +184,23 @@ try {
   AF.frame = frame;
   let lastTick = 0, slot = 0, rafEma = 16.7, rafLast = 0;
   // idle work (PERF.md §2): rAF slots skipped by the fps cap run AF.onIdle hooks (streaming, far builds) for ~60 % of a display
-  // interval, so the rendered frames never pay for them
-  const FS = AF.frameStats = { idleT: -1, idleMs: 0, capped: false };
-  const runIdle = () => {
+  // interval; 60/Max also gets a token fallback every second frame if no skipped slot ran
+  const FS = AF.frameStats = { idleT: -1, idleMs: 0, capped: false, fallback: 0, idleRuns: 0, maxIdleMs: 0 };
+  let idleCursor = 0, idleFrame = -1;
+  const runIdle = (budget = Math.min(AF.MOBILE ? 4 : 6, rafEma * 0.6)) => {
     const L = AF.hooks.idle; if (!L.length) return;
-    const t0 = performance.now(), end = t0 + Math.min(AF.MOBILE ? 6 : 10, rafEma * 0.6);
-    for (let pass = 0; pass < 4 && performance.now() < end - 0.5; pass++) {
+    const t0 = performance.now(), end = t0 + budget;
+    for (let pass = 0; pass < 4 && performance.now() < end - 0.2; pass++) {
       let busy = false;
-      for (const h of L) {
-        const left = end - performance.now(); if (left < 0.5) break;
-        try { if (h.fn(left)) busy = true; }
+      for (let index = 0; index < L.length; index++) {
+        const left = end - performance.now(); if (left < 0.2) break;
+        const h = L[idleCursor++ % L.length];
+        try { if (h.fn(Math.min(left, 1))) busy = true; }
         catch (e) { if (h.errs++ < 3) console.error('[af] idle ' + h.name + ' threw:', e); }
       }
       if (!busy) break;
     }
-    FS.idleT = AF.clock.t; FS.idleMs = performance.now() - t0;
+    idleFrame = AF.clock.frame; FS.idleRuns++; FS.idleT = AF.clock.t; FS.idleMs = performance.now() - t0; FS.maxIdleMs = Math.max(FS.maxIdleMs, FS.idleMs);
   };
   const loop = (now) => {
     requestAnimationFrame(loop);
@@ -213,6 +215,7 @@ try {
     const dt = Math.min(0.1, (now - last) / 1000); last = now; lastTick = now;
     fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { AF.fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
     frame(dt);
+    if (!AF.SHOT && !AF.TEST && AF.clock.frame - idleFrame >= 2) { runIdle(AF.MOBILE ? 1 : 1.5); FS.fallback++; }
   };
   requestAnimationFrame(loop);
   // hidden-tab pump (the Claude browser pane never fires rAF). Only runs while hidden.
@@ -221,7 +224,7 @@ try {
     MC.port1.onmessage = () => {
       if (!document.hidden || AF.SHOT) { pumping = false; return; }
       const n = performance.now();
-      if (AF.ready && !AF.paused && n - lastTick > 17) { const dt = Math.min(0.1, (n - lastTick) / 1000); lastTick = n; last = n; frame(dt); }
+      if (AF.ready && !AF.paused && n - lastTick > 17) { const dt = Math.min(0.1, (n - lastTick) / 1000); lastTick = n; last = n; frame(dt); if (!AF.TEST && AF.clock.frame - idleFrame >= 2) { runIdle(1.5); FS.fallback++; } }
       MC.port2.postMessage(0);
     };
     const kick = () => { if (document.hidden && !pumping && !AF.SHOT) { pumping = true; MC.port2.postMessage(0); } };
@@ -462,7 +465,8 @@ try {
       if (!F.on || !AF.ready && !force) { U.uFarOn.value = 0; return; }
       const cp = cam.position; cam.getWorldDirection(fw); fw.y = 0; const l = fw.length() || 1; fw.multiplyScalar(1 / l);
       let cx = cp.x + fw.x * F.R * 0.5, cz = cp.z + fw.z * F.R * 0.5;
-      cx = AF.clamp(cx, AF.W.X0 + 40, AF.W.x1 - 40); cz = AF.clamp(cz, -260, 260);
+      const bounds = AF.PLAN.world.bounds;
+      cx = AF.clamp(cx, bounds.x0 + 40, bounds.x1 - 40); cz = AF.clamp(cz, bounds.z0 + 40, bounds.z1 - 40);
       cx = Math.round(cx / 32) * 32; cz = Math.round(cz / 32) * 32;
       const moved = cx !== F.cx || cz !== F.cz, turned = F.dir.angleTo(AF.time.sunDir) > 0.0035;
       F.frameN++;

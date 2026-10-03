@@ -33,7 +33,7 @@ AF.PLAN = (() => {
     { name: 'Anchor Street', a: [240, -240], b: [240, 0] },                               // stops at Meridian: Union Terminal + rail yard fill x 173..300, z 10..72
     { name: 'Anchor Street', a: [240, 80], b: [240, 160] },
     // THE WEST SIDE (new land x < -300): Westgate Road links Wren St to New Friends Colony, the zoo and the airfield
-    { name: 'Westgate Road', a: [-640, 0], b: [-240, 0], w: 14 },
+    { name: 'Westgate Road', a: [-660, 0], b: [-240, 0], w: 14 },
     { name: 'Friends Lane', a: [-372, -226], b: [-372, 0] },
     { name: 'Airfield Road', a: [-470, 0], b: [-470, 36] },
     // EASTPORT (43-east.js, x 300..460): the avenues carry on east over the Solace River; two new N-S streets (the rail corridor
@@ -41,7 +41,7 @@ AF.PLAN = (() => {
     { name: 'North Street', a: [240, -240], b: [452, -240] },
     { name: 'Park Row', a: [240, -160], b: [452, -160], w: 14 },
     { name: 'Charter Street', a: [240, -80], b: [452, -80] },
-    { name: 'Meridian Avenue', a: [240, 0], b: [452, 0], w: 14 },
+    { name: 'Meridian Avenue', a: [240, 0], b: [460, 0], w: 14 },
     { name: 'Bay Street', a: [240, 80], b: [452, 80] },
     { name: 'Harbour Boulevard', a: [240, 160], b: [452, 160], w: 14 },
     { name: 'Riverside Drive', a: [320, -240], b: [320, 0] },
@@ -205,6 +205,22 @@ AF.PLAN = (() => {
   // ---- THE WEST SIDE layout (x -660..-300). Plots face Friends Lane (x -372); the zoo fills the north-west corner; the airfield
   // runs east-west along the coast so planes climb out over the sea.
   P.bounds = { x0: -660, z0: -300, x1: 460, z1: 300 };
+  P.world = {
+    play: { x0: -1220, x1: 1020, z0: -900, z1: 300 }, margin: 12,
+    bounds: { x0: -1476, x1: 1276, z0: -1708, z1: 940 },
+    lake: { name: 'Lake Tamsin', cx: -40, cz: -650, rx: 90, rz: 55, waterY: 22 },
+    island: { name: 'Serena Isle', cx: -60, cz: 600, rx: 220, rz: 130,
+      cone: { x: -10, z: 625, r: 85, y: 55, craterR: 13 },
+      airstrip: { x0: -230, x1: 90, z: 540, w: 22, y: 2 },
+      resort: { x: -170, z: 640, r: 45, y: 3 },
+      ferry: { cityPier: [0,260], islandPier: [-20,424], path: [[0,277],[-20,405]], dwell: 25, crossing: 40 },
+      landing: { x: -20, z: 478, r: 20, y: 2, pier: { x0: -24, x1: -16, z0: 420, z1: 478 } } },
+    roads: [
+      { name: 'Coast Road', w: 10, surface: 'asphalt', points: [[-660, 0], [-820, -10], [-1000, -40]], heights: [0, 5, 10] },
+      { name: 'Eastwood Road', w: 10, surface: 'asphalt', points: [[460, 0], [700, -40], [980, -120]], heights: [0, 10, 19] },
+      { name: 'Lake Road', w: 10, surface: 'gravel', points: [[258, -284], [258, -300], [230, -360], [160, -420], [50, -480], [-40, -560], [-40, -590]], heights: [30, 40, 44, 38, 23, 22, 23] },
+    ],
+  };
   P.west = {
     lane: -372,
     // 12 plots, 6 each side of Friends Lane, 35 m frontage. side -1 = west side (door faces east), +1 = east side (door faces west)

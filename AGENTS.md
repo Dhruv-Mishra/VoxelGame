@@ -19,14 +19,14 @@ Single-page three.js (r160, CDN importmap) voxel city game. **Edit `src/`, never
 ## Architecture (global `AF`)
 - Lifecycle: `AF.onBuild(name, order, fn)` at boot, `AF.onTick(name, order, fn)` per frame. Modes: `AF.modes[name]={enter,exit,update}`, `AF.setMode(name, opts)` (walk, aerial, drive, fly).
 - Events: `AF.emit/on` (`toast`, `bubble`, `dialogue`, …). `AF.addInteract(obj)` stores the **same object** (move it by mutating `x/y/z`); `dist`/`prio` pick the target.
-- World: `AF.W` voxels at 0.25 m, x∈[-660,300). `AF.addBuilding/placeStatic/removeStatic/addLight/addLabel`, models via `AF.Model` + `AF.meshModel`, colours via `AF.col(hex,{metal,rough,emit})`.
+- World: `AF.W` voxels at 0.25 m, x∈[-660,300) (the city). Outside it the procedural outland (`AF.PLAN.world`, 4× the city) — sample ground with `AF.outland.h(x,z)` there. `AF.addBuilding/placeStatic/removeStatic/addLight/addLabel`, models via `AF.Model` + `AF.meshModel`, colours via `AF.col(hex,{metal,rough,emit})`.
 - Layout: `05-plan.js` (`AF.PLAN`: roads, lots, `P.west` = colony/zoo/airfield, `P.pools`, views). Spawn/test positions need an explicit y or you land on roofs.
 
 ## Parts map
 - Engine: 00 prologue, 01 core/input/pointer lock, 02 voxel + region LOD, 03 renderer + tiers, 60 atmosphere/fog, 61 post, 62 water, 63 sky.
-- World: 10 terrain/coast (`AF.land.coastS(x,z)` = m inland, < 0 sea), 11 streets, 12 nature + ground cover, 13–42 districts, 45 friends colony/homes, 46 zoo, 47 airfield (deco terminal, covered forecourt, security funnel at x -490/-484 z 56, jet bridges to stands x -450/-360), 48 sea (ships, lighthouses, rig).
-- Actors: 50 cars/bikes (player contacts), 52 planes (arcade flight, per-type `TYPES`), 53 scheduled AI airliners (`AF.airTraffic`, 480 s timetable, one runway user at a time), 55 pedestrians/crowd, 56 animals, 57 friends (cast, dialogue, NPCs).
-- Player/UI: 70 avatar + walk/aerial, 71 UI (title, HUD, menu, map, dialogue), 72 touch, 98 tests, 99 boot.
+- World: 07 outland height/colour fn (`AF.outland`, everything outside the `AF.W` grid), 10 terrain/coast (`AF.land.coastS(x,z)` = m inland, < 0 sea), 11 streets, 12 nature + ground cover, 13–43 districts, 44-flora (outland vegetation, instanced), 44-island (Serena Isle + ferry), 44-sites (farms, villages, lodges), 45 friends colony/homes, 46 zoo, 47 airfield (fenced perimeter; security at x -490/-484 z 56 is the only walk-in route; parked cars, drop-off routes, passengers/staff; jet bridges to stands x -450/-360), 48 sea, 49 outland quadtree mesher (`AF.outland.addProp`, `renderer.diagnose()`).
+- Actors: 50 vehicle models/player driving/parking (`AF.vehicles.placeParked`), 51 traffic sim (lane graph, 15 Hz, `AF.vehicles.addRoute`), 52 planes, 53 AI airliners (`AF.airTraffic`; busy 600 s timetable within 900 m of the airport, else 480 s), 54 path walkers (`AF.walkers.addPath`, 4 shared draws), 55 pedestrians/crowd, 56 animals, 57 friends (cast, dialogue, NPCs; `visual:false` reuses walkers).
+- Player/UI: 70 avatar + walk/aerial, 71 UI (title, HUD, menu, dialogue), 72 touch, 74 map (whole-world raster in idle slots, minimap, `AF.ui.toggleMap`), 98 tests, 99 boot.
 - Title avatar turntable is drawn by the main renderer (viewport + scissor); never add a second WebGLRenderer.
 - Pointer lock is held across modes; Escape releases + pauses and never exits vehicles (E/F do).
 

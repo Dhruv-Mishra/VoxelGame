@@ -2,8 +2,7 @@
 try {
 // ===== 10-terrain: Port Solace ground — flat city (h=1), THE SEA south of the quay (z 210), granite quay wall,
 //       east breakwater (rubble heightmap) out to the lighthouse rock, Solace Heights (wooded hills + winding lane + villas),
-//       Swan Lake + the skating pond; THE ISLAND COAST (noisy shoreline inside every map edge: beaches, NW-bay dunes + mole,
-//       rocky shelves, the Heights as sea cliffs, the SW headland) and the ocean water + sea bed out to the horizon  (OWNER: land-harbour) =====
+//       Swan Lake + the skating pond, the south coast and ocean water + sea bed out to the horizon  (OWNER: land-harbour) =====
 {
   const P = AF.PLAN, W = AF.W;
   const L = AF.land = AF.land || {};
@@ -59,18 +58,11 @@ try {
     { x: -280, z: -262, w: 10, d: 12, name: 'The Gables', wall: 0xf0e2c4, roof: 0x4c7a6a },
   ];
 
-  // ---- THE ISLAND COAST: the shoreline runs a noisy ~2-3 m inside each map edge (the north-west bay bites ~40 m in); south of
-  //   the city it is the quay / the Solace Sands shore. L.coastS(x, z) = metres inland from the shoreline (< 0 = sea).
   const VSB = W.VS, XE = W.x1, ZN = W.Z0;
-  const bayK = L.bayK = (x) => smooth(-452, -414, x) * smooth(-316, -362, x);
   const beachShore = (x) => 221.5 + Math.sin((x + 300) * 0.085) * 3.2 + (N2(x * 0.15, 3.7) - 0.5) * 2 + smooth(-310, -380, x) * fbm(x * 0.012, 5, 3) * 14;
-  const INS_N = new Float32Array(W.NX), SHORE_S = new Float32Array(W.NX), INS_W = new Float32Array(W.NZ), INS_E = new Float32Array(W.NZ);
-  for (let i = 0; i < W.NX; i++) { const x = W.X0 + (i + 0.5) * VSB; INS_N[i] = 1.5 + 2 * fbm(x * 0.021 + 7, 3.1, 3) + bayK(x) * (36 + (fbm(x * 0.03, 9, 3) - 0.5) * 16); SHORE_S[i] = x < -239 ? beachShore(x) : COAST; }
-  for (let k = 0; k < W.NZ; k++) { const z = ZN + (k + 0.5) * VSB; INS_W[k] = 1.5 + 2 * fbm(z * 0.021 - 3, 5.3, 3); INS_E[k] = 1.5 + 2 * fbm(z * 0.021 + 11, 1.7, 3); }
-  L.coastS = (x, z) => {
-    const i = clamp(Math.floor((x - W.X0) / VSB), 0, W.NX - 1), k = clamp(Math.floor((z - ZN) / VSB), 0, W.NZ - 1);
-    return Math.min(x - W.X0 - INS_W[k], XE - x - INS_E[k], z - ZN - INS_N[i], SHORE_S[i] - z);
-  };
+  const SHORE_S = new Float32Array(W.NX);
+  for (let i = 0; i < W.NX; i++) { const x = W.X0 + (i + 0.5) * VSB; SHORE_S[i] = x < -239 ? beachShore(x) : COAST; }
+  L.coastS = (x, z) => (x < W.X0 || x >= XE ? AF.outland.coastZ(x) : SHORE_S[clamp(W.bx(x), 0, W.NX - 1)]) - z;
   const HEADLAND = L.HEADLAND = { x: -634, z: 238, r: 19, r0: 7, top: 8 };   // south-west headland (Cape Solace Light, 48-sea)
   const protectedAt = (x, z) => (z > 166 && x > -300) || (x > PK.x0 - 1 && x < PK.x1 + 1 && z > PK.z0 - 1 && z < PK.z1 + 1) || !!L.inLot(x, z, 1.5)
     || P.nearestRoad(x, z).edge < 2 || VILLAS.some((v) => Math.abs(x - v.x) < v.w / 2 + 5 && Math.abs(z - v.z) < v.d / 2 + 5);
@@ -162,14 +154,12 @@ try {
           const hp = hash(Math.floor(x * 2), Math.floor(z * 2));
           let hB = 1, colT = top, colS = 0;
           if (hh > 0) {
-            // terraced wooded hills: 3-block steps whose edges wander, the odd rock outcrop
-            const h = heightsH(x, z), warp = (N2(x * 0.05 + 9, z * 0.05 - 4) - 0.5) * 1.6;
-            const st = 2;
-            hB = Math.max(1, Math.floor((h * 4 + warp * st) / st) * st + 1);
+            const h = heightsH(x, z), warp = (N2(x * 0.11 + 9, z * 0.09 - 4) - 0.5) * 2.4;
+            hB = Math.max(1, Math.floor(h * 4 + warp) + 1);
             const n2 = N2(x * 0.06 + 50, z * 0.06);
             colT = n2 < 0.16 ? GR.litO : n2 < 0.4 ? GR.dark : n2 < 0.62 ? GR.base : n2 < 0.78 ? GR.moss : n2 < 0.9 ? GR.light : GR.litR;
             const rn = N2(x * 0.045 + 2, z * 0.045 + 7);
-            colS = rn > 0.74 ? ST.grey : GRS;
+            colS = rn > 0.74 ? ST.grey : colT;
           }
           const lz = L.lakeE(x, z) + (N2(x * 0.25, z * 0.25) - 0.5) * 0.03;
           if (lz < 1.12) {
@@ -210,73 +200,46 @@ try {
         }
       }
     }
-    // ---- villa pads (flat terraces at the pad-centre height)
     for (const v of VILLAS) {
-      const hb = Math.max(1, Math.round(heightsH(v.x, v.z) * 4) + 1); v.y = hb * 0.25;
-      W.eachCol(v.x - v.w / 2 - 4, v.z - v.d / 2 - 4, v.x + v.w / 2 + 4, v.z + v.d / 2 + 4, (bx, bz, i) => { H[i] = hb; S[i] = ST.grey; });
+      const samples = [];
+      for (let x = v.x - v.w / 2; x <= v.x + v.w / 2; x += 2) for (let z = v.z - v.d / 2; z <= v.z + v.d / 2; z += 2) samples.push(W.groundY(x, z));
+      samples.sort((a, b) => a - b); const hb = Math.round(samples[samples.length >> 1] * 4); v.y = hb * 0.25;
+      const rx = v.w / 2 + 2, rz = v.d / 2 + 3, bank = 15;
+      W.eachCol(v.x - rx - bank, v.z - rz - bank, v.x + rx + bank, v.z + rz + bank, (bx, bz, i, x, z) => {
+        const margin = Math.max(Math.abs(x - v.x) - rx, Math.abs(z - v.z) - rz);
+        if (margin >= bank) return;
+        H[i] = Math.round(AF.lerp(hb, H[i], smooth(0, bank, margin))); S[i] = C[i];
+      });
+      v.pad = { rx, rz, bank, plinth: 0.5, retaining: 0 };
+      let laneX = v.x, laneZ = v.z + rz, laneY = v.y, best = Infinity;
+      for (const lane of LANES) for (let index = 1; index < lane.length; index++) {
+        const before = lane[index - 1], at = lane[index], dx = at[0] - before[0], dz = at[1] - before[1], fraction = clamp(((v.x - before[0]) * dx + (v.z - before[1]) * dz) / (dx * dx + dz * dz), 0, 1);
+        const x = before[0] + dx * fraction, z = before[1] + dz * fraction, distance = Math.hypot(x - v.x, z - v.z);
+        if (distance < best) { best = distance; laneX = x; laneZ = z; laneY = W.groundY(x, z); }
+      }
+      const startZ = v.z + v.d / 2 + 2, length = Math.hypot(laneX - v.x, laneZ - startZ);
+      for (let along = 0; along <= length; along += 0.25) {
+        const fraction = length ? along / length : 0, x = AF.lerp(v.x, laneX, fraction), z = AF.lerp(startZ, laneZ, fraction), height = Math.round(AF.lerp(v.y, laneY, fraction) * 4);
+        W.eachCol(x - 1.25, z - 1.25, x + 1.25, z + 1.25, (bx, bz, i) => { H[i] = height; C[i] = GRAV[0]; S[i] = GRAV[0]; });
+      }
     }
-    // ---- THE ISLAND COAST (edge strips only): sea shelf + tide-line rocks, beaches (low dunes in the north-west bay), rocky shelves,
-    //      the Heights dropping into the sea as cliffs, a rubble mole in the bay; lots/roads/park/villa pads are never cut
-    const CLF = L.CLIFF = [c(0x8a8276, { jitter: 0.7, edge: 1 }), c(0x9c9184, { jitter: 0.7, edge: 1 }), c(0x6f685e, { jitter: 0.7, edge: 1 })];
-    const MARRAM = c(0x9aa45a, { jitter: 0.9 }), TIDE = Math.floor(SEA_Y * 4);
-    const MOLE = L.MOLE = [[-404, -254], [-401, -276], [-394, -295]];
-    const moleD = (x, z) => { let b = 1e9; for (let i = 0; i < MOLE.length - 1; i++) { const [ax, az] = MOLE[i], [bx, bz] = MOLE[i + 1], dx = bx - ax, dz = bz - az, u = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz), 0, 1); b = Math.min(b, Math.hypot(x - ax - dx * u, z - az - dz * u)); } return b; };
+    for (const v of VILLAS) {
+      const { rx, rz, bank } = v.pad, feather = bank + 6;
+      W.eachCol(v.x - rx - feather, v.z - rz - feather, v.x + rx + feather, v.z + rz + feather, (bx, bz, index, x, z) => {
+        const margin = Math.max(Math.abs(x - v.x) - rx, Math.abs(z - v.z) - rz);
+        if (margin >= feather) return;
+        H[index] = Math.round(AF.lerp(v.y, heightsH(x, z) + 0.25, smooth(0, feather, margin)) * 4); S[index] = C[index];
+      });
+    }
     const CT = L.coastT = { beach: 0, dune: 0, rock: 0, cliff: 0, sea: 0, wall: 0 };
-    // west of the park the Heights meet the sea as a graded rocky slope (shelf at the tide line, then ~1.6 m rise per metre)
-    const nwSlope = (x, z) => x < PK.x0 - 1 && z < -236;
-    const coastCol = (i, x, z) => {
-      const s = L.coastS(x, z), g = H[i];
-      if (s >= 9 && !(s < 44 && g > 6 && nwSlope(x, z))) return;
-      if (protectedAt(x, z)) { if (s < 2) { S[i] = g > 6 ? CLF[0] : GRAN[0]; CT.wall++; } return; }
-      const hp = hash(Math.floor(x * 2), Math.floor(z * 2)), cliff = g > 6, rocky = g > 2 || N2(x * 0.045 + 17, z * 0.045 - 5) > 0.62;
-      let h = g, top = C[i], side = S[i];
-      if (s < 0) {
-        h = Math.min(g, clamp(Math.floor((SEA_Y - 0.35 + s * 0.3) * 4), -16, TIDE - 1));
-        top = s > -2.5 ? (hp < 0.5 ? SEA.sand : SEA.sandD) : N2(x * 0.1, z * 0.1) < 0.45 ? SEA.weed : SEA.mud; side = SEA.sandD; CT.sea++;
-        if (rocky && s > -7) {
-          const rh = hash(Math.floor(x * 1.4) + 3, Math.floor(z * 1.4) - 5);
-          if (rh > 0.52) { h = Math.max(h, TIDE - 3 + Math.floor((rh - 0.52) * 12 * (1 + s / 7)) + (cliff ? 2 : 0)); top = RUB[(rh * 37 | 0) & 3]; side = top; CT.rock++; }
-        }
-      } else if (cliff && nwSlope(x, z)) {
-        const r2 = hash(Math.floor(x * 1.5), Math.floor(z * 1.5)), wn = (N2(x * 0.09 + 31, z * 0.09 - 12) - 0.5) * 2.4;
-        const gh = Math.max(TIDE + 1, Math.floor((SEA_Y + 0.3 + (s < 4 ? s * 0.35 : 1.4 + (s - 4) * 1.6) + wn + r2 * 0.5) * 4));
-        if (gh < g) {
-          h = gh; side = RUB[(r2 * 7 | 0) & 3]; CT.rock++;
-          if (s < 3) top = hp < 0.35 ? SEA.pebble : RUB[(r2 * 4) | 0];
-          else if (g - gh > 10 || r2 < 0.35) top = r2 < 0.08 ? RUB[4] : r2 < 0.5 ? CLF[(r2 * 5) % 3 | 0] : RUB[(r2 * 4) | 0];
-          else top = hp < 0.5 ? GR.dry : GR.olive;
-        }
-      } else if (cliff) {
-        if (s < 2.5) { side = CLF[(hp * 3) | 0]; CT.cliff++; }
-      } else if (rocky) {
-        const r2 = hash(Math.floor(x * 1.5), Math.floor(z * 1.5)), sh = TIDE + 1 + Math.floor(s * 1.6 + r2 * 3);
-        if (sh < g) { h = sh; top = r2 < 0.12 ? RUB[4] : RUB[(r2 * 4) | 0]; side = RUB[(r2 * 7 | 0) & 3]; CT.rock++; }
-      } else {
-        const bh = Math.floor((SEA_Y + 0.2 + s * 0.33) * 4), dk = z < -236 ? bayK(x) : 0;
-        const dune = dk > 0.05 && s > 3.9 ? Math.floor(3.4 * dk * Math.sin(Math.PI * Math.min(1, (s - 3.9) / 5.1)) * (0.55 + 0.45 * N2(x * 0.08 + 2, z * 0.08))) : 0;
-        if (bh < g) { h = bh; top = s < 0.9 ? BEACH.wet : hp < 0.5 ? BEACH.dry : BEACH.dry2; side = BEACH.wet; CT.beach++; }
-        else if (dune > 0) { h = Math.max(g, 1 + dune); top = dune >= 2 && hp < 0.55 ? MARRAM : hp < 0.5 ? BEACH.dry : BEACH.dry2; side = BEACH.dry2; CT.dune++; }
-        else if (hp < (9 - s) * 0.06) top = hp < 0.2 ? MARRAM : BEACH.dry2;
-      }
-      if (z < -250 && x > -412 && x < -386) {
-        const md = moleD(x, z) + (N2(x * 0.4, z * 0.4) - 0.5) * 1.1;
-        if (md < 1.5) { h = Math.max(h, 2); top = hp < 0.5 ? CAP : CAPD; side = RUB[(hp * 4) | 0]; }
-        else if (md < 6) { const hr = Math.max(-16, 1 - Math.floor((md - 1.5) * 2.2) - Math.floor(hash(Math.floor(x * 1.3), Math.floor(z * 1.3)) * 3)); if (hr > h) { h = hr; top = RUB[(hp * 4) | 0]; side = top; } }
-      }
-      H[i] = h; C[i] = top; S[i] = side;
-    };
     // the Solace Sands slope carried up the airfield's south strip
     const sands = (i, x, z) => {
       if (protectedAt(x, z)) return;
       const h = Math.floor((SEA_Y + (SHORE_S[clamp(Math.floor((x - W.X0) / VSB), 0, W.NX - 1)] - z) * 0.11) * 4); if (h >= H[i]) return;
       H[i] = h; C[i] = hash(Math.floor(x * 2), Math.floor(z * 2)) < 0.5 ? BEACH.dry : BEACH.dry2; S[i] = BEACH.wet; CT.beach++;
     };
-    W.eachCol(W.X0, ZN, XE, -236, (bx, bz, i, x, z) => coastCol(i, x, z));
-    W.eachCol(W.X0, -236, W.X0 + 14, 300, (bx, bz, i, x, z) => coastCol(i, x, z));
-    W.eachCol(XE - 14, -236, XE, COAST, (bx, bz, i, x, z) => coastCol(i, x, z));
-    W.eachCol(W.X0 + 14, 204, -300, COAST, (bx, bz, i, x, z) => sands(i, x, z));
-    // the outermost block ring is always sea bed (the mesher draws no faces against the world edge)
-    L.closeEdges = () => { const E = (i) => { H[i] = -16; C[i] = SEA.deep; S[i] = WETG; }; for (let bx = 0; bx < W.NX; bx++) { E(bx * NZ); E(bx * NZ + NZ - 1); } for (let bz = 0; bz < NZ; bz++) { E(bz); E((W.NX - 1) * NZ + bz); } };
+    W.eachCol(W.X0, 204, -300, COAST, (bx, bz, i, x, z) => sands(i, x, z));
+    L.closeEdges = () => { for (let bx = 0; bx < W.NX; bx++) { const index = bx * NZ + NZ - 1; H[index] = -16; C[index] = SEA.deep; S[index] = WETG; } };
     L.closeEdges();
     // ---- side colouring: granite courses on the quay wall, rubble on the breakwater, strata on the heights
     W.sideFn = (bx, bz, by, top) => {
@@ -286,8 +249,6 @@ try {
         const course = (by + 16) >> 1, jt = ((bx + (course & 1) * 3) >> 3) & 3;
         return by >= 0 ? GRAN[jt % 3] : (by === -5 ? WEED : GRAN[(jt + 1) % 3]);
       }
-      const sc = S[bx * NZ + bz];
-      if (sc === CLF[0] || sc === CLF[1] || sc === CLF[2]) return CLF[((by >> 3) + 9 + ((bx >> 5) & 1)) % 3];   // sea-cliff strata
       return 0;
     };
     W.tDirty = true;
@@ -322,16 +283,6 @@ try {
     const sp = [], sn = [], si = []; let sN = 0;
     const q = (x0, z0, x1, z1) => { sp.push(x0, SEA_Y, z0, x0, SEA_Y, z1, x1, SEA_Y, z1, x1, SEA_Y, z0); sn.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0); si.push(sN, sN + 1, sN + 2, sN, sN + 2, sN + 3); sN += 4; };
     for (let x = W.X0; x < XE; x += 8) for (let z = COAST; z < 300; z += 8) q(x, z, Math.min(XE, x + 8), Math.min(300, z + 8));
-    // coastal water inside the map edges: 4 m tiles where the island shore dips under the sea, always along the edge ring
-    for (let x = W.X0; x < XE; x += 4) for (let z = ZN; z < COAST; z += 4) {
-      if (x > W.X0 && x + 4 < XE && z > ZN) {
-        if (L.coastS(x + 2, z + 2) > 14) continue;
-        let wet = false;
-        for (let i = 0; i < 4 && !wet; i++) for (let k = 0; k < 4; k++) { const px = x + i + 0.5, pz = z + k + 0.5; if (L.coastS(px, pz) < 2 && W.groundY(px, pz) < SEA_Y - 0.01) { wet = true; break; } }
-        if (!wet) continue;
-      }
-      q(x, z, x + 4, Math.min(COAST, z + 4));
-    }
     // the open ocean all around the island, out past the camera's far plane (50 m tiles near the coast, 300 m beyond)
     const band = (x0, z0, x1, z1, st) => { for (let x = x0; x < x1; x += st) for (let z = z0; z < z1; z += st) q(x, z, Math.min(x1, x + st), Math.min(z1, z + st)); };
     const ring = (h, o, st) => { band(o[0], o[1], o[2], h[1], st); band(o[0], h[3], o[2], o[3], st); band(o[0], h[1], h[0], h[3], st); band(h[2], h[1], o[2], h[3], st); };
@@ -425,7 +376,7 @@ try {
     const geos = [mk(hullC[0], sail), mk(hullC[1], sailR), mk(hullC[2], sail)];
     const Y = [];
     for (let i = 0; i < 5; i++) { const me = AF.modelMesh(geos[i % 3]); me.frustumCulled = false; me.castShadow = false; me.rotation.order = 'YXZ'; AF.scene.add(me);
-      Y.push({ me, z: 330 + i * 52 + (i % 2) * 18, v: (i % 2 ? -1 : 1) * (2.2 + i * 0.35), x0: -650 + i * 290, ph: i * 1.7 }); }
+      Y.push({ me, z: 330 + i * 20, v: (i % 2 ? -1 : 1) * (2.2 + i * 0.35), x0: -650 + i * 290, ph: i * 1.7 }); }
     L.yachts = Y;
     AF.onTick('land-sails', 330, (dt, t) => {
       for (const y of Y) {
@@ -464,7 +415,8 @@ try {
       const wall = AF.col(v.wall, { jitter: 0.3, edge: 0.6 }), roof = AF.col(v.roof, { jitter: 0.5, edge: 0.8 }), roofD = AF.col(v.roof, { jitter: 0.5, edge: 0.8, sat: 0.8 });
       const x0 = v.x - v.w / 2, x1 = v.x + v.w / 2, z0 = v.z - v.d / 2, z1 = v.z + v.d / 2, y0 = v.y, fl = 2;
       const H2 = fl * 3.75;
-      F(x0 - 0.5, y0, z0 - 0.5, x1 + 0.5, y0 + 0.75, z1 + 0.5, stone);                        // plinth
+      F(x0 - 0.5, y0, z0 - 0.5, x1 + 0.5, y0 + 0.5, z1 + 0.5, stone);
+      F(x0, y0 + 0.5, z0, x1, y0 + 0.75, z1, wall);
       F(x0, y0 + 0.75, z0, x1, y0 + 0.75 + H2, z1, wall);                                     // solid body
       F(x0 - 0.25, y0 + 0.75 + 3.75, z0 - 0.25, x1 + 0.25, y0 + 1.0 + 3.75, z1 + 0.25, trim);  // belt course
       F(x0 - 0.5, y0 + 0.75 + H2, z0 - 0.5, x1 + 0.5, y0 + 1.0 + H2, z1 + 0.5, trim);        // cornice
@@ -500,7 +452,12 @@ try {
       // gravel forecourt + hedges
       F(x0 - 2, y0, z1 + 0.5, x1 + 2, y0 + 0.01, z1 + 4, 0);
       W.eachCol(x0 - 2, z1 + 0.5, x1 + 2, z1 + 4, (bx, bz, i) => { W.C[i] = gravel; });
-      for (let x = x0 - 3; x < x1 + 3; x += 0.25) { if (Math.abs(x - v.x) < 2) continue; F(x, y0, z1 + 4, x + 0.25, y0 + 1.0, z1 + 4.75, hedge); }
+      for (let x = x0 - 2; x < x1 + 2; x += 0.25) { if (Math.abs(x - v.x) < 2) continue; const gy = W.groundY(x, z1 + 3); F(x, gy, z1 + 3, x + 0.25, gy + 0.75, z1 + 3.75, hedge); }
+      for (let side = -1; side <= 1; side += 2) {
+        const gx = v.x + side * (v.w / 2 + 1.5);
+        for (let z = z0; z < z1; z += 0.25) { const gy = W.groundY(gx, z); F(gx, gy, z, gx + 0.5, gy + 0.5, z + 0.25, hedge); }
+      }
+      AF.addLabel(v.name, v.x, v.z, 'place');
     }
   });
 
@@ -509,6 +466,18 @@ try {
   AF.addLabel(HT.name, -240, -278, 'place');
   AF.addLabel(LK.name, LK.cx, LK.cz, 'place');
   AF.addLabel(HB.name, 40, 250, 'place');
+
+  AF.test('land: villa cut-and-fill pads have low plinths and graded banks', () => {
+    let rise = 0;
+    for (const v of VILLAS) {
+      if (!v.pad || v.pad.plinth > 0.75 || v.pad.retaining > 1) return { ok: false, info: 'bad pad ' + v.name };
+      for (let x = v.x - v.pad.rx - v.pad.bank; x < v.x + v.pad.rx + v.pad.bank; x++) for (let z = v.z - v.pad.rz - v.pad.bank; z < Math.min(W.z1, v.z + v.pad.rz + v.pad.bank); z++) {
+        if (W.col(x, z) < 0 || W.col(x + 0.25, z + 0.25) < 0) continue;
+        rise = Math.max(rise, Math.abs(W.groundY(x, z) - W.groundY(x + 0.25, z)), Math.abs(W.groundY(x, z) - W.groundY(x, z + 0.25)));
+      }
+    }
+    return { ok: rise <= 1.25, info: 'maximum bank step ' + rise + ' m, plinth 0.5 m' };
+  });
 
   AF.test('land: sea exists (open water south of the quay)', () => {
     const w = AF.world.water.find((e) => e.geo.userData.sea);
@@ -530,10 +499,9 @@ try {
     const hE = W.groundY(200, -296), hW = W.groundY(-270, -296), park = W.groundY(-20, -290);
     return { ok: Math.max(hE, hW) > 25 && park < 1, info: `E ${hE} W ${hW} park ${park}` };
   });
-  AF.test('land: island coastline (beaches, dunes, rocks, sea cliffs, north-west bay)', () => {
-    const t = L.coastT || {};
-    const bay = W.groundY(-425, -285);
-    return { ok: t.beach > 5000 && t.dune > 200 && t.rock > 500 && t.cliff > 200 && bay < SEA_Y, info: `${JSON.stringify(t)} bay bed ${bay}` };
+  AF.test('land: north and side boundaries continue inland; south stays sea', () => {
+    const north = W.groundY(-425, -299.9), west = W.groundY(W.X0 + 0.1, -100), east = W.groundY(XE - 0.1, -100);
+    return { ok: north >= 0 && west >= 0 && east >= 0 && W.groundY(0, 299.9) === -4 && L.coastS(0, -300) > 500, info: `north ${north}, west ${west}, east ${east}, south ${W.groundY(0, 299.9)}` };
   });
   AF.test('land: breakwater walkable to the lighthouse', () => {
     const p0 = L.bwPoint(0.5);

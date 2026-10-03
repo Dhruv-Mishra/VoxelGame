@@ -1,10 +1,13 @@
 try {
 {
   const A = AF.PLAN.west.air, PI = Math.PI, PERIOD = 480;
-  const traffic = AF.airTraffic = { period: PERIOD, flights: [], runway: -1, bridges: [false, false] };
+  const traffic = AF.airTraffic = { period: PERIOD, flights: [], runway: -1, bridges: [false, false], busy:false, changes:Array.from({length:32},()=>({index:-1,time:-1,enabled:false,oldSafe:true,newSafe:true})), changeCount:0, visible:false };
   const pose = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' };
   const matrix = new THREE.Matrix4(), position = new THREE.Vector3(), scale = new THREE.Vector3(1, 1, 1), rotation = new THREE.Quaternion(), euler = new THREE.Euler(0, 0, 0, 'YXZ');
   let bodies, gears, props, strobes, docks, batches, model, lastFar = -1;
+  const view=new THREE.Frustum(),viewMatrix=new THREE.Matrix4(),sphere=new THREE.Sphere(new THREE.Vector3(),22),candidate={x:0,y:0,z:0,yaw:0,pitch:0,roll:0,gear:true,phase:''};
+  const nearAirport=(point,radius)=>Math.max(A.x0-point.x,0,point.x-A.x1)**2+Math.max(32-point.z,0,point.z-204)**2+Math.max(0,point.y-100)**2<radius*radius;
+  const safe=(result,camera)=>{sphere.center.set(result.x,result.y,result.z);return (result.x-camera.x)**2+(result.y-camera.y)**2+(result.z-camera.z)**2>2250000&&!view.intersectsSphere(sphere);};
   const rounded = (points) => {
     const samples = [], append = (x, z) => samples.push(x, z);
     append(points[0][0], points[0][1]);
@@ -42,49 +45,69 @@ try {
     else { const elapsed = time - 254, angle = Math.min(PI / 3, elapsed * 0.018), radius = 2200; result.x = -618 - radius * Math.sin(angle) - Math.max(0, elapsed - PI / 0.054) * 40 * Math.cos(PI / 3); result.z = 152 + radius * (1 - Math.cos(angle)) + Math.max(0, elapsed - PI / 0.054) * 40 * Math.sin(PI / 3); result.y = 0.25 + elapsed * 3.5; result.yaw = -PI / 2 + angle; result.pitch = 0.09; result.roll = elapsed < PI / 0.054 ? -0.12 : 0; result.gear = elapsed < 5; result.phase = 'climb'; }
     return result;
   };
-  const phaseAt = (time, offset) => ((time - offset) % PERIOD + PERIOD) % PERIOD;
+  const phaseAt = (time, offset, period=PERIOD) => ((time - offset) % period + period) % period;
   const runwayUse = (time) => time >= 48 && time < 80 || time >= 240 && time < 266;
   const hazard = () => { const plane = AF.mode === 'fly' && AF.planes.cur; return !!(plane && plane.x > A.runway.x0 - 30 && plane.x < A.runway.x1 + 30 && Math.abs(plane.z - 152) < 26 && plane.y < 30); };
-  const batch = (geometry, count, name) => { const mesh = new THREE.InstancedMesh(geometry, AF.mat.voxel, count); mesh.name = name; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = true; mesh.receiveShadow = true; mesh.matrixAutoUpdate = false; AF.scene.add(mesh); return mesh; };
+  const batch = (geometry, count, name) => { const mesh = new THREE.InstancedMesh(geometry, AF.mat.voxelInst, count); mesh.name = name; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = true; mesh.receiveShadow = true; mesh.customDepthMaterial=AF.mat.depthInst; mesh.matrixAutoUpdate = false; mesh.count=count; AF.scene.add(mesh); return mesh; };
   AF.onBuild('air-traffic', 641, () => {
     model = AF.planes.trafficGeometry();
-    bodies = batch(model.body, 2, 'air-traffic bodies'); gears = batch(model.gear, 2, 'air-traffic gear'); props = batch(model.prop, 4, 'air-traffic propellers');
+    bodies = batch(model.body, 4, 'air-traffic bodies'); gears = batch(model.gear, 4, 'air-traffic gear'); props = batch(model.prop, 8, 'air-traffic propellers');
     const flash = new AF.Model(2, 2, 2); flash.box(0, 0, 0, 2, 2, 2, AF.westKit.glow(0xffffff, 3));
-    strobes = batch(AF.meshModel(flash, { vs: 0.125, anchor: [0.5, 0.5, 0.5] }), 2, 'air-traffic strobes');
+    strobes = batch(AF.meshModel(flash, { vs: 0.125, anchor: [0.5, 0.5, 0.5] }), 4, 'air-traffic strobes');
     const dock = new AF.Model(12, 14, 10), color = AF.col(0x394b52, { jitter: 0, rough: 0.8 });
     dock.box(0, 0, 0, 12, 14, 10, color); dock.box(1, 1, 0, 11, 13, 10, 0);
     docks = batch(AF.meshModel(dock, { vs: 0.25, anchor: [0.5, 0, 0.5] }), 2, 'air-traffic bridge bellows');
     batches = [bodies, gears, props, strobes, docks];
-    for (let index = 0; index < 2; index++) {
-      const stand = index === 0 ? -450 : -360;
-      traffic.flights.push({ name: index === 0 ? 'SA109 Coast' : 'SA227 Isles', offset: index * 240, stand, cycle: -999, delay: 0, diverted: false, goAt: 0, goX: 0, goY: 0, goZ: 0, x: 0, y: 0, z: 0, phase: '', arrival: rounded([[-348, 152], [-344, 152], [-344, 124], [stand, 124], [stand, 94]]), departure: rounded([[stand, 116], [stand, 124], [-344, 124], [-344, 152], [-352, 152]]) });
+    for (let index = 0; index < 4; index++) {
+      const stand = index%2 === 0 ? -450 : -360;
+      traffic.flights.push({ name: ['SA109 Coast','SA227 Isles','SA318 Westmoor','SA442 Bay'][index], enabled:index<2, period:index<2?PERIOD:600, offset:index<2?index*240:index*150, stand, cycle: -999, delay: 0, diverted: false, goAt: 0, goX: 0, goY: 0, goZ: 0, x: 0, y: 0, z: 0, phase: '', arrival: rounded([[-348, 152], [-344, 152], [-344, 124], [stand, 124], [stand, 94]]), departure: rounded([[stand, 116], [stand, 124], [-344, 124], [-344, 152], [-352, 152]]) });
     }
+    for(const mesh of batches){mesh.visible=false;mesh.instanceMatrix.array.fill(0);}
   });
   const update = traffic.update = (dt, time) => {
     if (!bodies) return;
-    const camera = AF.camera.position, blocked = hazard(), farSlot = Math.floor(time * 4);
+    const camera = AF.camera.position, farSlot = Math.floor(time * 4);
+    const flying=AF.mode==='fly'&&AF.planes.cur,local=nearAirport(camera,900)||(flying&&nearAirport(flying,900));
+    traffic.busy=!!local;traffic.period=local?600:PERIOD;
+    if(!nearAirport(camera,2000)&&!(flying&&nearAirport(flying,2000))){
+      let close=false;for(const flight of traffic.flights)if(flight.enabled&&(flight.x-camera.x)**2+(flight.y-camera.y)**2+(flight.z-camera.z)**2<4000000){close=true;break;}
+      if(!close){if(traffic.visible)for(const mesh of batches)mesh.visible=false;traffic.visible=false;traffic.bridges[0]=traffic.bridges[1]=false;return;}
+    }
+    if(!nearAirport(camera,350)&&farSlot===lastFar)return;
+    const blocked=hazard();AF.camera.updateMatrixWorld();viewMatrix.multiplyMatrices(AF.camera.projectionMatrix,AF.camera.matrixWorldInverse);view.setFromProjectionMatrix(viewMatrix);
     let dirty = false, near = false, inRange = false;
+    traffic.bridges[0]=traffic.bridges[1]=false;
     for (let index = 0; index < traffic.flights.length; index++) {
-      const flight = traffic.flights[index], cycle = Math.floor((time - flight.offset) / PERIOD);
-      if (flight.cycle === -999 || time - flight.offset - flight.cycle * PERIOD - flight.delay >= PERIOD || cycle < flight.cycle) { if (traffic.runway === index) traffic.runway = -1; flight.cycle = cycle; flight.delay = 0; flight.diverted = false; }
-      let phase = time - flight.offset - flight.cycle * PERIOD - flight.delay;
+      const flight = traffic.flights[index],wantedPeriod=traffic.busy?600:PERIOD,wantedOffset=traffic.busy?index*150:index*240,wanted=index<2||traffic.busy;
+      const oldPhase=flight.cycle===-999?phaseAt(time,flight.offset,flight.period):time-flight.offset-flight.cycle*flight.period-flight.delay;
+      sample(flight,oldPhase,pose);sample(flight,phaseAt(time,wantedOffset,wantedPeriod),candidate);
+      const oldSafe=!flight.enabled||safe(pose,camera),newSafe=!wanted||safe(candidate,camera);
+      if((flight.enabled!==wanted||flight.period!==wantedPeriod||flight.offset!==wantedOffset)&&oldSafe&&newSafe&&(pose.phase==='climb'||!flight.enabled)&&(candidate.phase==='climb'||candidate.phase==='arrival'||!wanted)){
+        if(traffic.runway===index)traffic.runway=-1;
+        const change=traffic.changes[traffic.changeCount++%32];change.index=index;change.time=time;change.enabled=wanted;change.oldSafe=oldSafe;change.newSafe=newSafe;
+        flight.enabled=wanted;flight.period=wantedPeriod;flight.offset=wantedOffset;flight.cycle=-999;flight.delay=0;flight.diverted=false;
+      }
+      if(!flight.enabled){matrix.makeScale(0,0,0);bodies.setMatrixAt(index,matrix);gears.setMatrixAt(index,matrix);strobes.setMatrixAt(index,matrix);props.setMatrixAt(index*2,matrix);props.setMatrixAt(index*2+1,matrix);dirty=true;continue;}
+      const cycle=Math.floor((time-flight.offset)/flight.period);
+      if (flight.cycle === -999 || time - flight.offset - flight.cycle * flight.period - flight.delay >= flight.period || cycle < flight.cycle) { if (traffic.runway === index) traffic.runway = -1; flight.cycle = cycle; flight.delay = 0; flight.diverted = false; }
+      let phase = time - flight.offset - flight.cycle * flight.period - flight.delay;
       if (blocked && traffic.runway === index && phase >= 240 && phase < 254) { flight.delay += dt; phase -= dt; }
       if (phase >= 48 && phase < 55 && !flight.diverted) {
         if (blocked || traffic.runway >= 0 && traffic.runway !== index) { sample(flight, phase, pose); flight.diverted = true; flight.goAt = time; flight.goX = pose.x; flight.goY = pose.y; flight.goZ = pose.z; if (traffic.runway === index) traffic.runway = -1; }
         else traffic.runway = index;
       }
       if (!flight.diverted && phase >= 240 && phase < 266 && traffic.runway !== index) {
-        const other = phaseAt(time, traffic.flights[1 - index].offset);
-        if (blocked || traffic.runway >= 0 || other >= 20 && other < 80) { flight.delay += dt; phase = 240; }
+        let arriving=false;for(let otherIndex=0;otherIndex<traffic.flights.length;otherIndex++){const other=traffic.flights[otherIndex];if(otherIndex===index||!other.enabled||other.diverted)continue;const otherPhase=time-other.offset-other.cycle*other.period-other.delay;if(otherPhase>=20&&otherPhase<80)arriving=true;}
+        if (blocked || traffic.runway >= 0 || arriving) { flight.delay += dt; phase = 240; }
         else traffic.runway = index;
       }
       if (traffic.runway === index && (phase >= 80 && phase < 240 || phase >= 266)) traffic.runway = -1;
       sample(flight, phase, pose);
       if (flight.diverted) { const elapsed = time - flight.goAt, turn = Math.min(PI / 2, elapsed * 0.05); pose.x = flight.goX + 700 * Math.sin(turn); pose.z = flight.goZ + 700 * (1 - Math.cos(turn)) + Math.max(0, elapsed - PI * 10) * 35; pose.y = flight.goY + elapsed * 4; pose.yaw = PI / 2 - turn; pose.pitch = 0.11; pose.roll = turn < PI / 2 ? 0.18 : 0; pose.gear = elapsed < 4; pose.phase = 'go-around'; }
       flight.x = pose.x; flight.y = pose.y; flight.z = pose.z; flight.phase = pose.phase;
-      traffic.bridges[index] = pose.phase === 'parked';
+      if(pose.phase==='parked')traffic.bridges[index%2]=true;
       const distance2 = (pose.x - camera.x) ** 2 + (pose.y - camera.y) ** 2 + (pose.z - camera.z) ** 2;
-      if (distance2 < 22500) near = true;
+      if (distance2 < 6400) near = true;
       if (distance2 < 4000000 || traffic.bridges[index]) inRange = true;
       if (distance2 > 22500 && farSlot === lastFar) continue;
       dirty = true;
@@ -92,12 +115,13 @@ try {
       scale.setScalar(pose.gear && distance2 < 4000000 ? 1 : 0); matrix.compose(position, rotation, scale); gears.setMatrixAt(index, matrix);
       for (let propIndex = 0; propIndex < 2; propIndex++) { position.copy(model.props[propIndex]).applyQuaternion(rotation); position.x += pose.x; position.y += pose.y; position.z += pose.z; euler.set(-pose.pitch, pose.yaw, pose.roll, 'YXZ'); rotation.setFromEuler(euler); const spinning = pose.phase === 'parked' ? 0 : time * 45; euler.set(0, 0, spinning); matrix.makeRotationFromEuler(euler); matrix.premultiply(newRotation(rotation)); matrix.setPosition(position); if (distance2 > 4000000) matrix.scale(scale.setScalar(0)); props.setMatrixAt(index * 2 + propIndex, matrix); }
       euler.set(-pose.pitch, pose.yaw, pose.roll, 'YXZ'); rotation.setFromEuler(euler); position.set(0, 5.5, -8).applyQuaternion(rotation); position.x += pose.x; position.y += pose.y; position.z += pose.z; scale.setScalar(distance2 < 4000000 && time % 1.4 < 0.09 && pose.phase !== 'parked' ? 1 : 0); matrix.compose(position, rotation, scale); strobes.setMatrixAt(index, matrix);
-      position.set(flight.stand + 2, 1.75, 84); rotation.identity(); scale.setScalar(traffic.bridges[index] ? 1 : 0); matrix.compose(position, rotation, scale); docks.setMatrixAt(index, matrix);
     }
+    for(let index=0;index<2;index++){position.set(index===0?-448:-358,1.75,84);rotation.identity();scale.setScalar(traffic.bridges[index]?1:0);matrix.compose(position,rotation,scale);docks.setMatrixAt(index,matrix);}
     lastFar = farSlot;
-    bodies.castShadow = gears.castShadow = props.castShadow = near;
+    bodies.castShadow = near;gears.castShadow=props.castShadow=false;
     // all aircraft beyond 2 km (and no bridge docked): the five batches cost nothing instead of five empty draws + shadow draws
     if (bodies.visible !== inRange) bodies.visible = gears.visible = props.visible = strobes.visible = docks.visible = inRange;
+    traffic.visible=inRange;
     if (dirty) {
       bodies.instanceMatrix.needsUpdate = gears.instanceMatrix.needsUpdate = props.instanceMatrix.needsUpdate = strobes.instanceMatrix.needsUpdate = docks.instanceMatrix.needsUpdate = true;
       // r160 culls an InstancedMesh by its instances' bounding sphere: a handful of instances, so recomputing is cheap
@@ -108,11 +132,11 @@ try {
   const newRotation = (quaternion) => rotationMatrix.makeRotationFromQuaternion(quaternion);
   AF.onTick('air-traffic', 442, update);
   AF.test('air traffic: timetable separates runway reservations and stays above ground', () => {
-    let ok = traffic.flights.length === 2, minimum = Infinity, maximum = 0;
+    let ok = traffic.flights.length === 4, minimum = Infinity, maximum = 0;
     const result = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' };
     for (let time = 0; time < PERIOD * 2; time += 0.25) {
       let occupied = 0;
-      for (const flight of traffic.flights) { const phase = phaseAt(time, flight.offset); if (runwayUse(phase)) occupied++; sample(flight, phase, result); const clearance = result.y - Math.max(-1.25, AF.W.groundY(result.x, result.z)); minimum = Math.min(minimum, clearance); if (clearance < -0.01) ok = false; }
+      for (let index=0;index<4;index++) { const flight=traffic.flights[index],phase = phaseAt(time,index*150,600); if (runwayUse(phase)) occupied++; sample(flight, phase, result); const clearance = result.y - Math.max(-1.25, AF.W.groundY(result.x, result.z)); minimum = Math.min(minimum, clearance); if (clearance < -0.01) ok = false; }
       maximum = Math.max(maximum, occupied); if (occupied > 1) ok = false;
     }
     const triangles = model ? model.body.index.count / 3 : Infinity;
@@ -125,6 +149,18 @@ try {
       }
     }
     return { ok: ok && triangles < 6000 && parkedClear, info: 'runway max=' + maximum + ', clearance=' + minimum.toFixed(2) + 'm, parked clear=' + parkedClear + ', body=' + triangles + ' tris' };
+  });
+  AF.test('air traffic: busy near, light far, transitions stay off-screen',()=>{
+    const camera=AF.camera.position.clone(),quaternion=AF.camera.quaternion.clone(),saved=traffic.flights.map(flight=>Object.assign({},flight)),runway=traffic.runway;
+    let nearCount=0,farCount=0,maximum=0;
+    try{
+      AF.camera.position.set(-480,20,110);AF.camera.lookAt(-480,20,200);
+      for(let time=0;time<1200;time+=0.1){update(0.1,time);nearCount=Math.max(nearCount,traffic.flights.filter(flight=>flight.enabled).length);let users=0;for(const flight of traffic.flights)if(flight.enabled&&!flight.diverted&&runwayUse(time-flight.offset-flight.cycle*flight.period-flight.delay))users++;maximum=Math.max(maximum,users);}
+      AF.camera.position.set(700,20,-200);AF.camera.lookAt(900,20,-200);
+      for(let time=1200;time<2400;time+=0.1)update(0.1,time);
+      farCount=traffic.flights.filter(flight=>flight.enabled).length;
+      return{ok:nearCount===4&&farCount===2&&maximum<=1&&traffic.changes.every(change=>change.oldSafe&&change.newSafe),info:'near '+nearCount+', far '+farCount+', runway max '+maximum+', safe changes '+traffic.changeCount};
+    }finally{saved.forEach((flight,index)=>Object.assign(traffic.flights[index],flight));traffic.runway=runway;AF.camera.position.copy(camera);AF.camera.quaternion.copy(quaternion);lastFar=-1;update(0,AF.clock.t);}
   });
 }
 } catch (error) { AF.partError('53-airtraffic.js', error); }

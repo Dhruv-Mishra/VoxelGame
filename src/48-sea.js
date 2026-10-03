@@ -131,11 +131,11 @@ try {
     const trawls = [trawler(col(0xa83a2a)), trawler(col(0x2f5a8a))].map((m) => geoOf(m, 1 / 8));
     // routes stay 150–700 m offshore, clear of the rig (600, 240), the harbour ferry/tug loops and the yachts' lane (z 324..566)
     const SPEC = [
-      { name: 'container ship', geo: cont, route: loop(ellipse(-180, 0, 1100, 820, 0, 0, -1)), speed: 6.5, len: 72, beam: 12, draft: 2.4, bob: 0.12, roll: 0.01, bw: 0.4 },
-      { name: 'island ferry', geo: fer, route: loop(ellipse(-260, 640, 305, 70, Math.atan2(520, -320), 0, 1)), speed: 5, len: 40, beam: 10, draft: 1.6, bob: 0.16, roll: 0.018, bw: 0.55 },
-      { name: 'sailboat', geo: sails[0], route: loop(ellipse(-980, -120, 120, 80, 0.4, 0.08, 1)), speed: 3.2, len: 10, beam: 3, draft: 0.45, bob: 0.22, roll: 0.09, bw: 0.9 },
-      { name: 'sailboat', geo: sails[1], route: loop(ellipse(-80, -560, 110, 70, -0.2, 0.1, -1)), speed: 2.8, len: 10, beam: 3, draft: 0.45, bob: 0.22, roll: 0.09, bw: 0.85 },
-      { name: 'fishing boat', geo: trawls[0], route: loop(ellipse(560, -420, 95, 60, 0.7, 0.18, 1)), speed: 2.2, len: 12, beam: 4, draft: 0.7, bob: 0.25, roll: 0.05, bw: 0.8 },
+      { name: 'container ship', geo: cont, route: loop(ellipse(-180, 1040, 1100, 190, 0, 0, -1)), speed: 6.5, len: 72, beam: 12, draft: 2.4, bob: 0.12, roll: 0.01, bw: 0.4 },
+      { name: 'island ferry', geo: fer, route: loop(ellipse(-430, 650, 80, 190, 0, 0, 1)), speed: 5, len: 40, beam: 10, draft: 1.6, bob: 0.16, roll: 0.018, bw: 0.55 },
+      { name: 'sailboat', geo: sails[0], route: loop(ellipse(-980, 430, 120, 80, 0.4, 0.08, 1)), speed: 3.2, len: 10, beam: 3, draft: 0.45, bob: 0.22, roll: 0.09, bw: 0.9 },
+      { name: 'sailboat', geo: sails[1], route: loop(ellipse(260, 610, 60, 100, -0.2, 0.1, -1)), speed: 2.8, len: 10, beam: 3, draft: 0.45, bob: 0.22, roll: 0.09, bw: 0.85 },
+      { name: 'fishing boat', geo: trawls[0], route: loop(ellipse(560, 430, 95, 60, 0.7, 0.18, 1)), speed: 2.2, len: 12, beam: 4, draft: 0.7, bob: 0.25, roll: 0.05, bw: 0.8 },
       { name: 'fishing boat', geo: trawls[1], route: loop(ellipse(-900, 380, 80, 90, 0.2, 0.15, -1)), speed: 2, len: 12, beam: 4, draft: 0.7, bob: 0.25, roll: 0.05, bw: 0.75 },
     ];
     SPEC.forEach((s, i) => {
@@ -306,7 +306,7 @@ try {
     SEA.rigs.push({ name: 'Solace Alpha', grp, flame: fm, glow: glowS, nav });
   });
 
-  // the outer ring of the world grid stays sea bed, whatever the districts stamped since the terrain pass
+  // Preserve the southern sea edge after the districts finish stamping terrain.
   AF.onBuild('sea-edges', 495, () => { if (AF.land && AF.land.closeEdges) AF.land.closeEdges(); });
   // the Heights light also streaks across the water at night (the south-west one is already a quay-side candidate)
   AF.onBuild('sea-reflections', 710, () => {
@@ -336,17 +336,19 @@ try {
     }
   });
 
-  AF.test('sea: island in open ocean on all four edges, ships, 2 lighthouses, oil rig, no horizon ring', () => {
+  AF.test('sea: southern ocean, mainland connections, ships, 2 lighthouses, oil rig, no horizon ring', () => {
     let dry = 0, n = 0;
+    let connected = 0;
     for (let t = 0.01; t < 1; t += 0.02) {
       const x = W.X0 + (W.x1 - W.X0) * t, z = W.Z0 + (W.z1 - W.Z0) * t;
-      for (const [px, pz] of [[W.X0 + 0.1, z], [W.x1 - 0.1, z], [x, W.Z0 + 0.1], [x, W.z1 - 0.1]]) { n++; if (W.groundY(px, pz) >= SEA_Y) dry++; }
+      n++; if (W.groundY(x, W.z1 - 0.1) >= SEA_Y) dry++;
+      if (W.groundY(x, W.Z0 + 0.1) >= SEA_Y) connected++;
     }
     const sea = AF.world.water.find((e) => e.geo.userData.sea), bb = sea && sea.geo.boundingBox;
     const cover = !!bb && bb.min.x < W.X0 - 1500 && bb.max.x > W.x1 + 1500 && bb.min.z < W.Z0 - 1500 && bb.max.z > W.z1 + 1500;
     const horizon = !!AF.scene.getObjectByName('land-horizon');
-    return { ok: dry === 0 && cover && SEA.ships.length >= 3 && SEA.lighthouses.length === 2 && SEA.rigs.length === 1 && !horizon,
-      info: `edge samples ${n} dry ${dry}, ocean ${bb ? [bb.min.x, bb.max.x, bb.min.z, bb.max.z].map(Math.round).join(',') : '-'}, ships ${SEA.ships.length}, lighthouses ${SEA.lighthouses.length}, rigs ${SEA.rigs.length}, horizon ${horizon}` };
+    return { ok: dry === 0 && connected >= 40 && cover && SEA.ships.length >= 3 && SEA.lighthouses.length === 2 && SEA.rigs.length === 1 && !horizon,
+      info: `south samples ${n} dry ${dry}, north land ${connected}, ocean ${bb ? [bb.min.x, bb.max.x, bb.min.z, bb.max.z].map(Math.round).join(',') : '-'}, ships ${SEA.ships.length}, lighthouses ${SEA.lighthouses.length}, rigs ${SEA.rigs.length}, horizon ${horizon}` };
   });
 }
 

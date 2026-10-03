@@ -7,26 +7,22 @@ try {
     const I = AF.input, root = document.getElementById('ui'), cv = document.getElementById('cv');
     const st = document.createElement('style');
     st.textContent = `
-      #ui .tc-stick{position:absolute;width:112px;height:112px;margin:-56px 0 0 -56px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.07),rgba(255,255,255,.02));border:1.5px solid rgba(255,255,255,.16);display:none;pointer-events:none}
-      #ui .tc-stick i{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:rgba(255,246,228,.42);box-shadow:0 2px 12px rgba(0,0,0,.25)}
+      #ui .tc-stick{position:absolute;width:112px;height:112px;margin:-56px 0 0 -56px;border-radius:50%;background:var(--bg);border:1px solid var(--line);display:none;pointer-events:none}
+      #ui .tc-stick i{position:absolute;left:50%;top:50%;width:42px;height:42px;margin:-21px 0 0 -21px;border-radius:50%;background:rgba(238,241,242,.3)}
       #ui .tc-btns{position:absolute;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:flex-end;gap:10px}
       #ui .tc-row{display:flex;gap:10px;align-items:flex-end}
-      #ui .tc{width:52px;height:52px;border-radius:50%;background:rgba(14,20,28,.42);border:1px solid rgba(255,255,255,.14);color:rgba(255,248,232,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;touch-action:none;user-select:none;-webkit-user-select:none;transition:background .12s,transform .08s}
+      #ui .tc{width:46px;height:46px;border-radius:50%;background:var(--bg);border:1px solid var(--line);color:var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;touch-action:none;user-select:none;-webkit-user-select:none;transition:background .18s}
       #ui .tc svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
-      #ui .tc small{font:600 8px system-ui;letter-spacing:.12em;opacity:.7}
-      #ui .tc.big{width:66px;height:66px} #ui .tc.big svg{width:28px;height:28px}
-      #ui .tc.on,#ui .tc:active{background:rgba(240,200,112,.8);color:#1b1408;transform:scale(.95)}
+      #ui .tc small{font:500 8px var(--font);opacity:.7}
+      #ui .tc.big{width:58px;height:58px} #ui .tc.big svg{width:26px;height:26px}
+      #ui .tc.on,#ui .tc:active{background:var(--accent);color:#112723}
       #ui.titling .tc-btns,#ui.titling .tc-stick{display:none!important}
-      #ui .tc-hintL{position:absolute;left:max(24px,env(safe-area-inset-left));bottom:max(26px,env(safe-area-inset-bottom));font:11px system-ui;letter-spacing:.06em;color:rgba(255,255,255,.4);pointer-events:none;transition:opacity .6s}
       #ui.touch #h-clock{padding:5px 11px;min-width:0} #ui.touch #h-clock .t{font-size:15px} #ui.touch #h-clock .p{font-size:11px;max-width:150px}
       #ui.touch #h-mini{width:84px;height:84px} #ui.touch .round{width:34px;height:34px;font-size:14px} #ui.touch #h-right{gap:6px}
-      #ui.touch .hud.panel,#ui.touch .hud .panel{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(12,20,30,.6);box-shadow:0 4px 14px rgba(0,0,0,.22)}
-      #ui.touch #h-prompt{font-size:14px;padding:9px 16px 9px 10px}`;
+      #ui.touch #h-prompt{font-size:12px;padding:7px 12px 7px 7px}`;
     document.head.appendChild(st);
     const stick = document.createElement('div'); stick.className = 'tc-stick'; stick.innerHTML = '<i></i>'; root.appendChild(stick);
     const knob = stick.firstChild;
-    const hintL = document.createElement('div'); hintL.className = 'tc-hintL hud'; hintL.textContent = 'drag to move'; root.appendChild(hintL);
-    let hintDone = false; try { hintDone = localStorage.getItem('portSolace.stickHint') === '1'; } catch (e) {}
     const pad = document.createElement('div'); pad.className = 'tc-btns hud'; root.appendChild(pad);
     const ic = (d, lab) => `<svg viewBox="0 0 24 24">${d}</svg>` + (lab ? `<small>${lab}</small>` : '');
     const IC = {
@@ -44,6 +40,7 @@ try {
     const rows = [document.createElement('div'), document.createElement('div')]; rows.forEach((r) => { r.className = 'tc-row'; pad.appendChild(r); });
     const btns = DEF.map(([label, key, kind, modes, cls], i) => {
       const b = document.createElement('button'); b.className = 'tc pe' + (cls ? ' ' + cls : ''); b.innerHTML = label; b.dataset.key = key;
+      b.setAttribute('aria-label', { run: 'Run', Space: modes[0] === 'walk' ? 'Jump' : 'Brake', KeyE: 'Exit', KeyF: 'Exit plane', KeyB: 'Wheel brake', 'thr+': 'Increase throttle', 'thr-': 'Decrease throttle', Tab: 'Walk' }[key] || 'Deploy parachute');
       (i % 2 ? rows[1] : rows[0]).appendChild(b);
       const down = (e) => {
         e.preventDefault(); e.stopPropagation();
@@ -55,7 +52,7 @@ try {
       b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
       return { b, modes };
     });
-    const sync = () => { const m = AF.mode; for (const { b, modes } of btns) b.style.display = modes.includes(m) ? '' : 'none'; hintL.style.display = !hintDone && (m === 'walk' || m === 'drive' || m === 'fly' || m === 'row') ? '' : 'none'; };
+    const sync = () => { const m = AF.mode; for (const { b, modes } of btns) b.style.display = modes.includes(m) ? '' : 'none'; };
     AF.on('mode', sync); sync();
 
     // the stick (left 45% of the screen) and drag-to-look (the rest)
@@ -66,9 +63,9 @@ try {
     cv.addEventListener('pointerdown', (e) => {
       if (e.pointerType !== 'touch') return;
       e.preventDefault();
-      if (AF.ui && AF.ui.titleOpen && AF.ui.titleOpen()) return;
+      if (AF.ui && AF.ui.modalOpen()) return;
       const left = e.clientX < innerWidth * 0.45 && AF.mode !== 'aerial';
-      if (left && sId == null) { sId = e.pointerId; sx = e.clientX; sy = e.clientY; stick.style.left = sx + 'px'; stick.style.top = sy + 'px'; stick.style.display = 'block'; knob.style.transform = ''; hintL.style.opacity = '0'; if (!hintDone) { hintDone = true; try { localStorage.setItem('portSolace.stickHint', '1'); } catch (er) {} } }
+      if (left && sId == null) { sId = e.pointerId; sx = e.clientX; sy = e.clientY; stick.style.left = sx + 'px'; stick.style.top = sy + 'px'; stick.style.display = 'block'; knob.style.transform = ''; }
       else if (lookId == null) { lookId = e.pointerId; lx = e.clientX; ly = e.clientY; I.mouse.buttons = 1; }
       else { pinch.set(e.pointerId, [e.clientX, e.clientY]); }
       if (lookId != null) pinch.set(lookId, [lx, ly]);

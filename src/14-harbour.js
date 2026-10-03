@@ -739,7 +739,7 @@ try {
       }
       { // a fourth boat putters out past the breakwater and back on a slow loop
         const bm = AF.modelMesh(BG[0]); AF.scene.add(bm);
-        const path = new THREE.CatmullRomCurve3([[-80, 232], [-40, 300], [80, 340], [230, 330], [320, 320], [360, 400], [250, 470], [60, 420], [-60, 330]].map(([x, z]) => new THREE.Vector3(x, 0, z)), true, 'centripetal');
+        const path = new THREE.CatmullRomCurve3([[-80,232],[-70,280],[-80,330],[-130,370],[-175,345],[-165,285],[-120,245]].map(([x, z]) => new THREE.Vector3(x, 0, z)), true, 'centripetal');
         const len = path.getLength(), st = { s: 0 }, sm = LIB.smoke(4, 0x8a8a90, 0.9, 3);
         const upd = (dt, t) => { st.s = (st.s + dt * 2.6) % len; const u = st.s / len, p = path.getPointAt(u), tg = path.getTangentAt(u);
           bm.position.set(p.x, SEA_Y - 0.3 + Math.sin(t * 1.2) * 0.1, p.z); bm.rotation.y = Math.atan2(tg.x, tg.z); bm.rotation.z = Math.sin(t * 0.9) * 0.05; bm.rotation.x = Math.sin(t * 0.7) * 0.03;
@@ -1007,35 +1007,10 @@ try {
       fm.box(15, 35, 40, 21, 44, 46, funnel); fm.box(15, 40, 40, 21, 42, 46, C.navy);                  // funnel
       fm.box(17, 38, 76, 19, 44, 78, C.white);                                                       // flag mast
       for (const lz of [36, 56]) { fm.box(4, 22, lz, 6, 25, lz + 6, C.red); fm.box(30, 22, lz, 32, 25, lz + 6, C.red); }   // lifebuoys/boats
-      const ferry = AF.modelMesh(fm, { vs: 1 / 4, anchor: [0.5, 0, 0.5] }); AF.scene.add(ferry);
-      ferry.traverse((o) => { o.frustumCulled = true; });
-      const nm = LIB.sign('SOLACE BELLE', C.navy, null, 1 / 16);
-      const nml = new THREE.Mesh(nm, AF.mat.voxel); nml.position.set(-4.55, 2.6, 0); nml.rotation.y = -Math.PI / 2; ferry.add(nml);
-      // route: closed loop out across the harbour, broadside to the pier head at the start
-      const pts = [[0, 268.5], [30, 280], [80, 330], [70, 420], [-20, 450], [-90, 400], [-80, 320], [-40, 282]].map(([x, z]) => new THREE.Vector3(x, 0, z));
-      const curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal');
-      const LEN = curve.getLength(), smoke = LIB.smoke(7, 0xe0dcd4, 2.4, 6);
-      // wake: a fading foam strip behind the stern
-      const wakeMat = new THREE.MeshBasicMaterial({ color: 0xf4f8f8, transparent: true, opacity: 0.35, depthWrite: false, fog: true });
-      const wake = new THREE.Mesh(new THREE.PlaneGeometry(5, 22), wakeMat); wake.rotation.x = -Math.PI / 2; wake.renderOrder = 3; AF.scene.add(wake);
-      const st = { s: 0, dwell: 25, v: 0 };
-      HR.ferry = { mesh: ferry, curve, st, get x() { return ferry.position.x; }, get z() { return ferry.position.z; } };
-      const place2 = (dt, t) => {
-        if (st.dwell > 0) { st.dwell -= dt; st.v = 0; } else {
-          const u = st.s / LEN, near = Math.min(u, 1 - u) * LEN;
-          st.v = Math.min(6.5, 1.2 + near * 0.12); st.s += st.v * dt;
-          if (st.s >= LEN) { st.s -= LEN; st.dwell = 40; }
-        }
-        const u = st.s / LEN, p = curve.getPointAt(u), tg = curve.getTangentAt(u);
-        ferry.position.set(p.x, SEA_Y - 1.0 + Math.sin(t * 0.8) * 0.06, p.z);
-        ferry.rotation.y = Math.atan2(tg.x, tg.z); ferry.rotation.z = Math.sin(t * 0.6) * 0.012;
-        const k = clamp(st.v / 4, 0, 1);
-        wake.position.set(p.x - tg.x * 22, SEA_Y + 0.03, p.z - tg.z * 22); wake.rotation.z = -Math.atan2(tg.x, tg.z); wakeMat.opacity = 0.32 * k; wake.visible = k > 0.02;
-        const fx = p.x + tg.x * (43 - 56) * 0.25, fz = p.z + tg.z * (43 - 56) * 0.25;
-        smoke.update(dt, t, fx, SEA_Y - 1.0 + 11, fz, 0.5 + k * 0.5);
-      };
-      place2(0, 0);
-      dyn.push({ x: 0, z: 0, r: 1e9, always: true, update: place2 });
+      for(let x=0;x<fm.w;x++)for(let y=0;y<fm.h;y++)for(let z=0;z<fm.d;z++)if(fm.get(x,y,z)===C.glass)fm.set(x,y,z,C.win);
+      const ferry = new THREE.Mesh(AF.meshModel(fm,{vs:0.25,anchor:[0.5,0,0.5],flat:true}),AF.mat.voxel);
+      ferry.name='serena-ferry';ferry.receiveShadow=true;ferry.position.set(0,SEA_Y-1,277);AF.scene.add(ferry);
+      HR.ferry={mesh:ferry,st:{dwell:25,v:0},get x(){return ferry.position.x;},get z(){return ferry.position.z;}};
     }
 
     L.hbWestMs = Math.round(performance.now() - t0);
@@ -1237,7 +1212,7 @@ try {
   AF.test('harbour: ferry sails its loop', () => {
     const f = HR.ferry; if (!f) return { ok: false, info: 'no ferry' };
     const x0 = f.mesh.position.x, z0 = f.mesh.position.z; f.st.dwell = 0;
-    for (let i = 0; i < 30; i++) L.hbUpdate(0.2, 20 + i * 0.2);
+    for (let i = 0; i < 30; i++) AF.island.ferry.update(0.2, 20 + i * 0.2);
     const d = Math.hypot(f.mesh.position.x - x0, f.mesh.position.z - z0);
     return { ok: d > 3, info: `moved ${d.toFixed(1)} m` };
   });

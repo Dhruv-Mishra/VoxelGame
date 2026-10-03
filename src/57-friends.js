@@ -111,12 +111,12 @@ try {
   const you = () => (AF.friends && AF.friends.current ? AF.friends.current.name : 'friend');
   const fill = (s) => String(s).replace(/\{you\}/g, you()).replace(/\{YOU\}/g, you().toUpperCase());
   N.spawn = (o) => {
-    const P = AF.avatar.build(o.look);
+    const P = o.visual === false ? { root: new THREE.Group() } : AF.avatar.build(o.look);
     const root = P.root; root.position.set(o.x, o.y, o.z); root.rotation.y = o.yaw || 0;
-    if (o.pose === 'sit') AF.avatar.sit(P, true, o.seatH ?? 0.75);
+    if (o.pose === 'sit' && o.visual !== false) AF.avatar.sit(P, true, o.seatH ?? 0.75);
     AF.scene.add(root);
     const n = { id: o.id || ('npc' + N.list.length), first: o.name, name: o.name, role: o.role || '', x: o.x, y: o.y, z: o.z, yaw: o.yaw || 0, yaw0: o.yaw || 0, root, parts: P,
-      st: { phase: 0, speed: 0, air: 0, t: Math.random() * 10, land: 0, typing: !!o.typing }, pose: o.pose || 'stand', lines: o.lines || null, greet: o.greet || null, ti: 0, greetT: -99, hidden: false };
+      st: { phase: 0, speed: 0, air: 0, t: Math.random() * 10, land: 0, typing: !!o.typing }, visual: o.visual !== false, pose: o.pose || 'stand', lines: o.lines || null, greet: o.greet || null, ti: 0, greetT: -99, hidden: false };
     n.interact = AF.addInteract({ x: o.x, y: o.y + 1.0, z: o.z, r: o.r || 2.6, label: 'Talk to ' + o.name, prio: 0.3, can: () => AF.mode === 'walk' && !n.hidden, act: () => N.talk(n) });
     N.list.push(n);
     return n;
@@ -155,7 +155,7 @@ try {
       }
       n.st.lookYaw = look == null ? null : AF.lerp(n.st.lookYaw ?? 0, look, 1 - Math.exp(-dt * 5));
       n.root.rotation.y = n.yaw;
-      AF.avatar.animate(n.parts, n.st, dt, 0, true);
+      if (n.visual) AF.avatar.animate(n.parts, n.st, dt, 0, true);
     }
   });
 

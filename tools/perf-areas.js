@@ -15,6 +15,9 @@ async (page) => {
     { name: 'zoo-aerial', p: [-440, 70, 30, -550, 2, -150] },
     { name: 'zoo-lions', p: [-505, 3, -95, -526, 1, -115] },
     { name: 'airfield', p: [-360, 45, 230, -480, 2, 130] },
+    { name: 'outland-north', p: [-40, 60, -420, -40, 40, -700] },
+    { name: 'westmoor', p: [-800, 30, -100, -1000, 0, -200] },
+    { name: 'island', p: [-60, 40, 420, -60, 10, 600] },
   ];
   const tier = globalThis.__psTier || 'lite', mobile = !!globalThis.__psMobile;
   const url = 'http://127.0.0.1:8765/' + (globalThis.__psUrl || 'output.html') + '?nostream&v=' + Date.now() + (mobile ? '&mobile' : '');

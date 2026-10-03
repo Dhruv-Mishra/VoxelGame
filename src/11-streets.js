@@ -444,7 +444,7 @@ try {
         return ph < 14 ? 'red' : ph < 24.5 ? 'green' : ph < 27.5 ? 'amber' : 'red';
       };
       AF.trafficLight = {
-        at: TL.map((L) => [L.x, L.z]), stateAt,
+        at: TL.map((L) => [L.x, L.z]), lights: TL, stateAt,
         state(x, z, dirAxis) {
           let axis = 'x';
           if (dirAxis === 'z' || dirAxis === 1 || dirAxis === 2 || dirAxis === false) axis = 'z';

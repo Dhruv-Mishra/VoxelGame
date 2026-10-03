@@ -242,14 +242,38 @@ try {
       AF.addLight({ x: cxh, y: 8, z: (hz0 + hz1) / 2, color: 0xfff0d0, intensity: 1, range: 16, kind: 'interior' });
       AF.addBuilding({ id: 'hangar' + h0, name: 'Hangar', kind: 'airport', box: [h0, 0, hz0, h1, 12, hz1], doors: [{ x: cxh, y: 0.25, z: hz1, yaw: PI }], interior: true, owner: 'west', label: false });
     }
-    // ---- windsock + the perimeter fence along the road (gap for the car park)
+    // ---- windsock + closed airside boundary, joined to the terminal at z56
     if (AF.makeFlag) {
       W.fill(-332, 0.25, 172, -331.75, 6, 172.25, AF.MAT.steel);
       AF.makeFlag({ x: -331.9, y: 6, z: 172.1, w: 3, h: 0.9, design: 'custom', key: 'windsock', draw: (g) => { for (let i = 0; i < 5; i++) g(i * 12, 0, 12, 39, i % 2 ? '#f2f0e8' : '#ff6a1a'); } });
     }
-    const post = AF.MAT.iron;
-    for (let x = A.x0; x < A.x1; x += 3) { if (x > -522 && x < -418) continue; W.fill(x, 0.25, A.z0, x + 0.125, 2, A.z0 + 0.125, post); }
-    W.fill(A.x0, 1.75, A.z0, -522, 1.875, A.z0 + 0.125, post); W.fill(-418, 1.75, A.z0, A.x1, 1.875, A.z0 + 0.125, post);
+    const post = AF.MAT.iron, mesh = col(0x697b7d, { pat: 'checker', metal: 0.65, rough: 0.75, jitter: 0.03 });
+    A.perimeter = [[-650,32,-548,32],[-548,32,-548,56],[-434,56,-308,56],[-650,32,-650,246],[-308,56,-308,246],[-650,246,-308,246]];
+    for (const [x0,z0,x1,z1] of A.perimeter) {
+      const length = Math.hypot(x1-x0,z1-z0), dx = (x1-x0)/length, dz = (z1-z0)/length;
+      for (let distance=0; distance<length; distance+=0.25) {
+        const x=x0+dx*distance, z=z0+dz*distance, y=Math.max(-4,W.groundY(x,z));
+        W.fill(x,y,z,x+0.25,y+2.75,z+0.25,mesh);
+        if (distance%4===0) W.fill(x,y,z,x+0.5,y+3,z+0.5,post);
+        W.fill(x,y+2.75,z,x+0.25,y+3,z+0.25,post);
+      }
+    }
+    W.fill(-434.5,0.25,55.5,-434,8,56.5,cream);
+    W.fill(-642,0.25,31.75,-636,3,32.5,post);
+    W.fill(-642,1.25,31.5,-636,1.75,31.75,col(0xe8c23a,{pat:'checker'}));
+    sign('SERVICE / CLOSED',-639,3.2,31.5,0.08);
+    for(const x of [-497,-493,-481]) W.fill(x,0.25,43,x+0.25,1,43.25,brass);
+    W.clear(-460,0.5,69.25,-457,3.5,70.5);
+    W.clear(-460,0.5,62,-457,3.5,69.25);
+    sign('APRON',-458.5,3.8,69.25,0.1);
+    W.fill(-461,0.25,70,-456.5,0.5,87,cream);
+    for(const x of [-523,-513,-503]) {paint(x-3,39,x+3,43,()=>yellow);sign('TAXI',x,0.6,43.25,0.08);}
+    paint(-525,21,-466,30,()=>asph[0]);paint(-467,27,-460,39,()=>asph[0]);
+    paint(-521,29,-518,38,()=>asph[0]);paint(-509,32,-462,36,()=>asph[0]);
+    paint(-520,34,-454,40,()=>asph[0]);paint(-454,34,-442,40,()=>asph[0]);paint(-476,14,-464,20,()=>asph[0]);
+    paint(-536,3,-416,9,()=>asph[0]);paint(-536,4,-530,37,()=>asph[0]);paint(-422,4,-416,26,()=>asph[0]);paint(-533,31,-526,36,()=>asph[0]);paint(-533,21,-416,25,()=>asph[0]);
+    sign('SHUTTLE',-529,2.8,36.75,0.08);
+    W.fill(-529.25,0.25,36.5,-529,2.75,36.75,steel);
     AF.addLabel('Westgate Airfield', (A.x0 + A.x1) / 2, 150, 'place');
     A.buildMs = Math.round(performance.now() - t0);
   });
@@ -259,6 +283,73 @@ try {
     if (AF.mode !== 'walk' || !player || Math.abs(player.x + 487) > 10 || Math.abs(player.z - 56) > 8) { securityZ = 0; return; }
     if (securityZ > 0 && securityZ < 56.25 && player.z >= 56.25 && player.y < 2 && (Math.abs(player.x + 490) < 0.85 || Math.abs(player.x + 484) < 0.85) && t - securityAt > 12) { AF.emit('toast', 'Security: all clear, enjoy your flight'); securityAt = t; }
     securityZ = player.z;
+  });
+  AF.onBuild('airfield-circulation-clearance',480.5,()=>{
+    const lanes=[[-540,0,-526,14],[-427,0,-411,14],[-536,6,-530,37],[-422,6,-416,29],[-536,21,-416,25],[-540,27,-526,40],[-526,24,-460,28]];
+    A.clearedFurniture=0;for(let index=AF.world.props.length-1;index>=0;index--){const prop=AF.world.props[index],boxes=AF.colliders.get(Math.floor(prop.x/8)*100000+Math.floor(prop.z/8)),box=prop.col||boxes?.find(box=>box.x1-box.x0<=0.8&&box.z1-box.z0<=0.8&&Math.abs((box.x0+box.x1)/2-prop.x)<0.1&&Math.abs((box.z0+box.z1)/2-prop.z)<0.1&&box.y1<=5.1);if(!box||box.y1>5.1)continue;
+      if(lanes.some(([x0,z0,x1,z1])=>box.x1>x0&&box.x0<x1&&box.z1>z0&&box.z0<z1)){AF.removeStatic(prop);if(!prop.col)AF.removeCollider(box);A.clearedFurniture++;}
+    }
+  });
+  AF.onBuild('airfield-parking',481,()=>{
+    A.parking={bays:[],cars:[],taxis:[]};
+    for(const z of [17,37]) for(let x=-514.5,index=0;x<-425;x+=3,index++) {
+      if(z===37&&(x<-454||x>-454&&x<-442)||z===17&&x>-476&&x<-464)continue;
+      A.parking.bays.push([x,z]);
+    }
+    const count=Math.round(A.parking.bays.length*0.7);
+    const bays=A.parking.bays.map((point,index)=>({point,key:AF.hash2(index,471)})).sort((first,second)=>first.key-second.key);
+    for(let index=0;index<count;index++){const [x,z]=bays[index].point;A.parking.cars.push(AF.vehicles.placeParked(null,x,z,z===17?0:PI,{seed:470+index}));}
+    for(const x of [-523,-513,-503])A.parking.taxis.push(AF.vehicles.placeParked('taxi',x,41,PI/2,{noDrive:true}));
+  });
+  AF.onBuild('airfield-life',660,()=>{
+    const VV=AF.vehicles;
+    A.dropoff=VV.addRoute('Westgate drop-off',[[-471.5,10],[-471.5,25],[-478,26],[-512,26],[-522,30],[-522,34],[-508,34],[-464,34],[-464,29],[-468.5,25],[-468.5,10]],{count:5,types:['taxi','sedan','taxi','sedan','taxi'],stops:[{s:86,dwell:8}],activeRadius:350});
+    A.shuttle=VV.addRoute('Westgate shuttle',[[-419,6],[-533,6],[-533,34],[-529,34],[-529,23],[-419,23]],{count:1,types:['bus'],stops:[{s:144,dwell:10}],activeRadius:350});
+    for(const car of A.dropoff.cars)car.ai.v0=4;
+    A.shuttle.cars[0].ai.v0=3;
+    const add=(name,points,options)=>AF.walkers.addPath('airport-'+name,points,Object.assign({mode:'flow',activeRadius:350,luggage:0.7},options));
+    const entrance=[[-491,0.5,38],[-491,0.5,50],[-490,0.5,50],[-490,0.5,58],[-490,0.5,61],[-458.5,0.5,61]];
+    A.passengers=[
+      add('departures-kerb',[[-506,0.25,37],[-506,0.5,38],...entrance],{count:10,dwell:[{i:3,t:7},{i:5,t:2}],speed:1.05}),
+      add('departures-parking',[[-438,0.25,26],[-458,0.25,26],[-458,0.5,38],...entrance],{count:8,dwell:[{i:4,t:6},{i:6,t:2}],speed:1.15}),
+      add('departures-bus',[[-529,0.25,37],[-516,0.5,38],...entrance],{count:6,dwell:[{i:3,t:8}],speed:1.1}),
+      add('arrivals',[[-458.5,0.5,61],[-483.7,0.5,61],[-484,0.5,58],[-484,0.5,50],[-485,0.5,50],[-485,0.5,38],[-476,0.25,38],[-476,0.25,26],[-435,0.25,26]],{count:9,speed:1.1}),
+      add('arrivals-taxi',[[-458.5,0.5,61],[-484,0.5,61],[-484,0.5,50],[-485,0.5,50],[-485,0.5,38],[-497,0.5,38],[-497,0.25,41],[-499,0.25,41]],{count:6,speed:1}),
+    ];
+    A.boarding=[];
+    for(const stand of [-450,-360]){
+      const points=[[-458.5,0.5,61],[-450,0.5,61],[-450,0.75,62.75],[-450,1,64.25],[-450,1.25,65.75],[-450,1.5,67.25],[-450,1.75,68.75],[-450,1.75,74],[stand+2,1.75,74],[stand+2,1.75,83]];
+      const path=add('boarding-'+stand,points,{count:8,speed:1.25,mode:'pingpong',dwell:[{i:0,t:4},{i:9,t:5}]});path.enabled=false;A.boarding.push(path);
+    }
+    const staff=(name,x,y,z,col,pose='stand',yaw=PI)=>{
+      const look=AF.peopleKit.makeLook(col===0x26324e?'police':'ticket','m','adult',AF.rng(name.length*71));look.top.col=col;look.bottom.col=0x26324e;look.pose=pose;look.yaw=yaw;
+      return AF.walkers.addPath('airport-staff-'+name,[[x,y,z]],{count:1,speed:0,activeRadius:230,looks:[look]});
+    };
+    for(const [name,x,y,z,col] of [['security',-488.5,0.5,58.7,0x26324e],['lane2',-482,0.5,58.7,0x26324e],['checkin',-534,0.5,49.5,0x3f7f7c],['desk2',-529,0.5,49.5,0x3f7f7c],['cafe',-445,0.5,61.5,0xf3f0e6],['crew1',-566,0.25,92,0xff8a32],['crew2',-375,0.25,98,0xff8a32]])staff(name,x,y,z,col);
+    A.marshallers=[staff('marshal1',-450,0.25,79,0xff8a32,'marshal',0),staff('marshal2',-360,0.25,79,0xff8a32,'marshal',0)];
+  });
+  AF.onBuild('airfield-staff',826,()=>{
+    const spawn=(id,name,role,x,y,z,lines)=>AF.npc.spawn({id,name,role,x,y,z,visual:false,look:{},greet:[lines[0]],lines:[lines]});
+    A.staff=[spawn('airport-security','Officer Reed','Airport security',-488.5,0.5,58.7,['Boarding pass, please... you are all clear.','Enjoy your flight. The apron door is beyond the lounge.']),spawn('airport-checkin','Mabel','Check-in agent',-534,0.5,49.5,['Welcome to Westgate. I can check that bag for you.','Departures through the checkpoint, gates straight ahead.']),spawn('airport-crew','Otto','Ground crew',-566,0.25,92,['The Sky Cub is ready for you.','Keep clear of the taxiway when an airliner arrives.'])];
+  });
+  AF.onTick('airfield-boarding',304,()=>{
+    const camera=AF.camera.position;
+    if(camera.x<-1000||camera.x>-50||camera.z<-320||camera.z>600)return;
+    for(let index=0;index<2;index++){
+      const parked=!!AF.airTraffic?.bridges[index];if(A.boarding)A.boarding[index].enabled=parked;
+      let guiding=false;if(AF.airTraffic)for(const flight of AF.airTraffic.flights)if(flight.enabled&&flight.stand===(index===0?-450:-360)&&flight.phase==='taxi-in')guiding=true;
+      if(A.marshallers)A.marshallers[index].actors[0].look.pose=guiding?'marshal':'stand';
+    }
+  });
+  AF.test('airfield: painted parking is approximately seventy percent full',()=>({ok:A.parking.cars.length/A.parking.bays.length>=0.68&&A.parking.cars.length/A.parking.bays.length<=0.72&&A.parking.taxis.length===3,info:A.parking.cars.length+'/'+A.parking.bays.length+' bays + three taxis'}));
+  AF.test('airfield: departure and arrival paths stay clear of static obstacles',()=>{
+    let blocked=0,probes=0;for(const path of A.passengers)for(let index=1;index<path.points.length;index++){
+      const before=path.points[index-1],after=path.points[index],steps=Math.ceil(Math.hypot(after[0]-before[0],after[2]-before[2])*2);
+      for(let step=0;step<=steps;step++){const fraction=step/steps;probes++;if(AF.boxBlocked(before[0]+(after[0]-before[0])*fraction,before[1]+(after[1]-before[1])*fraction,before[2]+(after[2]-before[2])*fraction,0.22,1.7))blocked++;}
+    }return{ok:blocked===0,info:probes+' passenger-path probes, '+blocked+' blocked'};
+  });
+  AF.test('airfield: local vehicles and passengers deactivate remotely',()=>{
+    const camera=AF.camera.position.clone();try{AF.camera.position.set(10000,20,10000);AF.vehicles.simTraffic(1/15);AF.walkers.update(0.1,1);return{ok:A.dropoff.cars.every(car=>!car.active)&&A.shuttle.cars.every(car=>!car.active)&&A.passengers.every(path=>!path.active),info:'drop-off, shuttle and departures/arrivals gated'};}finally{AF.camera.position.copy(camera);AF.vehicles.simTraffic(1/15);AF.walkers.update(0,AF.clock.t);}
   });
   AF.test('airfield: entry and security arches are walkable', () => {
     let ok = true;
@@ -280,6 +371,29 @@ try {
       if (AF.boxBlocked(x, y, z, 0.3, 1.75)) ok = false;
     }
     return { ok, info: 'two gate stairs, continuous covered pier, bridge floors at 1.75m' };
+  });
+  AF.test('airfield: perimeter blocks bodies and cars on every land and beach edge', () => {
+    let probes=0, gaps=0;
+    for(const [x0,z0,x1,z1] of A.perimeter) {
+      const length=Math.hypot(x1-x0,z1-z0);
+      for(let distance=0.5;distance<length;distance+=0.5) {
+        const x=x0+(x1-x0)*distance/length+0.125,z=z0+(z1-z0)*distance/length+0.125,y=Math.max(-4,W.groundY(x,z));
+        probes++; if(!AF.boxBlocked(x,y+0.05,z,0.3,1.75)||!AF.boxBlocked(x,y+0.3,z,1,1.5)) gaps++;
+      }
+    }
+    return {ok:gaps===0&&AF.land.coastS(-650,246)<-12,info:probes+' probes, '+gaps+' gaps; sea closure z246'};
+  });
+  AF.test('airfield: forecourt to apron succeeds only through security', () => {
+    const clear=(points)=>{
+      for(let index=1;index<points.length;index++) {
+        const before=points[index-1],at=points[index],steps=Math.ceil(Math.hypot(at[0]-before[0],at[1]-before[1])*4);
+        for(let step=0;step<=steps;step++) {const x=before[0]+(at[0]-before[0])*step/steps,z=before[1]+(at[1]-before[1])*step/steps;if(AF.boxBlocked(x,0.5,z,0.3,1.75))return false;}
+      }
+      return true;
+    };
+    const through=clear([[-491,38],[-491,50],[-490,50],[-490,61],[-458.5,61],[-458.5,85]]);
+    const west=clear([[-550,28],[-550,80]]),east=clear([[-430,38],[-430,85]]);
+    return {ok:through&&!west&&!east,info:'terminal '+through+', bypass west/east '+west+'/'+east};
   });
 }
 

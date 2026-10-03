@@ -72,10 +72,35 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
 - **Partial reveal**: a pending cluster within view range shows each region as soon as it is meshed and hides that
   region's slice of the merged 1 m copy (geometry groups + an invisible material); the cluster only pays one extra draw
   per slice while half-loaded. `meshRegionG` must keep `hid: cl.lvl === 1 && !cl.part`.
-  (`gfx-adapt`, checked every 4 s).
-- Night light pools (6) on; no PMREM, no far cascade, no post chain, near-only shadows (unchanged memory rules).
 - LOD ranges: full voxels to 50 m, 0.5 m copy to 125 m, 1 m clusters beyond.
 - Brightness defaults to the slider maximum (2.0) everywhere (`localStorage['portSolace.bright2']`); `?shot`/`?test` use 1.0.
+
+## 5b. Outland (locked)
+- Everything outside the `AF.W` city grid is the procedural **outland** (`07-outland.js` height/colour function
+  `AF.outland.h/colTop/colSide/waterY`, `49-outland.js` quadtree mesher). The world is 4× the city
+  (`AF.PLAN.world.play` x [-1220,1020], z [-900,300]) plus Serena Isle and a horizon ring; the grid size is unchanged.
+- Tiles are 64×64 cells, built in idle slots (`outland-build`), swapped with `AF.world.fade`. Tile edges share a
+  world-anchored 8 m boundary profile (no skirts); `AF.outland.renderer.diagnose()` checks gaps/overlaps on demand.
+- Budget: outland ≤ 20 draws and ≤ 250 k triangles in city poses. Outland props go through `AF.outland.addProp`
+  (merged per tile, coarse LOD), vegetation through `44-flora.js` (one instanced batch per LOD, ~3.5 k records, 3 draws).
+- All outland water (Lake Tamsin, Mirror Lake, ponds) is one mesh; the island lagoon is one more.
+- Lights for idle-built content must be registered at build time: night light pools snapshot `AF.lights` once.
+
+## 5c. Traffic, walkers, airport (locked)
+- `51-traffic.js`: lane graph (nodes split at crossings, directed lanes, sampled connectors), intrusive per-lane queues,
+  persistent junction ownership, fixed 15 Hz step with render interpolation; full rate within 240 m, 1/4 beyond in
+  view, 1/8 off screen. Was 0.4–1.2 ms/frame, now 0.09–0.19 ms. Add drivers with `AF.vehicles.addRoute` (gated by
+  `activeRadius`) and parked cars with `AF.vehicles.placeParked` (merged static, promoted to a car on use).
+- `54-walkers.js`: `AF.walkers.addPath(name, points, opts)` — all path pedestrians (airport, island, outland) share four
+  instanced draws, 512-actor cap, inactive paths freeze, limbs at 5 Hz beyond 60 m.
+- Airport: fenced perimeter (security is the only walk-in route), parked cars are merged props, drop-off routes and
+  passenger/staff paths gate at 350 m; the busy 600 s timetable (4 flights) runs only within 900 m, else the light
+  480 s timetable. Airport hooks ≈ 0.17 ms near, < 0.02 ms elsewhere.
+
+## 5d. UI / map
+- `74-map.js` rasterises the whole world (0.1 px/m) and the city (1.5 px/m) in idle slots (≤ 1.5 ms slices) after
+  `ready`; canvases total ≈ 10–15 MB. Minimap redraws ≤ 10 Hz and only when the view changed. HUD text updates on
+  change only. No backdrop blur on phones.
 
 ## 6b. Content already optimised (keep it that way)
 - Central Park actors: shared per-part InstancedMeshes + merged far poses (`park-life-parts`, `park-life-far`,
@@ -92,15 +117,11 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
 - Night light pools (6) on; no PMREM, no far cascade, no post chain, near-only shadows (unchanged memory rules).
 
 ## 7. Content rules (all parts, locked)
-1. Static scenery → voxels (`W.fill`) or `AF.placeStatic` props (merged  (`--out=name.html` for a private copy when
-  several agents work at once).
-- Playwright: `tools/perf-areas.js` (per-pose ms / GPU ms / draws / tris / top ticks; set `globalThis.__psUrl =
-  'tools/output-pre.html'` for the pre-spec baseline). `tools/session.js` keeps a booted page; then `tools/perf-list.js`
-  (`afList(pose)`: what the main pass drew, grouped by owner) and `tools/perf-break.js`. `tools/stream-fly.js` = real-time
-  streaming flight (late-LOD metric), `tools/test-run.js` = `?test` in a private context, `tools/look.js` = screenshots
-  with the shipping defaults. perf-areas / session / stream-fly close other browser contexts: never run them while
-  another agent uses the browserrs at reduced rate; no
-   `new THREE.*` / array literals / closures inside per-frame code.
+1. Static scenery → voxels (`W.fill`) or `AF.placeStatic` props (merged per region); outside the grid
+   `AF.outland.addProp`.
+2. Movers → shared InstancedMeshes (`AF.walkers`, vehicle batches, park/zoo parts), never one mesh per body part.
+3. Ticks are distance/view gated and run far movers at reduced rate; no `new THREE.*` / array literals / closures
+   inside per-frame code.
 4. Lights: only through `AF.addLight` (pooled, tier-capped). Lamps are emissive voxels (`glow`). Never add
    `THREE.PointLight`/`SpotLight` in content parts.
 5. No new transparent materials except glass/water; merge water bodies of one area into one mesh where possible.
@@ -111,5 +132,8 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
 - `node tools/serve.mjs 8765`, build with `node tools/build.mjs --check`.
 - Playwright: `tools/perf-areas.js` (per-pose ms / GPU ms / draws / tris / top ticks; set `globalThis.__psUrl =
   'tools/output-pre.html'` for the pre-spec baseline). `tools/session.js` keeps a booted page; then `tools/perf-list.js`
-  (`afList(pose)`: what the main pass drew, grouped by owner) and `tools/perf-break.js`.
+  (`afList(pose)`: what the main pass drew, grouped by owner) and `tools/perf-break.js`. `tools/stream-fly.js` = real-time
+  streaming flight (late-LOD metric), `tools/test-run.js` = `?test` in a private context, `tools/look.js` = screenshots
+  with the shipping defaults, `tools/tick-survey.js` = per-hook tick cost. perf-areas / session / stream-fly close other
+  browser contexts: never run them while another agent uses the browser. Use `--out=name.html` for a private build.
 - Any change that adds > 20 draw calls or > 100 k triangles to a pose in the table must be justified in its commit.

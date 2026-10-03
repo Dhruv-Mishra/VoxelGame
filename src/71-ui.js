@@ -6,43 +6,46 @@ try {
   const root = document.getElementById('ui');
   const h = (tag, cls, html, parent) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; (parent || root).appendChild(e); return e; };
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const icons = { map: '<path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Zm6-3v15m6-12v15"/>', menu: '<path d="M4 6h16M4 12h16M4 18h16"/>', full: '<path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/>', me: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/>', in: '<path d="M5 12h14M12 5v14"/>', out: '<path d="M5 12h14"/>', close: '<path d="m6 6 12 12M18 6 6 18"/>' };
+  UI.icon = name => '<svg viewBox="0 0 24 24" aria-hidden="true">' + (icons[name] || icons.full) + '</svg>';
   const TOUCH = AF.touch = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window && navigator.maxTouchPoints > 0);
   if (TOUCH) root.classList.add('touch');
 
   // ------------------------------------------------------------------ style
   const css = `
-  #ui{--bg:rgba(10,20,30,.72);--bg2:rgba(10,20,30,.9);--line:rgba(255,236,190,.16);--ink:#f4ead2;--dim:#b9b2a0;--gold:#f0c870;--r:14px;
-    font:14px/1.35 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
-  #ui .panel{background:var(--bg);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  #ui{font:13px/1.4 var(--font);color:var(--ink);-webkit-font-smoothing:antialiased}
+  #ui .panel{box-sizing:border-box;background:var(--bg);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:var(--r)}
+  #ui.touch .panel{backdrop-filter:none;-webkit-backdrop-filter:none}
   #ui button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
-  #ui .btn{padding:9px 16px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid var(--line);transition:background .15s,transform .1s}
-  #ui .btn:hover{background:rgba(255,255,255,.16)} #ui .btn:active{transform:scale(.97)}
-  #ui .btn.primary{background:linear-gradient(180deg,#f6d68a,#d9a445);color:#1b1408;border:0;font-weight:600}
-  #ui .deco{font-family:Limelight,'Poiret One',Georgia,serif;letter-spacing:.18em}
-  #ui kbd{display:inline-block;min-width:18px;padding:1px 6px;border-radius:6px;background:rgba(255,255,255,.14);font:600 12px system-ui;text-align:center}
+  #ui button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  #ui .round svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  #ui .btn{padding:8px 14px;border-radius:8px;background:rgba(255,255,255,.06);transition:background .18s}
+  #ui .btn:hover{background:rgba(255,255,255,.12)}
+  #ui .btn.primary{background:var(--accent);color:#112723;font-weight:600}
+  #ui kbd{display:inline-block;min-width:16px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.1);font:500 11px var(--font);text-align:center}
   #ui .hide{display:none!important}
   #ui #t-title{position:absolute;inset:0;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;padding:max(24px,4vh) max(28px,5vw) max(20px,env(safe-area-inset-bottom));pointer-events:none;background:none;transition:opacity .6s}
   #ui #t-title:before{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,rgba(5,10,16,0) 30%,rgba(5,10,16,.5) 100%),linear-gradient(0deg,rgba(5,10,16,.55),rgba(5,10,16,0) 34%),linear-gradient(180deg,rgba(5,10,16,.45),rgba(5,10,16,0) 26%)}
   #ui #t-title .fade{position:absolute;inset:0;background:#04080d;opacity:1;transition:opacity .45s ease;pointer-events:none}
   #ui #t-title.out{opacity:0}
   #ui #t-title .logo{position:absolute;z-index:1;top:max(4vh,18px);left:max(28px,5vw);text-align:left}
-  #ui #t-title h1{margin:0;font:400 clamp(26px,4.4vw,52px)/1 Limelight,Georgia,serif;letter-spacing:.24em;color:#ffe6a8;text-shadow:0 2px 0 rgba(60,36,8,.7),0 0 24px rgba(240,190,90,.35)}
-  #ui #t-title .sub{margin-top:8px;color:#e9dcc0;font-style:italic;text-shadow:0 1px 3px #000}
-  #ui #t-title .modal{pointer-events:auto;width:min(420px,92vw);max-height:100%;padding:16px 18px 18px;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;z-index:0;overflow:hidden;background:linear-gradient(180deg,rgba(10,18,28,.14),rgba(10,18,28,.14) 58%,rgba(10,18,28,.8) 74%);backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 24px 70px rgba(0,0,0,.45);animation:uiIn .35s ease}
-  #ui #t-title .q{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);text-align:center}
+  #ui #t-title h1{margin:0;font:400 46px/1.1 Limelight,Georgia,serif;color:var(--ink)}
+  #ui #t-title .sub{margin-top:8px;color:var(--dim);font-size:13px}
+  #ui #t-title .modal{pointer-events:auto;width:min(380px,92vw);max-height:100%;padding:14px 16px 20px;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;z-index:0;overflow:hidden;background:none;border:0;backdrop-filter:none;-webkit-backdrop-filter:none;animation:uiIn .18s ease}
+  #ui #t-title .q{font-size:12px;color:var(--dim);text-align:center}
   #ui #t-title .stage{position:relative;z-index:-1;width:100%;height:min(42vh,340px);min-height:190px;margin:6px 0 4px;border-radius:14px;overflow:hidden;background:none;cursor:grab;touch-action:none}
-  #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;background:rgba(10,20,30,.6);border:1px solid var(--line);font-size:28px;line-height:1;display:flex;align-items:center;justify-content:center;color:#ffe6a8;transition:background .15s,transform .1s}
-  #ui #t-title .arr:hover{background:rgba(240,200,112,.28)} #ui #t-title .arr:active{transform:translateY(-50%) scale(.94)}
+  #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:10px;background:var(--bg);font-size:26px;line-height:1;display:grid;place-items:center;color:var(--ink);transition:background .18s}
+  #ui #t-title .arr:hover{background:rgba(255,255,255,.16)}
   #ui #t-title .arr.l{left:10px} #ui #t-title .arr.r{right:10px}
-  #ui #t-title .cnt{position:absolute;right:12px;top:10px;font-size:11px;color:var(--dim);letter-spacing:.12em}
-  #ui #t-title .n{font:400 26px Limelight,Georgia,serif;letter-spacing:.1em;color:#ffe6a8;text-align:center}
-  #ui #t-title .tg{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);text-align:center}
+  #ui #t-title .cnt{position:absolute;right:12px;top:10px;font-size:11px;color:var(--dim)}
+  #ui #t-title .n{font-size:24px;font-weight:600;color:var(--ink);text-align:center}
+  #ui #t-title .tg{font-size:11px;color:var(--accent);text-align:center}
   #ui #t-title .d{color:var(--ink);opacity:.85;font-size:14px;text-align:center;min-height:38px;max-width:420px}
   #ui #t-title .dots{display:flex;gap:7px;margin:6px 0 10px}
   #ui #t-title .dots button{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.22);padding:0}
-  #ui #t-title .dots button.on{background:var(--gold);transform:scale(1.25)}
-  #ui #t-title .go{padding:13px 30px;font-size:16px;display:inline-flex;align-items:center;gap:10px;letter-spacing:.04em}
-  #ui #t-title .go .ic{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1b1408;color:#f6d68a;font-size:11px;padding-left:2px}
+  #ui #t-title .dots button.on{background:var(--accent)}
+  #ui #t-title .go{padding:11px 24px;font-size:14px;display:inline-flex;align-items:center;gap:10px}
+  #ui #t-title .go .ic{font-size:11px}
   @media (orientation:portrait) and (max-width:760px){#ui #t-title{align-items:center;justify-content:flex-end;padding-top:max(88px,12vh)} #ui #t-title .logo{left:0;right:0;text-align:center} #ui #t-title:before{background:linear-gradient(0deg,rgba(5,10,16,.7),rgba(5,10,16,0) 60%),linear-gradient(180deg,rgba(5,10,16,.5),rgba(5,10,16,0) 25%)}}
   @media (orientation:landscape) and (max-height:560px){
     #ui #t-title{padding:10px max(14px,env(safe-area-inset-right)) 10px max(14px,env(safe-area-inset-left));align-items:flex-end}
@@ -53,69 +56,62 @@ try {
     #ui #t-title .q{grid-row:1} #ui #t-title .n{grid-row:2;font-size:22px} #ui #t-title .tg{grid-row:3} #ui #t-title .d{grid-row:4;font-size:13px;min-height:0} #ui #t-title .dots{grid-row:5;margin:4px 0} #ui #t-title .go{grid-row:6;padding:11px 22px;font-size:15px}
   }
   #ui.titling .hud{display:none!important}
-  #ui #h-clock{position:absolute;left:max(14px,env(safe-area-inset-left));top:max(14px,env(safe-area-inset-top));padding:8px 14px;display:flex;flex-direction:column;gap:1px;min-width:120px}
-  #ui #h-clock .t{font-size:20px;font-weight:600}
-  #ui #h-clock .t small{font-size:12px;color:var(--dim);margin-left:4px;font-weight:500}
-  #ui #h-clock .p{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+  #ui.mapping .hud,#ui.mapping #h-toasts,#ui.mapping #h-banner,#ui.mapping .bubble,#ui.mapping #h-dlg{display:none!important}
+  #ui #h-clock{position:absolute;left:max(16px,env(safe-area-inset-left));top:max(16px,env(safe-area-inset-top));padding:8px 12px;display:flex;align-items:center;gap:12px;max-width:calc(100% - 156px)}
+  #ui #h-clock .t{font-size:15px;font-weight:600;white-space:nowrap}
+  #ui #h-clock .t small{font-size:10px;color:var(--dim);margin-left:3px;font-weight:500}
+  #ui #h-clock .p{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;min-width:0}
   #ui #h-right{position:absolute;right:max(14px,env(safe-area-inset-right));top:max(14px,env(safe-area-inset-top));display:flex;flex-direction:column;align-items:flex-end;gap:8px}
-  #ui #h-mini{width:148px;height:148px;border-radius:50%;overflow:hidden;position:relative;padding:0;cursor:pointer}
+  #ui #h-mini{width:112px;height:112px;border-radius:50%;overflow:hidden;position:relative;padding:0;cursor:pointer;border:1px solid rgba(255,255,255,.5)}
   #ui.touch #h-mini{width:112px;height:112px}
   #ui #h-mini canvas{width:100%;height:100%;display:block}
-  #ui #h-mini .n{position:absolute;left:50%;top:3px;transform:translateX(-50%);font:700 10px system-ui;color:#3a2718}
-  #ui .round{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px}
+  #ui #h-mini .n{position:absolute;left:50%;top:4px;transform:translateX(-50%);font:700 10px var(--font);color:#213b37}
+  #ui .round{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px}
   #ui #h-btns{display:flex;gap:8px}
-  #ui #h-prompt{position:absolute;left:50%;bottom:max(96px,calc(env(safe-area-inset-bottom) + 96px));transform:translateX(-50%);padding:9px 18px 9px 10px;border-radius:999px;display:none;white-space:nowrap;font-size:15px;align-items:center;gap:10px}
-  #ui #h-prompt b{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;border-radius:8px;background:var(--gold);color:#1b1408;font-weight:700}
-  #ui.touch #h-prompt{bottom:auto;top:60%;padding:12px 20px 12px 12px;font-size:16px}
+  #ui #h-prompt{position:absolute;left:50%;bottom:max(56px,calc(env(safe-area-inset-bottom) + 56px));transform:translateX(-50%);padding:6px 12px 6px 6px;display:none;max-width:calc(100% - 32px);font-size:13px;align-items:center;gap:8px}
+  #ui #h-prompt b{display:grid;place-items:center;min-width:22px;height:22px;border-radius:5px;background:rgba(255,255,255,.1);color:var(--accent);font-weight:600}
+  #ui.touch #h-prompt{bottom:auto;top:60%;max-width:60%}
   #ui #h-toasts{position:absolute;left:50%;top:max(14px,env(safe-area-inset-top));transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;width:min(520px,62vw);pointer-events:none}
   @media (max-width:900px){#ui #h-toasts{width:min(420px,46vw)}}
-  #ui #h-toasts .panel{padding:8px 16px;font-size:14px;text-align:center;animation:uiIn .3s ease;transition:opacity .5s}
+  #ui #h-toasts .panel{padding:6px 12px;font-size:12px;text-align:center;animation:uiIn .18s ease;transition:opacity .18s}
   @keyframes uiIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-  #ui #h-hint{position:absolute;left:50%;bottom:max(16px,env(safe-area-inset-bottom));transform:translateX(-50%);padding:5px 14px;border-radius:999px;font-size:12px;color:var(--dim);display:none;white-space:nowrap}
-  #ui #h-speed{position:absolute;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));padding:10px 16px;display:none;text-align:right;min-width:120px}
+  #ui #h-hint{position:absolute;left:50%;bottom:max(16px,env(safe-area-inset-bottom));transform:translateX(-50%);padding:5px 12px;font-size:11px;color:var(--dim);display:none;max-width:calc(100% - 32px);text-align:center}
+  #ui #h-speed{position:absolute;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));padding:8px 12px;display:none;text-align:right;min-width:88px}
   #ui.touch #h-speed{display:none!important}
-  #ui #h-rot{display:none;position:absolute;inset:0;z-index:30;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(6,12,18,.9);color:#ffe6a8;font-size:17px;letter-spacing:.04em}
+  #ui #h-rot{display:none;position:absolute;inset:0;z-index:30;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--bg2);color:var(--ink);font-size:15px}
   #ui #h-rot svg{width:64px;height:64px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;animation:uiRot 2.4s ease-in-out infinite}
   @keyframes uiRot{0%,20%{transform:rotate(0)}50%,80%{transform:rotate(-90deg)}100%{transform:rotate(0)}}
-  @media (orientation:portrait){#ui.touch:not(.titling):not(.portraitok) #h-rot{display:flex}}
-  #ui #h-speed .v{font-size:30px;font-weight:700;line-height:1} #ui #h-speed .v small{font-size:12px;color:var(--dim);margin-left:4px;font-weight:500}
+  @media (orientation:portrait){#ui.touch:not(.titling):not(.portraitok):not(.mapping) #h-rot{display:flex}}
+  #ui #h-speed .v{font-size:24px;font-weight:600;line-height:1} #ui #h-speed .v small{font-size:11px;color:var(--dim);margin-left:4px;font-weight:500}
   #ui #h-speed .s{font-size:12px;color:var(--dim);margin-top:4px}
-  #ui #h-speed .bar{height:4px;border-radius:4px;background:rgba(255,255,255,.12);margin-top:6px;overflow:hidden} #ui #h-speed .bar i{display:block;height:100%;background:var(--gold)}
-  #ui #h-banner{position:absolute;left:50%;top:20%;transform:translateX(-50%);text-align:center;opacity:0;transition:opacity .7s;pointer-events:none;text-shadow:0 2px 8px rgba(0,0,0,.7)}
-  #ui #h-banner.show{opacity:1} #ui #h-banner .k{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:#e9dcc0} #ui #h-banner .n{font:400 26px Limelight,Georgia,serif;letter-spacing:.06em;color:#ffe6a8}
-  #ui #h-dlg{position:absolute;left:50%;bottom:max(22px,env(safe-area-inset-bottom));transform:translateX(-50%);width:min(600px,94vw);padding:14px 18px 12px 84px;display:none;min-height:66px;cursor:pointer}
-  #ui #h-dlg .face{position:absolute;left:14px;top:12px;width:56px;height:56px;border-radius:50%;overflow:hidden;background:rgba(255,255,255,.08)}
+  #ui #h-speed .bar{height:3px;border-radius:3px;background:rgba(255,255,255,.12);margin-top:6px;overflow:hidden} #ui #h-speed .bar i{display:block;height:100%;background:var(--accent)}
+  #ui #h-banner{position:absolute;left:50%;top:20%;transform:translateX(-50%);text-align:center;opacity:0;transition:opacity .18s;pointer-events:none;text-shadow:0 1px 5px #000;max-width:70%}
+  #ui #h-banner.show{opacity:1} #ui #h-banner .k{font-size:10px;color:var(--dim)} #ui #h-banner .n{font-size:20px;font-weight:500;color:var(--ink)}
+  #ui #h-dlg{position:absolute;left:50%;bottom:max(22px,env(safe-area-inset-bottom));transform:translateX(-50%);width:min(540px,calc(100% - 32px));box-sizing:border-box;padding:12px 16px 24px 68px;display:none;min-height:74px;cursor:pointer}
+  #ui #h-dlg .face{position:absolute;left:12px;top:12px;width:42px;height:42px;border-radius:50%;overflow:hidden;background:rgba(255,255,255,.08)}
   #ui #h-dlg .face svg{width:100%;height:100%}
-  #ui #h-dlg .nm{font-weight:700;color:var(--gold)} #ui #h-dlg .rl{font-size:12px;color:var(--dim);margin-left:6px}
-  #ui #h-dlg .ln{font-size:16px;margin-top:3px;min-height:22px}
+  #ui #h-dlg .nm{font-weight:600;color:var(--accent)} #ui #h-dlg .rl{font-size:11px;color:var(--dim);margin-left:6px}
+  #ui #h-dlg .ln{font-size:14px;margin-top:4px;min-height:20px}
   #ui #h-dlg .more{position:absolute;right:14px;bottom:6px;font-size:11px;color:var(--dim)}
-  #ui .bubble{position:absolute;left:0;top:0;transform:translate(-50%,-100%);padding:6px 12px;border-radius:12px;background:rgba(255,250,238,.95);color:#2a1d12;font-size:14px;max-width:260px;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.3);pointer-events:none}
-  #ui .bubble:after{content:'';position:absolute;left:50%;bottom:-6px;margin-left:-6px;border:6px solid transparent;border-top-color:rgba(255,250,238,.95);border-bottom:0}
-  #ui .bubble b{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#9a5a1a}
+  #ui .bubble{position:absolute;left:0;top:0;transform:translate(-50%,-100%);padding:6px 10px;border-radius:10px;background:var(--bg2);color:var(--ink);font-size:12px;max-width:240px;text-align:center;border:1px solid var(--line);pointer-events:none}
+  #ui .bubble b{display:block;font-size:10px;color:var(--accent);margin-bottom:2px}
   #ui .sheet{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(4,10,16,.5);padding:16px}
   #ui .sheet.open{display:flex}
   #ui .sheet>.panel{background:var(--bg2);width:min(420px,100%);max-height:100%;overflow:auto;padding:18px}
-  #ui .sheet h2{margin:0 0 12px;font:400 20px Limelight,Georgia,serif;letter-spacing:.14em;color:#ffe6a8;text-align:center}
-  #ui .row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+  #ui .sheet h2{margin:0 0 16px;font-size:18px;font-weight:500;color:var(--ink)}
+  #ui .row{display:flex;align-items:center;gap:12px;padding:8px 0}
   #ui .row label{flex:1;color:var(--dim)}
-  #ui .seg{display:flex;background:rgba(255,255,255,.06);border-radius:999px;padding:3px}
-  #ui .seg button{padding:6px 12px;border-radius:999px;font-size:13px;color:var(--dim)} #ui .seg button.on{background:var(--gold);color:#1b1408;font-weight:600}
-  #ui input[type=range]{flex:1.2;accent-color:#e6b85a}
+  #ui .seg{display:flex;background:rgba(255,255,255,.04);border-radius:8px;padding:3px}
+  #ui .seg button{padding:5px 8px;border-radius:5px;font-size:12px;color:var(--dim)} #ui .seg button.on{background:rgba(255,255,255,.12);color:var(--accent)}
+  #ui input[type=range]{flex:1.2;min-width:0;accent-color:var(--accent)}
   #ui .stack{display:grid;gap:8px;margin-top:12px}
   #ui #m-help>.panel{width:min(560px,100%)}
   #ui #m-help .cols{display:grid;grid-template-columns:1fr 1fr;gap:4px 22px}
-  #ui #m-help h3{margin:10px 0 4px;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold)}
+  #ui #m-help h3{margin:10px 0 6px;font-size:12px;font-weight:500;color:var(--accent)}
   #ui #m-help .k{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:2px 0}
   @media (max-width:520px){#ui #m-help .cols{grid-template-columns:1fr}}
-  #ui #m-map>.panel{width:auto;padding:12px}
-  #ui #m-map .wrap{position:relative;border-radius:10px;overflow:hidden}
-  #ui #m-map canvas{display:block}
-  #ui #m-map .lab{position:absolute;transform:translate(-50%,-50%);font:600 11px system-ui;white-space:nowrap;cursor:pointer;color:#1b2a3a;text-shadow:0 0 3px #f5ecd6,0 0 3px #f5ecd6;padding:1px 4px;border-radius:5px}
-  #ui #m-map .lab:hover{background:#1b2a3a;color:#fff;text-shadow:none}
-  #ui #m-map .lab.view{background:rgba(27,42,58,.85);color:#ffe6a8;text-shadow:none;border-radius:999px;padding:2px 8px}
-  #ui #m-map .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px} #ui #m-map .hd span{color:var(--dim);font-size:12px}
-  #ui #m-map .pick{position:absolute;transform:translateX(-50%);z-index:6;display:flex;flex-direction:column;gap:5px;padding:8px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;min-width:150px}
-  #ui #m-map .pick .t{font-weight:600;text-align:center}
+  @media(max-width:480px){#ui #t-title h1{font-size:30px}#ui #h-clock{flex-direction:column;align-items:flex-start;gap:0}#ui .row{flex-wrap:wrap}#ui .sheet{padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}}
+  @media(max-width:520px) and (orientation:portrait){#ui #h-toasts{top:max(176px,env(safe-area-inset-top));width:calc(100% - 40px)}}
   `;
   const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
   try { const fl = document.createElement('link'); fl.rel = 'stylesheet'; fl.href = 'https://fonts.googleapis.com/css2?family=Limelight&display=swap'; document.head.appendChild(fl); } catch (e) {}
@@ -156,6 +152,9 @@ try {
     <button class="btn primary go"><span class="ic">&#9654;</span><span class="lb">Let's Play</span></button></div>`); title.id = 't-title';
   const clock = h('div', 'panel hud', `<div class="t"><span class="tm">4:30</span><small class="ap">PM</small></div><div class="p">Port Solace</div>`); clock.id = 'h-clock';
   const right = h('div', 'hud', `<div id="h-mini" class="panel pe"><canvas width="220" height="220"></canvas><div class="n">N</div></div><div id="h-btns">${TOUCH ? '<button class="panel round pe" data-k="full" title="Fullscreen">&#x26F6;</button>' : '<button class="panel round pe" data-k="map" title="Map (M)">&#x1F5FA;</button>'}<button class="panel round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); right.id = 'h-right';
+  for (const button of right.querySelectorAll('button')) { button.innerHTML = UI.icon(button.dataset.k); button.setAttribute('aria-label', button.title); }
+  const miniButton = right.querySelector('#h-mini'); miniButton.setAttribute('role', 'button'); miniButton.setAttribute('aria-label', 'Open world map'); miniButton.tabIndex = 0;
+  miniButton.addEventListener('keydown', event => { if (event.code === 'Enter' || event.code === 'Space') { event.preventDefault(); UI.toggleMap(true); } });
   // phones: fullscreen + landscape lock from the Play tap (a user gesture); iOS Safari has neither API, so portrait gets a rotate hint
   const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
   const goFull = (on = true) => {
@@ -188,7 +187,6 @@ try {
     <div class="row"><label>Frame rate</label><div class="seg" data-k="fps"><button data-v="30" title="Default: smooth, cool and battery-friendly">30</button><button data-v="60">60</button><button data-v="0">Max</button></div></div>
     <div class="stack"><button class="btn primary" data-k="resume">Resume</button><button class="btn" data-k="map">Map</button><button class="btn" data-k="help">Controls</button><button class="btn" data-k="switch">Switch friend</button></div></div>`); menu.id = 'm-menu';
   const help = h('div', 'sheet pe', ''); help.id = 'm-help';
-  const mapEl = h('div', 'sheet pe', `<div class="panel"><div class="hd"><b class="deco" style="color:#ffe6a8">MAP</b><span>pick a place to go there</span><button class="btn" data-k="closemap">Close</button></div><div class="wrap"><canvas></canvas><div class="labs"></div></div></div>`); mapEl.id = 'm-map';
   const K = (k, d) => `<div class="k"><span>${d}</span><span>${k.split('+').map((x) => '<kbd>' + x + '</kbd>').join(' ')}</span></div>`;
   help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>RUN button</span></div></div>
     <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Jump \u00b7 brake</span><span>round button</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
@@ -204,6 +202,8 @@ try {
   UI.modalOpen = () => S.map || S.help || S.menu || S.title;
   UI.dialogueOpen = () => !!S.dlg;
   const show = (el, on, disp = 'block') => { const v = on ? disp : 'none'; if (el.style.display !== v) el.style.display = v; };
+  const text = (el, value) => { value = String(value); if (el.textContent !== value) el.textContent = value; };
+  const clockTime = clock.querySelector('.tm'), clockAP = clock.querySelector('.ap'), clockPlace = clock.querySelector('.p'), speedValue = speed.querySelector('.v span'), speedName = speed.querySelector('.s'), speedBar = speed.querySelector('.bar');
   UI.toast = (text, ms) => {
     if (!text) return;
     const t = h('div', 'panel', esc(text), toasts);
@@ -241,6 +241,9 @@ try {
 
   // ------------------------------------------------------------------ speech bubbles: friends + staff greet you, townsfolk chatter as you pass
   const BB = { cur: null, until: 0, next: 3, seen: new Set() }, BV = new THREE.Vector3();
+  let bubbleW = innerWidth, bubbleH = innerHeight;
+  const bubbleResize = () => { bubbleW = innerWidth; bubbleH = innerHeight; };
+  addEventListener('resize', bubbleResize);
   const OVER = { paperboy: ['EXTRA! EXTRA! Blimp over the harbour!', 'Getcher Clarion, two cents!'], vendor: ['Getcher red-hots! Nickel a frank!', 'Hot roasted chestnuts!'], cabbie: ['Taxi, mister?', 'Harbour Cab, going anywhere!'],
     police: ['Keep it moving, folks.', 'Evening. Mind the streetcar.'], kid: ['Race you to the fountain!', 'Look, the blimp!', 'Have you been to the new zoo?'], fisherman: ['Mackerel are running tonight.'], conductor: ['All aboard for the loop!'],
     _: ['Evening!', 'Swell weather, ain\u2019t it?', 'Did you see the blimp?', 'Lovely evening for it.', 'Harbour Days on Saturday!', 'They opened a zoo out west, you know.', 'Heard you can fly planes from the new airfield!', 'Nice day for a drive.', 'Mind how you go.', 'Have we met?', 'Love the outfit!', 'You\u2019re new in town, aren\u2019t you?'] };
@@ -264,8 +267,8 @@ try {
     const hgt = (q.parts && q.parts.root ? q.parts.root.scale.y : 1) * (q.parts && q.parts.sitting ? 1.7 : 2.15);
     BV.set(q.x, q.y + hgt, q.z).project(AF.camera);
     if (BV.z > 1 || Math.abs(BV.x) > 1.05 || Math.abs(BV.y) > 1.05) { show(bubbleEl, false); return; }
-    const r = AF.renderer.domElement.getBoundingClientRect();
-    bubbleEl.style.left = ((BV.x + 1) / 2 * r.width) + 'px'; bubbleEl.style.top = ((1 - BV.y) / 2 * r.height) + 'px'; show(bubbleEl, true);
+    const left = Math.round((BV.x + 1) / 2 * bubbleW) + 'px', top = Math.round((1 - BV.y) / 2 * bubbleH) + 'px';
+    if (bubbleEl.style.left !== left) bubbleEl.style.left = left; if (bubbleEl.style.top !== top) bubbleEl.style.top = top; show(bubbleEl, true);
   };
 
   // ------------------------------------------------------------------ title: pick your friend (modal, alphabetical, live 3D turntable)
@@ -274,7 +277,10 @@ try {
   UI.roster = roster;
   // drawn by the main renderer into the stage's screen rect after each frame (no second WebGL context)
   const stage = title.querySelector('.stage');
-  const PV = { scene: null, cam: null, P: null, st: { phase: 0, speed: 0, air: 0, t: 0, land: 0 }, yaw: 0.4, drag: null, pop: 1, aspect: 0, size: new THREE.Vector2(), vp: new THREE.Vector4(), sc: new THREE.Vector4() };
+  const PV = { scene: null, cam: null, P: null, st: { phase: 0, speed: 0, air: 0, t: 0, land: 0 }, yaw: 0.4, drag: null, pop: 1, aspect: 0, rect: null, canvasRect: null, size: new THREE.Vector2(), vp: new THREE.Vector4(), sc: new THREE.Vector4() };
+  const previewResize = () => { PV.rect = stage.getBoundingClientRect(); PV.canvasRect = AF.renderer.domElement.getBoundingClientRect(); };
+  addEventListener('resize', previewResize);
+  const previewObserver = new ResizeObserver(previewResize); previewObserver.observe(stage); previewObserver.observe(title.querySelector('.modal')); previewObserver.observe(AF.renderer.domElement);
   const pvInit = () => {
     if (PV.scene) return;
     const sc = new THREE.Scene();
@@ -317,7 +323,8 @@ try {
   });
   AF.afterFrame = () => {
     if (!S.title || !PV.P) return;
-    const R = AF.renderer, cr = R.domElement.getBoundingClientRect(), r = stage.getBoundingClientRect();
+    if (!PV.rect) previewResize();
+    const R = AF.renderer, cr = PV.canvasRect, r = PV.rect;
     R.getSize(PV.size);
     const k = PV.size.x / (cr.width || 1), w = r.width * k, hh = r.height * k;
     if (w < 2 || hh < 2) return;
@@ -391,7 +398,7 @@ try {
         let s = SHOTS[CV.i];
         CV.t += Math.min(dt, 0.1);
         if (CV.t > s[4]) { CV.i = (CV.i + 1) % SHOTS.length; CV.t = 0; s = SHOTS[CV.i]; }
-        fadeEl.style.opacity = CV.t < 0.35 || CV.t > s[4] - 0.45 ? 1 : 0;
+        const fade = CV.t < 0.35 || CV.t > s[4] - 0.45 ? '1' : '0'; if (fadeEl.style.opacity !== fade) fadeEl.style.opacity = fade;
         const k = ease(Math.min(1, CV.t / s[4]));
         CV.p.set(s[0][0] + (s[2][0] - s[0][0]) * k, s[0][1] + (s[2][1] - s[0][1]) * k, s[0][2] + (s[2][2] - s[0][2]) * k);
         CV.q.set(s[1][0] + (s[3][0] - s[1][0]) * k, s[1][1] + (s[3][1] - s[1][1]) * k, s[1][2] + (s[3][2] - s[1][2]) * k);
@@ -410,16 +417,16 @@ try {
     menu.querySelectorAll('[data-k=gfx] button').forEach((b) => b.classList.toggle('on', b.dataset.v === G.name));
     menu.querySelectorAll('[data-k=res] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === G.res));
     const cv = AF.renderer.domElement, pr = AF.renderer.getPixelRatio();
-    menu.querySelector('.rr').textContent = `Render ${cv.width}\u00d7${cv.height} (${pr.toFixed(2)}\u00d7 CSS px${devicePixelRatio > pr + 0.01 ? ', ' + Math.round(pr / devicePixelRatio * 100) + '% of display' : ''})${G.auto ? ' \u00b7 auto ' + G.name : ''}`;
+    text(menu.querySelector('.rr'), `Render ${cv.width}\u00d7${cv.height} (${pr.toFixed(2)}\u00d7 CSS px${devicePixelRatio > pr + 0.01 ? ', ' + Math.round(pr / devicePixelRatio * 100) + '% of display' : ''})${G.auto ? ' \u00b7 auto ' + G.name : ''}`);
     menu.querySelectorAll('[data-k=clock] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'stop') === !!AF.time.paused));
-    const hr = menu.querySelector('[data-k=hour]'); if (document.activeElement !== hr) hr.value = AF.time.hours.toFixed(2);
-    menu.querySelector('[data-k=sens]').value = String(AF.lookSens());
-    menu.querySelector('[data-k=bright]').value = String(AF.brightness ?? 1);
+    const hr = menu.querySelector('[data-k=hour]'), hour = AF.time.hours.toFixed(2); if (document.activeElement !== hr && hr.value !== hour) hr.value = hour;
+    const sens = menu.querySelector('[data-k=sens]'), sv = String(AF.lookSens()), bright = menu.querySelector('[data-k=bright]'), bv = String(AF.brightness ?? 1);
+    if (sens.value !== sv) sens.value = sv; if (bright.value !== bv) bright.value = bv;
     menu.querySelectorAll('[data-k=fps] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === AF.fpsCap));
   };
   const exitLock = () => AF.input.releaseLock();
-  const toggleMenu = (on, resume = true) => { S.menu = on ?? !S.menu; if (S.menu) { syncMenu(); S.help = false; S.map = false; mapEl.classList.remove('open'); help.classList.remove('open'); exitLock(); } menu.classList.toggle('open', S.menu); if (!S.menu && resume) AF.input.requestLock(); };
-  const toggleHelp = (on) => { S.help = on ?? !S.help; help.classList.toggle('open', S.help); if (S.help) { S.menu = false; menu.classList.remove('open'); exitLock(); } else AF.input.requestLock(); };
+  const toggleMenu = (on, resume = true) => { S.menu = on ?? !S.menu; if (S.menu) { syncMenu(); S.help = false; if (S.map) UI.toggleMap(false, false); help.classList.remove('open'); exitLock(); } menu.classList.toggle('open', S.menu); if (!S.menu && resume) AF.input.requestLock(); };
+  const toggleHelp = (on) => { S.help = on ?? !S.help; help.classList.toggle('open', S.help); if (S.help) { if (S.map) UI.toggleMap(false, false); S.menu = false; menu.classList.remove('open'); exitLock(); } else AF.input.requestLock(); };
   UI.resume = () => { if (S.menu) toggleMenu(false); };
   AF.on('pointerunlock', (intentional) => { if (!intentional && !S.title && !UI.modalOpen() && !S.dlg) toggleMenu(true); });
   AF.on('escape', () => {
@@ -450,100 +457,14 @@ try {
   menu.querySelector('[data-k=bright]').addEventListener('input', (e) => AF.setBrightness && AF.setBrightness(e.target.value));
   help.addEventListener('click', (e) => { if (e.target === help || e.target.closest('[data-k=closehelp]')) toggleHelp(false); });
   right.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); else if (b.dataset.k === 'full') goFull(!isFull()); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
-  prompt.addEventListener('click', () => AF.input.tap('KeyE'));
+  prompt.addEventListener('click', () => AF.input.tap(AF.mode==='ferry-ride'?'Space':'KeyE'));
 
-  // map base: 1.5 px per metre over the whole world (AF.PLAN.bounds)
-  const B = AF.PLAN.bounds || { x0: -300, z0: -300, x1: 300, z1: 300 }, BW = B.x1 - B.x0, BH = B.z1 - B.z0, PX = 1.5;
-  const base = document.createElement('canvas'); base.width = Math.round(BW * PX); base.height = Math.round(BH * PX);
-  const wx = (x) => (x - B.x0) * PX, wz = (z) => (z - B.z0) * PX;
-  const drawBase = () => {
-    const g = base.getContext('2d'), P = AF.PLAN, W = AF.W, NW = base.width, NH = base.height;
-    const img = g.createImageData(NW, NH), D = img.data, paper = [238, 225, 192], hex = AF.PAL.hex;
-    for (let py = 0; py < NH; py++) {
-      const bz = Math.min(W.NZ - 1, Math.max(0, W.bz(B.z0 + py / PX)));
-      for (let px = 0; px < NW; px++) {
-        const bx = Math.min(W.NX - 1, Math.max(0, W.bx(B.x0 + px / PX))), i = bx * W.NZ + bz;
-        const c = hex[W.C[i]] ?? 0x6f9a3e, hh = W.H[i], hW = W.H[Math.max(0, bx - 4) * W.NZ + bz], hN = W.H[bx * W.NZ + Math.max(0, bz - 4)];
-        const sh = AF.clamp(1 + (hh - hW) * 0.05 + (hh - hN) * 0.04, 0.72, 1.2), o = (py * NW + px) * 4, k = 0.5;
-        D[o] = AF.clamp((((c >> 16) & 255) * k + paper[0] * (1 - k)) * sh, 0, 255); D[o + 1] = AF.clamp((((c >> 8) & 255) * k + paper[1] * (1 - k)) * sh, 0, 255); D[o + 2] = AF.clamp(((c & 255) * k + paper[2] * (1 - k)) * sh * 0.96, 0, 255); D[o + 3] = 255;
-      }
-    }
-    g.putImageData(img, 0, 0);
-    g.fillStyle = 'rgba(92,140,170,.85)'; g.beginPath(); g.ellipse(wx(P.lake.cx), wz(P.lake.cz), P.lake.rx * PX, P.lake.rz * PX, 0, 0, Math.PI * 2); g.fill();
-    g.lineCap = 'round'; g.strokeStyle = '#3a2718'; g.lineWidth = 10 * PX; g.beginPath();
-    for (const r of P.roads) { g.moveTo(wx(r.a[0]), wz(r.a[1])); g.lineTo(wx(r.b[0]), wz(r.b[1])); } g.stroke();
-    g.strokeStyle = '#f4ead0'; g.lineWidth = 7.5 * PX; g.stroke();
-    for (const b of AF.buildings) { const Bx = b.box; if (!Bx || b.kind === 'zoo') continue; g.fillStyle = b.owner === 'west' ? '#c77a9a' : /home|house/i.test((b.kind || '') + (b.id || '')) ? '#c9905a' : '#a8743f'; g.fillRect(wx(Math.min(Bx[0], Bx[3])), wz(Math.min(Bx[2], Bx[5])), Math.abs(Bx[3] - Bx[0]) * PX, Math.abs(Bx[5] - Bx[2]) * PX); }
-    const L = P.rail.length; g.beginPath(); for (let s = 0; s <= L; s += 4) { const p = P.railPoint(s); s ? g.lineTo(wx(p.x), wz(p.z)) : g.moveTo(wx(p.x), wz(p.z)); } g.closePath(); g.strokeStyle = '#2f5d3a'; g.lineWidth = 3; g.stroke();
-  };
-  const DIR = new THREE.Vector3();
   const focus = () => AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes && AF.planes.cur ? AF.planes.cur : AF.player;
-  const markers = (g, tx, tz, sc) => {
-    if (sc > 0.9 && AF.people) { g.fillStyle = 'rgba(58,39,24,.8)'; for (const q of AF.people) { if (!q || q.hidden || !isFinite(q.x)) continue; g.fillRect(tx(q.x) - 1.5, tz(q.z) - 1.5, 3, 3); } }
-    if (AF.npcs) { g.fillStyle = '#d9486f'; for (const n of AF.npcs) { if (n.hidden || !n.friend) continue; g.beginPath(); g.arc(tx(n.x), tz(n.z), 4, 0, 7); g.fill(); } }
-    const cars = AF.vehicles && AF.vehicles.cars; if (cars) for (const c of cars) { if (!isFinite(c.x)) continue; g.fillStyle = c.type && c.type.lux ? '#e0a020' : '#6a5a48'; g.fillRect(tx(c.x) - 2, tz(c.z) - 2, 4, 4); }
-    if (AF.planes) for (const p of AF.planes.list) { g.fillStyle = '#2d6aa8'; g.beginPath(); g.arc(tx(p.x), tz(p.z), 4, 0, 7); g.fill(); }
-    const aerial = AF.mode === 'aerial', src = focus();
-    const px = aerial ? AF.camTarget.x : src.x, pz = aerial ? AF.camTarget.z : src.z;
-    AF.camera.getWorldDirection(DIR);
-    g.save(); g.translate(tx(px), tz(pz)); g.rotate(-(aerial ? Math.atan2(DIR.x, DIR.z) : src.yaw ?? 0) + Math.PI);
-    g.fillStyle = '#e8402b'; g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.closePath(); g.stroke(); g.fill(); g.restore();
-  };
-  const mcv = right.querySelector('canvas'), mg = mcv.getContext('2d');
-  const drawMini = () => {
-    const N = mcv.width, src = focus(), aerial = AF.mode === 'aerial';
-    const span = aerial ? AF.clamp(AF.PL.aerial.d * 1.4, 160, 700) : AF.mode === 'fly' ? 480 : AF.mode === 'drive' ? 220 : 140;
-    const cx = aerial ? AF.camTarget.x : src.x, cz = aerial ? AF.camTarget.z : src.z, sc = N / span;
-    mg.fillStyle = '#6a8fa8'; mg.fillRect(0, 0, N, N);
-    mg.drawImage(base, wx(cx - span / 2), wz(cz - span / 2), span * PX, span * PX, 0, 0, N, N);
-    markers(mg, (x) => (x - cx) * sc + N / 2, (z) => (z - cz) * sc + N / 2, sc);
-  };
-  const mapCv = mapEl.querySelector('canvas'), mapG = mapCv.getContext('2d'), labs = mapEl.querySelector('.labs');
-  let mapW = 600, mapH = 375;
-  const drawMap = () => { mapG.drawImage(base, 0, 0, mapW, mapH); markers(mapG, (x) => (x - B.x0) / BW * mapW, (z) => (z - B.z0) / BH * mapH, mapW / BW); };
-  const buildLabels = () => {
-    labs.innerHTML = ''; const boxes = [];
-    const add = (name, x, z, cls, fn) => {
-      const lx = (x - B.x0) / BW * mapW, lz = (z - B.z0) / BH * mapH, bw = name.length * 6.4 + 12, bh = 16, bb = [lx - bw / 2, lz - bh / 2, lx + bw / 2, lz + bh / 2];
-      if (bb[0] < 2 || bb[2] > mapW - 2 || bb[1] < 2 || bb[3] > mapH - 2) return;
-      for (const o of boxes) if (bb[0] < o[2] && bb[2] > o[0] && bb[1] < o[3] && bb[3] > o[1]) return;
-      boxes.push(bb);
-      const e = document.createElement('div'); e.className = 'lab ' + cls; e.textContent = name; e.style.left = lx + 'px'; e.style.top = lz + 'px';
-      e.addEventListener('click', (ev) => {
-        ev.stopPropagation(); const old = labs.querySelector('.pick'); if (old) old.remove();
-        const pk = document.createElement('div'); pk.className = 'pick'; pk.style.left = AF.clamp(lx, 80, mapW - 80) + 'px'; pk.style.top = Math.min(lz + 12, mapH - 110) + 'px';
-        pk.innerHTML = '<div class="t"></div><button class="btn primary" data-a="walk">Go there</button><button class="btn" data-a="fly">Fly over</button>';
-        pk.querySelector('.t').textContent = name;
-        pk.addEventListener('click', (e2) => { e2.stopPropagation(); const a = e2.target.dataset && e2.target.dataset.a; if (!a) return; pk.remove(); fn(a === 'walk'); });
-        labs.appendChild(pk);
-      });
-      labs.appendChild(e);
-    };
-    const travel = (x, z, walk, b) => {
-      toggleMap(false);
-      if (!walk) { AF.flyTo([x + 38, 42, z + 52], [x, 2, z]); return; }
-      let px = x, pz = z, yaw = 0;
-      if (b && b.doors && b.doors.length) { const d = b.doors[0]; yaw = d.yaw || 0; px = d.x - Math.sin(yaw) * 1.4; pz = d.z - Math.cos(yaw) * 1.4; }
-      AF.setMode('walk', { x: px, y: AF.surfaceBelow(px, pz, 80, 100), z: pz, yaw });
-    };
-    for (const v of AF.PLAN.views) add(v.name, v.target[0], v.target[2], 'view', (w) => { if (w) travel(v.target[0], v.target[2], true); else { toggleMap(false); AF.flyTo(v.pos, v.target); } });
-    for (const l of AF.labels) { if (l.kind === 'street') continue; const b = l.kind === 'building' ? AF.buildings.find((q) => q.name === l.name) : null; if (b && b.kind === 'house' && b.owner !== 'west') continue; add(l.name, l.x, l.z, 'bld', (w) => travel(l.x, l.z, w, b)); }
-  };
-  const toggleMap = (on) => {
-    S.map = on ?? !S.map;
-    if (S.map) {
-      const k = Math.min((innerWidth - 56) / BW, (innerHeight - 110) / BH);
-      mapW = Math.round(BW * k); mapH = Math.round(BH * k); mapCv.width = mapW; mapCv.height = mapH; const wr = mapEl.querySelector('.wrap'); wr.style.width = mapW + 'px'; wr.style.height = mapH + 'px';
-      buildLabels(); drawMap(); S.menu = false; menu.classList.remove('open'); exitLock();
-    }
-    mapEl.classList.toggle('open', S.map);
-    if (!S.map) AF.input.requestLock();
-  };
-  mapEl.addEventListener('click', (e) => { if (e.target === mapEl || e.target.closest('[data-k=closemap]')) toggleMap(false); else { const pk = labs.querySelector('.pick'); if (pk && !e.target.closest('.pick')) pk.remove(); } });
-  UI.toggleMap = toggleMap; UI.toggleHelp = toggleHelp; UI.toggleMenu = toggleMenu;
+  const toggleMap = (...args) => UI.toggleMap && UI.toggleMap(...args);
+  UI.toggleHelp = toggleHelp; UI.toggleMenu = toggleMenu;
 
   // ------------------------------------------------------------------ build + tick
-  AF.onBuild('ui', 830, () => { try { drawBase(); } catch (e) { console.warn('[af] ui map base failed', e); } buildTitle(); root.appendChild(title); });
+  AF.onBuild('ui', 830, () => { buildTitle(); root.appendChild(title); });
   AF.on('mode', (name) => { if (name !== 'drive' && name !== 'fly') show(speed, false); });
   let frameN = 0;
   const fmt = (hrs) => { const hh = Math.floor(hrs) % 24, mm = Math.floor((hrs - Math.floor(hrs)) * 60); return [((hh + 11) % 12) + 1 + ':' + String(mm).padStart(2, '0'), hh < 12 ? 'AM' : 'PM']; };
@@ -551,7 +472,8 @@ try {
     const pl = focus(); if (!pl) return '';
     const lot = AF.PLAN.lotAt(pl.x, pl.z), id = lot && lot.id;
     if (id === 'w-zoo') return 'Solace Zoo'; if (id === 'w-airfield') return 'Westgate Airfield';
-    const nr = AF.PLAN.nearestRoad(pl.x, pl.z); return nr.d < 12 ? nr.road.name : pl.x < -300 ? 'The West Side' : 'Port Solace';
+    if (pl.z > 300) return 'Serena Isle'; if (pl.z < -300) return 'Solace Range'; if (pl.x < -660) return 'Westmoor'; if (pl.x > 460) return 'Eastwood';
+    const nr = AF.PLAN.nearestRoad(pl.x, pl.z); return nr.road && nr.d < 12 ? nr.road.name : pl.x < -300 ? 'The West Side' : 'Port Solace';
   };
   AF.onTick('ui', 950, (dt) => {
     frameN++;
@@ -574,29 +496,28 @@ try {
       if (S.dlg && AF.mode === 'walk' && AF.player && S.dlgFrom && Math.hypot(AF.player.x - S.dlgFrom.x, AF.player.z - S.dlgFrom.z) > 6) closeDlg();
     }
     try { bubbleTick(dt); } catch (e) { show(bubbleEl, false); }
-    const it = AF.mode === 'walk' && !S.dlg && !UI.modalOpen() ? AF.interactTarget : null;
-    if (it) { const lab = `<b>${TOUCH ? '&#9995;' : 'E'}</b>` + esc(it.label || 'Use'); if (prompt._l !== lab) { prompt.innerHTML = lab; prompt._l = lab; } }
+    const it = (AF.mode === 'walk'||AF.mode==='ferry-ride') && !S.dlg && !UI.modalOpen() ? AF.interactTarget : null;
+    if (it && (prompt._target !== it || prompt._label !== it.label)) { prompt._target = it; prompt._label = it.label; const lab = `<b>${TOUCH ? '&#9995;' : AF.mode==='ferry-ride'?'Space':'E'}</b>` + esc(it.label || 'Use'); if (prompt._l !== lab) { prompt.innerHTML = lab; prompt._l = lab; } }
     show(prompt, !!it, 'flex');
     const now = performance.now();
-    for (let i = S.toasts.length - 1; i >= 0; i--) { const o = S.toasts[i]; if (now > o.until) { o.el.style.opacity = '0'; if (now > o.until + 500) { o.el.remove(); S.toasts.splice(i, 1); } } }
+    for (let i = S.toasts.length - 1; i >= 0; i--) { const o = S.toasts[i]; if (now > o.until) { if (o.el.style.opacity !== '0') o.el.style.opacity = '0'; if (now > o.until + 200) { o.el.remove(); S.toasts.splice(i, 1); } } }
     if (frameN % 10 === 0 && !S.title) {
       let b = null;
       if (AF.mode === 'walk' && AF.player) b = AF.buildingAt(AF.player.x, AF.player.y + 1, AF.player.z);
       if (b !== S.bannerB) { S.bannerB = b; if (b && b.name && b.label !== false) UI.banner(b.name, b.kind); }
-      const [t, ap] = fmt(AF.time.hours); clock.querySelector('.tm').textContent = t; clock.querySelector('.ap').textContent = ap;
+      const [t, ap] = fmt(AF.time.hours); text(clockTime, t); text(clockAP, ap);
       const place = b && b.name && b.label !== false ? b.name : placeName();
-      clock.querySelector('.p').textContent = (AF.friends && AF.friends.current ? AF.friends.current.name + ' \u00b7 ' : '') + place;
+      text(clockPlace, place);
       if (S.menu) syncMenu();
     }
     if (S.bannerT && now > S.bannerT) { banner.classList.remove('show'); S.bannerT = 0; }
-    if (!S.title && frameN % 3 === 0) drawMini();
-    if (S.map && frameN % 8 === 0) drawMap();
-    const d = (AF.mode === 'drive' || AF.mode === 'fly') && AF.clock.t - S.hudT < 1.0 ? S.hud : null;
+    const d = (AF.mode === 'drive' || AF.mode === 'fly'||AF.mode==='ferry-ride') && AF.clock.t - S.hudT < 1.0 ? S.hud : null;
     show(speed, !!d);
     if (d && frameN % 3 === 0) {
-      speed.querySelector('.v span').textContent = Math.round(d.speed || 0);
-      speed.querySelector('.s').textContent = d.mode === 'fly' ? `${d.car || ''} \u00b7 ${Math.round(d.alt || 0)} m` : (d.car || '') + (d.gear === 'R' ? ' \u00b7 R' : '');
-      const bar = speed.querySelector('.bar'); bar.classList.toggle('hide', d.mode !== 'fly'); if (d.mode === 'fly') bar.firstChild.style.width = Math.round((d.throttle || 0) * 100) + '%';
+      text(speedValue, Math.round(d.speed || 0));
+      text(speedName, d.mode === 'fly' ? `${d.car || ''} \u00b7 ${Math.round(d.alt || 0)} m` : (d.car || '') + (d.gear === 'R' ? ' \u00b7 R' : ''));
+      if (speedBar.classList.contains('hide') !== (d.mode !== 'fly')) speedBar.classList.toggle('hide', d.mode !== 'fly');
+      if (d.mode === 'fly') { const width = Math.round((d.throttle || 0) * 100) + '%'; if (speedBar.firstChild.style.width !== width) speedBar.firstChild.style.width = width; }
     }
   });
 }

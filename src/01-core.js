@@ -41,7 +41,7 @@ AF.GFX = {
 AF.hooks = { build: [], tick: [], tests: [], idle: [] };
 AF.onBuild = (name, order, fn) => { AF.hooks.build.push({ name, order, fn }); };
 AF.onTick = (name, order, fn) => { AF.hooks.tick.push({ name, order, fn, errs: 0 }); AF.hooks.tick.sort((a, b) => a.order - b.order); };
-// idle work: fn(budgetMs) -> true when it still has work. Runs in the rAF slots the fps cap skips (PERF.md §2), never in a rendered frame.
+// idle work: fn(budgetMs) -> true while busy; skipped rAF slots plus a token fallback when 60/Max has no spare slot.
 AF.onIdle = (name, fn) => { AF.hooks.idle.push({ name, fn, errs: 0 }); };
 // frame cap (PERF.md §2, locked): 30 by default, 60 or 0 (= display rate) from the menu; saved per browser
 AF.fpsCap = (() => { try { const s = localStorage.getItem('portSolace.fps'); if (s !== null && [0, 30, 60].includes(+s)) return +s; } catch (e) { /* storage blocked */ } return 30; })();

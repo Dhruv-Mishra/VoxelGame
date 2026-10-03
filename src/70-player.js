@@ -269,7 +269,7 @@ try {
     f: new THREE.Vector3(10, 0, -10), d: 300, y: 0, p: 0.4,
     lastInput: 0, fly: null, spin: 0, started: false,
   };
-  const MIN_P = 12 * PI / 180, MAX_P = 85 * PI / 180, MIN_D = 15, MAX_D = 620;
+  const MIN_P = 12 * PI / 180, MAX_P = 85 * PI / 180, MIN_D = 15, MAX_D = 1900;
   const orbitFrom = (pos, target) => {
     const dx = pos[0] - target[0], dy = pos[1] - target[1], dz = pos[2] - target[2];
     const d = Math.max(MIN_D, Math.min(MAX_D, Math.hypot(dx, dy, dz)));
@@ -359,7 +359,8 @@ try {
         if (I.key('Minus') || I.key('NumpadSubtract')) { AE.dist = AF.clamp(AE.dist * Math.exp(dt * 1.5), MIN_D, MAX_D); markInput(); }
         if (I.hit('Tab')) { AF.setMode('walk', { x: body.x, y: body.y, z: body.z, yaw: player.yaw }); return; }
       }
-      AE.focus.x = AF.clamp(AE.focus.x, AF.W.X0 + 10, 290); AE.focus.z = AF.clamp(AE.focus.z, -290, 290);
+      const bounds = AF.PLAN.world.play;
+      AE.focus.x = AF.clamp(AE.focus.x, bounds.x0, bounds.x1); AE.focus.z = AF.clamp(AE.focus.z, bounds.z0, AF.PLAN.world.bounds.z1);
       const idleFor = AF.clock.t - AE.lastInput;
       const spinT = (idleFor > 25 || titleUp) && !AE.fly ? 1 : 0;
       AE.spin = AF.lerp(AE.spin, spinT, 1 - Math.exp(-dt * 0.6));
@@ -398,7 +399,8 @@ try {
     let t = 0.5, step = 0.5;
     for (; t < maxD; t += step) {
       const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
-      if (x < AF.W.X0 || x > AF.W.x1 || z < -300 || z > 300) { if (t > 50 && y < -20) break; continue; }
+      const bounds = AF.PLAN.world.bounds;
+      if (x < bounds.x0 || x > bounds.x1 || z < bounds.z0 || z > bounds.z1) { if (t > 50 && y < -20) break; continue; }
       if (solid(x, y, z)) {
         let a = t - step, b = t;
         for (let i = 0; i < 8; i++) { const mm = (a + b) / 2; if (solid(o.x + d.x * mm, o.y + d.y * mm, o.z + d.z * mm)) b = mm; else a = mm; }
@@ -566,6 +568,9 @@ try {
       const wasAir = !body.onGround;
       const ox = body.x, oz = body.z;
       AF.moveBody(body, vel.x * dt, vel.z * dt, dt, { step: 0.55 });
+      const bounds = AF.PLAN.world.play, margin = AF.PLAN.world.margin;
+      body.x = AF.clamp(body.x, bounds.x0 - margin, bounds.x1 + margin);
+      body.z = AF.clamp(body.z, bounds.z0 - margin, AF.PLAN.world.bounds.z1 - margin);
       if (wasAir && body.onGround) AN.land = 0.6;
       const hs = Math.hypot(body.x - ox, body.z - oz) / Math.max(dt, 1e-4);
       if (body.hitWall) { vel.x *= 0.6; vel.z *= 0.6; }

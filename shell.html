@@ -5,16 +5,17 @@
 <link rel="icon" href="data:,">
 <title>Port Solace</title>
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;background:#0b1822;font-family:Georgia,'Times New Roman',serif;color:#f4ead2;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  :root{--bg:rgba(14,16,20,.55);--bg2:rgba(14,16,20,.94);--line:rgba(255,255,255,.12);--ink:#eef1f2;--dim:#a9b1b6;--accent:#8bd8c3;--r:12px;--font:system-ui,-apple-system,'Segoe UI',sans-serif}
+  html,body{margin:0;height:100%;overflow:hidden;background:#101216;font-family:var(--font);color:var(--ink);letter-spacing:0;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
   #cv{position:fixed;inset:0;width:100%;height:100%;display:block;outline:none;touch-action:none}
   #ui{position:fixed;inset:0;pointer-events:none;z-index:5}
   #ui .pe{pointer-events:auto}
-  #loader{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 40%,#1b3a46 0%,#0a1822 75%);transition:opacity 1s ease}
-  #loader h1{font-size:clamp(36px,8vw,64px);letter-spacing:.3em;margin:0 0 6px;color:#f3c77a;font-weight:normal;padding-left:.3em}
-  #loader .sub{font-style:italic;font-size:16px;color:#d9c7a3;margin-bottom:30px}
-  #loader .bar{width:min(360px,70vw);height:6px;border-radius:6px;overflow:hidden;background:rgba(255,255,255,.12)}
-  #loader .fill{height:100%;width:0;background:linear-gradient(90deg,#e7a64b,#f3d38a);transition:width .25s}
-  #loader .msg{margin-top:12px;font-size:13px;color:#bfa77f;min-height:18px}
+  #loader{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 40%,#22272a,#101216 75%);transition:opacity .18s ease;padding:20px}
+  #loader h1{font-size:32px;margin:0 0 10px;font-weight:500;text-align:center}
+  #loader .sub{font-size:12px;color:var(--dim);margin-bottom:32px;text-align:center}
+  #loader .bar{width:min(280px,70vw);height:2px;overflow:hidden;background:var(--line)}
+  #loader .fill{height:100%;width:0;background:var(--accent);transition:width .18s}
+  #loader .msg{margin-top:14px;font-size:11px;color:var(--dim);min-height:18px}
   #loader.done{opacity:0;pointer-events:none}
 </style></head>
 <body>
