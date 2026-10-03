@@ -73,6 +73,20 @@ try {
     ST.stats.warmMs = Math.round(performance.now() - t0);
   };
 
+  // one object (and its children) compiled ahead of its first draw without stalling a frame: compileAsync uses
+  // KHR_parallel_shader_compile, against the scene's lights and the post chain's scene target (the programs the frame will use).
+  // three prepares one object per material per call, so callers pass each object that needs its own variant separately.
+  ST.compileAhead = (root) => {
+    const R = AF.renderer, P = AF.post, prev = R.getRenderTarget();
+    try {
+      R.setRenderTarget(P && P.enabled && P.sceneRT ? P.sceneRT : null);
+      if (R.compileAsync) return R.compileAsync(root, AF.camera, AF.scene).catch((e) => AF.warnOnce('compile ahead', e));
+      R.compile(root, AF.camera, AF.scene);
+    } catch (e) { AF.warnOnce('compile ahead', e); }
+    finally { R.setRenderTarget(prev); }
+    return Promise.resolve();
+  };
+
   // wait until no system misses anything near the view (3 calm frames), at most maxMs
   const settle = async (maxMs, onProgress) => {
     const t0 = performance.now(); let calm = 0, frames = 0;

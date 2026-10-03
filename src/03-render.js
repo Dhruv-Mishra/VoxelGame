@@ -364,15 +364,16 @@ try {
   // THE LOD TABLE (every system reads AF.LOD, filled from here): regLod/farLod = metres to the 0.5 m coarse / 1 m far region copies,
   // lod = near props, propCull = far props hidden beyond, outland = quadtree split distance per tile size, flora = [mid, near, far]
   // tree LOD distances. Loading runs AF.LOD.prefetch (01-stream) farther out than these display ranges.
+  // Full-fidelity ranges (lod, regLod, outland, flora mid/near) are 2.5x the Sep 2026 table (outland meshing runs on workers).
   const TIER = {
-    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 70, propCull: 700, outland: 0.8, flora: [70, 180, 960] },
-    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 45, propCull: 300, outland: 0.7, flora: [65, 160, 880] },
-    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 2, pools: 8, regLod: 80, farLod: 240, lod: 35, propCull: 240, outland: 0.48, flora: [45, 105, 720] },
-    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 32, propCull: 200, outland: 0.38, flora: [28, 80, 480] },
-    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000, outland: 1.0, flora: [90, 240, 1400] },
+    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 375, farLod: 560, lod: 175, propCull: 700, outland: 2.0, flora: [175, 450, 960] },
+    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 238, farLod: 360, lod: 112, propCull: 300, outland: 1.75, flora: [162, 400, 880] },
+    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 2, pools: 8, regLod: 200, farLod: 300, lod: 88, propCull: 240, outland: 1.2, flora: [112, 262, 720] },
+    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 162, farLod: 245, lod: 80, propCull: 200, outland: 0.95, flora: [70, 200, 480] },
+    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 500, ao: 16, lights: 12, pools: 24, regLod: 550, farLod: 825, propCull: 2000, outland: 2.5, flora: [225, 600, 1400] },
   };
   AF.gfx.TIER = TIER;
-  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 50, farLod: 125, lod: 40, propCull: 180, dynMin: 0.55 };
+  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 125, farLod: 190, lod: 100, propCull: 180, dynMin: 0.55 };
   if (AF.MOBILE) TIER.low = mobileTier;
   const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : G.lite && G.tier === 'high' ? TIER.lite : (TIER[G.tier] || TIER.ultra);
   const texSeen = new WeakSet();
@@ -395,7 +396,7 @@ try {
     AF.REGION_LOD = (T.regLod || 130) * view;
     AF.FAR_LOD = (T.farLod || 1e9) * view;
     AF.PROP_CULL = (T.propCull || 900) * view;
-    const fl = T.flora, near = Math.min(320, fl[1] * view);
+    const fl = T.flora, near = Math.min(800, fl[1] * view);
     Object.assign(AF.LOD, { view, props: AF.LOD_DIST, region: AF.REGION_LOD, far: AF.FAR_LOD, cull: AF.PROP_CULL, outland: T.outland * view, floraMid: Math.min(near - 30, fl[0] * view), floraNear: near, floraFar: Math.min(1600, fl[2] * view), prefetch: AF.stream.PREFETCH });
     if (AF.gfx.pools) AF.gfx.pools.max = T.pools;
     if (AF.atmos && AF.atmos.setLights) AF.atmos.setLights(T.lights);

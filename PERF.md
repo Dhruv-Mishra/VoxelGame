@@ -67,7 +67,9 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
 - Every LOD swap of voxel-material meshes (region full ↔ 0.5 m coarse, cluster full ↔ 1 m far, props near ↔ far,
   prop cull) is a **dithered cross-fade** (`AF.world.fade`, 0.3 s, shared `uFadeK` uniform, `fadeIn`/`fadeOut` material
   variants with `discard` only in those variants). Do not toggle `.visible` directly for those meshes; call the fade.
-- Fade programs are precompiled (`AF.world.fade.warm()`) so the first swap never hitches.
+- Fade programs are precompiled (`AF.world.fade.warm()`) so the first swap never hitches. The warm is keyed on tier + env
+  map + voxel program count and compiles in/out x receiveShadow variants through `AF.stream.compileAhead` (post sceneRT
+  bound); park/zoo materials re-run `compileAhead` when their env map changes and after `preloaded`.
 - While `AF.stream.loading` (boot preload, travel veil) every swap is instant: nothing is on screen to fade.
 
 ## 5. Streaming (locked) — one engine: `01-stream.js` (`AF.stream`)
@@ -94,7 +96,8 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
 - **Partial reveal**: a pending cluster within view range shows each region as soon as it is meshed and hides that
   region's slice of the merged 1 m copy (geometry groups + an invisible material); the cluster only pays one extra draw
   per slice while half-loaded. `meshRegionG` must keep `hid: cl.lvl === 1 && !cl.part`.
-- LOD ranges: full voxels to 50 m, 0.5 m copy to 125 m, 1 m clusters beyond.
+- LOD ranges (Oct 2026, 2.5x on every tier and phones): Laptop full voxels to 88 m, 0.5 m copy to 200 m, 1 m clusters
+  beyond; Balanced 112/238; High 175/375; phone 100/125 (see `TIER`).
 - Brightness defaults to the slider maximum (2.0) everywhere (`localStorage['portSolace.bright2']`); `?shot`/`?test` use 1.0.
 
 ## 5b. Outland (locked)
@@ -113,6 +116,11 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
   Outland fauna (`56-wild`): five InstancedMeshes (deer, rabbit, sheep, cow, hawk), herds wake within 260 m (hawks 700 m), 15 Hz.
   Particles were trimmed (Oct 2026): 140 falling leaves, 14 smoking chimneys x 8 puffs, 8 manhole vents x 8 (skipped when far),
   4 puffs per cart, half the quay spray. Outland roads are looked up through a 64 m segment grid (`roadAt`), never a scan of every segment.
+- **Worker meshing** (Oct 2026): `O.meshTileArrays` (07-outland, shared by main thread and workers) runs in a pool of up to
+  3 Web Workers (2 on phones) whose source is `AF.outland.scopeFn` + the network snapshot (`O.netExport`). Tiles that touch
+  the city grid (24 m margin) mesh on the main thread. Each scan drops queued tiles that are no longer wanted, aborts a
+  stale main-thread generator, and ranks by distance + look-ahead with a behind-camera penalty; never let the queue keep
+  work for areas the player has passed. Budgets: 960 nodes / 400 MB desktop, 720 / 224 MB phone (x reach).
 - All outland water (Lake Tamsin, Mirror Lake, ponds) is one mesh; the island lagoon is one more.
 - Lights for idle-built content must be registered at build time: night light pools snapshot `AF.lights` once.
 
@@ -127,8 +135,10 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
   instanced draws, 512-actor cap, inactive paths freeze, limbs at 5 Hz beyond 60 m. `look.pose` 'dance' / 'ride' poses
   (island party, jet-ski riders) use the same batches.
 - Airport: fenced perimeter (security is the only walk-in route), parked cars are merged props, drop-off routes and
-  passenger/staff paths gate at 350 m; the busy 600 s timetable (4 flights) runs only within 900 m, else the light
-  480 s timetable. Airport hooks ≈ 0.17 ms near, < 0.02 ms elsewhere.
+  passenger/staff paths gate at 350 m; the busy 360 s timetable (10 flights, 8 liveries, 2 airframes) runs only within
+  900 m, else the light 480 s timetable (2 flights). Two runways (R1 landing eastbound, R2 take-off), one-way taxiways,
+  hold logic instead of collision checks; all AI aircraft share 7 instanced batches with a per-instance `livery` attribute.
+  Ground crew (fuel/catering/tug per stand, ramp walkers) only run while a stand is served. Airport hooks ≈ 0.2 ms near.
 
 ## 5e. Outland network (Oct 2026)
 - Roads in `AF.PLAN.world.roads` are control points; `07-outland` (build 496) densifies them (Catmull-Rom, 5-6 m), profiles heights
@@ -159,7 +169,7 @@ showing their 1 m copy within 160 m of the camera 2350 → ~900 sample-regions, 
 - Zoo: one merged far mesh per species beyond 52–62 m with a dithered swap, pools batched into two water meshes, Pride
   Rock is a supported stepped outcrop (lions rest on the sampled surface).
 - Airfield: terminal/forecourt/jet bridges are voxels + static props (zero extra draws); AI traffic (`53-airtraffic.js`)
-  is five InstancedMeshes, frustum-culled by instance bounds, hidden when nothing is within 2 km, zero per-frame allocation
+  is seven InstancedMeshes, frustum-culled by instance bounds, hidden when nothing is within 2 km, zero per-frame allocation
 - Serena Isle (`44-island.js`): party stage, dance floor, bonfire, volleyball, umbrellas, raft, hire hut and runway paint are
   merged outland props (zero extra draws); dancers / bathers / riders are path walkers; all seven jet skis (4 rideable, 3 AI)
   are one InstancedMesh hidden beyond ~500 m of the island; four tier-pooled lights (party x2, bonfire, hire).

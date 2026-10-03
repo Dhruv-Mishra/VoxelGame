@@ -122,6 +122,14 @@ try {
       }
       for (const source of group.geometries) source.dispose();
     }
+    // the env map reaches these clones in update(), which only runs near the park: take it (and compile) before play starts
+    AF.on('preloaded', () => {
+      for (const group of groups.values()) {
+        const material = group.mesh.material;
+        if (material.envMap !== group.material.envMap) { material.envMap = group.material.envMap; material.needsUpdate = true; }
+        AF.stream.compileAhead(group.mesh);
+      }
+    });
     const update = () => {
       for (let index = 0; index < entries.length; index++) {
         const entry = entries[index], offset = index * 20;
@@ -146,7 +154,7 @@ try {
         }
         group.mesh.count = visible ? 1 : 0; group.mesh.castShadow = shadows && shadow;
         const material = group.mesh.material, source = group.material;
-        if (material.envMap !== source.envMap) { material.envMap = source.envMap; material.needsUpdate = true; }
+        if (material.envMap !== source.envMap) { material.envMap = source.envMap; material.needsUpdate = true; AF.stream.compileAhead(group.mesh); }
         material.envMapIntensity = source.envMapIntensity;
       }
       texture.needsUpdate = true;

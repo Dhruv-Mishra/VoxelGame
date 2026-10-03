@@ -353,6 +353,11 @@ const TYPES = [
   { id: 'icecream', name: 'Harbour Ice Co. truck', kind: 'van', paints: [['ice', 'navy']], seat: 'seatR', ai: true, build: vanText('HARBOUR ICE', 'ice', 'navy', 'navy') },
   { id: 'mail', name: 'Sunrise Bread van', kind: 'van', paints: [['bread', 'maroon']], seat: 'seatB', ai: true, build: vanText('SUNRISE BREAD', 'bread', 'maroon', 'maroon') },
   { id: 'laundry', name: 'Solace Laundry Van', kind: 'van', paints: [['white', 'teal']], seat: 'seatB', ai: true, build: vanText('LAUNDRY', 'white', 'teal', 'teal') },
+  // airport ground support (53-airtraffic drives them to the stands)
+  { id: 'fuel', name: 'Westgate fuel truck', kind: 'van', paints: [['white', 'fire']], seat: 'seatB', ai: true, build: vanText('AVGAS', 'white', 'fire', 'fire') },
+  { id: 'catering', name: 'Sky Catering truck', kind: 'van', paints: [['white', 'navy']], seat: 'seatR', ai: true, build: vanText('CATERING', 'white', 'navy', 'navy') },
+  { id: 'baggage', name: 'Baggage tractor', kind: 'van', paints: [['sunY', 'jet']], seat: 'seatB', ai: true, build: vanText('RAMP', 'sunY', 'jet', 'jet') },
+  { id: 'followme', name: 'Follow-me car', kind: 'van', paints: [['cabYel', 'jet']], seat: 'seatT', ai: true, build: vanText('FOLLOW ME', 'cabYel', 'jet', 'jet') },
   { id: 'bus', name: 'Double-Decker Bus', kind: 'bus', paints: [['busGreen', 'busCream']], seat: 'seatG', ai: true, big: true, build: () => buildDecker(kcols()) },
   { id: 'firetruck', name: 'Engine Co. 7', kind: 'truck', paints: [['fire', 'white']], seat: 'seatB', big: true,
     build: (p) => { const k = kcols(); const S = { L: 88, W: 22, H: 30, top: 23, hood: 18, hoodTop: 15, axles: [16, 66], wr: 4.5, winY: [14, 20], bandY: [11, 12] };
@@ -549,6 +554,7 @@ const WHEELS = {
   pickup: { axles: [9, 39], wr: 3.8, L: 50, W: 18 }, convertible: { axles: [9, 38], wr: 3.6, L: 48, W: 18 }, taxi: { axles: [10, 38], wr: 3.6, L: 50, W: 18 }, gullcab: { axles: [10, 38], wr: 3.6, L: 50, W: 18 }, beaconcab: { axles: [10, 38], wr: 3.6, L: 50, W: 18 }, stream: { axles: [10, 38], wr: 3.6, L: 50, W: 18 },
   police: { axles: [10, 37], wr: 3.6, L: 48, W: 18 }, milk: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, icecream: { axles: [9, 34], wr: 3.6, L: 44, W: 19 },
   mail: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, laundry: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, bus: { axles: [16, 78], wr: 4.5, L: 96, W: 24 }, firetruck: { axles: [16, 66], wr: 4.5, L: 88, W: 22 },
+  fuel: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, catering: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, baggage: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, followme: { axles: [9, 34], wr: 3.6, L: 44, W: 19 },
   dairycart: { axles: [], wr: 5.6, L: 66, W: 16 }, sidecar: { axles: [], wr: 3.4, L: 24, W: 16 }, icecart: { axles: [], wr: 5.6, L: 66, W: 16 },
   speedster: { axles: [11, 41], wr: 3.8, L: 52, W: 18 }, duesy: { axles: [10, 46], wr: 3.9, L: 58, W: 18 }, arrow: { axles: [9, 39], wr: 3.8, L: 50, W: 16 }, cord: { axles: [10, 40], wr: 3.6, L: 52, W: 18 },
   moto: { axles: [], wr: 3.4, L: 22, W: 6, wb: 1.5 },
@@ -568,15 +574,15 @@ function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   const wr = Wl.wr * CVS, ws = wr / 0.37;
   const wheels = [];
   for (const [ai, az] of Wl.axles.entries()) for (const s of [1, -1]) wheels.push({ lx: s * (halfW - 0.17), ly: wr, lz: (az + 0.5) * CVS - halfL, front: ai === 1, side: s });
-  const car = {
+  const car = Object.assign(new AF.Vehicle({ name: T.name, x, z, yaw }), {
     id: VV.cars.length, type: T, name: T.name, mesh, x, z, y: 0, yaw, pitch: 0, roll: 0, v: 0, vx: 0, vz: 0, steer: 0, spin: 0,
     halfL, halfW, wr, ws, wheels, wheelbase: Wl.wb || (Wl.axles.length > 1 ? (Wl.axles[1] - Wl.axles[0]) * CVS : 2.4), gait: Math.random() * 6, height: G.spec.H,
     ai: null, parked: true, player: false, driver: -1, bob: 0, bobV: 0, sway: 0, key: G.key, vPrev: 0, brake: 0,
-  };
+  });
   car.y = AF.surfaceBelow(x, z, (o.y ?? 0) + 2.5, 6);
   VV.cars.push(car);
   if (WHEEL_IM) { let count = 4; for (const existing of VV.cars) if (existing.type.id === typeId) count++; ensureIM(typeId, count); }
-  if (!o.noDrive && !T.horse) car.interact = AF.addInteract({ x, y: car.y + 0.6, z, r: 1.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => bodyDist(car, px, pz), prio: 0.1,
+  if (!o.noDrive && !T.horse) car.attach({ r: 1.6, lift: 0.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => bodyDist(car, px, pz), prio: 0.1,
     can: () => AF.mode === 'walk' && car.active !== false && !car.player && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
   placeMesh(car);
   return car;
@@ -589,7 +595,7 @@ function placeMesh(car) {
 }
 
 // ---------------------------------------------------------------- drive mode
-const DR = { car: null, camPos: new THREE.Vector3(), camLook: new THREE.Vector3(), want: new THREE.Vector3(), orbit: 0, orbitP: 0, dist: 8.5, init: false };
+const DR = { car: null, chase: new AF.Vehicle.Chase(), seat: { x: 0, y: 0, z: 0, yaw: 0, roll: 0, pitch: 0, seatH: 0.7, lean: 0.35 } };
 const DRIVE_INPUT = { up: false, down: false, left: 0, right: 0, brake: false };
 const POINTS = new Float64Array(24), LOCAL_POINTS = new Float64Array([1, 1, -1, 1, 0, 1, 1, -1, -1, -1, 0, -1, 1, 0, -1, 0, 1, 0.5, -1, 0.5, 1, -0.5, -1, -0.5]);
 const CONTACT = new Float64Array(3), AXES = new Float64Array(8);
@@ -662,7 +668,7 @@ function stepPush(car, dt) {
     car.ai.offsetX = car.x - PUSH_POS.x; car.ai.offsetZ = car.z - PUSH_POS.z;
     car.ai.pushYaw = AF.angDiff(Math.atan2(PUSH_POS.dx, PUSH_POS.dz), car.yaw);
   } else car.v = (car.pushX || 0) * Math.sin(car.yaw) + (car.pushZ || 0) * Math.cos(car.yaw);
-  if (car.interact) { car.interact.x = car.x; car.interact.z = car.z; }
+  if (car.interact) car.sync();
   placeMesh(car);
 }
 function carContacts(car, dt) {
@@ -811,13 +817,13 @@ AF.modes.drive = {
     car.vx = Math.sin(car.yaw) * car.v; car.vz = Math.cos(car.yaw) * car.v;
     DR.bike = car.type.kind === 'bike' && !!car.type.solo;
     if (AF.player && AF.player.setVisible) AF.player.setVisible(DR.bike);
-    DR.orbit = 0; DR.orbitP = 0; DR.dragT = 0; DR.dist = car.type.big ? 13 : DR.bike ? 5.5 : 8.5; DR.init = false;
+    DR.chase.set({ dist: car.type.big ? 13 : DR.bike ? 5.5 : 8.5, height: (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0) });
     AF.emit('toast', (DR.bike ? 'You swing onto the ' : 'You slide behind the wheel of the ') + car.name + '.');
     AF.emit('hint', AF.touch ? '' : 'W/S throttle · A/D steer · Space brake · E to get out');
   },
   exit(to) {
     const car = DR.car;
-    if (car) { car.player = false; car.parked = true; car.v = 0; car.vx = car.vz = 0; car.steer *= 0.5; car.roll = 0; placeMesh(car); if (car.interact) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; } }
+    if (car) { car.player = false; car.parked = true; car.v = 0; car.vx = car.vz = 0; car.steer *= 0.5; car.roll = 0; placeMesh(car); if (car.interact) car.sync(); }
     DR.car = null; VV.player = null; if (AF.PL) AF.PL.seat = null;
     if (AF.player && AF.player.setVisible) AF.player.setVisible(true);
     AF.emit('hud', { speed: null, mode: to });
@@ -825,16 +831,9 @@ AF.modes.drive = {
   },
   update(dt) {
     const car = DR.car; if (!car) return;
-    const I = AF.input, S = I.stick;
-    const inp = DRIVE_INPUT;
-    inp.up = I.key('KeyW') || I.key('ArrowUp'); inp.down = I.key('KeyS') || I.key('ArrowDown');
-    inp.left = (I.key('KeyA') || I.key('ArrowLeft')) ? 1 : 0; inp.right = (I.key('KeyD') || I.key('ArrowRight')) ? 1 : 0; inp.brake = I.key('Space'); inp.thr = 1;
-    // touch stick: analog throttle past a dead zone, and a soft (squared) steering curve so a wobbling thumb doesn't twitch the car
-    if (S && (S.x || S.y)) {
-      if (S.y > 0.18) { inp.up = true; inp.thr = Math.min(1, 0.35 + (S.y - 0.18) / 0.55); } else if (S.y < -0.4) inp.down = true;
-      const ax = Math.max(0, Math.abs(S.x) - 0.14) / 0.72, st = Math.min(1, ax * ax * 0.6 + ax * 0.4);
-      if (S.x < 0) inp.left = st; else inp.right = st;
-    }
+    const V = AF.Vehicle.input(), inp = DRIVE_INPUT;
+    inp.up = V.thr > 0; inp.down = V.thr < 0; inp.thr = V.thr > 0 ? V.thr : 1;
+    inp.left = Math.max(0, -V.steer); inp.right = Math.max(0, V.steer); inp.brake = V.brake;
     if (VV.autoInput) Object.assign(inp, VV.autoInput);
     // fixed <= 1/60 s substeps: a phone's uneven frame times no longer shake the suspension and contacts
     const nSub = Math.min(4, Math.ceil(dt * 60 - 0.01)) || 1;
@@ -842,43 +841,15 @@ AF.modes.drive = {
     if (DR.bike) {
       const lean = -car.steer * AF.clamp(Math.abs(car.v) / 9, 0, 1) * 1.1;
       car.roll += (lean - car.roll) * Math.min(1, dt * 6);
-      const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw);
-      AF.PL.seat = { x: car.x - hx * 0.3, y: car.y + car.bob + 0.02, z: car.z - hz * 0.3, yaw: car.yaw, roll: car.roll, pitch: car.pitch, seatH: 0.7, lean: 0.35 };
+      const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), seat = DR.seat;
+      seat.x = car.x - hx * 0.3; seat.y = car.y + car.bob + 0.02; seat.z = car.z - hz * 0.3; seat.yaw = car.yaw; seat.roll = car.roll; seat.pitch = car.pitch;
+      AF.PL.seat = seat;
     }
     placeMesh(car);
-    if (car.interact) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; }
-    // chase camera
-    const m = I.mouse;
-    if ((document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { DR.orbit = (DR.orbit - m.dx * 0.006) % (Math.PI * 2); DR.orbitP = AF.clamp(DR.orbitP + m.dy * 0.004, -0.25, 0.9); DR.dragT = 1.5; }
-    else if ((DR.dragT = (DR.dragT || 0) - dt) < 0) { DR.orbit *= Math.exp(-dt * 1.8); DR.orbitP *= Math.exp(-dt * 1.8); }
-    if (m.wheel) DR.dist = AF.clamp(DR.dist * Math.exp(m.wheel * 0.001), 4, 28);
-    // chase camera rigidly follows the car's position; only its heading and boom length are smoothed (a world-space lerp lagged
-    // metres behind at speed and stuttered whenever the frame time varied)
-    const k0 = !DR.init;
-    if (k0) { DR.cyaw = car.yaw; DR.cy = car.y; DR.cd = DR.dist; }
-    DR.cyaw += AF.angDiff(DR.cyaw, car.yaw) * (1 - Math.exp(-dt * 4.5));
-    DR.cy += (car.y - DR.cy) * (1 - Math.exp(-dt * 6));
-    const a = DR.cyaw + DR.orbit, pitch = 0.2 + DR.orbitP + DR.dist * 0.004;
-    const tx = car.x + Math.sin(car.yaw) * 1.5, ty = DR.cy + (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), tz = car.z + Math.cos(car.yaw) * 1.5;
-    let d = DR.dist;
-    // keep the camera out of walls: pull in fast, ease back out
-    for (let t = 0.25; t <= 1.0001; t += 0.125) {
-      const dd = d * t, px = tx - Math.sin(a) * Math.cos(pitch) * dd, py = ty + Math.sin(pitch) * dd, pz = tz - Math.cos(a) * Math.cos(pitch) * dd;
-      if (AF.solidAt(px, py, pz)) { d = Math.max(1.2, d * Math.max(0.12, t - 0.15)); break; }
-    }
-    DR.cd = k0 ? d : DR.cd + (d - DR.cd) * (1 - Math.exp(-dt * (d < DR.cd ? 14 : 2.5)));
-    const want = DR.want.set(tx - Math.sin(a) * Math.cos(pitch) * DR.cd, ty + Math.sin(pitch) * DR.cd, tz - Math.cos(a) * Math.cos(pitch) * DR.cd);
-    DR.init = true;
-    DR.camPos.copy(want); DR.camLook.set(tx, ty, tz);
-    const cam = AF.camera;
-    cam.position.copy(DR.camPos);
-    const gy = AF.W.groundY(cam.position.x, cam.position.z) + 0.4; if (cam.position.y < gy) cam.position.y = gy;
-    cam.lookAt(DR.camLook);
-    if (AF.camTarget) AF.camTarget.copy(DR.camLook);
-    AF.shadowFocus.set(car.x, car.y, car.z); AF.shadowRadius = 60;
-    const kmh = Math.abs(car.v) * 3.6;
-    AF.emit('hud', { speed: Math.round(kmh / 1.609), unit: 'mph', kmh: Math.round(kmh), mode: 'drive', car: car.name, gear: car.v < -0.3 ? 'R' : 'D' });
-    if (I.hit('KeyE') || I.hit('KeyF')) VV.exitCar();
+    if (car.interact) car.sync();
+    DR.chase.update(dt, car.x, car.y, car.z, car.yaw);
+    AF.Vehicle.hud(car.v, car.name);
+    if (V.exit) VV.exitCar();
   },
 };
 
@@ -958,7 +929,7 @@ function syncInstances(dt) {
     FR_S.center.set(car.x, car.y + 1, car.z); FR_S.radius = car.halfL + 1.5;
     const inView = FRUSTUM.intersectsSphere(FR_S), far = d > FAR_D || !inView;
     car.inView = inView;
-    if (!car.player && car.interact && car.ai && d < 60) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; }
+    if (!car.player && car.interact && car.ai && d < 60) car.sync();
     if (far && (!lampsOn || !inView || d > LAMP_D)) continue;
     const alpha = VV.renderAlpha ?? 1, interpolate = car.ai && car.renderNear && car.prevX != null;
     const drawX = interpolate ? car.prevX + (car.x - car.prevX) * alpha : car.x, drawZ = interpolate ? car.prevZ + (car.z - car.prevZ) * alpha : car.z, drawYaw = interpolate ? car.prevYaw + AF.angDiff(car.prevYaw, car.yaw) * alpha : car.yaw;

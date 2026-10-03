@@ -125,8 +125,7 @@ AF.onBuild('island-life',666,()=>{
  one('Serena hire staff',fun.hire.x+2,fun.hire.y,fun.hire.z-1,look('stand',Math.PI));
  // jet skis: the rideable four (one per dock) and three riders racing the coast (AI hulls follow their walker seats)
  JS.mesh=new THREE.InstancedMesh(skiGeo(),AF.mat.voxelInst,8);JS.mesh.name='island-jetskis';JS.mesh.count=0;JS.mesh.frustumCulled=false;JS.mesh.castShadow=true;JS.mesh.receiveShadow=true;JS.mesh.customDepthMaterial=AF.mat.depthInst;JS.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);JS.mesh.layers.set(31);AF.scene.add(JS.mesh);
- fun.docks.forEach((d,i)=>{const k={name:'Serena jet ski',x:d.x,z:d.z,yaw:d.yaw,v:0,w:0,roll:0,pitch:0,ph:i*1.7,home:d};JS.skis.push(k);
-  AF.addInteract({x:d.land[0],y:d.y+1,z:d.land[1],r:5,label:'Ride a jet ski',prio:0.3,can:()=>AF.mode==='walk',act:()=>{if(Math.hypot(k.x-d.x,k.z-d.z)>4){k.x=d.x;k.z=d.z;k.yaw=d.yaw;}AF.setMode('jetski',{ski:k});}});});
+ fun.docks.forEach((d,i)=>JS.skis.push(new JetSki(d,i)));
  const lap=[];for(let a=-50;a<=230;a+=3){const r=a*Math.PI/180;let s=1+Math.sin(r*5)*0.04,x=0,z=0;for(let i=0;i<30;i++){x=I.cx+Math.cos(r)*290*s;z=I.cz+Math.sin(r)*190*s;if(O.h(x,z)<-2.4)break;s+=0.03;}lap.push([x,-1.12,z]);}
  JS.riders=AF.walkers.addPath('Serena jet-ski riders',lap,{count:3,speed:16*AF.vehicles.SPEED_K*0.7,mode:'pingpong',activeRadius:420,looks:[look('ride',0),look('ride',0),look('ride',0)]});S.walkers+=3;
 });
@@ -142,39 +141,41 @@ AF.onTick('island-jetskis',307,(dt,t)=>{
  const M=JS.mesh;if(!M)return;const cp=AF.camera.position;
  if(!JS.cur&&((cp.x-I.cx)/520)**2+((cp.z-I.cz)/430)**2>1){if(M.count){M.count=0;M.layers.set(31);}return;}
  let n=0;
- for(const k of JS.skis){
-  if(JS.cur!==k&&Math.abs(k.v)>0.05){k.v*=Math.exp(-dt*0.9);const nx=k.x+Math.sin(k.yaw)*k.v*dt,nz=k.z+Math.cos(k.yaw)*k.v*dt;if(wet(nx,nz)){k.x=nx;k.z=nz;}else k.v=0;k.roll*=Math.exp(-dt*2);k.pitch*=Math.exp(-dt*2);}
-  skiAt(n++,k.x,skiY(k,t),k.z,k.yaw,k.pitch,k.roll);
- }
+ for(const k of JS.skis){if(JS.cur!==k)k.drift(dt);skiAt(n++,k.x,skiY(k,t),k.z,k.yaw,k.pitch,k.roll);}
  const R=JS.riders;if(R&&R.active)for(const a of R.actors)skiAt(n++,a.x,SEA-0.1+Math.sin(t*2.6+a.ph)*0.06,a.z,a.yaw,0.08,Math.sin(t*0.9+a.ph)*0.12);
  M.count=n;M.layers.set(n?0:31);M.instanceMatrix.needsUpdate=true;
 });
+// a rideable jet ski (AF.Vehicle): boarded from its dock, or wherever it was left (the prompt follows it, reaching up the beach)
+class JetSki extends AF.Vehicle{
+ constructor(d,i){super({name:'Serena jet ski',x:d.x,z:d.z,yaw:d.yaw});this.y=SEA;this.w=0;this.ph=i*1.7;this.home=d;
+  this.attach({label:'Ride a jet ski',r:5,prio:0.3,can:()=>AF.mode==='walk'&&JS.cur!==this,act:()=>AF.setMode('jetski',{ski:this})});this.sync();}
+ sync(){const it=this.interact,d=this.home;if(Math.hypot(this.x-d.x,this.z-d.z)<4){it.x=d.land[0];it.z=d.land[1];it.y=d.y+1;it.r=5;}else{it.x=this.x;it.z=this.z;it.y=undefined;it.r=11;}}
+ // coasting with nobody aboard
+ drift(dt){if(Math.abs(this.v)<=0.05)return;this.v*=Math.exp(-dt*0.9);const nx=this.x+Math.sin(this.yaw)*this.v*dt,nz=this.z+Math.cos(this.yaw)*this.v*dt;if(wet(nx,nz)){this.x=nx;this.z=nz;}else this.v=0;this.roll*=Math.exp(-dt*2);this.pitch*=Math.exp(-dt*2);this.sync();}
+ step(dt,inp){
+  const vmax=16*AF.vehicles.SPEED_K*(inp.boost?1.3:1),thr=inp.thr,steer=inp.steer;
+  if(thr>0)this.v+=thr*(inp.boost?9:6.5)*Math.max(0,1-Math.max(0,this.v)/vmax)*dt;else if(thr<0)this.v+=thr*(this.v>0?9:2.5)*dt;
+  this.v-=this.v*0.25*dt+(thr?0:Math.sign(this.v)*Math.min(Math.abs(this.v),0.8*dt));this.v=AF.clamp(this.v,-3,vmax);
+  this.w+=(steer-this.w)*Math.min(1,dt*5);this.yaw-=this.w*(0.5+Math.min(1,Math.abs(this.v)/7)*1.1)*dt*(this.v<-0.2?-1:1);
+  const hx=Math.sin(this.yaw),hz=Math.cos(this.yaw),s=this.v<0?-1:1,nx=this.x+hx*this.v*dt,nz=this.z+hz*this.v*dt,Bd=AF.PLAN.world.bounds;
+  JS.bumpT-=dt;
+  if(wet(nx+hx*1.8*s,nz+hz*1.8*s)&&wet(nx,nz)&&nx>Bd.x0+20&&nx<Bd.x1-20&&nz>Bd.z0+20&&nz<Bd.z1-20){this.x=nx;this.z=nz;}
+  else{if(Math.abs(this.v)>4&&JS.bumpT<=0){AF.emit('toast','Bump! Too shallow \u2014 hop off with E or back out.');JS.bumpT=3;}this.v*=-0.3;}
+  this.roll+=(this.w*Math.min(1,Math.abs(this.v)/8)*0.4-this.roll)*Math.min(1,dt*4);this.pitch+=(Math.min(0.14,Math.max(0,this.v)*0.009)-this.pitch)*Math.min(1,dt*3);
+  this.y=skiY(this,AF.clock.t);this.sync();
+ }
+}
+const skiCam=new AF.Vehicle.Chase();
 AF.modes.jetski={
- enter(o={}){const k=o.ski;if(!k){AF.setMode('walk');return;}JS.cur=k;JS.camInit=false;k.v=0;k.w=0;AF.player.setVisible(true);AF.emit('toast',AF.touch?'Push the stick to ride. Tap EXIT beside a beach to hop off.':'Jet ski! W throttle, A/D steer, Shift for a burst, E to hop off beside a beach.');AF.emit('hint',AF.touch?'':'W/S throttle \u00b7 A/D steer \u00b7 Shift burst \u00b7 E hop off at a beach');},
- exit(){JS.cur=null;AF.PL.seat=null;AF.emit('hud',{speed:null});AF.emit('hint','');},
+ enter(o={}){const k=o.ski;if(!k){AF.setMode('walk');return;}JS.cur=k;k.v=0;k.w=0;skiCam.set({dist:6.4,height:1.6,ahead:2,shadow:50,floor:()=>SEA+1.2});AF.player.setVisible(true);AF.emit('toast',AF.touch?'Push the stick to ride. Tap EXIT beside a beach to hop off.':'Jet ski! W throttle, A/D steer, Shift for a burst, E to hop off beside a beach.');AF.emit('hint',AF.touch?'':'W/S throttle \u00b7 A/D steer \u00b7 Shift burst \u00b7 E hop off at a beach');},
+ exit(){const k=JS.cur;JS.cur=null;if(k)k.sync();AF.PL.seat=null;AF.emit('hud',{speed:null});AF.emit('hint','');},
  update(dt){
   const k=JS.cur;if(!k)return;dt=Math.min(dt,0.05);
-  const I=AF.input,St=I.stick,modal=!!(AF.ui&&AF.ui.modalOpen&&AF.ui.modalOpen());
-  const thr=modal?0:AF.clamp((I.key('KeyW')||I.key('ArrowUp')?1:0)-(I.key('KeyS')||I.key('ArrowDown')?1:0)+(St?St.y:0),-1,1);
-  const steer=modal?0:AF.clamp((I.key('KeyD')||I.key('ArrowRight')?1:0)-(I.key('KeyA')||I.key('ArrowLeft')?1:0)+(St?St.x:0),-1,1);
-  const burst=!modal&&(I.key('ShiftLeft')||I.key('ShiftRight')),vmax=16*AF.vehicles.SPEED_K*(burst?1.3:1);
-  if(thr>0)k.v+=thr*(burst?9:6.5)*Math.max(0,1-Math.max(0,k.v)/vmax)*dt;else if(thr<0)k.v+=thr*(k.v>0?9:2.5)*dt;
-  k.v-=k.v*0.25*dt+(thr?0:Math.sign(k.v)*Math.min(Math.abs(k.v),0.8*dt));k.v=AF.clamp(k.v,-3,vmax);
-  k.w+=(steer-k.w)*Math.min(1,dt*5);k.yaw-=k.w*(0.5+Math.min(1,Math.abs(k.v)/7)*1.1)*dt*(k.v<-0.2?-1:1);
-  const hx=Math.sin(k.yaw),hz=Math.cos(k.yaw),s=k.v<0?-1:1,nx=k.x+hx*k.v*dt,nz=k.z+hz*k.v*dt,Bd=AF.PLAN.world.bounds;
-  JS.bumpT-=dt;
-  if(wet(nx+hx*1.8*s,nz+hz*1.8*s)&&wet(nx,nz)&&nx>Bd.x0+20&&nx<Bd.x1-20&&nz>Bd.z0+20&&nz<Bd.z1-20){k.x=nx;k.z=nz;}
-  else{if(Math.abs(k.v)>4&&JS.bumpT<=0){AF.emit('toast','Bump! Too shallow \u2014 hop off with E or back out.');JS.bumpT=3;}k.v*=-0.3;}
-  k.roll+=(k.w*Math.min(1,Math.abs(k.v)/8)*0.4-k.roll)*Math.min(1,dt*4);k.pitch+=(Math.min(0.14,Math.max(0,k.v)*0.009)-k.pitch)*Math.min(1,dt*3);
-  const y=skiY(k,AF.clock.t),seat=JS.seat;seat.x=k.x-hx*0.15;seat.y=y-0.05;seat.z=k.z-hz*0.15;seat.yaw=k.yaw;seat.roll=k.roll;seat.pitch=-k.pitch;AF.PL.seat=seat;
-  JS.want.set(k.x-hx*6.4,SEA+2.6,k.z-hz*6.4);if(!JS.camInit){JS.cam.copy(JS.want);JS.camInit=true;}else JS.cam.lerp(JS.want,1-Math.exp(-dt*4));
-  const c=AF.camera;c.position.copy(JS.cam);JS.look.set(k.x+hx*2,y+1,k.z+hz*2);c.up.set(0,1,0);c.lookAt(JS.look);AF.camTarget.copy(JS.look);AF.shadowFocus.set(k.x,0,k.z);AF.shadowRadius=50;
-  AF.emit('hud',{mode:'drive',speed:Math.abs(k.v)*2.237,car:k.name+(burst?' \u00b7 burst':'')+' \u00b7 E hop off at a beach'});
-  if(!modal&&(I.hit('KeyE')||I.hit('KeyF'))){
-   let best=null;
-   for(let a=0;a<16;a++)for(const r of [2,3.5,5,6.5,8,10]){const x=k.x+Math.sin(a/16*Math.PI*2)*r,z=k.z+Math.cos(a/16*Math.PI*2)*r,gy=AF.surfaceBelow(x,z,8,12);if(Number.isFinite(gy)&&gy>SEA+0.35&&!AF.boxBlocked(x,gy+0.3,z,0.3,1.5)&&(!best||r<best.r))best={x,y:gy,z,r};}
-   if(best){k.v=0;AF.setMode('walk',{x:best.x,y:best.y,z:best.z,yaw:k.yaw});}else AF.emit('toast','Ride up to a beach or a jetty to hop off.');
-  }
+  const inp=AF.Vehicle.input();k.step(dt,inp);
+  const hx=Math.sin(k.yaw),hz=Math.cos(k.yaw),seat=JS.seat;seat.x=k.x-hx*0.15;seat.y=k.y-0.05;seat.z=k.z-hz*0.15;seat.yaw=k.yaw;seat.roll=k.roll;seat.pitch=-k.pitch;AF.PL.seat=seat;
+  skiCam.update(dt,k.x,k.y,k.z,k.yaw);
+  AF.Vehicle.hud(k.v,k.name,(inp.boost?' \u00b7 burst':'')+' \u00b7 E hop off at a beach');
+  if(inp.exit){const spot=AF.Vehicle.landing(k.x,k.z,SEA+0.35);if(spot){k.v=0;AF.setMode('walk',{x:spot.x,y:spot.y,z:spot.z,yaw:k.yaw});}else AF.emit('toast','Ride up to a beach or a jetty to hop off.');}
  }
 };
 function dockY(dock){const point=dock?route.islandPier:route.cityPier;return AF.surfaceBelow(point[0],point[1],4,8);}
@@ -226,7 +227,7 @@ AF.test('island: party, bonfire, volleyball and jet-ski hire are furnished and l
 AF.test('island: jet ski rides on open water, bumps off the shallows, hops off at a beach',()=>{
  const k=JS.skis[0];if(!k)return{ok:false,info:'no jet skis'};
  const I=AF.input,saved={mode:AF.mode,x:AF.player.x,y:AF.player.y,z:AF.player.z,yaw:AF.player.yaw},home={x:k.x,z:k.z,yaw:k.yaw},cam=AF.camera.position.clone(),modal=AF.ui&&AF.ui.modalOpen;
- let wetAll=true,moved=0,stopped=false,landed=false;
+ let wetAll=true,moved=0,stopped=false,landed=false,reboard=false;
  try{
   if(AF.ui)AF.ui.modalOpen=()=>false;
   AF.setMode('jetski',{ski:k});k.yaw=0;
@@ -234,8 +235,10 @@ AF.test('island: jet ski rides on open water, bumps off the shallows, hops off a
   k.yaw=Math.PI;for(let f=0;f<900&&!stopped;f++){const before=k.z;AF.modes.jetski.update(1/30);if(!wet(k.x,k.z))wetAll=false;if(f>30&&Math.abs(k.z-before)<0.01)stopped=true;}
   I.down.clear();for(let f=0;f<60;f++)AF.modes.jetski.update(1/30);
   I.pressed.add('KeyE');AF.modes.jetski.update(1/30);I.pressed.clear();landed=AF.mode==='walk'&&AF.player.y>SEA+0.3;
- }finally{if(AF.ui)AF.ui.modalOpen=modal;I.down.clear();I.pressed.clear();k.x=home.x;k.z=home.z;k.yaw=home.yaw;k.v=0;AF.setMode(saved.mode==='walk'?'walk':'aerial',saved);AF.camera.position.copy(cam);}
- return{ok:wetAll&&moved>20&&stopped&&landed,info:'moved '+moved.toFixed(0)+' m, stayed wet '+wetAll+', stopped at the shallows '+stopped+', hopped off '+landed};
+  // the ski stays where it was left and its prompt follows it: board it again from the beach
+  const it=k.interact;reboard=landed&&Math.hypot(it.x-AF.player.x,it.z-AF.player.z)<=it.r&&it.can();if(reboard){it.act();reboard=AF.mode==='jetski'&&JS.cur===k;}
+ }finally{if(AF.ui)AF.ui.modalOpen=modal;I.down.clear();I.pressed.clear();k.x=home.x;k.z=home.z;k.yaw=home.yaw;k.v=0;AF.setMode(saved.mode==='walk'?'walk':'aerial',saved);k.sync();AF.camera.position.copy(cam);}
+ return{ok:wetAll&&moved>20&&stopped&&landed&&reboard,info:'moved '+moved.toFixed(0)+' m, stayed wet '+wetAll+', stopped at the shallows '+stopped+', hopped off '+landed+', boarded again '+reboard};
 });
 AF.test('island: Cub runway is flat and clear for takeoff',()=>{const strip=I.airstrip;let lo=Infinity,hi=-Infinity,hits=0;for(let x=strip.x0+3;x<=strip.x1-3;x+=2)for(const dz of [-8,0,8]){const y=AF.W.groundY(x,strip.z+dz);lo=Math.min(lo,y);hi=Math.max(hi,y);if(AF.boxBlocked(x,y+0.1,strip.z+dz,1,2))hits++;}return{ok:strip.x1-strip.x0>=300&&hi-lo<=0.25&&!hits,info:(strip.x1-strip.x0)+' m, elevation '+lo+'..'+hi+', obstructions '+hits};});
 AF.test('island: island walkers stay on clear surfaces',()=>{const hits=[];for(const path of S.paths)for(const point of path.points)if(AF.boxBlocked(point[0],point[1]+0.1,point[2],0.18,1.4)&&hits.length<8)hits.push({path:path.name,point});return{ok:!hits.length&&S.walkers<=120,info:JSON.stringify(hits)};});

@@ -6,58 +6,8 @@ const roots = [], nodes = [], queue = [], empty = [];
 const R = O.renderer = { bootMs: 0, maxStepMs: 0, workMs: 0, maxNodes: 320, maxBytes: 80 * 1048576, bytes: 0, builds: 0, disposed: 0, active: 0 };
 let current = null, generator = null, stamp = 0, scanT = 0;
 const ahead = AF.stream.ahead;
-const quadP = new Float64Array(12), quadUV = new Float64Array(8);
-const setP = (a, b, c, d, e, f, g, h, i, j, k, l) => { const q = quadP; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; q[8] = i; q[9] = j; q[10] = k; q[11] = l; };
-const setUV = (a, b, c, d, e, f, g, h) => { const q = quadUV; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; };
-const heights = new Int16Array(66 * 66), colors = new Uint16Array(64 * 64), used = new Uint8Array(64 * 64);
-const terrainBuf = { n: 0, p: new Float32Array(262144 * 3), uv: new Float32Array(262144 * 2), pal: new Uint16Array(262144), an: new Uint8Array(262144), idx: new Uint32Array(393216),
-  quadS(points, tex, first, second, third, fourth, color, normal, ao0, ao1, ao2, ao3) {
-    const base = this.n; if (base + 4 > this.pal.length) throw new Error('outland mesh scratch capacity');
-    for (let corner = 0; corner < 4; corner++) {
-      const source = corner === 0 ? first : corner === 1 ? second : corner === 2 ? third : fourth, vertex = base + corner;
-      for (let axis = 0; axis < 3; axis++) this.p[vertex * 3 + axis] = points[source * 3 + axis];
-      this.uv[vertex * 2] = tex[source * 2]; this.uv[vertex * 2 + 1] = tex[source * 2 + 1]; this.pal[vertex] = color;
-      this.an[vertex] = (corner === 0 ? ao0 : corner === 1 ? ao1 : corner === 2 ? ao2 : ao3) * 8 + normal;
-    }
-    const offset = base / 4 * 6, reverse = ao0 + ao2 < ao1 + ao3;
-    this.idx[offset] = base + (reverse ? 1 : 0); this.idx[offset + 1] = base + (reverse ? 2 : 1); this.idx[offset + 2] = base + (reverse ? 3 : 2);
-    this.idx[offset + 3] = base + (reverse ? 1 : 0); this.idx[offset + 4] = base + (reverse ? 3 : 2); this.idx[offset + 5] = base + (reverse ? 0 : 3); this.n += 4;
-  },
-  *geometryG() { return yield* AF.GeoBuf.prototype.geometryG.call({ n: this.n, p: this.p.subarray(0, this.n * 3), uv: this.uv.subarray(0, this.n * 2), pal: this.pal.subarray(0, this.n), an: this.an.subarray(0, this.n), idx: this.idx.subarray(0, this.n / 4 * 6) }, true); }
-};
+const terrainBuf = O.terrainBuf;
 R.scratchBytes = terrainBuf.p.byteLength + terrainBuf.uv.byteLength + terrainBuf.pal.byteLength + terrainBuf.an.byteLength + terrainBuf.idx.byteLength;
-const directions = [[1, 0, 0], [-1, 0, 1], [0, 1, 4], [0, -1, 5]];
-const inside = (x, z) => x >= W.X0 && x < W.x1 && z >= W.Z0 && z < W.z1;
-const rimCache = new Map();
-function rimSample(x, z) {
-  const key = x * 10000 + z;
-  let height = rimCache.get(key);
-  if (height === undefined) { height = O.rimH ? O.rimH(x, z) : Math.round(O.h(x, z) * 4) / 4; rimCache.set(key, height); }
-  return height;
-}
-function boundaryH(x, z) {
-  const ax = -1484 + Math.floor((x + 1484) / 8) * 8, az = -1196 + Math.floor((z + 1196) / 8) * 8;
-  const ux = (x - ax) / 8, uz = (z - az) / 8;
-  return AF.lerp(AF.lerp(rimSample(ax, az), rimSample(ax + 8, az), ux), AF.lerp(rimSample(ax, az + 8), rimSample(ax + 8, az + 8), ux), uz);
-}
-function cornerH(entry, col, row, across, along, height) {
-  const step = entry.size / 64, ix = col + across, iz = row + along;
-  return ix === 0 || ix === 64 || iz === 0 || iz === 64 ? boundaryH(entry.x + ix * step, entry.z + iz * step) : height;
-}
-function apron(buf, entry, col, row, height, color) {
-  const step = entry.size / 64, xa = entry.x + col * step, za = entry.z + row * step;
-  setP(xa, cornerH(entry, col, row, 0, 0, height), za, xa, cornerH(entry, col, row, 0, 1, height), za + step, xa + step, cornerH(entry, col, row, 1, 1, height), za + step, xa + step, cornerH(entry, col, row, 1, 0, height), za);
-  setUV(xa * 4, za * 4, xa * 4, (za + step) * 4, (xa + step) * 4, (za + step) * 4, (xa + step) * 4, za * 4);
-  buf.quadS(quadP, quadUV, 0, 1, 2, 3, color, 2, 3, 3, 3, 3);
-}
-function wall(buf, xa, za, xb, zb, lowA, lowB, highA, highB, color, normal, soft) {
-  if (highA <= lowA && highB <= lowB) return;
-  setP(xa, Math.min(lowA, highA), za, xb, Math.min(lowB, highB), zb, xb, highB, zb, xa, highA, za);
-  const ua = (normal < 2 ? za : xa) * 4, ub = (normal < 2 ? zb : xb) * 4;
-  setUV(ua, lowA * 4, ub, lowB * 4, ub, highB * 4, ua, highA * 4);
-  const reverse = normal === 0 || normal === 5;
-  buf.quadS(quadP, quadUV, 0, reverse ? 3 : 1, 2, reverse ? 1 : 3, color, normal + (soft ? 32 : 0), 3, 3, 3, 3);
-}
 function node(x, z, level, parent) {
   const size = 32 * 2 ** level;
   const entry = { x, z, level, size, parent, children: null, meshes: [], ins: [], outs: [], rim: new Float32Array(260), ready: false, split: false, busy: false, fadeE: null, used: stamp, bytes: 0, queued: false, dirty: false };
@@ -67,90 +17,25 @@ function node(x, z, level, parent) {
 function distance(entry, x, y, z) {
   return Math.hypot(Math.max(entry.x - x, 0, x - entry.x - entry.size), Math.max(entry.z - z, 0, z - entry.z - entry.size), Math.max(0, y - O.h(AF.clamp(x, entry.x, entry.x + entry.size), AF.clamp(z, entry.z, entry.z + entry.size)) - 25) * 0.65);
 }
-function emit(buf, xa, za, xb, zb, lo, hi, color, normal, soft = false) {
-  if (normal === 2) {
-    setP(xa, hi, za, xa, hi, zb, xb, hi, zb, xb, hi, za);
-    setUV(xa * 4, za * 4, xa * 4, zb * 4, xb * 4, zb * 4, xb * 4, za * 4);
-    buf.quadS(quadP, quadUV, 0, 1, 2, 3, color, 2, 3, 3, 3, 3); return;
-  }
-  if (hi <= lo) return;
-  if (normal < 2) {
-    setP(xa, lo, za, xa, lo, zb, xa, hi, zb, xa, hi, za);
-    setUV(za * 4, lo * 4, zb * 4, lo * 4, zb * 4, hi * 4, za * 4, hi * 4);
-  } else {
-    setP(xa, lo, za, xb, lo, za, xb, hi, za, xa, hi, za);
-    setUV(xa * 4, lo * 4, xb * 4, lo * 4, xb * 4, hi * 4, xa * 4, hi * 4);
-  }
-  const reverse = normal === 0 || normal === 5;
-  buf.quadS(quadP, quadUV, 0, reverse ? 3 : 1, 2, reverse ? 1 : 3, color, normal + (soft ? 32 : 0), 3, 3, 3, 3);
+// a worker result (07-outland O.meshTileArrays, transferred buffers) as geometry: no copies, bounds precomputed
+function geometryFrom(pre) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pre.p, 3));
+  geo.setAttribute('aBU', new THREE.BufferAttribute(pre.uv, 2));
+  geo.setAttribute('aPal', new THREE.BufferAttribute(pre.pal, 1));
+  geo.setAttribute('aAN', new THREE.BufferAttribute(pre.an, 1));
+  geo.setIndex(new THREE.BufferAttribute(pre.idx, 1));
+  const b = pre.box, s = pre.sphere;
+  geo.boundingBox = new THREE.Box3(new THREE.Vector3(b[0], b[1], b[2]), new THREE.Vector3(b[3], b[4], b[5]));
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(s[0], s[1], s[2]), s[3]);
+  return geo;
 }
 function* build(entry) {
-  const step = entry.size / 64, quantum = step <= 1 ? step * 0.5 : step * 0.75, buf = terrainBuf, revision = entry.propRevision ?? 0;
-  buf.n = 0; colors.fill(0); used.fill(0);
-  for (let index = 0; index <= 64; index++) {
-    entry.rim[index] = boundaryH(entry.x, entry.z + index * step); entry.rim[65 + index] = boundaryH(entry.x + entry.size, entry.z + index * step);
-    entry.rim[130 + index] = boundaryH(entry.x + index * step, entry.z); entry.rim[195 + index] = boundaryH(entry.x + index * step, entry.z + entry.size);
-    if ((index & 7) === 7) yield;
-  }
-  for (let row = -1; row <= 64; row++) {
-    for (let col = -1; col <= 64; col++) {
-      const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step, offset = (row + 1) * 66 + col + 1;
-      heights[offset] = (O.meshH ? O.meshH(x, z, step) : Math.round(O.h(x, z) / quantum) * quantum) * 4;
-    }
-    yield;
-  }
-  for (let row = 0; row < 64; row++) { for (let col = 0; col < 64; col++) {
-    const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step, offset = (row + 1) * 66 + col + 1;
-    if (!inside(x, z) && heights[offset] > -6) colors[row * 64 + col] = O.colTop(x, z, heights[offset] * 0.25, (Math.abs(heights[offset + 1] - heights[offset - 1]) + Math.abs(heights[offset + 66] - heights[offset - 66])) / (8 * step), step);
-  } yield; }
-  for (let row = 0; row < 64; row++) {
-    const za = entry.z + row * step, zb = za + step;
-    for (let col = 0; col < 64;) {
-      const color = colors[row * 64 + col], offset = (row + 1) * 66 + col + 1, height = heights[offset] * 0.25;
-      if (!color || used[row * 64 + col]) { col++; continue; }
-      if (!row || row === 63 || !col || col === 63) { apron(buf, entry, col, row, height, color); col++; continue; }
-      let run = 1;
-      while (col + run < 63 && !used[row * 64 + col + run] && colors[row * 64 + col + run] === color && heights[offset + run] === heights[offset]) run++;
-      let depth = 1, match = true;
-      while (row + depth < 63 && match) {
-        for (let along = 0; along < run; along++) if (used[(row + depth) * 64 + col + along] || colors[(row + depth) * 64 + col + along] !== color || heights[offset + depth * 66 + along] !== heights[offset]) { match = false; break; }
-        if (match) depth++;
-      }
-      for (let across = 0; across < depth; across++) used.fill(1, (row + across) * 64 + col, (row + across) * 64 + col + run);
-      const xa = entry.x + col * step;
-      emit(buf, xa, za, xa + run * step, za + depth * step, height, height, color, 2);
-      col += run;
-    }
-    for (let col = 0; col < 64; col++) {
-      const color = colors[row * 64 + col]; if (!color) continue;
-      const xa = entry.x + col * step, xb = xa + step, offset = (row + 1) * 66 + col + 1, height = heights[offset] * 0.25;
-      for (const direction of directions) {
-        const dx = direction[0], dz = direction[1], normal = direction[2], nextX = xa + step * (0.5 + dx), nextZ = za + step * (0.5 + dz);
-        const grid = inside(nextX, nextZ), boundary = col + dx < 0 || col + dx >= 64 || row + dz < 0 || row + dz >= 64;
-        const fx = dx > 0 ? xb : xa, fz = dz > 0 ? zb : za;
-        if (grid) {
-          // The city emits no outer faces; both height directions belong to this wall.
-          for (let along = 0; along < step; along += 0.25) {
-            const gx = dx ? fx + dx * 0.125 : xa + along + 0.125, gz = dz ? fz + dz * 0.125 : za + along + 0.125;
-            const gridHeight = W.groundY(gx, gz), n = gridHeight > height ? normal ^ 1 : normal;
-            emit(buf, dx ? fx : xa + along, dz ? fz : za + along, dx ? fx : xa + along + 0.25, dz ? fz : za + along + 0.25, Math.min(height, gridHeight), Math.max(height, gridHeight), color, n);
-          }
-          continue;
-        }
-        if (boundary) continue;
-        const neighbor = heights[offset + dx + dz * 66] * 0.25;
-        if (neighbor < height) {
-          const across = dx > 0 ? 1 : 0, along = dz > 0 ? 1 : 0;
-          const highA = cornerH(entry, col, row, across, along, height), highB = cornerH(entry, col, row, dx ? across : 1, dz ? along : 1, height);
-          const lowA = cornerH(entry, col + dx, row + dz, dx ? 1 - across : 0, dz ? 1 - along : 0, neighbor), lowB = cornerH(entry, col + dx, row + dz, dx ? 1 - across : 1, dz ? 1 - along : 1, neighbor);
-          const gentle = height - neighbor <= step * 2;
-          wall(buf, dx ? fx : xa, dz ? fz : za, dx ? fx : xb, dz ? fz : zb, lowA, lowB, highA, highB, gentle ? color : O.colSide(xa + step / 2, za + step / 2, height), normal, gentle);
-        }
-      }
-    }
-    yield;
-  }
-  let geo = buf.n ? yield* buf.geometryG(true) : null;
+  const revision = entry.propRevision ?? 0, pre = entry.pre;
+  entry.pre = null;
+  let geo;
+  if (pre) { R.workerBuilt++; entry.rim.set(pre.rim); geo = pre.n ? geometryFrom(pre) : null; }
+  else { const n = yield* O.meshTileG(entry, entry.rim); geo = n ? yield* terrainBuf.geometryG(true) : null; }
   yield;
   if (O.props.length) {
     const props = [];
@@ -201,7 +86,7 @@ function wants(entry, cp, split, reach = 1) {
   if (entry.level <= 0) return false;
   const horizon = entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > 800;
   if (horizon) return false;
-  const threshold = entry.level === 1 ? 40 * AF.LOD.view : entry.size * AF.LOD.outland;
+  const threshold = entry.level === 1 ? 100 * AF.LOD.view : entry.size * AF.LOD.outland;
   return Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, ahead.x, cp.y, ahead.z) + 24) < threshold * (split ? 1.25 : 1) * reach;
 }
 // load ahead of display: every tile the view will split into within AF.LOD.prefetch x its split distance is built (all levels at
@@ -257,20 +142,101 @@ function dispose(entry) {
   R.bytes -= entry.bytes; entry.bytes = 0; entry.meshes.length = 0; entry.ready = false; entry.split = false; R.disposed++;
   return true;
 }
+// ---------------------------------------------------------------- scheduling (one prioritised queue, worker meshing, stale jobs dropped)
+// The queue is re-ranked every scan (10 Hz): distance to the camera or the look-ahead, tiles behind the camera later. Tiles the view no
+// longer needs (their parent stopped wanting a split within the prefetch radius) leave the queue, in-flight worker jobs for them are
+// ignored on return and a half-built main-thread tile is abandoned (nothing is attached before its last step), so driving past an area
+// never leaves a backlog. Meshing runs on Web Workers (07-outland's scope, same height function) for tiles clear of the city grid; the
+// main thread only wraps the transferred arrays (+ merges outland props) — tiles touching the city grid still mesh here in slices.
+const inside = (x, z) => x >= W.X0 && x < W.x1 && z >= W.Z0 && z < W.z1;
+const gridFree = (e) => e.x + e.size + 24 <= W.X0 || e.x - 24 >= W.x1 || e.z + e.size + 24 <= W.Z0 || e.z - 24 >= W.z1;
+const WK = O.worker = { list: [], jobs: new Map(), next: 1, on: false, tried: false, padsN: -1, stats: { workers: 0, sent: 0, done: 0, dropped: 0, failed: 0, ms: 0 } };
+R.dropped = 0; R.aborted = 0; R.workerBuilt = 0; R.sync = false;
+const fwd = new THREE.Vector3();
+function score(entry, cp) {
+  const d = Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, ahead.x, cp.y, ahead.z) + 24) + (entry.parent && !entry.parent.split ? 0 : -16);
+  const cx = entry.x + entry.size / 2 - cp.x, cz = entry.z + entry.size / 2 - cp.z, l = Math.hypot(cx, cz);
+  if (l < entry.size) return d;
+  const dot = (cx * fwd.x + cz * fwd.z) / l;
+  return dot < 0 ? d - dot * Math.min(d, 240) * 0.6 : d;
+}
+// still wanted: shown or about to be (parent split), a rebuild of a resident tile, or inside its parent's prefetch radius
+const needed = (entry, cp) => !entry.parent || entry.parent.split || entry.meshes.length > 0 || wants(entry.parent, cp, false, AF.LOD.prefetch * 1.15);
+const mainTakes = (e) => R.sync || !WK.on || !!e.pre || !!e.noWorker || !gridFree(e);
+const workerSource = () => `'use strict';
+const AF = { WORKER: true, clamp: ${AF.clamp}, lerp: ${AF.lerp}, smooth: ${AF.smooth}, hash2: ${AF.hash2}, noise2: ${AF.noise2}, onBuild() {}, test() {}, addLabel() {}, addLight() {}, PAL: { hex: [] } };
+let pal = null, palK = 0;
+AF.col = (v) => typeof v === 'string' ? 0 : pal[palK++];
+const outlandScope = ${O.scopeFn.toString()};
+onmessage = (e) => {
+  const m = e.data;
+  if (m.type === 'job') {
+    const t0 = performance.now();
+    try { const r = AF.outland.meshTileArrays(m.x, m.z, m.size); r.type = 'done'; r.id = m.id; r.ms = performance.now() - t0; postMessage(r, [r.p.buffer, r.uv.buffer, r.pal.buffer, r.an.buffer, r.idx.buffer, r.rim.buffer]); }
+    catch (err) { postMessage({ type: 'fail', id: m.id, err: String(err && err.message || err) }); }
+  } else if (m.type === 'pads') AF.outland.setPads(m.pads);
+  else if (m.type === 'init') {
+    pal = m.pal; const g = m.W, VS = g.VS, X0 = g.X0, Z0 = g.Z0, NX = g.NX, NZ = g.NZ, inv = 1 / VS;
+    AF.W = { VS, X0, Z0, NX, NZ, x1: X0 + NX * VS, z1: Z0 + NZ * VS, H: null, bx: (x) => Math.floor((x - X0) * inv), bz: (z) => Math.floor((z - Z0) * inv), xOf: (bx) => X0 + bx * VS, zOf: (bz) => Z0 + bz * VS,
+      col(x, z) { const bx = this.bx(x), bz = this.bz(z); if (bx < 0 || bz < 0 || bx >= NX || bz >= NZ) return -1; throw new Error('city grid sampled'); }, groundY() { throw new Error('city grid sampled'); } };
+    AF.PLAN = { world: m.net.plan, river: { headY: m.headY, x: () => 0 } };
+    AF.land = { BEACH: { shore: () => m.net.shore } };
+    outlandScope(AF); AF.outland.netImport(m.net);
+  }
+};`;
+function onResult(e) {
+  const m = e.data, job = WK.jobs.get(m.id); if (!job) return;
+  WK.jobs.delete(m.id); job.worker.busy--;
+  const entry = job.entry;
+  if (m.type === 'fail') { WK.stats.failed++; if (entry.job === m.id) entry.job = 0; entry.noWorker = true; AF.warnOnce('outland worker job', m.err); return; }
+  WK.stats.done++; WK.stats.ms += m.ms;
+  if (entry.job !== m.id || job.padsN !== WK.padsN || !entry.queued) { WK.stats.dropped++; if (entry.job === m.id) entry.job = 0; return; }
+  entry.job = 0; entry.pre = m;
+  dispatch();   // keep the worker fed between frames
+}
+function startWorkers() {
+  WK.tried = true;
+  if (typeof Worker === 'undefined' || AF.Q.has('noworker')) return;
+  try {
+    const net = O.netExport(), url = URL.createObjectURL(new Blob([workerSource()], { type: 'text/javascript' }));
+    const n = Math.max(1, Math.min(AF.MOBILE ? 2 : 3, (navigator.hardwareConcurrency || 4) - 1));
+    const init = { type: 'init', net, pal: Array.from(O.pal), headY: AF.PLAN.river.headY, W: { VS: W.VS, X0: W.X0, Z0: W.Z0, NX: W.NX, NZ: W.NZ } };
+    for (let index = 0; index < n; index++) {
+      const worker = new Worker(url); worker.busy = 0; worker.onmessage = onResult;
+      worker.onerror = (err) => { AF.warnOnce('outland worker failed: meshing on the main thread', err.message || err); WK.on = false; };
+      worker.postMessage(init); WK.list.push(worker);
+    }
+    WK.padsN = O.pads.length; WK.on = true; WK.stats.workers = n;
+  } catch (err) { AF.warnOnce('outland workers unavailable', err); WK.on = false; }
+}
+function dispatch() {
+  if (!WK.on || R.sync) return;
+  if (O.pads.length !== WK.padsN) { WK.padsN = O.pads.length; const pads = O.padsExport(); for (const worker of WK.list) worker.postMessage({ type: 'pads', pads }); }
+  for (const worker of WK.list) while (worker.busy < 3) {
+    let best = null, bestS = Infinity;
+    for (const e of queue) if (!e.job && !e.pre && !e.noWorker && gridFree(e) && e.score < bestS) { best = e; bestS = e.score; }
+    if (!best) return;
+    const id = WK.next++; best.job = id; worker.busy++; WK.stats.sent++;
+    WK.jobs.set(id, { entry: best, worker, padsN: WK.padsN });
+    worker.postMessage({ type: 'job', id, x: best.x, z: best.z, size: best.size });
+  }
+}
 function work(ms) {
   if (!AF.ready) return false;
+  if (!WK.tried && !R.sync) startWorkers();
+  dispatch();
   const start = performance.now(), end = start + Math.min(ms, AF.MOBILE ? 2.5 : 4);
   while (performance.now() < end) {
     if (!generator) {
-      let best = -1, bestD = Infinity;
-      const cp = AF.camera.position;
+      let best = -1, bestS = Infinity;
       for (let index = 0; index < queue.length; index++) {
-        const entry = queue[index], dist = Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, ahead.x, cp.y, ahead.z) + 24) + (entry.parent && !entry.parent.split ? 0 : -16);
-        if (dist < bestD) { bestD = dist; best = index; }
+        const e = queue[index];
+        if (e.job && !R.sync || !mainTakes(e)) continue;
+        if (e.score < bestS) { bestS = e.score; best = index; }
       }
       if (best < 0) break;
-      R.urgent = bestD < 48;   // a tile right around the camera: the rendered frame helps (outland-lod)
-      current = queue[best]; queue[best] = queue[queue.length - 1]; queue.pop();
+      R.urgent = bestS < 48;   // a tile right around the camera: the rendered frame helps (outland-lod)
+      current = queue[best]; queue[best] = queue[queue.length - 1]; queue.pop(); current.job = 0;
       generator = build(current);
     }
     const slice = performance.now(), done = generator.next().done;
@@ -278,11 +244,13 @@ function work(ms) {
     if (done) { generator = null; current = null; R.urgent = false; }
   }
   R.workMs = performance.now() - start;
-  return !!generator || queue.length > 0;
+  if (generator) return true;
+  for (const e of queue) if ((!e.job || R.sync) && mainTakes(e)) return true;
+  return false;
 }
 function scan() {
   const cp = AF.camera.position, reach = Math.max(1, AF.LOD.view ** 2); stamp++;
-  R.maxNodes = Math.round((AF.MOBILE ? 240 : 320) * reach); R.maxBytes = Math.min(AF.MOBILE ? 72 : 160, (AF.MOBILE ? 48 : 80) * reach) * 1048576;
+  R.maxNodes = Math.round((AF.MOBILE ? 720 : 960) * reach); R.maxBytes = Math.min(AF.MOBILE ? 224 : 400, (AF.MOBILE ? 176 : 240) * reach) * 1048576;
   for (const entry of nodes) if (entry.dirty && entry.ready && !entry.fadeE && !entry.busy) {
     let parent = entry.parent, blocked = false;
     while (parent) { if (parent.fadeE || parent.busy) { blocked = true; break; } parent = parent.parent; }
@@ -290,6 +258,14 @@ function scan() {
   }
   for (const root of roots) update(root, cp, false);
   for (const root of roots) prefetch(root, cp);
+  // drop what the view stopped wanting; rank the rest
+  for (let index = queue.length - 1; index >= 0; index--) {
+    const e = queue[index]; if (needed(e, cp)) continue;
+    queue[index] = queue[queue.length - 1]; queue.pop(); e.queued = false; e.job = 0; e.pre = null; R.dropped++;
+  }
+  if (current && !current.meshes.length && !needed(current, cp)) { generator = null; current.queued = false; current = null; R.urgent = false; R.aborted++; }
+  AF.camera.getWorldDirection(fwd); fwd.y = 0; if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, 1); fwd.normalize();
+  for (const e of queue) e.score = score(e, cp);
   let kept = 0;
   for (const entry of nodes) if (entry.ready) kept++;
   while (kept > R.maxNodes || R.bytes > R.maxBytes) {
@@ -308,14 +284,21 @@ AF.onTick('outland-lod', 876, (dt) => {
   work(R.urgent ? (AF.world.stream && AF.world.stream.urgent ? 1.5 : AF.MOBILE ? 2.5 : 3) : 1);
 });
 R.settle = () => {
-  for (let pass = 0; pass < 7; pass++) {
-    scan(); while (work(20)); AF.step(22, 1 / 30);
-  }
+  R.sync = true;
+  try { for (let pass = 0; pass < 7; pass++) { scan(); while (work(20)); AF.step(22, 1 / 30); } }
+  finally { R.sync = false; }
 };
 R.stats = () => {
   let visible = 0, triangles = 0;
   for (const mesh of group.children) if (mesh.visible) { visible++; triangles += mesh.geometry.index.count / 3; }
-  return { nodes: nodes.length, resident: R.active, visible, triangles, bytes: R.bytes, bootMs: R.bootMs, maxStepMs: R.maxStepMs, builds: R.builds, disposed: R.disposed, pending: queue.length };
+  return { nodes: nodes.length, resident: R.active, visible, triangles, bytes: R.bytes, bootMs: R.bootMs, maxStepMs: R.maxStepMs, builds: R.builds, workerBuilt: R.workerBuilt, disposed: R.disposed, pending: queue.length, dropped: R.dropped, aborted: R.aborted };
+};
+// shown tiles coarser than the view wants (the "late detail" metric of tools/outland-drive.js)
+R.late = () => {
+  const cp = AF.camera.position; let n = 0;
+  const walk = (entry) => { if (entry.split) { for (const child of entry.children) walk(child); } else if (wants(entry, cp, false)) n++; };
+  for (const root of roots) walk(root);
+  return n;
 };
 R.diagnose = () => {
   const visible = nodes.filter(entry => entry.meshes.some(mesh => mesh.visible && mesh.material === AF.mat.voxel));
@@ -338,7 +321,7 @@ R.diagnose = () => {
     if (inside(x, z) || O.h(x, z) < -1.25) continue;
     samples++; if (!cover.some(entry => x >= entry.x && x < entry.x + entry.size && z >= entry.z && z < entry.z + entry.size)) holes++;
   }
-  return { overlaps, edgePairs: pairs, maxGap, holes, coverSamples: samples, speculativeSkirts: 0, rimSamples: rimCache.size };
+  return { overlaps, edgePairs: pairs, maxGap, holes, coverSamples: samples, speculativeSkirts: 0 };
 };
 O.addProp = (geo, x, y, z, rot = 0, opts = {}) => {
   if (!geo || !geo.attributes.aPal || !geo.index || !geo.attributes.position.array) throw new Error('outland props need retained voxel geometry');

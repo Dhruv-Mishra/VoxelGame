@@ -51,14 +51,6 @@ try {
   // W lifts the nose from 1.25x stall, a full-throttle roll leaves the ground by itself at 1.45x stall
   for (const T of Object.values(TYPES)) T.vmax = Math.round(T.vmax * 0.85 * 10) / 10;
   const ROTATE_K = 1.25, LIFTOFF_K = 1.45, ROLL_DRAG = 0.7;
-  PL.trafficGeometry = () => {
-    const B = TYPES.airliner.build(), red = C(0xff3040, { emit: 0xff2030, emitK: 2, mode: 'always' }), green = C(0x30ff80, { emit: 0x20ff60, emitK: 2, mode: 'always' }), white = C(0xffffff, { emit: 0xffffff, emitK: 2, mode: 'always' });
-    const gear = new AF.Model(B.m.w, B.m.h, B.m.d);
-    for (let x = 0; x < B.m.w; x++) for (let y = 0; y < 6; y++) for (let z = 0; z < B.m.d; z++) { const value = B.m.get(x, y, z); if (value && (Math.abs(x - 59) >= 20 && Math.abs(x - 59) <= 24)) { gear.set(x, y, z, value); B.m.set(x, y, z, 0); } }
-    B.m.box(0, 7, 55, 2, 9, 57, red); B.m.box(116, 7, 55, 118, 9, 57, green); B.m.box(58, 20, 2, 60, 22, 4, white);
-    const options = { vs: 0.25, anchor: [0.5, 0, 0.5] }, shared = planeGeo('airliner');
-    return { body: AF.meshModel(B.m, options), gear: AF.meshModel(gear, options), prop: shared.pgeo, props: shared.props };
-  };
   const planeGeo = (id) => {
     if (geoCache[id]) return geoCache[id];
     const T = TYPES[id], B = T.build();
@@ -73,17 +65,19 @@ try {
     const body = AF.modelMesh(G.geo); root.add(body);
     const props = G.props.map((p) => { const pm = AF.modelMesh(G.pgeo); pm.position.copy(p); root.add(pm); return pm; });
     root.rotation.order = 'YXZ'; AF.scene.add(root);
-    const pl = { id, T, G, root, props, x, y: AF.W.groundY(x, z), z, yaw, pitch: 0, roll: 0, gam: 0, pr: 0, rr: 0, v: 0, throttle: 0, engine: false, home: { x, z, yaw }, onGround: true, spin: 0, name: T.name };
-    pl.interact = AF.addInteract({ x, y: pl.y + 1, z, r: 2.2, label: 'Fly the ' + T.name, prio: 0.1,
+    const pl = Object.assign(new AF.Vehicle({ name: T.name, x, z, yaw }), { id, T, G, root, props, x, y: AF.W.groundY(x, z), z, yaw, pitch: 0, roll: 0, gam: 0, pr: 0, rr: 0, v: 0, throttle: 0, engine: false, home: { x, z, yaw }, onGround: true, spin: 0, name: T.name });
+    pl.attach({ r: 2.2, lift: 1, label: 'Fly the ' + T.name, prio: 0.1,
       dist: (px, pz) => { const s = Math.sin(pl.yaw), c = Math.cos(pl.yaw), rx = px - pl.x, rz = pz - pl.z, lx = rx * c - rz * s, lz = rx * s + rz * c; return Math.hypot(Math.max(0, Math.abs(lx) - Math.min(1.5, G.halfW)), Math.max(0, Math.abs(lz) - G.halfL)); },
       can: () => AF.mode === 'walk' && PL.cur !== pl, act: () => AF.setMode('fly', { plane: pl }) });
     PL.list.push(pl); place(pl);
     return pl;
   };
-  const place = (pl) => { pl.root.position.set(pl.x, pl.y, pl.z); pl.root.rotation.set(-pl.pitch, pl.yaw, pl.roll, 'YXZ'); if (pl.interact) { pl.interact.x = pl.x; pl.interact.y = pl.y + 1; pl.interact.z = pl.z; } };
+  const place = (pl) => { pl.root.position.set(pl.x, pl.y, pl.z); pl.root.rotation.set(-pl.pitch, pl.yaw, pl.roll, 'YXZ'); if (pl.interact) pl.sync(); };
   PL.make = make;
+  // the model kit for 53-airtraffic's airframes (palette helper, fuselage / wing rasterisers, the airliner propeller)
+  PL.kit = { C, fuselage, wing, propGeo: () => planeGeo('airliner').pgeo };
   // approach guidance picks the nearest of these east-west strips { x0, x1, z } (the island adds its own)
-  PL.runways = [A.runway];
+  PL.runways = [A.runway, A.runway2];
 
   // ---------------------------------------------------------------- the flight model
   // pitch = nose attitude, gam = flight-path angle (chases the nose: angle of attack settles quickly), v = airspeed along the path

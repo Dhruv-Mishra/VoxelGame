@@ -35,6 +35,22 @@ try {
     paint(ax0, az1, ax1, A.taxiZ - 6, (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1]);
     for (let x = -580; x <= -380; x += 40) paint(x - 0.25, az0 + 6, x + 0.25, az1, () => yellow);   // stand lines
     for (const x of [-450, -360]) { paint(x - 0.25, 84, x + 0.25, 118, () => yellow); paint(x - 3, 92, x + 3, 92.5, () => yellow); }
+    // ---- R2 (departures, 09R) south of R1, the west crossing taxiway to it, the taxiway's east / west extensions and remote stand 3
+    const R2 = A.runway2, sz0 = R2.z - R2.w / 2, sz1 = R2.z + R2.w / 2, tarmac = (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1];
+    paint(R2.x0, sz0, R2.x1, sz1, tarmac);
+    paint(R2.x0 + 30, R2.z - 0.5, R2.x1 - 30, R2.z + 0.5, (x) => ((Math.floor(x / 6) & 1) ? white : null));
+    paint(R2.x0, sz0 + 0.5, R2.x1, sz0 + 1, () => white); paint(R2.x0, sz1 - 1, R2.x1, sz1 - 0.5, () => white);
+    for (const [ex, dir] of [[R2.x0 + 3, 1], [R2.x1 - 3, -1]]) for (let k = -3; k < 3; k++) { const zz = R2.z + k * 2.6 + 0.4; paint(Math.min(ex, ex + dir * 10), zz, Math.max(ex, ex + dir * 10), zz + 1.6, () => white); }
+    paint(A.westX - 6, A.taxiZ - 6, -612, A.taxiZ + 6, tarmac);                                   // taxiway west extension
+    paint(A.westX - 6, A.taxiZ, A.westX + 6, rz0, tarmac); paint(A.westX - 6, rz1, A.westX + 6, sz0, tarmac);   // west crossing: taxiway -> R1 -> R2
+    paint(A.westX - 0.25, A.taxiZ, A.westX + 0.25, sz0 + 1, (x, z) => (z < rz0 || z > rz1) ? yellow : null);
+    for (const z of [rz0 - 3, rz1 + 2.5]) for (let x = A.westX - 6; x < A.westX + 6; x += 1.5) paint(x, z, x + 1, z + 0.5, () => yellow);   // hold-short bars
+    paint(-338, A.taxiZ - 6, -316, A.taxiZ + 6, tarmac);                                           // taxiway east extension to stand 3
+    paint(-345, 72, -312, 112, (x, z) => conc[((Math.floor(x / 5) + Math.floor(z / 5)) & 1)]); paint(-345, 112, -312, A.taxiZ - 6, tarmac);
+    paint(-325.25, 84, -324.75, A.taxiZ, () => yellow); paint(-328, 92, -322, 92.5, () => yellow);
+    const edgeW = glow(0xfff2c0, 2.6, 'night'), edgeG = glow(0x40ff80, 2.6, 'night'), edgeR = glow(0xff4030, 2.6, 'night'), edgeB = glow(0x4a8aff, 2.2, 'night');
+    for (let x = R2.x0; x <= R2.x1; x += 12) for (const z of [sz0 - 0.5, sz1 + 0.25]) W.fill(x, 0.25, z, x + 0.25, 0.5, z + 0.25, x < R2.x0 + 2 ? edgeG : x > R2.x1 - 2 ? edgeR : edgeW);
+    for (let z = A.taxiZ + 8; z < sz0; z += 10) if (z < rz0 - 1 || z > rz1 + 1) for (const x of [A.westX - 6.25, A.westX + 6]) W.fill(x, 0.25, z, x + 0.25, 0.5, z + 0.25, edgeB);
     // car park + forecourt off Airfield Road
     paint(-520, 12, -420, 42, (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1]);
     for (let x = -516; x < -424; x += 3) { paint(x, 14, x + 0.2, 20, () => white); paint(x, 34, x + 0.2, 40, () => white); }
@@ -300,6 +316,8 @@ try {
     const bays=A.parking.bays.map((point,index)=>({point,key:AF.hash2(index,471)})).sort((first,second)=>first.key-second.key);
     for(let index=0;index<count;index++){const [x,z]=bays[index].point;A.parking.cars.push(AF.vehicles.placeParked(null,x,z,z===17?0:PI,{seed:470+index}));}
     for(const x of [-523,-513,-503])A.parking.taxis.push(AF.vehicles.placeParked('taxi',x,41,PI/2,{noDrive:true}));
+    // the ramp's parked ground support row in front of the hangars (merged static props: no draws of their own)
+    A.parking.gse=[['firetruck',-622],['followme',-604],['fuel',-596],['baggage',-588],['baggage',-582],['catering',-574]].map(([type,x])=>AF.vehicles.placeParked(type,x,104,PI/2,{noDrive:true}));
   });
   AF.onBuild('airfield-life',660,()=>{
     const VV=AF.vehicles;

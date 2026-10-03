@@ -707,6 +707,12 @@ try {
     dryTarget(an); an.state = id === 'penguin' ? 'waddle' : 'wander';
     an.next = id === 'giraffe' || id === 'zebra' || id === 'antelope' || id === 'deer' || id === 'stag' || id === 'rhino' || id === 'hippo' || id === 'elephant' || id === 'flamingo' ? 'graze' : 'rest'; an.timer = 25;
   };
+  // the dithered LOD fade material's two variants (far: receive only; parts: cast + receive) compile before the first swap
+  AF.on('preloaded', () => {
+    const sp = Object.values(Z.species)[0]; if (!sp) return;
+    const part = sp.meshes.find((m) => m !== sp.far), mat = zooFadeMaterial();
+    for (const mesh of [sp.far, part]) { if (!mesh) continue; const was = mesh.material; mesh.material = mat; AF.stream.compileAhead(mesh); mesh.material = was; }
+  });
   AF.onBuild('zoo-animals', 640, () => {
     const R = AF.rng(2026);
     for (const H of HAB) for (const [id, n] of H.animals) {

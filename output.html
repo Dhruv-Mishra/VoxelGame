@@ -30,7 +30,7 @@
 </script>
 <script type="module">
 // Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.
-// Parts: 00-prologue, 01-core, 01-stream, 02-voxel, 03-render, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-farms, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 98-tests, 99-boot
+// Parts: 00-prologue, 01-core, 01-stream, 02-voxel, 03-render, 04-vehicle, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-farms, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 98-tests, 99-boot
 // ===== prologue: module scope shared by every part (only THREE + ADDONS live here) =====
 window.AF = window.AF || {};
 {
@@ -483,6 +483,20 @@ try {
     });
     if (proxies.length) { AF.shadowDirty = true; await ST.nextFrame(); await ST.nextFrame(); for (const m of proxies) { AF.scene.remove(m); if (m.dispose) m.dispose(); } }
     ST.stats.warmMs = Math.round(performance.now() - t0);
+  };
+
+  // one object (and its children) compiled ahead of its first draw without stalling a frame: compileAsync uses
+  // KHR_parallel_shader_compile, against the scene's lights and the post chain's scene target (the programs the frame will use).
+  // three prepares one object per material per call, so callers pass each object that needs its own variant separately.
+  ST.compileAhead = (root) => {
+    const R = AF.renderer, P = AF.post, prev = R.getRenderTarget();
+    try {
+      R.setRenderTarget(P && P.enabled && P.sceneRT ? P.sceneRT : null);
+      if (R.compileAsync) return R.compileAsync(root, AF.camera, AF.scene).catch((e) => AF.warnOnce('compile ahead', e));
+      R.compile(root, AF.camera, AF.scene);
+    } catch (e) { AF.warnOnce('compile ahead', e); }
+    finally { R.setRenderTarget(prev); }
+    return Promise.resolve();
   };
 
   // wait until no system misses anything near the view (3 calm frames), at most maxMs
@@ -1931,16 +1945,20 @@ AF.onTick('lod-fade', 881, (dt) => {
   if (FADE.act.length) { FADE.k += dt / FADE.dur; if (FADE.k >= 1) fadeEnd(); }
   if (!FADE.act.length && FADE.pend.length) fadeStart();
   U.uFadeK.value = Math.min(1, FADE.k);
-  // first use of a fade variant would compile a big program mid-game: compile both whenever the voxel program inputs change
-  // (tier = light / shadow state, env map) by drawing a degenerate triangle with each for one frame
-  if (!AF.ready || !FADE.on) return;
-  const key = AF.GFX.name + (AF.mat.voxel.envMap ? 'e' : '');
-  if (FADE.warm) { for (const w of FADE.warm) AF.scene.remove(w); FADE.warm = null; }
+  // first use of a fade variant would compile a big program mid-game (measured 0.2-1.5 s on ANGLE): whenever the voxel material gains
+  // a program variant (tier, light / shadow state, env map) compile both fade variants for receive-shadow on and off with
+  // compileAsync (KHR_parallel_shader_compile: the driver compiles off the main thread) against the scene's lights
+  if (!AF.ready || !FADE.on || FADE.compiling) return;
+  const vp = AF.renderer.properties.get(AF.mat.voxel).programs;
+  const key = AF.GFX.name + (AF.mat.voxel.envMap ? 'e' : '') + (vp ? vp.size : 0);
   if (key !== FADE.warmKey) {
     FADE.warmKey = key; const M = fadeMats(), V = AF.mat.voxel;
     for (const m of [M.in, M.out]) { if (!!m.envMap !== !!V.envMap) m.needsUpdate = true; m.envMap = V.envMap; }
     const g = FADE.warmGeo || (FADE.warmGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)));
-    FADE.warm = [M.in, M.out].map((mat) => { const w = new THREE.Mesh(g, mat); w.frustumCulled = false; w.receiveShadow = true; AF.scene.add(w); return w; });
+    const group = FADE.warmGroup || (FADE.warmGroup = []);
+    if (!group.length) for (const mat of [M.in, M.out]) for (const recv of [true, false]) { const w = new THREE.Mesh(g, mat); w.frustumCulled = false; w.receiveShadow = recv; w.castShadow = recv; group.push(w); }
+    FADE.compiling = true;
+    Promise.all(group.map((w) => AF.stream.compileAhead(w))).finally(() => { FADE.compiling = false; });
   }
 });
 // FAR clusters: 4 x 4 regions (128 m) merged into ONE 1 m mesh (voxels + terrain) — ~16x fewer far draw calls,
@@ -3148,15 +3166,16 @@ try {
   // THE LOD TABLE (every system reads AF.LOD, filled from here): regLod/farLod = metres to the 0.5 m coarse / 1 m far region copies,
   // lod = near props, propCull = far props hidden beyond, outland = quadtree split distance per tile size, flora = [mid, near, far]
   // tree LOD distances. Loading runs AF.LOD.prefetch (01-stream) farther out than these display ranges.
+  // Full-fidelity ranges (lod, regLod, outland, flora mid/near) are 2.5x the Sep 2026 table (outland meshing runs on workers).
   const TIER = {
-    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 150, farLod: 420, lod: 70, propCull: 700, outland: 0.8, flora: [70, 180, 960] },
-    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 95, farLod: 320, lod: 45, propCull: 300, outland: 0.7, flora: [65, 160, 880] },
-    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 2, pools: 8, regLod: 80, farLod: 240, lod: 35, propCull: 240, outland: 0.48, flora: [45, 105, 720] },
-    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 65, farLod: 180, lod: 32, propCull: 200, outland: 0.38, flora: [28, 80, 480] },
-    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 200, ao: 16, lights: 12, pools: 24, regLod: 220, farLod: 800, propCull: 2000, outland: 1.0, flora: [90, 240, 1400] },
+    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 375, farLod: 560, lod: 175, propCull: 700, outland: 2.0, flora: [175, 450, 960] },
+    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 238, farLod: 360, lod: 112, propCull: 300, outland: 1.75, flora: [162, 400, 880] },
+    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 2, pools: 8, regLod: 200, farLod: 300, lod: 88, propCull: 240, outland: 1.2, flora: [112, 262, 720] },
+    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 162, farLod: 245, lod: 80, propCull: 200, outland: 0.95, flora: [70, 200, 480] },
+    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 500, ao: 16, lights: 12, pools: 24, regLod: 550, farLod: 825, propCull: 2000, outland: 2.5, flora: [225, 600, 1400] },
   };
   AF.gfx.TIER = TIER;
-  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 50, farLod: 125, lod: 40, propCull: 180, dynMin: 0.55 };
+  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 125, farLod: 190, lod: 100, propCull: 180, dynMin: 0.55 };
   if (AF.MOBILE) TIER.low = mobileTier;
   const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : G.lite && G.tier === 'high' ? TIER.lite : (TIER[G.tier] || TIER.ultra);
   const texSeen = new WeakSet();
@@ -3179,7 +3198,7 @@ try {
     AF.REGION_LOD = (T.regLod || 130) * view;
     AF.FAR_LOD = (T.farLod || 1e9) * view;
     AF.PROP_CULL = (T.propCull || 900) * view;
-    const fl = T.flora, near = Math.min(320, fl[1] * view);
+    const fl = T.flora, near = Math.min(800, fl[1] * view);
     Object.assign(AF.LOD, { view, props: AF.LOD_DIST, region: AF.REGION_LOD, far: AF.FAR_LOD, cull: AF.PROP_CULL, outland: T.outland * view, floraMid: Math.min(near - 30, fl[0] * view), floraNear: near, floraFar: Math.min(1600, fl[2] * view), prefetch: AF.stream.PREFETCH });
     if (AF.gfx.pools) AF.gfx.pools.max = T.pools;
     if (AF.atmos && AF.atmos.setLights) AF.atmos.setLights(T.lights);
@@ -3641,6 +3660,114 @@ try {
 
 } catch (e) { AF.partError('03-render.js', e); }
 
+// ================================================================ 04-vehicle.js
+try {
+// ===== AF.Vehicle: what every player-rideable vehicle shares (cars / bikes 50, planes 52, jet skis 44-island)
+// - pose fields x, y, z, yaw, pitch, roll, v (m/s along the heading) and a name
+// - ONE boarding prompt that follows the vehicle wherever it was left (attach / sync), so it can always be ridden again
+// - Vehicle.input(): keyboard + touch stick read once into a shared object (no per-frame allocation): thr -1..1, steer -1..1 (right +),
+//   brake, boost, exit (E/F pressed), modal (a menu is open: everything zero)
+// - Vehicle.Chase: the chase camera (rigid position, smoothed heading / height / boom, mouse orbit, wheel zoom, pulled in front of walls)
+// - Vehicle.landing(x, z, ...): nearest dry, unblocked spot to hop off onto
+// - Vehicle.all: every vehicle, for central queries
+{
+  class Vehicle {
+    constructor(o = {}) {
+      this.name = o.name || 'vehicle'; this.x = o.x ?? 0; this.y = o.y ?? 0; this.z = o.z ?? 0; this.yaw = o.yaw ?? 0;
+      this.pitch = 0; this.roll = 0; this.v = 0; this.interact = null; this.lift = 0.6;
+      Vehicle.all.push(this);
+    }
+    // the boarding prompt; dist(px, pz) may measure to the body instead of the centre; reach(vehicle) may widen r (e.g. left off its berth)
+    attach(o) {
+      this.lift = o.lift ?? this.lift; this.reach = o.reach || null;
+      this.interact = AF.addInteract({ x: this.x, y: this.y + this.lift, z: this.z, r: o.r ?? 2.2, label: o.label, prio: o.prio ?? 0.1, dist: o.dist, can: o.can, act: o.act });
+      this.r0 = this.interact.r;
+      return this.interact;
+    }
+    sync() {
+      const it = this.interact; if (!it) return;
+      it.x = this.x; it.z = this.z; it.y = this.y + this.lift;
+      if (this.reach) { const r = this.reach(this); it.r = r || this.r0; if (r) it.y = undefined; }   // a wide reach ignores height (a beach above a ski)
+    }
+  }
+  Vehicle.all = [];
+
+  const IN = Vehicle.IN = { thr: 0, steer: 0, brake: false, boost: false, exit: false, modal: false };
+  Vehicle.input = () => {
+    const I = AF.input, S = I.stick, modal = !!(AF.ui && AF.ui.modalOpen && AF.ui.modalOpen());
+    IN.modal = modal;
+    if (modal) { IN.thr = IN.steer = 0; IN.brake = IN.boost = IN.exit = false; return IN; }
+    IN.thr = (I.key('KeyW') || I.key('ArrowUp') ? 1 : 0) - (I.key('KeyS') || I.key('ArrowDown') ? 1 : 0);
+    IN.steer = (I.key('KeyD') || I.key('ArrowRight') ? 1 : 0) - (I.key('KeyA') || I.key('ArrowLeft') ? 1 : 0);
+    // touch stick: analog throttle past a dead zone, and a soft (squared) steering curve so a wobbling thumb doesn't twitch
+    if (S && (S.x || S.y)) {
+      IN.thr = S.y > 0.18 ? Math.min(1, 0.35 + (S.y - 0.18) / 0.55) : S.y < -0.4 ? -1 : 0;
+      const ax = Math.max(0, Math.abs(S.x) - 0.14) / 0.72, st = Math.min(1, ax * ax * 0.6 + ax * 0.4);
+      IN.steer = S.x < 0 ? -st : st;
+    }
+    IN.brake = I.key('Space'); IN.boost = I.key('ShiftLeft') || I.key('ShiftRight');
+    IN.exit = I.hit('KeyE') || I.hit('KeyF');
+    return IN;
+  };
+
+  // chase camera: follows the vehicle's position rigidly; only heading, height and boom length are smoothed (a world-space lerp lagged
+  // metres behind at speed and stuttered whenever the frame time varied). floor(x, z) = lowest camera height there.
+  class Chase {
+    constructor(o = {}) { this.want = new THREE.Vector3(); this.look = new THREE.Vector3(); this.set(o); }
+    set(o = {}) {
+      this.dist = o.dist ?? 8.5; this.height = o.height ?? 1.3; this.ahead = o.ahead ?? 1.5; this.floor = o.floor || null; this.radius = o.shadow ?? 60;
+      this.orbit = 0; this.orbitP = 0; this.dragT = 0; this.init = false;
+      return this;
+    }
+    update(dt, x, y, z, yaw) {
+      const m = AF.input.mouse;
+      if ((document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { this.orbit = (this.orbit - m.dx * 0.006) % (Math.PI * 2); this.orbitP = AF.clamp(this.orbitP + m.dy * 0.004, -0.25, 0.9); this.dragT = 1.5; }
+      else if ((this.dragT -= dt) < 0) { this.orbit *= Math.exp(-dt * 1.8); this.orbitP *= Math.exp(-dt * 1.8); }
+      if (m.wheel) this.dist = AF.clamp(this.dist * Math.exp(m.wheel * 0.001), 4, 28);
+      const first = !this.init;
+      if (first) { this.cyaw = yaw; this.cy = y; this.cd = this.dist; }
+      this.cyaw += AF.angDiff(this.cyaw, yaw) * (1 - Math.exp(-dt * 4.5));
+      this.cy += (y - this.cy) * (1 - Math.exp(-dt * 6));
+      const a = this.cyaw + this.orbit, pitch = 0.2 + this.orbitP + this.dist * 0.004, cp = Math.cos(pitch), sp = Math.sin(pitch);
+      const tx = x + Math.sin(yaw) * this.ahead, ty = this.cy + this.height, tz = z + Math.cos(yaw) * this.ahead;
+      let d = this.dist;
+      // keep the camera out of walls: pull in fast, ease back out
+      for (let t = 0.25; t <= 1.0001; t += 0.125) {
+        const dd = d * t;
+        if (AF.solidAt(tx - Math.sin(a) * cp * dd, ty + sp * dd, tz - Math.cos(a) * cp * dd)) { d = Math.max(1.2, d * Math.max(0.12, t - 0.15)); break; }
+      }
+      this.cd = first ? d : this.cd + (d - this.cd) * (1 - Math.exp(-dt * (d < this.cd ? 14 : 2.5)));
+      this.init = true;
+      const cam = AF.camera;
+      cam.position.set(tx - Math.sin(a) * cp * this.cd, ty + sp * this.cd, tz - Math.cos(a) * cp * this.cd);
+      const low = this.floor ? this.floor(cam.position.x, cam.position.z) : AF.W.groundY(cam.position.x, cam.position.z) + 0.4;
+      if (cam.position.y < low) cam.position.y = low;
+      this.look.set(tx, ty, tz); cam.up.set(0, 1, 0); cam.lookAt(this.look);
+      if (AF.camTarget) AF.camTarget.copy(this.look);
+      AF.shadowFocus.set(x, y, z); AF.shadowRadius = this.radius;
+    }
+  }
+  Vehicle.Chase = Chase;
+
+  // nearest spot within maxR of (x, z) whose surface is above minY and leaves room to stand (rings of 16 directions)
+  const RINGS = [2, 3.5, 5, 6.5, 8, 10], SPOT = { x: 0, y: 0, z: 0, r: 0 };
+  Vehicle.landing = (x, z, minY, top = 8, maxR = 10) => {
+    let found = false;
+    for (const r of RINGS) {
+      if (r > maxR) break;
+      for (let a = 0; a < 16; a++) {
+        const px = x + Math.sin(a / 16 * Math.PI * 2) * r, pz = z + Math.cos(a / 16 * Math.PI * 2) * r, gy = AF.surfaceBelow(px, pz, top, 12);
+        if (Number.isFinite(gy) && gy > minY && !AF.boxBlocked(px, gy + 0.3, pz, 0.3, 1.5)) { SPOT.x = px; SPOT.y = gy; SPOT.z = pz; SPOT.r = r; found = true; break; }
+      }
+      if (found) return SPOT;
+    }
+    return null;
+  };
+  Vehicle.hud = (v, name, extra = '') => { const kmh = Math.abs(v) * 3.6; AF.emit('hud', { mode: 'drive', speed: Math.round(kmh / 1.609), unit: 'mph', kmh: Math.round(kmh), car: name + extra, gear: v < -0.3 ? 'R' : 'D' }); };
+  AF.Vehicle = Vehicle;
+}
+} catch (e) { AF.partError('04-vehicle.js', e); }
+
 // ================================================================ 05-plan.js
 try {
 // ===== 05-plan: THE PORT SOLACE PLAN — every agent builds inside the rects given here  (OWNER: coordinator) =====
@@ -3888,7 +4015,9 @@ AF.PLAN = (() => {
     // 12 plots, 6 each side of Friends Lane, 35 m frontage. side -1 = west side (door faces east), +1 = east side (door faces west)
     plots: [],
     zoo: { x0: -650, z0: -290, x1: -448, z1: -16, gate: [-548, -14] },
-    air: { x0: -650, z0: 12, x1: -308, z1: 204, runway: { x0: -640, x1: -326, z: 152, w: 24 }, taxiZ: 124, apron: [-600, 72, -330, 112], terminal: [-548, 44, -434, 70], tower: [-424, 50], hangars: [[-632, 40, -598, 96], [-590, 40, -556, 96]] },
+    // runway = R1 (arrivals, land eastbound), runway2 = R2 (departures, take off eastbound); stands = AI airliner stands (bridge index)
+    air: { x0: -650, z0: 12, x1: -308, z1: 204, runway: { x0: -640, x1: -326, z: 152, w: 24 }, runway2: { x0: -640, x1: -326, z: 188, w: 22 }, taxiZ: 124, westX: -626, apron: [-600, 72, -330, 112], terminal: [-548, 44, -434, 70], tower: [-424, 50], hangars: [[-632, 40, -598, 96], [-590, 40, -556, 96]],
+      stands: [{ x: -450, bridge: 0, max: 1.05 }, { x: -360, bridge: 1, max: 1.05 }, { x: -325, max: 0.9 }] },
   };
   for (let i = 0; i < 6; i++) for (const side of [-1, 1]) {
     const z1 = -10 - i * 36, z0 = z1 - 34;
@@ -3933,6 +4062,9 @@ AF.PLAN = (() => {
 
 // ================================================================ 07-outland.js
 try {
+// The whole part is one function: it runs here, and its source is shipped to the outland mesh workers (49-outland), which run it on
+// a stub AF (AF.WORKER) and import the generated network with O.netImport, so both threads sample the very same height function.
+function outlandScope(AF) {
 const W = AF.W, P = AF.PLAN.world, smooth = AF.smooth, clamp = AF.clamp, noise = AF.noise2;
 const O = AF.outland = { bounds: P.bounds, play: P.play, props: [], pads: [], edgeReady: false, rivers: [], wayside: [], TUNNEL_H: 6.5 };
 const tiles = new Map(), edges = new Map(), segments = [], roadGrid = new Map(), riverSegs = [], riverGrid = new Map();
@@ -4422,10 +4554,7 @@ function buildRivers() {
     const river = { name: spec.name, pts, levels, hw: spec.w / 2 }; O.rivers.push(river);
     for (let index = 1; index < pts.length; index++) {
       const a = pts[index - 1], b = pts[index], dx = b[0] - a[0], dz = b[1] - a[1], segment = { x: a[0], z: a[1], dx, dz, len2: dx * dx + dz * dz || 1, y0: levels[index - 1], y1: levels[index], hw: river.hw };
-      riverSegs.push(segment);
-      for (let ix = Math.floor((Math.min(a[0], b[0]) - 100) / 64); ix <= Math.floor((Math.max(a[0], b[0]) + 100) / 64); ix++) for (let iz = Math.floor((Math.min(a[1], b[1]) - 100) / 64); iz <= Math.floor((Math.max(a[1], b[1]) + 100) / 64); iz++) {
-        const key = ix * 10000 + iz; let bucket = riverGrid.get(key); if (!bucket) { bucket = []; riverGrid.set(key, bucket); } bucket.push(segment);
-      }
+      riverSegs.push(segment); bucketRiver(segment);
     }
     const middle = pts[Math.floor(pts.length / 2)]; AF.addLabel(spec.name, middle[0], middle[1], 'place');
   }
@@ -4544,10 +4673,18 @@ function register(road) {
     const segment = { x: start[0], z: start[1], dx, dz, len2, length, y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.kind, hw: road.w / 2, flag, deck: road.kind === 0 || flag === 1, road,
       lift: road.lift, grade: Math.abs(road.heights[index] - road.heights[index - 1]) / length, first: index === 1, last: index === road.points.length - 1,
       b0: road.bank ? road.bank[index - 1] : 0, b1: road.bank ? road.bank[index] : 0 };
-    segments.push(segment); acc += segment.length;
-    const x0 = Math.floor((Math.min(segment.x, segment.x + segment.dx) - 44) / 64), x1 = Math.floor((Math.max(segment.x, segment.x + segment.dx) + 44) / 64);
-    const z0 = Math.floor((Math.min(segment.z, segment.z + segment.dz) - 44) / 64), z1 = Math.floor((Math.max(segment.z, segment.z + segment.dz) + 44) / 64);
-    for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) { const key = ix * 10000 + iz; let bucket = roadGrid.get(key); if (!bucket) { bucket = []; roadGrid.set(key, bucket); } bucket.push(segment); }
+    segments.push(segment); acc += segment.length; bucketRoad(segment);
+  }
+}
+function bucketRoad(segment) {
+  const x0 = Math.floor((Math.min(segment.x, segment.x + segment.dx) - 44) / 64), x1 = Math.floor((Math.max(segment.x, segment.x + segment.dx) + 44) / 64);
+  const z0 = Math.floor((Math.min(segment.z, segment.z + segment.dz) - 44) / 64), z1 = Math.floor((Math.max(segment.z, segment.z + segment.dz) + 44) / 64);
+  for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) { const key = ix * 10000 + iz; let bucket = roadGrid.get(key); if (!bucket) { bucket = []; roadGrid.set(key, bucket); } bucket.push(segment); }
+}
+function bucketRiver(segment) {
+  const ax = segment.x, az = segment.z, bx = ax + segment.dx, bz = az + segment.dz;
+  for (let ix = Math.floor((Math.min(ax, bx) - 100) / 64); ix <= Math.floor((Math.max(ax, bx) + 100) / 64); ix++) for (let iz = Math.floor((Math.min(az, bz) - 100) / 64); iz <= Math.floor((Math.max(az, bz) + 100) / 64); iz++) {
+    const key = ix * 10000 + iz; let bucket = riverGrid.get(key); if (!bucket) { bucket = []; riverGrid.set(key, bucket); } bucket.push(segment);
   }
 }
 AF.onBuild('outland-boundary', 496, () => {
@@ -4581,6 +4718,178 @@ for (const entry of [['Solace Range', 220, -780], ['Park Valley', -40, -440], ['
 AF.addLabel('Mirror Lake', 828, -198);
 AF.addLabel('Ochre Flats', 930, 70);
 for (const road of P.roads) { const point = road.points[1]; AF.addLabel(road.name, point[0], point[1], 'street'); }
+
+// ---------------------------------------------------------------- tile mesher (49-outland quadtree tiles): runs here and on the workers
+const quadP = new Float64Array(12), quadUV = new Float64Array(8);
+const setP = (a, b, c, d, e, f, g, h, i, j, k, l) => { const q = quadP; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; q[8] = i; q[9] = j; q[10] = k; q[11] = l; };
+const setUV = (a, b, c, d, e, f, g, h) => { const q = quadUV; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; };
+const heights = new Int16Array(66 * 66), colors = new Uint16Array(64 * 64), used = new Uint8Array(64 * 64);
+const terrainBuf = O.terrainBuf = { n: 0, p: new Float32Array(262144 * 3), uv: new Float32Array(262144 * 2), pal: new Uint16Array(262144), an: new Uint8Array(262144), idx: new Uint32Array(393216),
+  quadS(points, tex, first, second, third, fourth, color, normal, ao0, ao1, ao2, ao3) {
+    const base = this.n; if (base + 4 > this.pal.length) throw new Error('outland mesh scratch capacity');
+    for (let corner = 0; corner < 4; corner++) {
+      const source = corner === 0 ? first : corner === 1 ? second : corner === 2 ? third : fourth, vertex = base + corner;
+      for (let axis = 0; axis < 3; axis++) this.p[vertex * 3 + axis] = points[source * 3 + axis];
+      this.uv[vertex * 2] = tex[source * 2]; this.uv[vertex * 2 + 1] = tex[source * 2 + 1]; this.pal[vertex] = color;
+      this.an[vertex] = (corner === 0 ? ao0 : corner === 1 ? ao1 : corner === 2 ? ao2 : ao3) * 8 + normal;
+    }
+    const offset = base / 4 * 6, reverse = ao0 + ao2 < ao1 + ao3;
+    this.idx[offset] = base + (reverse ? 1 : 0); this.idx[offset + 1] = base + (reverse ? 2 : 1); this.idx[offset + 2] = base + (reverse ? 3 : 2);
+    this.idx[offset + 3] = base + (reverse ? 1 : 0); this.idx[offset + 4] = base + (reverse ? 3 : 2); this.idx[offset + 5] = base + (reverse ? 0 : 3); this.n += 4;
+  },
+  *geometryG() { return yield* AF.GeoBuf.prototype.geometryG.call({ n: this.n, p: this.p.subarray(0, this.n * 3), uv: this.uv.subarray(0, this.n * 2), pal: this.pal.subarray(0, this.n), an: this.an.subarray(0, this.n), idx: this.idx.subarray(0, this.n / 4 * 6) }, true); }
+};
+const directions = [[1, 0, 0], [-1, 0, 1], [0, 1, 4], [0, -1, 5]];
+const inside = (x, z) => x >= W.X0 && x < W.x1 && z >= W.Z0 && z < W.z1;
+const rimCache = new Map();
+let padsSeen = -1;
+function rimSample(x, z) {
+  const key = x * 10000 + z;
+  let height = rimCache.get(key);
+  if (height === undefined) { height = O.rimH ? O.rimH(x, z) : Math.round(O.h(x, z) * 4) / 4; rimCache.set(key, height); }
+  return height;
+}
+function boundaryH(x, z) {
+  const ax = -1484 + Math.floor((x + 1484) / 8) * 8, az = -1196 + Math.floor((z + 1196) / 8) * 8;
+  const ux = (x - ax) / 8, uz = (z - az) / 8;
+  return AF.lerp(AF.lerp(rimSample(ax, az), rimSample(ax + 8, az), ux), AF.lerp(rimSample(ax, az + 8), rimSample(ax + 8, az + 8), ux), uz);
+}
+function cornerH(entry, col, row, across, along, height) {
+  const step = entry.size / 64, ix = col + across, iz = row + along;
+  return ix === 0 || ix === 64 || iz === 0 || iz === 64 ? boundaryH(entry.x + ix * step, entry.z + iz * step) : height;
+}
+function apron(buf, entry, col, row, height, color) {
+  const step = entry.size / 64, xa = entry.x + col * step, za = entry.z + row * step;
+  setP(xa, cornerH(entry, col, row, 0, 0, height), za, xa, cornerH(entry, col, row, 0, 1, height), za + step, xa + step, cornerH(entry, col, row, 1, 1, height), za + step, xa + step, cornerH(entry, col, row, 1, 0, height), za);
+  setUV(xa * 4, za * 4, xa * 4, (za + step) * 4, (xa + step) * 4, (za + step) * 4, (xa + step) * 4, za * 4);
+  buf.quadS(quadP, quadUV, 0, 1, 2, 3, color, 2, 3, 3, 3, 3);
+}
+function wall(buf, xa, za, xb, zb, lowA, lowB, highA, highB, color, normal, soft) {
+  if (highA <= lowA && highB <= lowB) return;
+  setP(xa, Math.min(lowA, highA), za, xb, Math.min(lowB, highB), zb, xb, highB, zb, xa, highA, za);
+  const ua = (normal < 2 ? za : xa) * 4, ub = (normal < 2 ? zb : xb) * 4;
+  setUV(ua, lowA * 4, ub, lowB * 4, ub, highB * 4, ua, highA * 4);
+  const reverse = normal === 0 || normal === 5;
+  buf.quadS(quadP, quadUV, 0, reverse ? 3 : 1, 2, reverse ? 1 : 3, color, normal + (soft ? 32 : 0), 3, 3, 3, 3);
+}
+function emit(buf, xa, za, xb, zb, lo, hi, color, normal, soft = false) {
+  if (normal === 2) {
+    setP(xa, hi, za, xa, hi, zb, xb, hi, zb, xb, hi, za);
+    setUV(xa * 4, za * 4, xa * 4, zb * 4, xb * 4, zb * 4, xb * 4, za * 4);
+    buf.quadS(quadP, quadUV, 0, 1, 2, 3, color, 2, 3, 3, 3, 3); return;
+  }
+  if (hi <= lo) return;
+  if (normal < 2) {
+    setP(xa, lo, za, xa, lo, zb, xa, hi, zb, xa, hi, za);
+    setUV(za * 4, lo * 4, zb * 4, lo * 4, zb * 4, hi * 4, za * 4, hi * 4);
+  } else {
+    setP(xa, lo, za, xb, lo, za, xb, hi, za, xa, hi, za);
+    setUV(xa * 4, lo * 4, xb * 4, lo * 4, xb * 4, hi * 4, xa * 4, hi * 4);
+  }
+  const reverse = normal === 0 || normal === 5;
+  buf.quadS(quadP, quadUV, 0, reverse ? 3 : 1, 2, reverse ? 1 : 3, color, normal + (soft ? 32 : 0), 3, 3, 3, 3);
+}
+// one tile { x, z, size } (64 x 64 cells) into O.terrainBuf; rim = Float32Array(260) edge profile. Returns the vertex count.
+O.meshTileG = function* (entry, rim) {
+  if (O.pads.length !== padsSeen) { padsSeen = O.pads.length; rimCache.clear(); }
+  const step = entry.size / 64, quantum = step <= 1 ? step * 0.5 : step * 0.75, buf = terrainBuf;
+  buf.n = 0; colors.fill(0); used.fill(0);
+  for (let index = 0; index <= 64; index++) {
+    rim[index] = boundaryH(entry.x, entry.z + index * step); rim[65 + index] = boundaryH(entry.x + entry.size, entry.z + index * step);
+    rim[130 + index] = boundaryH(entry.x + index * step, entry.z); rim[195 + index] = boundaryH(entry.x + index * step, entry.z + entry.size);
+    if ((index & 7) === 7) yield;
+  }
+  for (let row = -1; row <= 64; row++) {
+    for (let col = -1; col <= 64; col++) {
+      const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step, offset = (row + 1) * 66 + col + 1;
+      heights[offset] = (O.meshH ? O.meshH(x, z, step) : Math.round(O.h(x, z) / quantum) * quantum) * 4;
+    }
+    yield;
+  }
+  for (let row = 0; row < 64; row++) { for (let col = 0; col < 64; col++) {
+    const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step, offset = (row + 1) * 66 + col + 1;
+    if (!inside(x, z) && heights[offset] > -6) colors[row * 64 + col] = O.colTop(x, z, heights[offset] * 0.25, (Math.abs(heights[offset + 1] - heights[offset - 1]) + Math.abs(heights[offset + 66] - heights[offset - 66])) / (8 * step), step);
+  } yield; }
+  for (let row = 0; row < 64; row++) {
+    const za = entry.z + row * step, zb = za + step;
+    for (let col = 0; col < 64;) {
+      const color = colors[row * 64 + col], offset = (row + 1) * 66 + col + 1, height = heights[offset] * 0.25;
+      if (!color || used[row * 64 + col]) { col++; continue; }
+      if (!row || row === 63 || !col || col === 63) { apron(buf, entry, col, row, height, color); col++; continue; }
+      let run = 1;
+      while (col + run < 63 && !used[row * 64 + col + run] && colors[row * 64 + col + run] === color && heights[offset + run] === heights[offset]) run++;
+      let depth = 1, match = true;
+      while (row + depth < 63 && match) {
+        for (let along = 0; along < run; along++) if (used[(row + depth) * 64 + col + along] || colors[(row + depth) * 64 + col + along] !== color || heights[offset + depth * 66 + along] !== heights[offset]) { match = false; break; }
+        if (match) depth++;
+      }
+      for (let across = 0; across < depth; across++) used.fill(1, (row + across) * 64 + col, (row + across) * 64 + col + run);
+      const xa = entry.x + col * step;
+      emit(buf, xa, za, xa + run * step, za + depth * step, height, height, color, 2);
+      col += run;
+    }
+    for (let col = 0; col < 64; col++) {
+      const color = colors[row * 64 + col]; if (!color) continue;
+      const xa = entry.x + col * step, xb = xa + step, offset = (row + 1) * 66 + col + 1, height = heights[offset] * 0.25;
+      for (const direction of directions) {
+        const dx = direction[0], dz = direction[1], normal = direction[2], nextX = xa + step * (0.5 + dx), nextZ = za + step * (0.5 + dz);
+        const grid = inside(nextX, nextZ), boundary = col + dx < 0 || col + dx >= 64 || row + dz < 0 || row + dz >= 64;
+        const fx = dx > 0 ? xb : xa, fz = dz > 0 ? zb : za;
+        if (grid) {
+          // The city emits no outer faces; both height directions belong to this wall.
+          for (let along = 0; along < step; along += 0.25) {
+            const gx = dx ? fx + dx * 0.125 : xa + along + 0.125, gz = dz ? fz + dz * 0.125 : za + along + 0.125;
+            const gridHeight = W.groundY(gx, gz), n = gridHeight > height ? normal ^ 1 : normal;
+            emit(buf, dx ? fx : xa + along, dz ? fz : za + along, dx ? fx : xa + along + 0.25, dz ? fz : za + along + 0.25, Math.min(height, gridHeight), Math.max(height, gridHeight), color, n);
+          }
+          continue;
+        }
+        if (boundary) continue;
+        const neighbor = heights[offset + dx + dz * 66] * 0.25;
+        if (neighbor < height) {
+          const across = dx > 0 ? 1 : 0, along = dz > 0 ? 1 : 0;
+          const highA = cornerH(entry, col, row, across, along, height), highB = cornerH(entry, col, row, dx ? across : 1, dz ? along : 1, height);
+          const lowA = cornerH(entry, col + dx, row + dz, dx ? 1 - across : 0, dz ? 1 - along : 0, neighbor), lowB = cornerH(entry, col + dx, row + dz, dx ? 1 - across : 1, dz ? 1 - along : 1, neighbor);
+          const gentle = height - neighbor <= step * 2;
+          wall(buf, dx ? fx : xa, dz ? fz : za, dx ? fx : xb, dz ? fz : zb, lowA, lowB, highA, highB, gentle ? color : O.colSide(xa + step / 2, za + step / 2, height), normal, gentle);
+        }
+      }
+    }
+    yield;
+  }
+  return buf.n;
+};
+// worker side: a whole tile as exact-length transferable arrays (the attributes of GeoBuf.geometryG(true)) + bounds as AF.geometryBoundsG
+O.meshTileArrays = (x, z, size) => {
+  const rim = new Float32Array(260), gen = O.meshTileG({ x, z, size }, rim); while (!gen.next().done);
+  const buf = terrainBuf, n = buf.n, p = buf.p.slice(0, n * 3), uv = buf.uv.slice(0, n * 2), ix = buf.idx.subarray(0, n / 4 * 6);
+  for (let i = 0; i < uv.length; i++) uv[i] *= 0.25;
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity, r2 = 0;
+  for (let i = 0; i < p.length; i += 3) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); z0 = Math.min(z0, p[i + 2]); z1 = Math.max(z1, p[i + 2]); }
+  const cx = (x0 + x1) * 0.5, cy = (y0 + y1) * 0.5, cz = (z0 + z1) * 0.5;
+  for (let i = 0; i < p.length; i += 3) r2 = Math.max(r2, (p[i] - cx) ** 2 + (p[i + 1] - cy) ** 2 + (p[i + 2] - cz) ** 2);
+  return { n, p, uv, pal: buf.pal.slice(0, n), an: buf.an.slice(0, n), idx: n > 65535 ? new Uint32Array(ix) : new Uint16Array(ix), box: [x0, y0, z0, x1, y1, z1], sphere: [cx, cy, cz, Math.sqrt(r2)], rim };
+};
+// the generated network + every city-edge height for the workers (structured-clone safe: roads reduced to what the samplers read)
+O.padsExport = () => O.pads.map((pad) => ({ x: pad.x, z: pad.z, rx: pad.rx, rz: pad.rz, y: pad.y, bank: pad.bank, kind: pad.kind, face: pad.face, pave: pad.pave }));
+O.netExport = () => {
+  for (let bx = 0; bx < W.NX; bx++) { const x = W.xOf(bx) + 0.125; edge(x, W.Z0 - 1); edge(x, W.z1 + 1); }
+  for (let bz = 0; bz < W.NZ; bz++) { const z = W.zOf(bz) + 0.125; edge(W.X0 - 1, z); edge(W.x1 + 1, z); }
+  const lite = new Map(), roadOf = (road) => { let v = lite.get(road); if (!v) { v = { kind: road.kind, w: road.w, ring: !!road.ring, driveway: !!road.driveway, order: road.order, ends: road.ends.slice() }; lite.set(road, v); } return v; };
+  const plan = { roads: [] };
+  for (const key in P) if (key !== 'roads') { try { plan[key] = structuredClone(P[key]); } catch (e) { /* functions stay main-thread only */ } }
+  return { plan, segments: segments.map((s) => Object.assign({}, s, { road: roadOf(s.road) })), rivers: riverSegs.slice(), edges: new Map(edges), pads: O.padsExport(), shore: AF.land && AF.land.BEACH ? AF.land.BEACH.shore(W.X0) : 210 };
+};
+O.netImport = (net) => {
+  segments.length = 0; roadGrid.clear(); for (const s of net.segments) { segments.push(s); bucketRoad(s); }
+  riverSegs.length = 0; riverGrid.clear(); for (const s of net.rivers) { riverSegs.push(s); bucketRiver(s); }
+  riverReady = true; edges.clear(); for (const [key, value] of net.edges) edges.set(key, value); O.edgeReady = true;
+  O.setPads(net.pads);
+};
+O.setPads = (pads) => { O.pads.length = 0; for (const pad of pads) O.pads.push(pad); };
+}
+outlandScope(AF);
+AF.outland.scopeFn = outlandScope;
 } catch (e) { AF.partError('07-outland.js', e); }
 
 // ================================================================ 10-terrain.js
@@ -7040,6 +7349,14 @@ try {
       }
       for (const source of group.geometries) source.dispose();
     }
+    // the env map reaches these clones in update(), which only runs near the park: take it (and compile) before play starts
+    AF.on('preloaded', () => {
+      for (const group of groups.values()) {
+        const material = group.mesh.material;
+        if (material.envMap !== group.material.envMap) { material.envMap = group.material.envMap; material.needsUpdate = true; }
+        AF.stream.compileAhead(group.mesh);
+      }
+    });
     const update = () => {
       for (let index = 0; index < entries.length; index++) {
         const entry = entries[index], offset = index * 20;
@@ -7064,7 +7381,7 @@ try {
         }
         group.mesh.count = visible ? 1 : 0; group.mesh.castShadow = shadows && shadow;
         const material = group.mesh.material, source = group.material;
-        if (material.envMap !== source.envMap) { material.envMap = source.envMap; material.needsUpdate = true; }
+        if (material.envMap !== source.envMap) { material.envMap = source.envMap; material.needsUpdate = true; AF.stream.compileAhead(group.mesh); }
         material.envMapIntensity = source.envMapIntensity;
       }
       texture.needsUpdate = true;
@@ -20185,8 +20502,7 @@ AF.onBuild('island-life',666,()=>{
  one('Serena hire staff',fun.hire.x+2,fun.hire.y,fun.hire.z-1,look('stand',Math.PI));
  // jet skis: the rideable four (one per dock) and three riders racing the coast (AI hulls follow their walker seats)
  JS.mesh=new THREE.InstancedMesh(skiGeo(),AF.mat.voxelInst,8);JS.mesh.name='island-jetskis';JS.mesh.count=0;JS.mesh.frustumCulled=false;JS.mesh.castShadow=true;JS.mesh.receiveShadow=true;JS.mesh.customDepthMaterial=AF.mat.depthInst;JS.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);JS.mesh.layers.set(31);AF.scene.add(JS.mesh);
- fun.docks.forEach((d,i)=>{const k={name:'Serena jet ski',x:d.x,z:d.z,yaw:d.yaw,v:0,w:0,roll:0,pitch:0,ph:i*1.7,home:d};JS.skis.push(k);
-  AF.addInteract({x:d.land[0],y:d.y+1,z:d.land[1],r:5,label:'Ride a jet ski',prio:0.3,can:()=>AF.mode==='walk',act:()=>{if(Math.hypot(k.x-d.x,k.z-d.z)>4){k.x=d.x;k.z=d.z;k.yaw=d.yaw;}AF.setMode('jetski',{ski:k});}});});
+ fun.docks.forEach((d,i)=>JS.skis.push(new JetSki(d,i)));
  const lap=[];for(let a=-50;a<=230;a+=3){const r=a*Math.PI/180;let s=1+Math.sin(r*5)*0.04,x=0,z=0;for(let i=0;i<30;i++){x=I.cx+Math.cos(r)*290*s;z=I.cz+Math.sin(r)*190*s;if(O.h(x,z)<-2.4)break;s+=0.03;}lap.push([x,-1.12,z]);}
  JS.riders=AF.walkers.addPath('Serena jet-ski riders',lap,{count:3,speed:16*AF.vehicles.SPEED_K*0.7,mode:'pingpong',activeRadius:420,looks:[look('ride',0),look('ride',0),look('ride',0)]});S.walkers+=3;
 });
@@ -20202,39 +20518,41 @@ AF.onTick('island-jetskis',307,(dt,t)=>{
  const M=JS.mesh;if(!M)return;const cp=AF.camera.position;
  if(!JS.cur&&((cp.x-I.cx)/520)**2+((cp.z-I.cz)/430)**2>1){if(M.count){M.count=0;M.layers.set(31);}return;}
  let n=0;
- for(const k of JS.skis){
-  if(JS.cur!==k&&Math.abs(k.v)>0.05){k.v*=Math.exp(-dt*0.9);const nx=k.x+Math.sin(k.yaw)*k.v*dt,nz=k.z+Math.cos(k.yaw)*k.v*dt;if(wet(nx,nz)){k.x=nx;k.z=nz;}else k.v=0;k.roll*=Math.exp(-dt*2);k.pitch*=Math.exp(-dt*2);}
-  skiAt(n++,k.x,skiY(k,t),k.z,k.yaw,k.pitch,k.roll);
- }
+ for(const k of JS.skis){if(JS.cur!==k)k.drift(dt);skiAt(n++,k.x,skiY(k,t),k.z,k.yaw,k.pitch,k.roll);}
  const R=JS.riders;if(R&&R.active)for(const a of R.actors)skiAt(n++,a.x,SEA-0.1+Math.sin(t*2.6+a.ph)*0.06,a.z,a.yaw,0.08,Math.sin(t*0.9+a.ph)*0.12);
  M.count=n;M.layers.set(n?0:31);M.instanceMatrix.needsUpdate=true;
 });
+// a rideable jet ski (AF.Vehicle): boarded from its dock, or wherever it was left (the prompt follows it, reaching up the beach)
+class JetSki extends AF.Vehicle{
+ constructor(d,i){super({name:'Serena jet ski',x:d.x,z:d.z,yaw:d.yaw});this.y=SEA;this.w=0;this.ph=i*1.7;this.home=d;
+  this.attach({label:'Ride a jet ski',r:5,prio:0.3,can:()=>AF.mode==='walk'&&JS.cur!==this,act:()=>AF.setMode('jetski',{ski:this})});this.sync();}
+ sync(){const it=this.interact,d=this.home;if(Math.hypot(this.x-d.x,this.z-d.z)<4){it.x=d.land[0];it.z=d.land[1];it.y=d.y+1;it.r=5;}else{it.x=this.x;it.z=this.z;it.y=undefined;it.r=11;}}
+ // coasting with nobody aboard
+ drift(dt){if(Math.abs(this.v)<=0.05)return;this.v*=Math.exp(-dt*0.9);const nx=this.x+Math.sin(this.yaw)*this.v*dt,nz=this.z+Math.cos(this.yaw)*this.v*dt;if(wet(nx,nz)){this.x=nx;this.z=nz;}else this.v=0;this.roll*=Math.exp(-dt*2);this.pitch*=Math.exp(-dt*2);this.sync();}
+ step(dt,inp){
+  const vmax=16*AF.vehicles.SPEED_K*(inp.boost?1.3:1),thr=inp.thr,steer=inp.steer;
+  if(thr>0)this.v+=thr*(inp.boost?9:6.5)*Math.max(0,1-Math.max(0,this.v)/vmax)*dt;else if(thr<0)this.v+=thr*(this.v>0?9:2.5)*dt;
+  this.v-=this.v*0.25*dt+(thr?0:Math.sign(this.v)*Math.min(Math.abs(this.v),0.8*dt));this.v=AF.clamp(this.v,-3,vmax);
+  this.w+=(steer-this.w)*Math.min(1,dt*5);this.yaw-=this.w*(0.5+Math.min(1,Math.abs(this.v)/7)*1.1)*dt*(this.v<-0.2?-1:1);
+  const hx=Math.sin(this.yaw),hz=Math.cos(this.yaw),s=this.v<0?-1:1,nx=this.x+hx*this.v*dt,nz=this.z+hz*this.v*dt,Bd=AF.PLAN.world.bounds;
+  JS.bumpT-=dt;
+  if(wet(nx+hx*1.8*s,nz+hz*1.8*s)&&wet(nx,nz)&&nx>Bd.x0+20&&nx<Bd.x1-20&&nz>Bd.z0+20&&nz<Bd.z1-20){this.x=nx;this.z=nz;}
+  else{if(Math.abs(this.v)>4&&JS.bumpT<=0){AF.emit('toast','Bump! Too shallow \u2014 hop off with E or back out.');JS.bumpT=3;}this.v*=-0.3;}
+  this.roll+=(this.w*Math.min(1,Math.abs(this.v)/8)*0.4-this.roll)*Math.min(1,dt*4);this.pitch+=(Math.min(0.14,Math.max(0,this.v)*0.009)-this.pitch)*Math.min(1,dt*3);
+  this.y=skiY(this,AF.clock.t);this.sync();
+ }
+}
+const skiCam=new AF.Vehicle.Chase();
 AF.modes.jetski={
- enter(o={}){const k=o.ski;if(!k){AF.setMode('walk');return;}JS.cur=k;JS.camInit=false;k.v=0;k.w=0;AF.player.setVisible(true);AF.emit('toast',AF.touch?'Push the stick to ride. Tap EXIT beside a beach to hop off.':'Jet ski! W throttle, A/D steer, Shift for a burst, E to hop off beside a beach.');AF.emit('hint',AF.touch?'':'W/S throttle \u00b7 A/D steer \u00b7 Shift burst \u00b7 E hop off at a beach');},
- exit(){JS.cur=null;AF.PL.seat=null;AF.emit('hud',{speed:null});AF.emit('hint','');},
+ enter(o={}){const k=o.ski;if(!k){AF.setMode('walk');return;}JS.cur=k;k.v=0;k.w=0;skiCam.set({dist:6.4,height:1.6,ahead:2,shadow:50,floor:()=>SEA+1.2});AF.player.setVisible(true);AF.emit('toast',AF.touch?'Push the stick to ride. Tap EXIT beside a beach to hop off.':'Jet ski! W throttle, A/D steer, Shift for a burst, E to hop off beside a beach.');AF.emit('hint',AF.touch?'':'W/S throttle \u00b7 A/D steer \u00b7 Shift burst \u00b7 E hop off at a beach');},
+ exit(){const k=JS.cur;JS.cur=null;if(k)k.sync();AF.PL.seat=null;AF.emit('hud',{speed:null});AF.emit('hint','');},
  update(dt){
   const k=JS.cur;if(!k)return;dt=Math.min(dt,0.05);
-  const I=AF.input,St=I.stick,modal=!!(AF.ui&&AF.ui.modalOpen&&AF.ui.modalOpen());
-  const thr=modal?0:AF.clamp((I.key('KeyW')||I.key('ArrowUp')?1:0)-(I.key('KeyS')||I.key('ArrowDown')?1:0)+(St?St.y:0),-1,1);
-  const steer=modal?0:AF.clamp((I.key('KeyD')||I.key('ArrowRight')?1:0)-(I.key('KeyA')||I.key('ArrowLeft')?1:0)+(St?St.x:0),-1,1);
-  const burst=!modal&&(I.key('ShiftLeft')||I.key('ShiftRight')),vmax=16*AF.vehicles.SPEED_K*(burst?1.3:1);
-  if(thr>0)k.v+=thr*(burst?9:6.5)*Math.max(0,1-Math.max(0,k.v)/vmax)*dt;else if(thr<0)k.v+=thr*(k.v>0?9:2.5)*dt;
-  k.v-=k.v*0.25*dt+(thr?0:Math.sign(k.v)*Math.min(Math.abs(k.v),0.8*dt));k.v=AF.clamp(k.v,-3,vmax);
-  k.w+=(steer-k.w)*Math.min(1,dt*5);k.yaw-=k.w*(0.5+Math.min(1,Math.abs(k.v)/7)*1.1)*dt*(k.v<-0.2?-1:1);
-  const hx=Math.sin(k.yaw),hz=Math.cos(k.yaw),s=k.v<0?-1:1,nx=k.x+hx*k.v*dt,nz=k.z+hz*k.v*dt,Bd=AF.PLAN.world.bounds;
-  JS.bumpT-=dt;
-  if(wet(nx+hx*1.8*s,nz+hz*1.8*s)&&wet(nx,nz)&&nx>Bd.x0+20&&nx<Bd.x1-20&&nz>Bd.z0+20&&nz<Bd.z1-20){k.x=nx;k.z=nz;}
-  else{if(Math.abs(k.v)>4&&JS.bumpT<=0){AF.emit('toast','Bump! Too shallow \u2014 hop off with E or back out.');JS.bumpT=3;}k.v*=-0.3;}
-  k.roll+=(k.w*Math.min(1,Math.abs(k.v)/8)*0.4-k.roll)*Math.min(1,dt*4);k.pitch+=(Math.min(0.14,Math.max(0,k.v)*0.009)-k.pitch)*Math.min(1,dt*3);
-  const y=skiY(k,AF.clock.t),seat=JS.seat;seat.x=k.x-hx*0.15;seat.y=y-0.05;seat.z=k.z-hz*0.15;seat.yaw=k.yaw;seat.roll=k.roll;seat.pitch=-k.pitch;AF.PL.seat=seat;
-  JS.want.set(k.x-hx*6.4,SEA+2.6,k.z-hz*6.4);if(!JS.camInit){JS.cam.copy(JS.want);JS.camInit=true;}else JS.cam.lerp(JS.want,1-Math.exp(-dt*4));
-  const c=AF.camera;c.position.copy(JS.cam);JS.look.set(k.x+hx*2,y+1,k.z+hz*2);c.up.set(0,1,0);c.lookAt(JS.look);AF.camTarget.copy(JS.look);AF.shadowFocus.set(k.x,0,k.z);AF.shadowRadius=50;
-  AF.emit('hud',{mode:'drive',speed:Math.abs(k.v)*2.237,car:k.name+(burst?' \u00b7 burst':'')+' \u00b7 E hop off at a beach'});
-  if(!modal&&(I.hit('KeyE')||I.hit('KeyF'))){
-   let best=null;
-   for(let a=0;a<16;a++)for(const r of [2,3.5,5,6.5,8,10]){const x=k.x+Math.sin(a/16*Math.PI*2)*r,z=k.z+Math.cos(a/16*Math.PI*2)*r,gy=AF.surfaceBelow(x,z,8,12);if(Number.isFinite(gy)&&gy>SEA+0.35&&!AF.boxBlocked(x,gy+0.3,z,0.3,1.5)&&(!best||r<best.r))best={x,y:gy,z,r};}
-   if(best){k.v=0;AF.setMode('walk',{x:best.x,y:best.y,z:best.z,yaw:k.yaw});}else AF.emit('toast','Ride up to a beach or a jetty to hop off.');
-  }
+  const inp=AF.Vehicle.input();k.step(dt,inp);
+  const hx=Math.sin(k.yaw),hz=Math.cos(k.yaw),seat=JS.seat;seat.x=k.x-hx*0.15;seat.y=k.y-0.05;seat.z=k.z-hz*0.15;seat.yaw=k.yaw;seat.roll=k.roll;seat.pitch=-k.pitch;AF.PL.seat=seat;
+  skiCam.update(dt,k.x,k.y,k.z,k.yaw);
+  AF.Vehicle.hud(k.v,k.name,(inp.boost?' \u00b7 burst':'')+' \u00b7 E hop off at a beach');
+  if(inp.exit){const spot=AF.Vehicle.landing(k.x,k.z,SEA+0.35);if(spot){k.v=0;AF.setMode('walk',{x:spot.x,y:spot.y,z:spot.z,yaw:k.yaw});}else AF.emit('toast','Ride up to a beach or a jetty to hop off.');}
  }
 };
 function dockY(dock){const point=dock?route.islandPier:route.cityPier;return AF.surfaceBelow(point[0],point[1],4,8);}
@@ -20286,7 +20604,7 @@ AF.test('island: party, bonfire, volleyball and jet-ski hire are furnished and l
 AF.test('island: jet ski rides on open water, bumps off the shallows, hops off at a beach',()=>{
  const k=JS.skis[0];if(!k)return{ok:false,info:'no jet skis'};
  const I=AF.input,saved={mode:AF.mode,x:AF.player.x,y:AF.player.y,z:AF.player.z,yaw:AF.player.yaw},home={x:k.x,z:k.z,yaw:k.yaw},cam=AF.camera.position.clone(),modal=AF.ui&&AF.ui.modalOpen;
- let wetAll=true,moved=0,stopped=false,landed=false;
+ let wetAll=true,moved=0,stopped=false,landed=false,reboard=false;
  try{
   if(AF.ui)AF.ui.modalOpen=()=>false;
   AF.setMode('jetski',{ski:k});k.yaw=0;
@@ -20294,8 +20612,10 @@ AF.test('island: jet ski rides on open water, bumps off the shallows, hops off a
   k.yaw=Math.PI;for(let f=0;f<900&&!stopped;f++){const before=k.z;AF.modes.jetski.update(1/30);if(!wet(k.x,k.z))wetAll=false;if(f>30&&Math.abs(k.z-before)<0.01)stopped=true;}
   I.down.clear();for(let f=0;f<60;f++)AF.modes.jetski.update(1/30);
   I.pressed.add('KeyE');AF.modes.jetski.update(1/30);I.pressed.clear();landed=AF.mode==='walk'&&AF.player.y>SEA+0.3;
- }finally{if(AF.ui)AF.ui.modalOpen=modal;I.down.clear();I.pressed.clear();k.x=home.x;k.z=home.z;k.yaw=home.yaw;k.v=0;AF.setMode(saved.mode==='walk'?'walk':'aerial',saved);AF.camera.position.copy(cam);}
- return{ok:wetAll&&moved>20&&stopped&&landed,info:'moved '+moved.toFixed(0)+' m, stayed wet '+wetAll+', stopped at the shallows '+stopped+', hopped off '+landed};
+  // the ski stays where it was left and its prompt follows it: board it again from the beach
+  const it=k.interact;reboard=landed&&Math.hypot(it.x-AF.player.x,it.z-AF.player.z)<=it.r&&it.can();if(reboard){it.act();reboard=AF.mode==='jetski'&&JS.cur===k;}
+ }finally{if(AF.ui)AF.ui.modalOpen=modal;I.down.clear();I.pressed.clear();k.x=home.x;k.z=home.z;k.yaw=home.yaw;k.v=0;AF.setMode(saved.mode==='walk'?'walk':'aerial',saved);k.sync();AF.camera.position.copy(cam);}
+ return{ok:wetAll&&moved>20&&stopped&&landed&&reboard,info:'moved '+moved.toFixed(0)+' m, stayed wet '+wetAll+', stopped at the shallows '+stopped+', hopped off '+landed+', boarded again '+reboard};
 });
 AF.test('island: Cub runway is flat and clear for takeoff',()=>{const strip=I.airstrip;let lo=Infinity,hi=-Infinity,hits=0;for(let x=strip.x0+3;x<=strip.x1-3;x+=2)for(const dz of [-8,0,8]){const y=AF.W.groundY(x,strip.z+dz);lo=Math.min(lo,y);hi=Math.max(hi,y);if(AF.boxBlocked(x,y+0.1,strip.z+dz,1,2))hits++;}return{ok:strip.x1-strip.x0>=300&&hi-lo<=0.25&&!hits,info:(strip.x1-strip.x0)+' m, elevation '+lo+'..'+hi+', obstructions '+hits};});
 AF.test('island: island walkers stay on clear surfaces',()=>{const hits=[];for(const path of S.paths)for(const point of path.points)if(AF.boxBlocked(point[0],point[1]+0.1,point[2],0.18,1.4)&&hits.length<8)hits.push({path:path.name,point});return{ok:!hits.length&&S.walkers<=120,info:JSON.stringify(hits)};});
@@ -22157,6 +22477,12 @@ try {
     dryTarget(an); an.state = id === 'penguin' ? 'waddle' : 'wander';
     an.next = id === 'giraffe' || id === 'zebra' || id === 'antelope' || id === 'deer' || id === 'stag' || id === 'rhino' || id === 'hippo' || id === 'elephant' || id === 'flamingo' ? 'graze' : 'rest'; an.timer = 25;
   };
+  // the dithered LOD fade material's two variants (far: receive only; parts: cast + receive) compile before the first swap
+  AF.on('preloaded', () => {
+    const sp = Object.values(Z.species)[0]; if (!sp) return;
+    const part = sp.meshes.find((m) => m !== sp.far), mat = zooFadeMaterial();
+    for (const mesh of [sp.far, part]) { if (!mesh) continue; const was = mesh.material; mesh.material = mat; AF.stream.compileAhead(mesh); mesh.material = was; }
+  });
   AF.onBuild('zoo-animals', 640, () => {
     const R = AF.rng(2026);
     for (const H of HAB) for (const [id, n] of H.animals) {
@@ -22470,6 +22796,22 @@ try {
     paint(ax0, az1, ax1, A.taxiZ - 6, (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1]);
     for (let x = -580; x <= -380; x += 40) paint(x - 0.25, az0 + 6, x + 0.25, az1, () => yellow);   // stand lines
     for (const x of [-450, -360]) { paint(x - 0.25, 84, x + 0.25, 118, () => yellow); paint(x - 3, 92, x + 3, 92.5, () => yellow); }
+    // ---- R2 (departures, 09R) south of R1, the west crossing taxiway to it, the taxiway's east / west extensions and remote stand 3
+    const R2 = A.runway2, sz0 = R2.z - R2.w / 2, sz1 = R2.z + R2.w / 2, tarmac = (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1];
+    paint(R2.x0, sz0, R2.x1, sz1, tarmac);
+    paint(R2.x0 + 30, R2.z - 0.5, R2.x1 - 30, R2.z + 0.5, (x) => ((Math.floor(x / 6) & 1) ? white : null));
+    paint(R2.x0, sz0 + 0.5, R2.x1, sz0 + 1, () => white); paint(R2.x0, sz1 - 1, R2.x1, sz1 - 0.5, () => white);
+    for (const [ex, dir] of [[R2.x0 + 3, 1], [R2.x1 - 3, -1]]) for (let k = -3; k < 3; k++) { const zz = R2.z + k * 2.6 + 0.4; paint(Math.min(ex, ex + dir * 10), zz, Math.max(ex, ex + dir * 10), zz + 1.6, () => white); }
+    paint(A.westX - 6, A.taxiZ - 6, -612, A.taxiZ + 6, tarmac);                                   // taxiway west extension
+    paint(A.westX - 6, A.taxiZ, A.westX + 6, rz0, tarmac); paint(A.westX - 6, rz1, A.westX + 6, sz0, tarmac);   // west crossing: taxiway -> R1 -> R2
+    paint(A.westX - 0.25, A.taxiZ, A.westX + 0.25, sz0 + 1, (x, z) => (z < rz0 || z > rz1) ? yellow : null);
+    for (const z of [rz0 - 3, rz1 + 2.5]) for (let x = A.westX - 6; x < A.westX + 6; x += 1.5) paint(x, z, x + 1, z + 0.5, () => yellow);   // hold-short bars
+    paint(-338, A.taxiZ - 6, -316, A.taxiZ + 6, tarmac);                                           // taxiway east extension to stand 3
+    paint(-345, 72, -312, 112, (x, z) => conc[((Math.floor(x / 5) + Math.floor(z / 5)) & 1)]); paint(-345, 112, -312, A.taxiZ - 6, tarmac);
+    paint(-325.25, 84, -324.75, A.taxiZ, () => yellow); paint(-328, 92, -322, 92.5, () => yellow);
+    const edgeW = glow(0xfff2c0, 2.6, 'night'), edgeG = glow(0x40ff80, 2.6, 'night'), edgeR = glow(0xff4030, 2.6, 'night'), edgeB = glow(0x4a8aff, 2.2, 'night');
+    for (let x = R2.x0; x <= R2.x1; x += 12) for (const z of [sz0 - 0.5, sz1 + 0.25]) W.fill(x, 0.25, z, x + 0.25, 0.5, z + 0.25, x < R2.x0 + 2 ? edgeG : x > R2.x1 - 2 ? edgeR : edgeW);
+    for (let z = A.taxiZ + 8; z < sz0; z += 10) if (z < rz0 - 1 || z > rz1 + 1) for (const x of [A.westX - 6.25, A.westX + 6]) W.fill(x, 0.25, z, x + 0.25, 0.5, z + 0.25, edgeB);
     // car park + forecourt off Airfield Road
     paint(-520, 12, -420, 42, (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1]);
     for (let x = -516; x < -424; x += 3) { paint(x, 14, x + 0.2, 20, () => white); paint(x, 34, x + 0.2, 40, () => white); }
@@ -22735,6 +23077,8 @@ try {
     const bays=A.parking.bays.map((point,index)=>({point,key:AF.hash2(index,471)})).sort((first,second)=>first.key-second.key);
     for(let index=0;index<count;index++){const [x,z]=bays[index].point;A.parking.cars.push(AF.vehicles.placeParked(null,x,z,z===17?0:PI,{seed:470+index}));}
     for(const x of [-523,-513,-503])A.parking.taxis.push(AF.vehicles.placeParked('taxi',x,41,PI/2,{noDrive:true}));
+    // the ramp's parked ground support row in front of the hangars (merged static props: no draws of their own)
+    A.parking.gse=[['firetruck',-622],['followme',-604],['fuel',-596],['baggage',-588],['baggage',-582],['catering',-574]].map(([type,x])=>AF.vehicles.placeParked(type,x,104,PI/2,{noDrive:true}));
   });
   AF.onBuild('airfield-life',660,()=>{
     const VV=AF.vehicles;
@@ -23198,58 +23542,8 @@ const roots = [], nodes = [], queue = [], empty = [];
 const R = O.renderer = { bootMs: 0, maxStepMs: 0, workMs: 0, maxNodes: 320, maxBytes: 80 * 1048576, bytes: 0, builds: 0, disposed: 0, active: 0 };
 let current = null, generator = null, stamp = 0, scanT = 0;
 const ahead = AF.stream.ahead;
-const quadP = new Float64Array(12), quadUV = new Float64Array(8);
-const setP = (a, b, c, d, e, f, g, h, i, j, k, l) => { const q = quadP; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; q[8] = i; q[9] = j; q[10] = k; q[11] = l; };
-const setUV = (a, b, c, d, e, f, g, h) => { const q = quadUV; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; };
-const heights = new Int16Array(66 * 66), colors = new Uint16Array(64 * 64), used = new Uint8Array(64 * 64);
-const terrainBuf = { n: 0, p: new Float32Array(262144 * 3), uv: new Float32Array(262144 * 2), pal: new Uint16Array(262144), an: new Uint8Array(262144), idx: new Uint32Array(393216),
-  quadS(points, tex, first, second, third, fourth, color, normal, ao0, ao1, ao2, ao3) {
-    const base = this.n; if (base + 4 > this.pal.length) throw new Error('outland mesh scratch capacity');
-    for (let corner = 0; corner < 4; corner++) {
-      const source = corner === 0 ? first : corner === 1 ? second : corner === 2 ? third : fourth, vertex = base + corner;
-      for (let axis = 0; axis < 3; axis++) this.p[vertex * 3 + axis] = points[source * 3 + axis];
-      this.uv[vertex * 2] = tex[source * 2]; this.uv[vertex * 2 + 1] = tex[source * 2 + 1]; this.pal[vertex] = color;
-      this.an[vertex] = (corner === 0 ? ao0 : corner === 1 ? ao1 : corner === 2 ? ao2 : ao3) * 8 + normal;
-    }
-    const offset = base / 4 * 6, reverse = ao0 + ao2 < ao1 + ao3;
-    this.idx[offset] = base + (reverse ? 1 : 0); this.idx[offset + 1] = base + (reverse ? 2 : 1); this.idx[offset + 2] = base + (reverse ? 3 : 2);
-    this.idx[offset + 3] = base + (reverse ? 1 : 0); this.idx[offset + 4] = base + (reverse ? 3 : 2); this.idx[offset + 5] = base + (reverse ? 0 : 3); this.n += 4;
-  },
-  *geometryG() { return yield* AF.GeoBuf.prototype.geometryG.call({ n: this.n, p: this.p.subarray(0, this.n * 3), uv: this.uv.subarray(0, this.n * 2), pal: this.pal.subarray(0, this.n), an: this.an.subarray(0, this.n), idx: this.idx.subarray(0, this.n / 4 * 6) }, true); }
-};
+const terrainBuf = O.terrainBuf;
 R.scratchBytes = terrainBuf.p.byteLength + terrainBuf.uv.byteLength + terrainBuf.pal.byteLength + terrainBuf.an.byteLength + terrainBuf.idx.byteLength;
-const directions = [[1, 0, 0], [-1, 0, 1], [0, 1, 4], [0, -1, 5]];
-const inside = (x, z) => x >= W.X0 && x < W.x1 && z >= W.Z0 && z < W.z1;
-const rimCache = new Map();
-function rimSample(x, z) {
-  const key = x * 10000 + z;
-  let height = rimCache.get(key);
-  if (height === undefined) { height = O.rimH ? O.rimH(x, z) : Math.round(O.h(x, z) * 4) / 4; rimCache.set(key, height); }
-  return height;
-}
-function boundaryH(x, z) {
-  const ax = -1484 + Math.floor((x + 1484) / 8) * 8, az = -1196 + Math.floor((z + 1196) / 8) * 8;
-  const ux = (x - ax) / 8, uz = (z - az) / 8;
-  return AF.lerp(AF.lerp(rimSample(ax, az), rimSample(ax + 8, az), ux), AF.lerp(rimSample(ax, az + 8), rimSample(ax + 8, az + 8), ux), uz);
-}
-function cornerH(entry, col, row, across, along, height) {
-  const step = entry.size / 64, ix = col + across, iz = row + along;
-  return ix === 0 || ix === 64 || iz === 0 || iz === 64 ? boundaryH(entry.x + ix * step, entry.z + iz * step) : height;
-}
-function apron(buf, entry, col, row, height, color) {
-  const step = entry.size / 64, xa = entry.x + col * step, za = entry.z + row * step;
-  setP(xa, cornerH(entry, col, row, 0, 0, height), za, xa, cornerH(entry, col, row, 0, 1, height), za + step, xa + step, cornerH(entry, col, row, 1, 1, height), za + step, xa + step, cornerH(entry, col, row, 1, 0, height), za);
-  setUV(xa * 4, za * 4, xa * 4, (za + step) * 4, (xa + step) * 4, (za + step) * 4, (xa + step) * 4, za * 4);
-  buf.quadS(quadP, quadUV, 0, 1, 2, 3, color, 2, 3, 3, 3, 3);
-}
-function wall(buf, xa, za, xb, zb, lowA, lowB, highA, highB, color, normal, soft) {
-  if (highA <= lowA && highB <= lowB) return;
-  setP(xa, Math.min(lowA, highA), za, xb, Math.min(lowB, highB), zb, xb, highB, zb, xa, highA, za);
-  const ua = (normal < 2 ? za : xa) * 4, ub = (normal < 2 ? zb : xb) * 4;
-  setUV(ua, lowA * 4, ub, lowB * 4, ub, highB * 4, ua, highA * 4);
-  const reverse = normal === 0 || normal === 5;
-  buf.quadS(quadP, quadUV, 0, reverse ? 3 : 1, 2, reverse ? 1 : 3, color, normal + (soft ? 32 : 0), 3, 3, 3, 3);
-}
 function node(x, z, level, parent) {
   const size = 32 * 2 ** level;
   const entry = { x, z, level, size, parent, children: null, meshes: [], ins: [], outs: [], rim: new Float32Array(260), ready: false, split: false, busy: false, fadeE: null, used: stamp, bytes: 0, queued: false, dirty: false };
@@ -23259,90 +23553,25 @@ function node(x, z, level, parent) {
 function distance(entry, x, y, z) {
   return Math.hypot(Math.max(entry.x - x, 0, x - entry.x - entry.size), Math.max(entry.z - z, 0, z - entry.z - entry.size), Math.max(0, y - O.h(AF.clamp(x, entry.x, entry.x + entry.size), AF.clamp(z, entry.z, entry.z + entry.size)) - 25) * 0.65);
 }
-function emit(buf, xa, za, xb, zb, lo, hi, color, normal, soft = false) {
-  if (normal === 2) {
-    setP(xa, hi, za, xa, hi, zb, xb, hi, zb, xb, hi, za);
-    setUV(xa * 4, za * 4, xa * 4, zb * 4, xb * 4, zb * 4, xb * 4, za * 4);
-    buf.quadS(quadP, quadUV, 0, 1, 2, 3, color, 2, 3, 3, 3, 3); return;
-  }
-  if (hi <= lo) return;
-  if (normal < 2) {
-    setP(xa, lo, za, xa, lo, zb, xa, hi, zb, xa, hi, za);
-    setUV(za * 4, lo * 4, zb * 4, lo * 4, zb * 4, hi * 4, za * 4, hi * 4);
-  } else {
-    setP(xa, lo, za, xb, lo, za, xb, hi, za, xa, hi, za);
-    setUV(xa * 4, lo * 4, xb * 4, lo * 4, xb * 4, hi * 4, xa * 4, hi * 4);
-  }
-  const reverse = normal === 0 || normal === 5;
-  buf.quadS(quadP, quadUV, 0, reverse ? 3 : 1, 2, reverse ? 1 : 3, color, normal + (soft ? 32 : 0), 3, 3, 3, 3);
+// a worker result (07-outland O.meshTileArrays, transferred buffers) as geometry: no copies, bounds precomputed
+function geometryFrom(pre) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pre.p, 3));
+  geo.setAttribute('aBU', new THREE.BufferAttribute(pre.uv, 2));
+  geo.setAttribute('aPal', new THREE.BufferAttribute(pre.pal, 1));
+  geo.setAttribute('aAN', new THREE.BufferAttribute(pre.an, 1));
+  geo.setIndex(new THREE.BufferAttribute(pre.idx, 1));
+  const b = pre.box, s = pre.sphere;
+  geo.boundingBox = new THREE.Box3(new THREE.Vector3(b[0], b[1], b[2]), new THREE.Vector3(b[3], b[4], b[5]));
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(s[0], s[1], s[2]), s[3]);
+  return geo;
 }
 function* build(entry) {
-  const step = entry.size / 64, quantum = step <= 1 ? step * 0.5 : step * 0.75, buf = terrainBuf, revision = entry.propRevision ?? 0;
-  buf.n = 0; colors.fill(0); used.fill(0);
-  for (let index = 0; index <= 64; index++) {
-    entry.rim[index] = boundaryH(entry.x, entry.z + index * step); entry.rim[65 + index] = boundaryH(entry.x + entry.size, entry.z + index * step);
-    entry.rim[130 + index] = boundaryH(entry.x + index * step, entry.z); entry.rim[195 + index] = boundaryH(entry.x + index * step, entry.z + entry.size);
-    if ((index & 7) === 7) yield;
-  }
-  for (let row = -1; row <= 64; row++) {
-    for (let col = -1; col <= 64; col++) {
-      const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step, offset = (row + 1) * 66 + col + 1;
-      heights[offset] = (O.meshH ? O.meshH(x, z, step) : Math.round(O.h(x, z) / quantum) * quantum) * 4;
-    }
-    yield;
-  }
-  for (let row = 0; row < 64; row++) { for (let col = 0; col < 64; col++) {
-    const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step, offset = (row + 1) * 66 + col + 1;
-    if (!inside(x, z) && heights[offset] > -6) colors[row * 64 + col] = O.colTop(x, z, heights[offset] * 0.25, (Math.abs(heights[offset + 1] - heights[offset - 1]) + Math.abs(heights[offset + 66] - heights[offset - 66])) / (8 * step), step);
-  } yield; }
-  for (let row = 0; row < 64; row++) {
-    const za = entry.z + row * step, zb = za + step;
-    for (let col = 0; col < 64;) {
-      const color = colors[row * 64 + col], offset = (row + 1) * 66 + col + 1, height = heights[offset] * 0.25;
-      if (!color || used[row * 64 + col]) { col++; continue; }
-      if (!row || row === 63 || !col || col === 63) { apron(buf, entry, col, row, height, color); col++; continue; }
-      let run = 1;
-      while (col + run < 63 && !used[row * 64 + col + run] && colors[row * 64 + col + run] === color && heights[offset + run] === heights[offset]) run++;
-      let depth = 1, match = true;
-      while (row + depth < 63 && match) {
-        for (let along = 0; along < run; along++) if (used[(row + depth) * 64 + col + along] || colors[(row + depth) * 64 + col + along] !== color || heights[offset + depth * 66 + along] !== heights[offset]) { match = false; break; }
-        if (match) depth++;
-      }
-      for (let across = 0; across < depth; across++) used.fill(1, (row + across) * 64 + col, (row + across) * 64 + col + run);
-      const xa = entry.x + col * step;
-      emit(buf, xa, za, xa + run * step, za + depth * step, height, height, color, 2);
-      col += run;
-    }
-    for (let col = 0; col < 64; col++) {
-      const color = colors[row * 64 + col]; if (!color) continue;
-      const xa = entry.x + col * step, xb = xa + step, offset = (row + 1) * 66 + col + 1, height = heights[offset] * 0.25;
-      for (const direction of directions) {
-        const dx = direction[0], dz = direction[1], normal = direction[2], nextX = xa + step * (0.5 + dx), nextZ = za + step * (0.5 + dz);
-        const grid = inside(nextX, nextZ), boundary = col + dx < 0 || col + dx >= 64 || row + dz < 0 || row + dz >= 64;
-        const fx = dx > 0 ? xb : xa, fz = dz > 0 ? zb : za;
-        if (grid) {
-          // The city emits no outer faces; both height directions belong to this wall.
-          for (let along = 0; along < step; along += 0.25) {
-            const gx = dx ? fx + dx * 0.125 : xa + along + 0.125, gz = dz ? fz + dz * 0.125 : za + along + 0.125;
-            const gridHeight = W.groundY(gx, gz), n = gridHeight > height ? normal ^ 1 : normal;
-            emit(buf, dx ? fx : xa + along, dz ? fz : za + along, dx ? fx : xa + along + 0.25, dz ? fz : za + along + 0.25, Math.min(height, gridHeight), Math.max(height, gridHeight), color, n);
-          }
-          continue;
-        }
-        if (boundary) continue;
-        const neighbor = heights[offset + dx + dz * 66] * 0.25;
-        if (neighbor < height) {
-          const across = dx > 0 ? 1 : 0, along = dz > 0 ? 1 : 0;
-          const highA = cornerH(entry, col, row, across, along, height), highB = cornerH(entry, col, row, dx ? across : 1, dz ? along : 1, height);
-          const lowA = cornerH(entry, col + dx, row + dz, dx ? 1 - across : 0, dz ? 1 - along : 0, neighbor), lowB = cornerH(entry, col + dx, row + dz, dx ? 1 - across : 1, dz ? 1 - along : 1, neighbor);
-          const gentle = height - neighbor <= step * 2;
-          wall(buf, dx ? fx : xa, dz ? fz : za, dx ? fx : xb, dz ? fz : zb, lowA, lowB, highA, highB, gentle ? color : O.colSide(xa + step / 2, za + step / 2, height), normal, gentle);
-        }
-      }
-    }
-    yield;
-  }
-  let geo = buf.n ? yield* buf.geometryG(true) : null;
+  const revision = entry.propRevision ?? 0, pre = entry.pre;
+  entry.pre = null;
+  let geo;
+  if (pre) { R.workerBuilt++; entry.rim.set(pre.rim); geo = pre.n ? geometryFrom(pre) : null; }
+  else { const n = yield* O.meshTileG(entry, entry.rim); geo = n ? yield* terrainBuf.geometryG(true) : null; }
   yield;
   if (O.props.length) {
     const props = [];
@@ -23393,7 +23622,7 @@ function wants(entry, cp, split, reach = 1) {
   if (entry.level <= 0) return false;
   const horizon = entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > 800;
   if (horizon) return false;
-  const threshold = entry.level === 1 ? 40 * AF.LOD.view : entry.size * AF.LOD.outland;
+  const threshold = entry.level === 1 ? 100 * AF.LOD.view : entry.size * AF.LOD.outland;
   return Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, ahead.x, cp.y, ahead.z) + 24) < threshold * (split ? 1.25 : 1) * reach;
 }
 // load ahead of display: every tile the view will split into within AF.LOD.prefetch x its split distance is built (all levels at
@@ -23449,20 +23678,101 @@ function dispose(entry) {
   R.bytes -= entry.bytes; entry.bytes = 0; entry.meshes.length = 0; entry.ready = false; entry.split = false; R.disposed++;
   return true;
 }
+// ---------------------------------------------------------------- scheduling (one prioritised queue, worker meshing, stale jobs dropped)
+// The queue is re-ranked every scan (10 Hz): distance to the camera or the look-ahead, tiles behind the camera later. Tiles the view no
+// longer needs (their parent stopped wanting a split within the prefetch radius) leave the queue, in-flight worker jobs for them are
+// ignored on return and a half-built main-thread tile is abandoned (nothing is attached before its last step), so driving past an area
+// never leaves a backlog. Meshing runs on Web Workers (07-outland's scope, same height function) for tiles clear of the city grid; the
+// main thread only wraps the transferred arrays (+ merges outland props) — tiles touching the city grid still mesh here in slices.
+const inside = (x, z) => x >= W.X0 && x < W.x1 && z >= W.Z0 && z < W.z1;
+const gridFree = (e) => e.x + e.size + 24 <= W.X0 || e.x - 24 >= W.x1 || e.z + e.size + 24 <= W.Z0 || e.z - 24 >= W.z1;
+const WK = O.worker = { list: [], jobs: new Map(), next: 1, on: false, tried: false, padsN: -1, stats: { workers: 0, sent: 0, done: 0, dropped: 0, failed: 0, ms: 0 } };
+R.dropped = 0; R.aborted = 0; R.workerBuilt = 0; R.sync = false;
+const fwd = new THREE.Vector3();
+function score(entry, cp) {
+  const d = Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, ahead.x, cp.y, ahead.z) + 24) + (entry.parent && !entry.parent.split ? 0 : -16);
+  const cx = entry.x + entry.size / 2 - cp.x, cz = entry.z + entry.size / 2 - cp.z, l = Math.hypot(cx, cz);
+  if (l < entry.size) return d;
+  const dot = (cx * fwd.x + cz * fwd.z) / l;
+  return dot < 0 ? d - dot * Math.min(d, 240) * 0.6 : d;
+}
+// still wanted: shown or about to be (parent split), a rebuild of a resident tile, or inside its parent's prefetch radius
+const needed = (entry, cp) => !entry.parent || entry.parent.split || entry.meshes.length > 0 || wants(entry.parent, cp, false, AF.LOD.prefetch * 1.15);
+const mainTakes = (e) => R.sync || !WK.on || !!e.pre || !!e.noWorker || !gridFree(e);
+const workerSource = () => `'use strict';
+const AF = { WORKER: true, clamp: ${AF.clamp}, lerp: ${AF.lerp}, smooth: ${AF.smooth}, hash2: ${AF.hash2}, noise2: ${AF.noise2}, onBuild() {}, test() {}, addLabel() {}, addLight() {}, PAL: { hex: [] } };
+let pal = null, palK = 0;
+AF.col = (v) => typeof v === 'string' ? 0 : pal[palK++];
+const outlandScope = ${O.scopeFn.toString()};
+onmessage = (e) => {
+  const m = e.data;
+  if (m.type === 'job') {
+    const t0 = performance.now();
+    try { const r = AF.outland.meshTileArrays(m.x, m.z, m.size); r.type = 'done'; r.id = m.id; r.ms = performance.now() - t0; postMessage(r, [r.p.buffer, r.uv.buffer, r.pal.buffer, r.an.buffer, r.idx.buffer, r.rim.buffer]); }
+    catch (err) { postMessage({ type: 'fail', id: m.id, err: String(err && err.message || err) }); }
+  } else if (m.type === 'pads') AF.outland.setPads(m.pads);
+  else if (m.type === 'init') {
+    pal = m.pal; const g = m.W, VS = g.VS, X0 = g.X0, Z0 = g.Z0, NX = g.NX, NZ = g.NZ, inv = 1 / VS;
+    AF.W = { VS, X0, Z0, NX, NZ, x1: X0 + NX * VS, z1: Z0 + NZ * VS, H: null, bx: (x) => Math.floor((x - X0) * inv), bz: (z) => Math.floor((z - Z0) * inv), xOf: (bx) => X0 + bx * VS, zOf: (bz) => Z0 + bz * VS,
+      col(x, z) { const bx = this.bx(x), bz = this.bz(z); if (bx < 0 || bz < 0 || bx >= NX || bz >= NZ) return -1; throw new Error('city grid sampled'); }, groundY() { throw new Error('city grid sampled'); } };
+    AF.PLAN = { world: m.net.plan, river: { headY: m.headY, x: () => 0 } };
+    AF.land = { BEACH: { shore: () => m.net.shore } };
+    outlandScope(AF); AF.outland.netImport(m.net);
+  }
+};`;
+function onResult(e) {
+  const m = e.data, job = WK.jobs.get(m.id); if (!job) return;
+  WK.jobs.delete(m.id); job.worker.busy--;
+  const entry = job.entry;
+  if (m.type === 'fail') { WK.stats.failed++; if (entry.job === m.id) entry.job = 0; entry.noWorker = true; AF.warnOnce('outland worker job', m.err); return; }
+  WK.stats.done++; WK.stats.ms += m.ms;
+  if (entry.job !== m.id || job.padsN !== WK.padsN || !entry.queued) { WK.stats.dropped++; if (entry.job === m.id) entry.job = 0; return; }
+  entry.job = 0; entry.pre = m;
+  dispatch();   // keep the worker fed between frames
+}
+function startWorkers() {
+  WK.tried = true;
+  if (typeof Worker === 'undefined' || AF.Q.has('noworker')) return;
+  try {
+    const net = O.netExport(), url = URL.createObjectURL(new Blob([workerSource()], { type: 'text/javascript' }));
+    const n = Math.max(1, Math.min(AF.MOBILE ? 2 : 3, (navigator.hardwareConcurrency || 4) - 1));
+    const init = { type: 'init', net, pal: Array.from(O.pal), headY: AF.PLAN.river.headY, W: { VS: W.VS, X0: W.X0, Z0: W.Z0, NX: W.NX, NZ: W.NZ } };
+    for (let index = 0; index < n; index++) {
+      const worker = new Worker(url); worker.busy = 0; worker.onmessage = onResult;
+      worker.onerror = (err) => { AF.warnOnce('outland worker failed: meshing on the main thread', err.message || err); WK.on = false; };
+      worker.postMessage(init); WK.list.push(worker);
+    }
+    WK.padsN = O.pads.length; WK.on = true; WK.stats.workers = n;
+  } catch (err) { AF.warnOnce('outland workers unavailable', err); WK.on = false; }
+}
+function dispatch() {
+  if (!WK.on || R.sync) return;
+  if (O.pads.length !== WK.padsN) { WK.padsN = O.pads.length; const pads = O.padsExport(); for (const worker of WK.list) worker.postMessage({ type: 'pads', pads }); }
+  for (const worker of WK.list) while (worker.busy < 3) {
+    let best = null, bestS = Infinity;
+    for (const e of queue) if (!e.job && !e.pre && !e.noWorker && gridFree(e) && e.score < bestS) { best = e; bestS = e.score; }
+    if (!best) return;
+    const id = WK.next++; best.job = id; worker.busy++; WK.stats.sent++;
+    WK.jobs.set(id, { entry: best, worker, padsN: WK.padsN });
+    worker.postMessage({ type: 'job', id, x: best.x, z: best.z, size: best.size });
+  }
+}
 function work(ms) {
   if (!AF.ready) return false;
+  if (!WK.tried && !R.sync) startWorkers();
+  dispatch();
   const start = performance.now(), end = start + Math.min(ms, AF.MOBILE ? 2.5 : 4);
   while (performance.now() < end) {
     if (!generator) {
-      let best = -1, bestD = Infinity;
-      const cp = AF.camera.position;
+      let best = -1, bestS = Infinity;
       for (let index = 0; index < queue.length; index++) {
-        const entry = queue[index], dist = Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, ahead.x, cp.y, ahead.z) + 24) + (entry.parent && !entry.parent.split ? 0 : -16);
-        if (dist < bestD) { bestD = dist; best = index; }
+        const e = queue[index];
+        if (e.job && !R.sync || !mainTakes(e)) continue;
+        if (e.score < bestS) { bestS = e.score; best = index; }
       }
       if (best < 0) break;
-      R.urgent = bestD < 48;   // a tile right around the camera: the rendered frame helps (outland-lod)
-      current = queue[best]; queue[best] = queue[queue.length - 1]; queue.pop();
+      R.urgent = bestS < 48;   // a tile right around the camera: the rendered frame helps (outland-lod)
+      current = queue[best]; queue[best] = queue[queue.length - 1]; queue.pop(); current.job = 0;
       generator = build(current);
     }
     const slice = performance.now(), done = generator.next().done;
@@ -23470,11 +23780,13 @@ function work(ms) {
     if (done) { generator = null; current = null; R.urgent = false; }
   }
   R.workMs = performance.now() - start;
-  return !!generator || queue.length > 0;
+  if (generator) return true;
+  for (const e of queue) if ((!e.job || R.sync) && mainTakes(e)) return true;
+  return false;
 }
 function scan() {
   const cp = AF.camera.position, reach = Math.max(1, AF.LOD.view ** 2); stamp++;
-  R.maxNodes = Math.round((AF.MOBILE ? 240 : 320) * reach); R.maxBytes = Math.min(AF.MOBILE ? 72 : 160, (AF.MOBILE ? 48 : 80) * reach) * 1048576;
+  R.maxNodes = Math.round((AF.MOBILE ? 720 : 960) * reach); R.maxBytes = Math.min(AF.MOBILE ? 224 : 400, (AF.MOBILE ? 176 : 240) * reach) * 1048576;
   for (const entry of nodes) if (entry.dirty && entry.ready && !entry.fadeE && !entry.busy) {
     let parent = entry.parent, blocked = false;
     while (parent) { if (parent.fadeE || parent.busy) { blocked = true; break; } parent = parent.parent; }
@@ -23482,6 +23794,14 @@ function scan() {
   }
   for (const root of roots) update(root, cp, false);
   for (const root of roots) prefetch(root, cp);
+  // drop what the view stopped wanting; rank the rest
+  for (let index = queue.length - 1; index >= 0; index--) {
+    const e = queue[index]; if (needed(e, cp)) continue;
+    queue[index] = queue[queue.length - 1]; queue.pop(); e.queued = false; e.job = 0; e.pre = null; R.dropped++;
+  }
+  if (current && !current.meshes.length && !needed(current, cp)) { generator = null; current.queued = false; current = null; R.urgent = false; R.aborted++; }
+  AF.camera.getWorldDirection(fwd); fwd.y = 0; if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, 1); fwd.normalize();
+  for (const e of queue) e.score = score(e, cp);
   let kept = 0;
   for (const entry of nodes) if (entry.ready) kept++;
   while (kept > R.maxNodes || R.bytes > R.maxBytes) {
@@ -23500,14 +23820,21 @@ AF.onTick('outland-lod', 876, (dt) => {
   work(R.urgent ? (AF.world.stream && AF.world.stream.urgent ? 1.5 : AF.MOBILE ? 2.5 : 3) : 1);
 });
 R.settle = () => {
-  for (let pass = 0; pass < 7; pass++) {
-    scan(); while (work(20)); AF.step(22, 1 / 30);
-  }
+  R.sync = true;
+  try { for (let pass = 0; pass < 7; pass++) { scan(); while (work(20)); AF.step(22, 1 / 30); } }
+  finally { R.sync = false; }
 };
 R.stats = () => {
   let visible = 0, triangles = 0;
   for (const mesh of group.children) if (mesh.visible) { visible++; triangles += mesh.geometry.index.count / 3; }
-  return { nodes: nodes.length, resident: R.active, visible, triangles, bytes: R.bytes, bootMs: R.bootMs, maxStepMs: R.maxStepMs, builds: R.builds, disposed: R.disposed, pending: queue.length };
+  return { nodes: nodes.length, resident: R.active, visible, triangles, bytes: R.bytes, bootMs: R.bootMs, maxStepMs: R.maxStepMs, builds: R.builds, workerBuilt: R.workerBuilt, disposed: R.disposed, pending: queue.length, dropped: R.dropped, aborted: R.aborted };
+};
+// shown tiles coarser than the view wants (the "late detail" metric of tools/outland-drive.js)
+R.late = () => {
+  const cp = AF.camera.position; let n = 0;
+  const walk = (entry) => { if (entry.split) { for (const child of entry.children) walk(child); } else if (wants(entry, cp, false)) n++; };
+  for (const root of roots) walk(root);
+  return n;
 };
 R.diagnose = () => {
   const visible = nodes.filter(entry => entry.meshes.some(mesh => mesh.visible && mesh.material === AF.mat.voxel));
@@ -23530,7 +23857,7 @@ R.diagnose = () => {
     if (inside(x, z) || O.h(x, z) < -1.25) continue;
     samples++; if (!cover.some(entry => x >= entry.x && x < entry.x + entry.size && z >= entry.z && z < entry.z + entry.size)) holes++;
   }
-  return { overlaps, edgePairs: pairs, maxGap, holes, coverSamples: samples, speculativeSkirts: 0, rimSamples: rimCache.size };
+  return { overlaps, edgePairs: pairs, maxGap, holes, coverSamples: samples, speculativeSkirts: 0 };
 };
 O.addProp = (geo, x, y, z, rot = 0, opts = {}) => {
   if (!geo || !geo.attributes.aPal || !geo.index || !geo.attributes.position.array) throw new Error('outland props need retained voxel geometry');
@@ -24265,6 +24592,11 @@ const TYPES = [
   { id: 'icecream', name: 'Harbour Ice Co. truck', kind: 'van', paints: [['ice', 'navy']], seat: 'seatR', ai: true, build: vanText('HARBOUR ICE', 'ice', 'navy', 'navy') },
   { id: 'mail', name: 'Sunrise Bread van', kind: 'van', paints: [['bread', 'maroon']], seat: 'seatB', ai: true, build: vanText('SUNRISE BREAD', 'bread', 'maroon', 'maroon') },
   { id: 'laundry', name: 'Solace Laundry Van', kind: 'van', paints: [['white', 'teal']], seat: 'seatB', ai: true, build: vanText('LAUNDRY', 'white', 'teal', 'teal') },
+  // airport ground support (53-airtraffic drives them to the stands)
+  { id: 'fuel', name: 'Westgate fuel truck', kind: 'van', paints: [['white', 'fire']], seat: 'seatB', ai: true, build: vanText('AVGAS', 'white', 'fire', 'fire') },
+  { id: 'catering', name: 'Sky Catering truck', kind: 'van', paints: [['white', 'navy']], seat: 'seatR', ai: true, build: vanText('CATERING', 'white', 'navy', 'navy') },
+  { id: 'baggage', name: 'Baggage tractor', kind: 'van', paints: [['sunY', 'jet']], seat: 'seatB', ai: true, build: vanText('RAMP', 'sunY', 'jet', 'jet') },
+  { id: 'followme', name: 'Follow-me car', kind: 'van', paints: [['cabYel', 'jet']], seat: 'seatT', ai: true, build: vanText('FOLLOW ME', 'cabYel', 'jet', 'jet') },
   { id: 'bus', name: 'Double-Decker Bus', kind: 'bus', paints: [['busGreen', 'busCream']], seat: 'seatG', ai: true, big: true, build: () => buildDecker(kcols()) },
   { id: 'firetruck', name: 'Engine Co. 7', kind: 'truck', paints: [['fire', 'white']], seat: 'seatB', big: true,
     build: (p) => { const k = kcols(); const S = { L: 88, W: 22, H: 30, top: 23, hood: 18, hoodTop: 15, axles: [16, 66], wr: 4.5, winY: [14, 20], bandY: [11, 12] };
@@ -24461,6 +24793,7 @@ const WHEELS = {
   pickup: { axles: [9, 39], wr: 3.8, L: 50, W: 18 }, convertible: { axles: [9, 38], wr: 3.6, L: 48, W: 18 }, taxi: { axles: [10, 38], wr: 3.6, L: 50, W: 18 }, gullcab: { axles: [10, 38], wr: 3.6, L: 50, W: 18 }, beaconcab: { axles: [10, 38], wr: 3.6, L: 50, W: 18 }, stream: { axles: [10, 38], wr: 3.6, L: 50, W: 18 },
   police: { axles: [10, 37], wr: 3.6, L: 48, W: 18 }, milk: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, icecream: { axles: [9, 34], wr: 3.6, L: 44, W: 19 },
   mail: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, laundry: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, bus: { axles: [16, 78], wr: 4.5, L: 96, W: 24 }, firetruck: { axles: [16, 66], wr: 4.5, L: 88, W: 22 },
+  fuel: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, catering: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, baggage: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, followme: { axles: [9, 34], wr: 3.6, L: 44, W: 19 },
   dairycart: { axles: [], wr: 5.6, L: 66, W: 16 }, sidecar: { axles: [], wr: 3.4, L: 24, W: 16 }, icecart: { axles: [], wr: 5.6, L: 66, W: 16 },
   speedster: { axles: [11, 41], wr: 3.8, L: 52, W: 18 }, duesy: { axles: [10, 46], wr: 3.9, L: 58, W: 18 }, arrow: { axles: [9, 39], wr: 3.8, L: 50, W: 16 }, cord: { axles: [10, 40], wr: 3.6, L: 52, W: 18 },
   moto: { axles: [], wr: 3.4, L: 22, W: 6, wb: 1.5 },
@@ -24480,15 +24813,15 @@ function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   const wr = Wl.wr * CVS, ws = wr / 0.37;
   const wheels = [];
   for (const [ai, az] of Wl.axles.entries()) for (const s of [1, -1]) wheels.push({ lx: s * (halfW - 0.17), ly: wr, lz: (az + 0.5) * CVS - halfL, front: ai === 1, side: s });
-  const car = {
+  const car = Object.assign(new AF.Vehicle({ name: T.name, x, z, yaw }), {
     id: VV.cars.length, type: T, name: T.name, mesh, x, z, y: 0, yaw, pitch: 0, roll: 0, v: 0, vx: 0, vz: 0, steer: 0, spin: 0,
     halfL, halfW, wr, ws, wheels, wheelbase: Wl.wb || (Wl.axles.length > 1 ? (Wl.axles[1] - Wl.axles[0]) * CVS : 2.4), gait: Math.random() * 6, height: G.spec.H,
     ai: null, parked: true, player: false, driver: -1, bob: 0, bobV: 0, sway: 0, key: G.key, vPrev: 0, brake: 0,
-  };
+  });
   car.y = AF.surfaceBelow(x, z, (o.y ?? 0) + 2.5, 6);
   VV.cars.push(car);
   if (WHEEL_IM) { let count = 4; for (const existing of VV.cars) if (existing.type.id === typeId) count++; ensureIM(typeId, count); }
-  if (!o.noDrive && !T.horse) car.interact = AF.addInteract({ x, y: car.y + 0.6, z, r: 1.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => bodyDist(car, px, pz), prio: 0.1,
+  if (!o.noDrive && !T.horse) car.attach({ r: 1.6, lift: 0.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => bodyDist(car, px, pz), prio: 0.1,
     can: () => AF.mode === 'walk' && car.active !== false && !car.player && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
   placeMesh(car);
   return car;
@@ -24501,7 +24834,7 @@ function placeMesh(car) {
 }
 
 // ---------------------------------------------------------------- drive mode
-const DR = { car: null, camPos: new THREE.Vector3(), camLook: new THREE.Vector3(), want: new THREE.Vector3(), orbit: 0, orbitP: 0, dist: 8.5, init: false };
+const DR = { car: null, chase: new AF.Vehicle.Chase(), seat: { x: 0, y: 0, z: 0, yaw: 0, roll: 0, pitch: 0, seatH: 0.7, lean: 0.35 } };
 const DRIVE_INPUT = { up: false, down: false, left: 0, right: 0, brake: false };
 const POINTS = new Float64Array(24), LOCAL_POINTS = new Float64Array([1, 1, -1, 1, 0, 1, 1, -1, -1, -1, 0, -1, 1, 0, -1, 0, 1, 0.5, -1, 0.5, 1, -0.5, -1, -0.5]);
 const CONTACT = new Float64Array(3), AXES = new Float64Array(8);
@@ -24574,7 +24907,7 @@ function stepPush(car, dt) {
     car.ai.offsetX = car.x - PUSH_POS.x; car.ai.offsetZ = car.z - PUSH_POS.z;
     car.ai.pushYaw = AF.angDiff(Math.atan2(PUSH_POS.dx, PUSH_POS.dz), car.yaw);
   } else car.v = (car.pushX || 0) * Math.sin(car.yaw) + (car.pushZ || 0) * Math.cos(car.yaw);
-  if (car.interact) { car.interact.x = car.x; car.interact.z = car.z; }
+  if (car.interact) car.sync();
   placeMesh(car);
 }
 function carContacts(car, dt) {
@@ -24723,13 +25056,13 @@ AF.modes.drive = {
     car.vx = Math.sin(car.yaw) * car.v; car.vz = Math.cos(car.yaw) * car.v;
     DR.bike = car.type.kind === 'bike' && !!car.type.solo;
     if (AF.player && AF.player.setVisible) AF.player.setVisible(DR.bike);
-    DR.orbit = 0; DR.orbitP = 0; DR.dragT = 0; DR.dist = car.type.big ? 13 : DR.bike ? 5.5 : 8.5; DR.init = false;
+    DR.chase.set({ dist: car.type.big ? 13 : DR.bike ? 5.5 : 8.5, height: (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0) });
     AF.emit('toast', (DR.bike ? 'You swing onto the ' : 'You slide behind the wheel of the ') + car.name + '.');
     AF.emit('hint', AF.touch ? '' : 'W/S throttle · A/D steer · Space brake · E to get out');
   },
   exit(to) {
     const car = DR.car;
-    if (car) { car.player = false; car.parked = true; car.v = 0; car.vx = car.vz = 0; car.steer *= 0.5; car.roll = 0; placeMesh(car); if (car.interact) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; } }
+    if (car) { car.player = false; car.parked = true; car.v = 0; car.vx = car.vz = 0; car.steer *= 0.5; car.roll = 0; placeMesh(car); if (car.interact) car.sync(); }
     DR.car = null; VV.player = null; if (AF.PL) AF.PL.seat = null;
     if (AF.player && AF.player.setVisible) AF.player.setVisible(true);
     AF.emit('hud', { speed: null, mode: to });
@@ -24737,16 +25070,9 @@ AF.modes.drive = {
   },
   update(dt) {
     const car = DR.car; if (!car) return;
-    const I = AF.input, S = I.stick;
-    const inp = DRIVE_INPUT;
-    inp.up = I.key('KeyW') || I.key('ArrowUp'); inp.down = I.key('KeyS') || I.key('ArrowDown');
-    inp.left = (I.key('KeyA') || I.key('ArrowLeft')) ? 1 : 0; inp.right = (I.key('KeyD') || I.key('ArrowRight')) ? 1 : 0; inp.brake = I.key('Space'); inp.thr = 1;
-    // touch stick: analog throttle past a dead zone, and a soft (squared) steering curve so a wobbling thumb doesn't twitch the car
-    if (S && (S.x || S.y)) {
-      if (S.y > 0.18) { inp.up = true; inp.thr = Math.min(1, 0.35 + (S.y - 0.18) / 0.55); } else if (S.y < -0.4) inp.down = true;
-      const ax = Math.max(0, Math.abs(S.x) - 0.14) / 0.72, st = Math.min(1, ax * ax * 0.6 + ax * 0.4);
-      if (S.x < 0) inp.left = st; else inp.right = st;
-    }
+    const V = AF.Vehicle.input(), inp = DRIVE_INPUT;
+    inp.up = V.thr > 0; inp.down = V.thr < 0; inp.thr = V.thr > 0 ? V.thr : 1;
+    inp.left = Math.max(0, -V.steer); inp.right = Math.max(0, V.steer); inp.brake = V.brake;
     if (VV.autoInput) Object.assign(inp, VV.autoInput);
     // fixed <= 1/60 s substeps: a phone's uneven frame times no longer shake the suspension and contacts
     const nSub = Math.min(4, Math.ceil(dt * 60 - 0.01)) || 1;
@@ -24754,43 +25080,15 @@ AF.modes.drive = {
     if (DR.bike) {
       const lean = -car.steer * AF.clamp(Math.abs(car.v) / 9, 0, 1) * 1.1;
       car.roll += (lean - car.roll) * Math.min(1, dt * 6);
-      const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw);
-      AF.PL.seat = { x: car.x - hx * 0.3, y: car.y + car.bob + 0.02, z: car.z - hz * 0.3, yaw: car.yaw, roll: car.roll, pitch: car.pitch, seatH: 0.7, lean: 0.35 };
+      const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), seat = DR.seat;
+      seat.x = car.x - hx * 0.3; seat.y = car.y + car.bob + 0.02; seat.z = car.z - hz * 0.3; seat.yaw = car.yaw; seat.roll = car.roll; seat.pitch = car.pitch;
+      AF.PL.seat = seat;
     }
     placeMesh(car);
-    if (car.interact) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; }
-    // chase camera
-    const m = I.mouse;
-    if ((document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { DR.orbit = (DR.orbit - m.dx * 0.006) % (Math.PI * 2); DR.orbitP = AF.clamp(DR.orbitP + m.dy * 0.004, -0.25, 0.9); DR.dragT = 1.5; }
-    else if ((DR.dragT = (DR.dragT || 0) - dt) < 0) { DR.orbit *= Math.exp(-dt * 1.8); DR.orbitP *= Math.exp(-dt * 1.8); }
-    if (m.wheel) DR.dist = AF.clamp(DR.dist * Math.exp(m.wheel * 0.001), 4, 28);
-    // chase camera rigidly follows the car's position; only its heading and boom length are smoothed (a world-space lerp lagged
-    // metres behind at speed and stuttered whenever the frame time varied)
-    const k0 = !DR.init;
-    if (k0) { DR.cyaw = car.yaw; DR.cy = car.y; DR.cd = DR.dist; }
-    DR.cyaw += AF.angDiff(DR.cyaw, car.yaw) * (1 - Math.exp(-dt * 4.5));
-    DR.cy += (car.y - DR.cy) * (1 - Math.exp(-dt * 6));
-    const a = DR.cyaw + DR.orbit, pitch = 0.2 + DR.orbitP + DR.dist * 0.004;
-    const tx = car.x + Math.sin(car.yaw) * 1.5, ty = DR.cy + (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), tz = car.z + Math.cos(car.yaw) * 1.5;
-    let d = DR.dist;
-    // keep the camera out of walls: pull in fast, ease back out
-    for (let t = 0.25; t <= 1.0001; t += 0.125) {
-      const dd = d * t, px = tx - Math.sin(a) * Math.cos(pitch) * dd, py = ty + Math.sin(pitch) * dd, pz = tz - Math.cos(a) * Math.cos(pitch) * dd;
-      if (AF.solidAt(px, py, pz)) { d = Math.max(1.2, d * Math.max(0.12, t - 0.15)); break; }
-    }
-    DR.cd = k0 ? d : DR.cd + (d - DR.cd) * (1 - Math.exp(-dt * (d < DR.cd ? 14 : 2.5)));
-    const want = DR.want.set(tx - Math.sin(a) * Math.cos(pitch) * DR.cd, ty + Math.sin(pitch) * DR.cd, tz - Math.cos(a) * Math.cos(pitch) * DR.cd);
-    DR.init = true;
-    DR.camPos.copy(want); DR.camLook.set(tx, ty, tz);
-    const cam = AF.camera;
-    cam.position.copy(DR.camPos);
-    const gy = AF.W.groundY(cam.position.x, cam.position.z) + 0.4; if (cam.position.y < gy) cam.position.y = gy;
-    cam.lookAt(DR.camLook);
-    if (AF.camTarget) AF.camTarget.copy(DR.camLook);
-    AF.shadowFocus.set(car.x, car.y, car.z); AF.shadowRadius = 60;
-    const kmh = Math.abs(car.v) * 3.6;
-    AF.emit('hud', { speed: Math.round(kmh / 1.609), unit: 'mph', kmh: Math.round(kmh), mode: 'drive', car: car.name, gear: car.v < -0.3 ? 'R' : 'D' });
-    if (I.hit('KeyE') || I.hit('KeyF')) VV.exitCar();
+    if (car.interact) car.sync();
+    DR.chase.update(dt, car.x, car.y, car.z, car.yaw);
+    AF.Vehicle.hud(car.v, car.name);
+    if (V.exit) VV.exitCar();
   },
 };
 
@@ -24870,7 +25168,7 @@ function syncInstances(dt) {
     FR_S.center.set(car.x, car.y + 1, car.z); FR_S.radius = car.halfL + 1.5;
     const inView = FRUSTUM.intersectsSphere(FR_S), far = d > FAR_D || !inView;
     car.inView = inView;
-    if (!car.player && car.interact && car.ai && d < 60) { car.interact.x = car.x; car.interact.y = car.y + 0.6; car.interact.z = car.z; }
+    if (!car.player && car.interact && car.ai && d < 60) car.sync();
     if (far && (!lampsOn || !inView || d > LAMP_D)) continue;
     const alpha = VV.renderAlpha ?? 1, interpolate = car.ai && car.renderNear && car.prevX != null;
     const drawX = interpolate ? car.prevX + (car.x - car.prevX) * alpha : car.x, drawZ = interpolate ? car.prevZ + (car.z - car.prevZ) * alpha : car.z, drawYaw = interpolate ? car.prevYaw + AF.angDiff(car.prevYaw, car.yaw) * alpha : car.yaw;
@@ -25572,14 +25870,6 @@ try {
   // W lifts the nose from 1.25x stall, a full-throttle roll leaves the ground by itself at 1.45x stall
   for (const T of Object.values(TYPES)) T.vmax = Math.round(T.vmax * 0.85 * 10) / 10;
   const ROTATE_K = 1.25, LIFTOFF_K = 1.45, ROLL_DRAG = 0.7;
-  PL.trafficGeometry = () => {
-    const B = TYPES.airliner.build(), red = C(0xff3040, { emit: 0xff2030, emitK: 2, mode: 'always' }), green = C(0x30ff80, { emit: 0x20ff60, emitK: 2, mode: 'always' }), white = C(0xffffff, { emit: 0xffffff, emitK: 2, mode: 'always' });
-    const gear = new AF.Model(B.m.w, B.m.h, B.m.d);
-    for (let x = 0; x < B.m.w; x++) for (let y = 0; y < 6; y++) for (let z = 0; z < B.m.d; z++) { const value = B.m.get(x, y, z); if (value && (Math.abs(x - 59) >= 20 && Math.abs(x - 59) <= 24)) { gear.set(x, y, z, value); B.m.set(x, y, z, 0); } }
-    B.m.box(0, 7, 55, 2, 9, 57, red); B.m.box(116, 7, 55, 118, 9, 57, green); B.m.box(58, 20, 2, 60, 22, 4, white);
-    const options = { vs: 0.25, anchor: [0.5, 0, 0.5] }, shared = planeGeo('airliner');
-    return { body: AF.meshModel(B.m, options), gear: AF.meshModel(gear, options), prop: shared.pgeo, props: shared.props };
-  };
   const planeGeo = (id) => {
     if (geoCache[id]) return geoCache[id];
     const T = TYPES[id], B = T.build();
@@ -25594,17 +25884,19 @@ try {
     const body = AF.modelMesh(G.geo); root.add(body);
     const props = G.props.map((p) => { const pm = AF.modelMesh(G.pgeo); pm.position.copy(p); root.add(pm); return pm; });
     root.rotation.order = 'YXZ'; AF.scene.add(root);
-    const pl = { id, T, G, root, props, x, y: AF.W.groundY(x, z), z, yaw, pitch: 0, roll: 0, gam: 0, pr: 0, rr: 0, v: 0, throttle: 0, engine: false, home: { x, z, yaw }, onGround: true, spin: 0, name: T.name };
-    pl.interact = AF.addInteract({ x, y: pl.y + 1, z, r: 2.2, label: 'Fly the ' + T.name, prio: 0.1,
+    const pl = Object.assign(new AF.Vehicle({ name: T.name, x, z, yaw }), { id, T, G, root, props, x, y: AF.W.groundY(x, z), z, yaw, pitch: 0, roll: 0, gam: 0, pr: 0, rr: 0, v: 0, throttle: 0, engine: false, home: { x, z, yaw }, onGround: true, spin: 0, name: T.name });
+    pl.attach({ r: 2.2, lift: 1, label: 'Fly the ' + T.name, prio: 0.1,
       dist: (px, pz) => { const s = Math.sin(pl.yaw), c = Math.cos(pl.yaw), rx = px - pl.x, rz = pz - pl.z, lx = rx * c - rz * s, lz = rx * s + rz * c; return Math.hypot(Math.max(0, Math.abs(lx) - Math.min(1.5, G.halfW)), Math.max(0, Math.abs(lz) - G.halfL)); },
       can: () => AF.mode === 'walk' && PL.cur !== pl, act: () => AF.setMode('fly', { plane: pl }) });
     PL.list.push(pl); place(pl);
     return pl;
   };
-  const place = (pl) => { pl.root.position.set(pl.x, pl.y, pl.z); pl.root.rotation.set(-pl.pitch, pl.yaw, pl.roll, 'YXZ'); if (pl.interact) { pl.interact.x = pl.x; pl.interact.y = pl.y + 1; pl.interact.z = pl.z; } };
+  const place = (pl) => { pl.root.position.set(pl.x, pl.y, pl.z); pl.root.rotation.set(-pl.pitch, pl.yaw, pl.roll, 'YXZ'); if (pl.interact) pl.sync(); };
   PL.make = make;
+  // the model kit for 53-airtraffic's airframes (palette helper, fuselage / wing rasterisers, the airliner propeller)
+  PL.kit = { C, fuselage, wing, propGeo: () => planeGeo('airliner').pgeo };
   // approach guidance picks the nearest of these east-west strips { x0, x1, z } (the island adds its own)
-  PL.runways = [A.runway];
+  PL.runways = [A.runway, A.runway2];
 
   // ---------------------------------------------------------------- the flight model
   // pitch = nose attitude, gam = flight-path angle (chases the nose: angle of attack settles quickly), v = airspeed along the path
@@ -25882,14 +26174,28 @@ try {
 
 try {
 {
-  const A = AF.PLAN.west.air, PI = Math.PI, PERIOD = 480;
-  const traffic = AF.airTraffic = { period: PERIOD, flights: [], runway: -1, bridges: [false, false], busy:false, changes:Array.from({length:32},()=>({index:-1,time:-1,enabled:false,oldSafe:true,newSafe:true})), changeCount:0, visible:false };
-  const pose = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' };
-  const matrix = new THREE.Matrix4(), position = new THREE.Vector3(), scale = new THREE.Vector3(1, 1, 1), rotation = new THREE.Quaternion(), euler = new THREE.Euler(0, 0, 0, 'YXZ');
-  let bodies, gears, props, strobes, docks, batches, model, lastFar = -1;
-  const view=new THREE.Frustum(),viewMatrix=new THREE.Matrix4(),sphere=new THREE.Sphere(new THREE.Vector3(),22),candidate={x:0,y:0,z:0,yaw:0,pitch:0,roll:0,gear:true,phase:''};
-  const nearAirport=(point,radius)=>Math.max(A.x0-point.x,0,point.x-A.x1)**2+Math.max(32-point.z,0,point.z-204)**2+Math.max(0,point.y-100)**2<radius*radius;
-  const safe=(result,camera)=>{sphere.center.set(result.x,result.y,result.z);return (result.x-camera.x)**2+(result.y-camera.y)**2+(result.z-camera.z)**2>2250000&&!view.intersectsSphere(sphere);};
+  // ===== Westgate's AI airliners: two parallel runways, one-way ground flow (OWNER: transport)
+  // Arrivals land eastbound on R1 (z 152) and taxi west along the taxiway to one of three stands; departures push back onto the taxiway,
+  // taxi west, cross R1 at its west end (held while an arrival is on short final) and take off eastbound from R2 (z 188), climbing away
+  // in a right turn over the sea. A ground mover holds while anything sits in front of it and a pushback waits for a clear taxiway,
+  // so aircraft never taxi through each other. Within 900 m: ten flights on a 360 s timetable (an arrival and a departure every 36 s),
+  // eight airlines, two airframes (turboprop, regional jet) at 0.82-1.05 scale with per-instance liveries; else two flights on 480 s.
+  // All aircraft = 7 InstancedMeshes; full rate within 350 m, 4 Hz beyond, nothing drawn beyond 2 km.
+  const A = AF.PLAN.west.air, R1 = A.runway, R2 = A.runway2, TZ = A.taxiZ, WX = A.westX, STANDS = A.stands, PI = Math.PI;
+  const PERIOD = 480, BUSY_PERIOD = 360, BUSY = 10, GAP = BUSY_PERIOD / BUSY;
+  const traffic = AF.airTraffic = { period: PERIOD, flights: [], runway: -1, bridges: [false, false], busy: false, holds: 0, changes: Array.from({ length: 32 }, () => ({ index: -1, time: -1, enabled: false, oldSafe: true, newSafe: true })), changeCount: 0, visible: false };
+  const AIRLINES = traffic.airlines = [
+    { name: 'Solace Air', code: 'SA', a: 0x2d4a8a, b: 0x2d4a8a, c: 0xc8ccd2 }, { name: 'Isles Express', code: 'IX', a: 0x1f9e8a, b: 0xf2c21b, c: 0x1f9e8a },
+    { name: 'Westmoor Wings', code: 'WW', a: 0x7a2d3a, b: 0xd9a441, c: 0x7a2d3a }, { name: 'Bay Atlantic', code: 'BA', a: 0xc8221c, b: 0x1a2a5a, c: 0xd0d4da },
+    { name: 'Meridian Jet', code: 'MJ', a: 0x6a3fa0, b: 0xff8a32, c: 0x6a3fa0 }, { name: 'Coastal Connect', code: 'CC', a: 0x3a8ad8, b: 0x3a8ad8, c: 0xf4f4f4 },
+    { name: 'Harbour Cargo', code: 'HC', a: 0x4f6a2a, b: 0xe8c23a, c: 0x4f6a2a }, { name: 'Serena Skyways', code: 'SS', a: 0xff6f91, b: 0x2fb5c8, c: 0xf4f4f4 },
+  ];
+  const pose = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' }, candidate = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' };
+  const matrix = new THREE.Matrix4(), position = new THREE.Vector3(), scale = new THREE.Vector3(1, 1, 1), rotation = new THREE.Quaternion(), euler = new THREE.Euler(0, 0, 0, 'YXZ'), spin = new THREE.Matrix4();
+  let models = null, strobes, docks, batches, lastFar = -1;
+  const view = new THREE.Frustum(), viewMatrix = new THREE.Matrix4(), sphere = new THREE.Sphere(new THREE.Vector3(), 22);
+  const nearAirport = (point, radius) => Math.max(A.x0 - point.x, 0, point.x - A.x1) ** 2 + Math.max(32 - point.z, 0, point.z - 210) ** 2 + Math.max(0, point.y - 100) ** 2 < radius * radius;
+  const safe = (result, camera) => { sphere.center.set(result.x, result.y, result.z); return (result.x - camera.x) ** 2 + (result.y - camera.y) ** 2 + (result.z - camera.z) ** 2 > 2250000 && !view.intersectsSphere(sphere); };
   const rounded = (points) => {
     const samples = [], append = (x, z) => samples.push(x, z);
     append(points[0][0], points[0][1]);
@@ -25912,138 +26218,340 @@ try {
     result.x = points[index * 2 - 2] + dx * fraction; result.z = points[index * 2 - 1] + dz * fraction; result.yaw = Math.atan2(dx, dz);
   };
   const smooth = (amount) => amount * amount * (3 - 2 * amount);
+  // one cycle (s): 0-55 final into R1, 55-70 rollout, 70.. taxi in, ..135 parked, 135-145 pushback (turning to face west), 145.. taxi
+  // out, ..195 lined up on R2, 195-209 take-off roll, then a climbing right turn out to sea
+  const T_TD = 55, T_IN = 70, T_PUSH = 135, T_OUT = 145, T_TO = 195, T_CLIMB = 209, LINE_X = WX + 12, ROLL = 234, CLIMB_V = 40, TURN_W = 0.07, TURN = 2.1;
   const sample = traffic.sample = (flight, time, result) => {
     result.y = 0.25; result.pitch = result.roll = 0; result.gear = true;
-    if (time < 55) {
-      const amount = time / 55; result.x = -2600 + 1994 * amount; result.z = 152; result.yaw = PI / 2;
+    if (time < T_TD) {
+      const amount = time / T_TD; result.x = -2600 + 1994 * amount; result.z = R1.z; result.yaw = PI / 2;
       const distance = -606 - result.x; result.y = 0.25 + (distance > 80 ? distance * 0.0524 : 0.0524 * (2 * distance * distance / 80 - distance * distance * distance / 6400));
       result.pitch = distance < 80 ? 0.06 * (1 - distance / 80) : -0.0524; result.gear = distance < 1000; result.phase = 'arrival';
-    } else if (time < 70) { const amount = (time - 55) / 15; result.x = -606 + 258 * (1.88 * amount - 0.88 * amount * amount); result.z = 152; result.yaw = PI / 2; result.phase = 'rollout'; }
-    else if (time < 105) { along(flight.arrival, smooth((time - 70) / 35), result); result.phase = 'taxi-in'; }
-    else if (time < 180) { result.x = flight.stand; result.z = 94; result.yaw = PI; result.phase = 'parked'; }
-    else if (time < 190) { result.x = flight.stand; result.z = 94 + 22 * smooth((time - 180) / 10); result.yaw = PI; result.phase = 'pushback'; }
-    else if (time < 240) { along(flight.departure, smooth((time - 190) / 50), result); result.phase = 'taxi-out'; }
-    else if (time < 254) { const amount = (time - 240) / 14; result.x = -352 - 266 * (0.08 * amount + 0.92 * amount * amount); result.z = 152; result.yaw = -PI / 2; result.pitch = Math.max(0, (amount - 0.75) * 0.48); result.phase = 'takeoff'; }
-    else { const elapsed = time - 254, angle = Math.min(PI / 3, elapsed * 0.018), radius = 2200; result.x = -618 - radius * Math.sin(angle) - Math.max(0, elapsed - PI / 0.054) * 40 * Math.cos(PI / 3); result.z = 152 + radius * (1 - Math.cos(angle)) + Math.max(0, elapsed - PI / 0.054) * 40 * Math.sin(PI / 3); result.y = 0.25 + elapsed * 3.5; result.yaw = -PI / 2 + angle; result.pitch = 0.09; result.roll = elapsed < PI / 0.054 ? -0.12 : 0; result.gear = elapsed < 5; result.phase = 'climb'; }
+    } else if (time < T_IN) { const amount = (time - T_TD) / (T_IN - T_TD); result.x = -606 + 258 * (1.88 * amount - 0.88 * amount * amount); result.z = R1.z; result.yaw = PI / 2; result.phase = 'rollout'; }
+    else if (time < T_IN + flight.tIn) { along(flight.arrival, smooth((time - T_IN) / flight.tIn), result); result.phase = 'taxi-in'; }
+    else if (time < T_PUSH) { result.x = flight.stand; result.z = flight.standZ; result.yaw = PI; result.phase = 'parked'; }
+    else if (time < T_OUT) { const amount = (time - T_PUSH) / (T_OUT - T_PUSH); result.x = flight.stand; result.z = flight.standZ + (TZ - flight.standZ) * smooth(amount); result.yaw = PI + PI / 2 * smooth(Math.max(0, (amount - 0.35) / 0.65)); result.phase = 'pushback'; }
+    else if (time < T_OUT + flight.tOut) { along(flight.departure, smooth((time - T_OUT) / flight.tOut), result); result.phase = 'taxi-out'; }
+    else if (time < T_TO) { result.x = LINE_X; result.z = R2.z; result.yaw = PI / 2; result.phase = 'lineup'; }
+    else if (time < T_CLIMB) { const amount = (time - T_TO) / (T_CLIMB - T_TO); result.x = LINE_X + ROLL * (0.08 * amount + 0.92 * amount * amount); result.z = R2.z; result.yaw = PI / 2; result.pitch = Math.max(0, (amount - 0.75) * 0.48); result.y = 0.25 + Math.max(0, amount - 0.86) * 20; result.phase = 'takeoff'; }
+    else {
+      // right turn from east to south-south-west at TURN_W rad/s (radius CLIMB_V / TURN_W), then straight out over the sea
+      const elapsed = time - T_CLIMB, turnT = TURN / TURN_W, turning = Math.min(elapsed, turnT), radius = CLIMB_V / TURN_W, heading = PI / 2 - TURN_W * turning, straight = Math.max(0, elapsed - turnT);
+      result.x = LINE_X + ROLL + radius * Math.sin(TURN_W * turning) + Math.sin(heading) * CLIMB_V * straight;
+      result.z = R2.z + radius * (1 - Math.cos(TURN_W * turning)) + Math.cos(heading) * CLIMB_V * straight;
+      result.y = 3.05 + Math.min(900, elapsed * 7); result.yaw = heading; result.pitch = 0.12; result.roll = elapsed < turnT ? 0.22 : 0; result.gear = elapsed < 5; result.phase = 'climb';
+    }
     return result;
   };
-  const phaseAt = (time, offset, period=PERIOD) => ((time - offset) % period + period) % period;
-  const runwayUse = (time) => time >= 48 && time < 80 || time >= 240 && time < 266;
-  const hazard = () => { const plane = AF.mode === 'fly' && AF.planes.cur; return !!(plane && plane.x > A.runway.x0 - 30 && plane.x < A.runway.x1 + 30 && Math.abs(plane.z - 152) < 26 && plane.y < 30); };
-  const batch = (geometry, count, name) => { const mesh = new THREE.InstancedMesh(geometry, AF.mat.voxelInst, count); mesh.name = name; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = true; mesh.receiveShadow = true; mesh.customDepthMaterial=AF.mat.depthInst; mesh.matrixAutoUpdate = false; mesh.count=count; AF.scene.add(mesh); return mesh; };
+  const phaseAt = (time, offset, period = PERIOD) => ((time - offset) % period + period) % period;
+  const onRunway = (runway, plane) => plane.x > runway.x0 - 30 && plane.x < runway.x1 + 30 && Math.abs(plane.z - runway.z) < runway.w / 2 + 14 && plane.y < 30;
+  const hazard = (runway) => { const plane = AF.mode === 'fly' && AF.planes.cur; return !!(plane && onRunway(runway, plane)); };
+  // ---------------------------------------------------------------- airframes (voxel models with three livery slots: a stripe / wing tips, b tail, c engines)
+  const SLOTS = [0x020101, 0x020202, 0x020303].map((hex) => AF.col(hex, { jitter: 0, edge: 0.3 }));
+  let LIVERY = null;
+  const liveryMaterial = () => {
+    if (LIVERY) return LIVERY;
+    LIVERY = AF.mat.patchVoxel(AF.mat.voxelInst.clone(), 'air-livery'); const compile = LIVERY.onBeforeCompile;
+    LIVERY.onBeforeCompile = (shader, renderer) => {
+      compile(shader, renderer);
+      shader.vertexShader = shader.vertexShader.replace('attribute float aPal;', 'attribute float aPal; attribute vec3 livery;').replace('vec2 pUV =', 'float liveryPal = aPal < -2.5 ? livery.z : aPal < -1.5 ? livery.y : aPal < -0.5 ? livery.x : aPal;\nvec2 pUV =').replace('mod(aPal,', 'mod(liveryPal,').replace('floor(aPal /', 'floor(liveryPal /');
+    };
+    return LIVERY;
+  };
+  const turboprop = (kit, slot, light) => {
+    const { C, fuselage, wing } = kit, m = new AF.Model(118, 30, 82), g = new AF.Model(118, 30, 82), S = C(0xe4e8ee, { metal: 0.35, rough: 0.35 }), K = C(0x1a1a1a), G = C(0x2a3440, { rough: 0.1 }), cx = 59, cy = 10;
+    fuselage(m, cx, cy, 2, 72, 2, 6, S, (x, y, z) => (y === 2 && z % 3 === 0 && z > 14 && z < 64 && Math.abs(x) > 4) ? G : (y === -1 && Math.abs(x) >= 5) ? slot[0] : null);
+    fuselage(m, cx, cy, 72, 80, 6, 3, S, (x, y) => (y > 2 ? G : null));
+    wing(m, 0, 118, cy - 3, 48, 62, S, slot[0]); wing(m, cx - 20, cx + 21, cy + 1, 2, 10, S);
+    for (let y = 0; y < 12; y++) for (let z = 1; z < 10 - (y >> 1); z++) m.set(cx, cy + 1 + y, z, slot[1]);
+    for (const s of [-22, 22]) { fuselage(m, cx + s, cy - 2, 50, 66, 2.5, 3, slot[2]); for (let y = 0; y < cy - 4; y++) g.set(cx + s, y, 60, K); for (let z = 58; z < 63; z++) for (let y = 0; y < 3; y++) g.set(cx + s, y, z, K); }
+    for (let y = 0; y < cy - 5; y++) g.set(cx, y, 70, K); for (let z = 69; z < 72; z++) for (let y = 0; y < 2; y++) g.set(cx, y, z, K);
+    m.box(0, 7, 55, 2, 9, 57, light.red); m.box(116, 7, 55, 118, 9, 57, light.green);
+    return { m, g, props: [[cx - 22, cy - 2, 66.5], [cx + 22, cy - 2, 66.5]], tail: [cx, cy + 13, 3] };
+  };
+  const jet = (kit, slot, light) => {
+    const { C, fuselage } = kit, WD = 104, LD = 88, m = new AF.Model(WD, 36, LD), g = new AF.Model(WD, 36, LD), S = C(0xf0f2f5, { metal: 0.3, rough: 0.3 }), K = C(0x1a1a1a), G = C(0x22303c, { rough: 0.1 }), N = C(0xc0c4ca, { metal: 0.7, rough: 0.3 }), cx = 52, cy = 12;
+    fuselage(m, cx, cy + 1, 0, 14, 2, 6, S);
+    fuselage(m, cx, cy, 14, 74, 6, 6, S, (x, y, z) => (y === 2 && z % 3 === 0 && z > 18 && z < 70 && Math.abs(x) > 4) ? G : (y >= -2 && y <= -1 && Math.abs(x) >= 5) ? slot[0] : (y <= -5 ? N : null));
+    fuselage(m, cx, cy, 74, 87, 6, 2, S, (x, y, z) => (y > 1 && z > 75 && z < 80 ? G : null));
+    for (let x = 0; x < WD; x++) { const d = Math.abs(x + 0.5 - cx) / (WD / 2), z1 = Math.round(54 - d * 16), z0 = Math.round(38 - d * 10), tip = d > 0.92; for (let z = z0; z < z1; z++) m.set(x, cy - 4 + (d > 0.6 ? 1 : 0), z, tip ? slot[0] : S); }
+    for (const s of [-17, 17]) { fuselage(m, cx + s, cy - 7, 44, 60, 2.5, 3, slot[2]); for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) m.set(cx + s + x, cy - 7 + y, 59, K); }
+    for (let x = cx - 17; x <= cx + 17; x++) { const d = Math.abs(x - cx) / 17, z1 = Math.round(14 - d * 6), z0 = Math.round(5 - d * 3); for (let z = z0; z < z1; z++) m.set(x, cy + 3, z, S); }
+    for (let y = 0; y < 17; y++) { const z0 = 1 + Math.round(y * 0.75), z1 = 17 - Math.round(y * 0.2); for (let z = z0; z < z1; z++) m.set(cx, cy + 5 + y, z, slot[1]); }
+    for (const s of [-7, 7]) { for (let y = 0; y < cy - 5; y++) g.set(cx + s, y, 46, K); for (let z = 44; z < 49; z++) for (let y = 0; y < 3; y++) g.set(cx + s, y, z, K); }
+    for (let y = 0; y < cy - 6; y++) g.set(cx, y, 80, K); for (let z = 79; z < 82; z++) for (let y = 0; y < 2; y++) g.set(cx, y, z, K);
+    m.box(0, cy - 3, 30, 2, cy - 1, 32, light.red); m.box(WD - 2, cy - 3, 30, WD, cy - 1, 32, light.green);
+    return { m, g, props: [], tail: [cx, cy + 22, 3] };
+  };
+  const batch = (geometry, count, name, material = AF.mat.voxelInst) => { const mesh = new THREE.InstancedMesh(geometry, material, count); mesh.name = name; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = true; mesh.receiveShadow = true; mesh.customDepthMaterial = AF.mat.depthInst; mesh.matrixAutoUpdate = false; mesh.count = count; AF.scene.add(mesh); return mesh; };
+  const liveryGeo = (geo) => {
+    const source = geo.getAttribute('aPal'), values = new Float32Array(source.count);
+    for (let index = 0; index < source.count; index++) { const value = source.getX(index), slot = SLOTS.indexOf(value); values[index] = slot < 0 ? value : -slot - 1; }
+    geo.setAttribute('aPal', new THREE.BufferAttribute(values, 1));
+    geo.setAttribute('livery', new THREE.InstancedBufferAttribute(new Float32Array(BUSY * 3), 3));
+    return geo;
+  };
   AF.onBuild('air-traffic', 641, () => {
-    model = AF.planes.trafficGeometry();
-    bodies = batch(model.body, 4, 'air-traffic bodies'); gears = batch(model.gear, 4, 'air-traffic gear'); props = batch(model.prop, 8, 'air-traffic propellers');
+    const kit = AF.planes.kit, C = kit.C, options = { vs: 0.25, anchor: [0.5, 0, 0.5] };
+    const light = { red: C(0xff3040, { emit: 0xff2030, emitK: 2, mode: 'always' }), green: C(0x30ff80, { emit: 0x20ff60, emitK: 2, mode: 'always' }) };
+    models = [turboprop, jet].map((build, index) => {
+      const B = build(kit, SLOTS, light), w = B.m.w, d = B.m.d, local = (p) => new THREE.Vector3((p[0] - w / 2 + 0.5) * 0.25, p[1] * 0.25, (p[2] - d / 2) * 0.25);
+      const body = batch(liveryGeo(AF.meshModel(B.m, options)), BUSY, 'air-traffic ' + (index ? 'jets' : 'turboprops'), liveryMaterial());
+      const gear = batch(AF.meshModel(B.g, options), BUSY, 'air-traffic gear ' + index);
+      return { body, gear, props: B.props.map(local), tail: local(B.tail), len: d * 0.25, span: w * 0.25, tris: body.geometry.index.count / 3 };
+    });
+    traffic.models = models;
+    const props = batch(kit.propGeo(), BUSY * 2, 'air-traffic propellers');
+    models[0].propMesh = props;
     const flash = new AF.Model(2, 2, 2); flash.box(0, 0, 0, 2, 2, 2, AF.westKit.glow(0xffffff, 3));
-    strobes = batch(AF.meshModel(flash, { vs: 0.125, anchor: [0.5, 0.5, 0.5] }), 4, 'air-traffic strobes');
+    strobes = batch(AF.meshModel(flash, { vs: 0.125, anchor: [0.5, 0.5, 0.5] }), BUSY, 'air-traffic strobes');
     const dock = new AF.Model(12, 14, 10), color = AF.col(0x394b52, { jitter: 0, rough: 0.8 });
     dock.box(0, 0, 0, 12, 14, 10, color); dock.box(1, 1, 0, 11, 13, 10, 0);
     docks = batch(AF.meshModel(dock, { vs: 0.25, anchor: [0.5, 0, 0.5] }), 2, 'air-traffic bridge bellows');
-    batches = [bodies, gears, props, strobes, docks];
-    for (let index = 0; index < 4; index++) {
-      const stand = index%2 === 0 ? -450 : -360;
-      traffic.flights.push({ name: ['SA109 Coast','SA227 Isles','SA318 Westmoor','SA442 Bay'][index], enabled:index<2, period:index<2?PERIOD:600, offset:index<2?index*240:index*150, stand, cycle: -999, delay: 0, diverted: false, goAt: 0, goX: 0, goY: 0, goZ: 0, x: 0, y: 0, z: 0, phase: '', arrival: rounded([[-348, 152], [-344, 152], [-344, 124], [stand, 124], [stand, 94]]), departure: rounded([[stand, 116], [stand, 124], [-344, 124], [-344, 152], [-352, 152]]) });
+    batches = [models[0].body, models[0].gear, props, models[1].body, models[1].gear, strobes, docks];
+    const names = ['Coast', 'Isles', 'Westmoor', 'Bay', 'Harbour', 'Ridge', 'Lagoon', 'Summit', 'Meridian', 'Sands'];
+    for (let index = 0; index < BUSY; index++) {
+      const home = index % STANDS.length, airline = AIRLINES[(index * 5 + 3) % AIRLINES.length], model = AF.hash2(index, 53) < 0.55 ? 1 : 0;
+      const size = Math.min(STANDS[home].max, (model ? 0.82 : 0.86) + AF.hash2(index, 91) * 0.23), M = models[model];
+      // a route to every stand this airframe fits (the stand is picked on rollout: the first free one, its own if free)
+      const routes = STANDS.map((stand) => {
+        if (size > stand.max) return null;
+        const standZ = 84.5 + M.len * size / 2, arrival = rounded([[-348, R1.z], [-344, R1.z], [-344, TZ], [stand.x, TZ], [stand.x, standZ]]), departure = rounded([[stand.x, TZ], [WX, TZ], [WX, R2.z], [LINE_X, R2.z]]);
+        return { stand: stand.x, standInfo: stand, standZ, arrival, departure, tIn: arrival.length / 7, tOut: departure.length / 8 };
+      });
+      M.body.geometry.attributes.livery.setXYZ(index, AF.col(airline.a, { jitter: 0.05, edge: 0.3, rough: 0.3 }), AF.col(airline.b, { jitter: 0.05, edge: 0.3, rough: 0.3 }), AF.col(airline.c, { jitter: 0.05, edge: 0.3, metal: 0.4, rough: 0.3 }));
+      traffic.flights.push(Object.assign({ name: airline.code + (100 + ((index * 37 + 9) % 900)) + ' ' + names[index], airline: airline.name, index, model, size, home, si: home, routes, assigned: -1, enabled: index < 2, period: index < 2 ? PERIOD : BUSY_PERIOD, offset: index < 2 ? index * 240 : index * GAP,
+        cycle: -999, delay: 0, diverted: false, pushOk: -1, rollOk: -1, goAt: 0, goX: 0, goY: 0, goZ: 0, x: 0, y: -1e4, z: 0, phase: '', p: 0, pose: { x: 0, y: -1e4, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' } }, routes[home]));
     }
-    for(const mesh of batches){mesh.visible=false;mesh.instanceMatrix.array.fill(0);}
+    for (const M of models) M.body.geometry.attributes.livery.needsUpdate = true;
+    for (const mesh of batches) { mesh.visible = false; mesh.instanceMatrix.array.fill(0); }
   });
+  // ---------------------------------------------------------------- ground separation
+  // a ground mover holds while another aircraft sits within 48 m ahead of it (20 m either side); of two that face each other the
+  // lower index goes. Departures hold short of R1 while an arrival is on short final or the line-up is taken; a pushback starts only
+  // onto a clear taxiway; a take-off roll starts only with R2 clear.
+  const GROUND = { 'taxi-in': 1, 'taxi-out': 1, pushback: 1, lineup: 1, rollout: 1, takeoff: 1 }, movers = [];
+  const ahead = (f, g) => { const dx = g.pose.x - f.pose.x, dz = g.pose.z - f.pose.z, s = Math.sin(f.pose.yaw), c = Math.cos(f.pose.yaw), front = dx * s + dz * c; return front > 0 && front < 48 && Math.abs(dx * c - dz * s) < 20; };
+  const blockedBy = (f) => { for (const g of movers) if (g !== f && g.phase !== 'parked' && ahead(f, g) && !(ahead(g, f) && f.index < g.index)) return g; return null; };
+  const crossingBusy = () => {
+    for (const g of traffic.flights) if (g.enabled && !g.diverted && g.p >= 36 && g.p < 57) return true;
+    for (const g of movers) if (g.phase === 'lineup' || g.phase === 'taxi-out' && g.pose.z > R1.z) return true;
+    return hazard(R1);
+  };
+  const taxiwayBusyAt = (f) => { for (const g of movers) if (g !== f && (g.phase === 'taxi-in' || g.phase === 'taxi-out' || g.phase === 'pushback') && Math.abs(g.pose.x - f.stand) < 60 && Math.abs(g.pose.z - TZ) < 10) return true; return false; };
+  // the R1 exit (x -344) has priority: anything east of it waits while an arrival with a stand to go to is about to leave the runway
+  // or is on the exit (one still waiting for a stand does not count: it would wait for the very aircraft it holds up)
+  const JUNCTION_X = -344;
+  const exitBusy = () => { for (const g of traffic.flights) if (g.enabled && !g.diverted && (g.p > 45 && g.p < T_IN && !standTaken(g.si, g) || g.phase === 'taxi-in' && g.pose.z > TZ + 2)) return true; return false; };
+  const holdAt = (f, phase) => { f.delay += f.p - phase; traffic.holds += Math.max(0, f.p - phase); f.p = phase; sample(f, f.p, f.pose); f.phase = f.pose.phase; };
+  // stands: taken while an aircraft taxis to it, sits on it or pushes back from it (or has claimed it on rollout)
+  const STAND_BUSY = { 'taxi-in': 1, parked: 1, pushback: 1 };
+  const standTaken = (si, f) => { for (const g of traffic.flights) if (g !== f && g.enabled && g.si === si && (STAND_BUSY[g.phase] || g.phase === 'taxi-out' && Math.abs(g.pose.x - g.stand) < 45 || g.phase === 'rollout' && g.assigned === g.cycle)) return true; return false; };
+  const assignStand = (f) => {
+    let pick = f.routes[f.home] && !standTaken(f.home, f) ? f.home : -1;
+    for (let si = 0; si < STANDS.length && pick < 0; si++) if (f.routes[si] && !standTaken(si, f)) pick = si;
+    if (pick < 0) pick = f.home;
+    if (pick !== f.si) { f.si = pick; Object.assign(f, f.routes[pick]); }
+  };
   const update = traffic.update = (dt, time) => {
-    if (!bodies) return;
+    if (!models) return;
     const camera = AF.camera.position, farSlot = Math.floor(time * 4);
-    const flying=AF.mode==='fly'&&AF.planes.cur,local=nearAirport(camera,900)||(flying&&nearAirport(flying,900));
-    traffic.busy=!!local;traffic.period=local?600:PERIOD;
-    if(!nearAirport(camera,2000)&&!(flying&&nearAirport(flying,2000))){
-      let close=false;for(const flight of traffic.flights)if(flight.enabled&&(flight.x-camera.x)**2+(flight.y-camera.y)**2+(flight.z-camera.z)**2<4000000){close=true;break;}
-      if(!close){if(traffic.visible)for(const mesh of batches)mesh.visible=false;traffic.visible=false;traffic.bridges[0]=traffic.bridges[1]=false;return;}
+    const flying = AF.mode === 'fly' && AF.planes.cur, local = nearAirport(camera, 900) || (flying && nearAirport(flying, 900));
+    traffic.busy = !!local; traffic.period = local ? BUSY_PERIOD : PERIOD;
+    if (!nearAirport(camera, 2000) && !(flying && nearAirport(flying, 2000))) {
+      let close = false; for (const flight of traffic.flights) if (flight.enabled && (flight.x - camera.x) ** 2 + (flight.y - camera.y) ** 2 + (flight.z - camera.z) ** 2 < 4000000) { close = true; break; }
+      if (!close) { if (traffic.visible) for (const mesh of batches) mesh.visible = false; traffic.visible = false; traffic.bridges[0] = traffic.bridges[1] = false; return; }
     }
-    if(!nearAirport(camera,350)&&farSlot===lastFar)return;
-    const blocked=hazard();AF.camera.updateMatrixWorld();viewMatrix.multiplyMatrices(AF.camera.projectionMatrix,AF.camera.matrixWorldInverse);view.setFromProjectionMatrix(viewMatrix);
+    if (!nearAirport(camera, 350) && farSlot === lastFar) return;
+    const blocked1 = hazard(R1), blocked2 = hazard(R2);
+    AF.camera.updateMatrixWorld(); viewMatrix.multiplyMatrices(AF.camera.projectionMatrix, AF.camera.matrixWorldInverse); view.setFromProjectionMatrix(viewMatrix);
     let dirty = false, near = false, inRange = false;
-    traffic.bridges[0]=traffic.bridges[1]=false;
+    traffic.bridges[0] = traffic.bridges[1] = false; movers.length = 0;
+    // 1: timetable changes (only while the old and the new pose are both off screen), cycles, the R1 reservation and go-arounds
     for (let index = 0; index < traffic.flights.length; index++) {
-      const flight = traffic.flights[index],wantedPeriod=traffic.busy?600:PERIOD,wantedOffset=traffic.busy?index*150:index*240,wanted=index<2||traffic.busy;
-      const oldPhase=flight.cycle===-999?phaseAt(time,flight.offset,flight.period):time-flight.offset-flight.cycle*flight.period-flight.delay;
-      sample(flight,oldPhase,pose);sample(flight,phaseAt(time,wantedOffset,wantedPeriod),candidate);
-      const oldSafe=!flight.enabled||safe(pose,camera),newSafe=!wanted||safe(candidate,camera);
-      if((flight.enabled!==wanted||flight.period!==wantedPeriod||flight.offset!==wantedOffset)&&oldSafe&&newSafe&&(pose.phase==='climb'||!flight.enabled)&&(candidate.phase==='climb'||candidate.phase==='arrival'||!wanted)){
-        if(traffic.runway===index)traffic.runway=-1;
-        const change=traffic.changes[traffic.changeCount++%32];change.index=index;change.time=time;change.enabled=wanted;change.oldSafe=oldSafe;change.newSafe=newSafe;
-        flight.enabled=wanted;flight.period=wantedPeriod;flight.offset=wantedOffset;flight.cycle=-999;flight.delay=0;flight.diverted=false;
+      const flight = traffic.flights[index], wantedPeriod = traffic.busy ? BUSY_PERIOD : PERIOD, wantedOffset = traffic.busy ? index * GAP : index * 240, wanted = index < 2 || traffic.busy;
+      const oldPhase = flight.cycle === -999 ? phaseAt(time, flight.offset, flight.period) : time - flight.offset - flight.cycle * flight.period - flight.delay;
+      sample(flight, oldPhase, pose); sample(flight, phaseAt(time, wantedOffset, wantedPeriod), candidate);
+      const oldSafe = !flight.enabled || safe(pose, camera), newSafe = !wanted || safe(candidate, camera);
+      if ((flight.enabled !== wanted || flight.period !== wantedPeriod || flight.offset !== wantedOffset) && oldSafe && newSafe && (pose.phase === 'climb' || !flight.enabled) && (candidate.phase === 'climb' || candidate.phase === 'arrival' || !wanted)) {
+        if (traffic.runway === index) traffic.runway = -1;
+        const change = traffic.changes[traffic.changeCount++ % 32]; change.index = index; change.time = time; change.enabled = wanted; change.oldSafe = oldSafe; change.newSafe = newSafe;
+        flight.enabled = wanted; flight.period = wantedPeriod; flight.offset = wantedOffset; flight.cycle = -999; flight.delay = 0; flight.diverted = false;
       }
-      if(!flight.enabled){matrix.makeScale(0,0,0);bodies.setMatrixAt(index,matrix);gears.setMatrixAt(index,matrix);strobes.setMatrixAt(index,matrix);props.setMatrixAt(index*2,matrix);props.setMatrixAt(index*2+1,matrix);dirty=true;continue;}
-      const cycle=Math.floor((time-flight.offset)/flight.period);
-      if (flight.cycle === -999 || time - flight.offset - flight.cycle * flight.period - flight.delay >= flight.period || cycle < flight.cycle) { if (traffic.runway === index) traffic.runway = -1; flight.cycle = cycle; flight.delay = 0; flight.diverted = false; }
-      let phase = time - flight.offset - flight.cycle * flight.period - flight.delay;
-      if (blocked && traffic.runway === index && phase >= 240 && phase < 254) { flight.delay += dt; phase -= dt; }
-      if (phase >= 48 && phase < 55 && !flight.diverted) {
-        if (blocked || traffic.runway >= 0 && traffic.runway !== index) { sample(flight, phase, pose); flight.diverted = true; flight.goAt = time; flight.goX = pose.x; flight.goY = pose.y; flight.goZ = pose.z; if (traffic.runway === index) traffic.runway = -1; }
+      if (!flight.enabled) { flight.p = -1; flight.phase = ''; continue; }
+      const cycle = Math.floor((time - flight.offset) / flight.period);
+      // a new cycle starts at phase 0 (far out on final), never mid-timeline; hold time is made up on the far side of the climb-out
+      if (flight.cycle === -999 || cycle < flight.cycle) { if (traffic.runway === index) traffic.runway = -1; flight.cycle = cycle; flight.delay = 0; flight.diverted = false; }
+      else if (time - flight.offset - flight.cycle * flight.period - flight.delay >= flight.period) { if (traffic.runway === index) traffic.runway = -1; flight.cycle = cycle; flight.delay = Math.max(0, time - flight.offset - cycle * flight.period); flight.diverted = false; }
+      else if (flight.delay > 0 && time - flight.offset - flight.cycle * flight.period - flight.delay > T_CLIMB + 60) flight.delay = Math.max(0, flight.delay - dt * 1.5);
+      const phase = time - flight.offset - flight.cycle * flight.period - flight.delay;
+      if (phase >= 48 && phase < T_TD && !flight.diverted) {
+        if (blocked1 || traffic.runway >= 0 && traffic.runway !== index) { sample(flight, phase, pose); flight.diverted = true; flight.goAt = time; flight.goX = pose.x; flight.goY = pose.y; flight.goZ = pose.z; if (traffic.runway === index) traffic.runway = -1; }
         else traffic.runway = index;
       }
-      if (!flight.diverted && phase >= 240 && phase < 266 && traffic.runway !== index) {
-        let arriving=false;for(let otherIndex=0;otherIndex<traffic.flights.length;otherIndex++){const other=traffic.flights[otherIndex];if(otherIndex===index||!other.enabled||other.diverted)continue;const otherPhase=time-other.offset-other.cycle*other.period-other.delay;if(otherPhase>=20&&otherPhase<80)arriving=true;}
-        if (blocked || traffic.runway >= 0 || arriving) { flight.delay += dt; phase = 240; }
-        else traffic.runway = index;
+      if (traffic.runway === index && phase >= T_IN + 6) traffic.runway = -1;
+      if (phase >= T_TD && phase < T_IN && flight.assigned !== flight.cycle && !flight.diverted) { assignStand(flight); flight.assigned = flight.cycle; }
+      flight.p = phase; sample(flight, phase, flight.pose); flight.phase = flight.pose.phase;
+      if (!flight.diverted && GROUND[flight.phase]) movers.push(flight);
+    }
+    // 2: ground holds. Starts first (pushback, take-off roll, leaving the runway for a stand) so a start that waits is back on its
+    // stand / line-up / rollout end before anyone checks what is in front of them; then everything that moves checks its way
+    for (const f of movers) {
+      if (f.phase === 'taxi-in' && f.p < T_IN + 1.5 && standTaken(f.si, f)) { assignStand(f); if (standTaken(f.si, f)) holdAt(f, T_IN - 0.01); else sample(f, f.p, f.pose); }   // another free stand, or wait on the rollout end
+      else if (f.phase === 'pushback' && f.pushOk !== f.cycle) { if (taxiwayBusyAt(f) || f.stand > JUNCTION_X && exitBusy()) holdAt(f, T_PUSH - 0.01); else f.pushOk = f.cycle; }
+      else if (f.phase === 'takeoff' && f.rollOk !== f.cycle) {
+        let busy = blocked2; for (const g of movers) if (g !== f && g.phase === 'takeoff' && g.rollOk === g.cycle) busy = true;
+        if (busy) holdAt(f, T_TO - 0.01); else f.rollOk = f.cycle;
       }
-      if (traffic.runway === index && (phase >= 80 && phase < 240 || phase >= 266)) traffic.runway = -1;
-      sample(flight, phase, pose);
-      if (flight.diverted) { const elapsed = time - flight.goAt, turn = Math.min(PI / 2, elapsed * 0.05); pose.x = flight.goX + 700 * Math.sin(turn); pose.z = flight.goZ + 700 * (1 - Math.cos(turn)) + Math.max(0, elapsed - PI * 10) * 35; pose.y = flight.goY + elapsed * 4; pose.yaw = PI / 2 - turn; pose.pitch = 0.11; pose.roll = turn < PI / 2 ? 0.18 : 0; pose.gear = elapsed < 4; pose.phase = 'go-around'; }
-      flight.x = pose.x; flight.y = pose.y; flight.z = pose.z; flight.phase = pose.phase;
-      if(pose.phase==='parked')traffic.bridges[index%2]=true;
-      const distance2 = (pose.x - camera.x) ** 2 + (pose.y - camera.y) ** 2 + (pose.z - camera.z) ** 2;
+    }
+    for (const f of movers) {
+      let wait = (f.phase === 'taxi-in' || f.phase === 'taxi-out' || f.phase === 'lineup') && !!blockedBy(f);
+      if (!wait && f.phase === 'taxi-out' && f.pose.x > JUNCTION_X + 6 && f.pose.x < JUNCTION_X + 40 && Math.abs(f.pose.z - TZ) < 3 && exitBusy()) wait = true;
+      if (!wait && f.phase === 'taxi-out' && f.pose.x < WX + 20 && f.pose.z > TZ + 3 && f.pose.z < R1.z - R1.w / 2 - 2 && crossingBusy()) wait = true;
+      if (wait) holdAt(f, f.p - dt);
+    }
+    // 3: instances (each flight owns slot `index` in its airframe's batches; the other airframe's slot stays empty)
+    const propMesh = models[0].propMesh;
+    for (let index = 0; index < traffic.flights.length; index++) {
+      const flight = traffic.flights[index], M = models[flight.model], other = models[1 - flight.model], s = flight.size, P = flight.pose;
+      if (!flight.enabled) { matrix.makeScale(0, 0, 0); for (const m of models) { m.body.setMatrixAt(index, matrix); m.gear.setMatrixAt(index, matrix); } strobes.setMatrixAt(index, matrix); propMesh.setMatrixAt(index * 2, matrix); propMesh.setMatrixAt(index * 2 + 1, matrix); flight.y = -1e4; dirty = true; continue; }
+      if (flight.diverted) { const elapsed = time - flight.goAt, turn = Math.min(PI / 2, elapsed * 0.05); P.x = flight.goX + 700 * Math.sin(turn); P.z = flight.goZ - 700 * (1 - Math.cos(turn)) - Math.max(0, elapsed - PI * 10) * 35; P.y = flight.goY + elapsed * 4; P.yaw = PI / 2 + turn; P.pitch = 0.11; P.roll = turn < PI / 2 ? -0.18 : 0; P.gear = elapsed < 4; P.phase = flight.phase = 'go-around'; }
+      flight.x = P.x; flight.y = P.y; flight.z = P.z;
+      if (P.phase === 'parked' && flight.standInfo.bridge !== undefined) traffic.bridges[flight.standInfo.bridge] = true;
+      const distance2 = (P.x - camera.x) ** 2 + (P.y - camera.y) ** 2 + (P.z - camera.z) ** 2;
       if (distance2 < 6400) near = true;
-      if (distance2 < 4000000 || traffic.bridges[index]) inRange = true;
+      if (distance2 < 4000000 || P.phase === 'parked') inRange = true;
       if (distance2 > 22500 && farSlot === lastFar) continue;
       dirty = true;
-      euler.set(-pose.pitch, pose.yaw, pose.roll, 'YXZ'); rotation.setFromEuler(euler); position.set(pose.x, pose.y, pose.z); scale.setScalar(distance2 > 4000000 ? 0 : 1); matrix.compose(position, rotation, scale); bodies.setMatrixAt(index, matrix);
-      scale.setScalar(pose.gear && distance2 < 4000000 ? 1 : 0); matrix.compose(position, rotation, scale); gears.setMatrixAt(index, matrix);
-      for (let propIndex = 0; propIndex < 2; propIndex++) { position.copy(model.props[propIndex]).applyQuaternion(rotation); position.x += pose.x; position.y += pose.y; position.z += pose.z; euler.set(-pose.pitch, pose.yaw, pose.roll, 'YXZ'); rotation.setFromEuler(euler); const spinning = pose.phase === 'parked' ? 0 : time * 45; euler.set(0, 0, spinning); matrix.makeRotationFromEuler(euler); matrix.premultiply(newRotation(rotation)); matrix.setPosition(position); if (distance2 > 4000000) matrix.scale(scale.setScalar(0)); props.setMatrixAt(index * 2 + propIndex, matrix); }
-      euler.set(-pose.pitch, pose.yaw, pose.roll, 'YXZ'); rotation.setFromEuler(euler); position.set(0, 5.5, -8).applyQuaternion(rotation); position.x += pose.x; position.y += pose.y; position.z += pose.z; scale.setScalar(distance2 < 4000000 && time % 1.4 < 0.09 && pose.phase !== 'parked' ? 1 : 0); matrix.compose(position, rotation, scale); strobes.setMatrixAt(index, matrix);
+      const show = distance2 > 4000000 ? 0 : s;
+      euler.set(-P.pitch, P.yaw, P.roll, 'YXZ'); rotation.setFromEuler(euler); position.set(P.x, P.y, P.z);
+      matrix.compose(position, rotation, scale.setScalar(show)); M.body.setMatrixAt(index, matrix);
+      matrix.compose(position, rotation, scale.setScalar(P.gear ? show : 0)); M.gear.setMatrixAt(index, matrix);
+      matrix.makeScale(0, 0, 0); other.body.setMatrixAt(index, matrix); other.gear.setMatrixAt(index, matrix);
+      for (let k = 0; k < 2; k++) {
+        const prop = M.props[k];
+        if (!prop) { matrix.makeScale(0, 0, 0); propMesh.setMatrixAt(index * 2 + k, matrix); continue; }
+        position.copy(prop).multiplyScalar(s).applyQuaternion(rotation); position.x += P.x; position.y += P.y; position.z += P.z;
+        spin.makeRotationZ(P.phase === 'parked' ? 0 : time * 45); matrix.makeRotationFromQuaternion(rotation).multiply(spin); matrix.scale(scale.setScalar(show)); matrix.setPosition(position);
+        propMesh.setMatrixAt(index * 2 + k, matrix);
+      }
+      position.copy(M.tail).multiplyScalar(s).applyQuaternion(rotation); position.x += P.x; position.y += P.y; position.z += P.z;
+      matrix.compose(position, rotation, scale.setScalar(distance2 < 4000000 && time % 1.4 < 0.09 && P.phase !== 'parked' ? 1 : 0)); strobes.setMatrixAt(index, matrix);
     }
-    for(let index=0;index<2;index++){position.set(index===0?-448:-358,1.75,84);rotation.identity();scale.setScalar(traffic.bridges[index]?1:0);matrix.compose(position,rotation,scale);docks.setMatrixAt(index,matrix);}
+    for (let index = 0; index < 2; index++) { position.set(STANDS[index].x + 2, 1.75, 84); rotation.identity(); scale.setScalar(traffic.bridges[index] ? 1 : 0); matrix.compose(position, rotation, scale); docks.setMatrixAt(index, matrix); }
     lastFar = farSlot;
-    bodies.castShadow = near;gears.castShadow=props.castShadow=false;
-    // all aircraft beyond 2 km (and no bridge docked): the five batches cost nothing instead of five empty draws + shadow draws
-    if (bodies.visible !== inRange) bodies.visible = gears.visible = props.visible = strobes.visible = docks.visible = inRange;
-    traffic.visible=inRange;
-    if (dirty) {
-      bodies.instanceMatrix.needsUpdate = gears.instanceMatrix.needsUpdate = props.instanceMatrix.needsUpdate = strobes.instanceMatrix.needsUpdate = docks.instanceMatrix.needsUpdate = true;
-      // r160 culls an InstancedMesh by its instances' bounding sphere: a handful of instances, so recomputing is cheap
-      for (const mesh of batches) mesh.computeBoundingSphere();
-    }
+    for (const M of models) M.body.castShadow = near;
+    // all aircraft beyond 2 km (and none parked): the batches cost nothing instead of seven empty draws + shadow draws
+    if (models[0].body.visible !== inRange) for (const mesh of batches) mesh.visible = inRange;
+    traffic.visible = inRange;
+    if (dirty) for (const mesh of batches) { mesh.instanceMatrix.needsUpdate = true; mesh.computeBoundingSphere(); }   // a handful of instances: cheap
   };
-  const rotationMatrix = new THREE.Matrix4();
-  const newRotation = (quaternion) => rotationMatrix.makeRotationFromQuaternion(quaternion);
   AF.onTick('air-traffic', 442, update);
-  AF.test('air traffic: timetable separates runway reservations and stays above ground', () => {
-    let ok = traffic.flights.length === 4, minimum = Infinity, maximum = 0;
-    const result = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' };
-    for (let time = 0; time < PERIOD * 2; time += 0.25) {
-      let occupied = 0;
-      for (let index=0;index<4;index++) { const flight=traffic.flights[index],phase = phaseAt(time,index*150,600); if (runwayUse(phase)) occupied++; sample(flight, phase, result); const clearance = result.y - Math.max(-1.25, AF.W.groundY(result.x, result.z)); minimum = Math.min(minimum, clearance); if (clearance < -0.01) ok = false; }
-      maximum = Math.max(maximum, occupied); if (occupied > 1) ok = false;
+  // ---------------------------------------------------------------- ground crew
+  // Per stand a fuel truck (right) and a catering truck (left) wait on the service row (z 80.5, north of every nose and clear of the
+  // jet bridges), drive out beside a parked aircraft's nose and back before pushback; a tug comes to the nose and pushes the aircraft
+  // back; two ramp hands walk the stand while it is served. The trucks are 50-vehicles car models moved kinematically (no physics);
+  // the crew are path walkers (shared instanced batches). Everything is idle beyond 350 m.
+  const ROW = 80.5, SPOT = 86.3, CREW_V = 5;
+  const crew = traffic.crew = [];
+  const vest = (seed, pose = 'stand') => { const look = AF.peopleKit.makeLook('ticket', seed % 2 ? 'm' : 'f', 'adult', AF.rng(seed)); look.top.col = 0xff8a32; look.bottom.col = 0x26324e; look.pose = pose; return look; };
+  const route = (unit, points, yaw) => { unit.path = points; unit.step = 0; unit.endYaw = yaw; };
+  AF.onBuild('air-ground-crew', 662, () => {
+    const VV = AF.vehicles;
+    STANDS.forEach((stand, si) => {
+      const x = stand.x, right = Math.min(x + 14, -314), left = x - 14, units = [];
+      const add = (type, hx, side) => { const car = VV.makeCar(type, 0, hx, ROW, side > 0 ? -PI / 2 : PI / 2, { noDrive: true }); const unit = { car, side, home: [hx, ROW], x: hx, z: ROW, yaw: car.yaw, path: null, step: 0, endYaw: car.yaw, state: 'home' }; units.push(unit); return unit; };
+      const fuel = add('fuel', right, 1), catering = add('catering', left, -1), tug = add('baggage', x - 8.5, 0);
+      tug.home = [tug.x, ROW]; tug.yaw = tug.car.yaw = PI / 2; tug.endYaw = PI / 2;
+      const hands = AF.walkers.addPath('airport-ramp-' + si, [[x - 4, 0.25, 85.5], [x - 4, 0.25, 82.5], [x + 4, 0.25, 82.5], [x + 4, 0.25, 85.5]], { count: 2, speed: 1.1, mode: 'pingpong', activeRadius: 300, looks: [vest(si * 7 + 1), vest(si * 7 + 2)] });
+      hands.enabled = false;
+      crew.push({ stand, fuel, catering, tug, units, hands, served: false });
+    });
+    AF.walkers.addPath('airport-ramp-ga', [[-604, 0.25, 101], [-562, 0.25, 101], [-524, 0.25, 101], [-490, 0.25, 101]], { count: 3, speed: 1.2, mode: 'pingpong', activeRadius: 300, looks: [vest(31), vest(32), vest(33)] });
+    traffic.marshal3 = AF.walkers.addPath('airport-marshal-3', [[STANDS[2].x, 0.25, 79]], { count: 1, speed: 0, activeRadius: 230, looks: [vest(41)] });
+  });
+  const moveUnit = (unit, dt) => {
+    const car = unit.car;
+    if (unit.path && unit.step < unit.path.length) {
+      const [tx, tz] = unit.path[unit.step], dx = tx - unit.x, dz = tz - unit.z, d = Math.hypot(dx, dz), stepD = CREW_V * dt;
+      if (d <= stepD) { unit.x = tx; unit.z = tz; unit.step++; }
+      else { unit.x += dx / d * stepD; unit.z += dz / d * stepD; unit.yaw += AF.angDiff(unit.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 6); }
+      car.v = CREW_V;
+    } else { unit.yaw += AF.angDiff(unit.yaw, unit.endYaw) * Math.min(1, dt * 3); car.v = 0; }
+    car.x = unit.x; car.z = unit.z; car.yaw = unit.yaw; AF.vehicles.placeMesh(car);
+  };
+  AF.onTick('air-ground-crew', 443, (dt) => {
+    if (!crew.length || !models) return;
+    const camera = AF.camera.position;
+    if (!nearAirport(camera, 350)) return;
+    for (const C of crew) {
+      const x = C.stand.x; let parked = null, pushing = null, arriving = false;
+      for (const flight of traffic.flights) if (flight.enabled && flight.stand === x) { if (flight.phase === 'parked') parked = flight; else if (flight.phase === 'pushback') pushing = flight; else if (flight.phase === 'taxi-in') arriving = true; }
+      const serve = !!parked && parked.p < T_PUSH - 18 && parked.p > T_IN + parked.tIn + 3;
+      if (serve !== C.served) {
+        C.served = serve; C.hands.enabled = serve;
+        for (const unit of [C.fuel, C.catering]) {
+          const sx = x + unit.side * 6.5;
+          if (serve) route(unit, [[sx, ROW], [sx, SPOT]], unit.side > 0 ? -PI / 2 : PI / 2);
+          else route(unit, [[sx, ROW], unit.home], unit.side > 0 ? -PI / 2 : PI / 2);
+        }
+      }
+      // the tug: to the nose a few seconds before pushback, pinned to the nose while pushing, then home
+      const tug = C.tug;
+      if (pushing) {
+        const P = pushing.pose, M = models[pushing.model], reach = M.len * pushing.size / 2 + 2.2;
+        tug.x = P.x + Math.sin(P.yaw) * reach; tug.z = P.z + Math.cos(P.yaw) * reach; tug.yaw = P.yaw + PI; tug.state = 'push'; tug.path = null;
+        tug.car.v = 1; tug.car.x = tug.x; tug.car.z = tug.z; tug.car.yaw = tug.yaw; AF.vehicles.placeMesh(tug.car);
+        continue;
+      }
+      if (parked && parked.p > T_PUSH - 12 && tug.state !== 'nose') { tug.state = 'nose'; route(tug, [[tug.x, ROW], [x, ROW], [x, parked.standZ - models[parked.model].len * parked.size / 2 - 2.2]], 0); }
+      else if (!parked && tug.state !== 'home') { tug.state = 'home'; route(tug, [[tug.x, Math.max(tug.z, 100)], [tug.home[0], 100], tug.home], PI / 2); }
+      if (C.stand === STANDS[2] && traffic.marshal3) traffic.marshal3.actors[0].look.pose = arriving ? 'marshal' : 'stand';
+      for (const unit of C.units) moveUnit(unit, dt);
     }
-    const triangles = model ? model.body.index.count / 3 : Infinity;
-    let parkedClear = true;
-    for (const flight of traffic.flights) for (let time = 70; time < 240; time += 0.25) {
-      sample(flight, time, result);
-      for (const parked of AF.planes.list) {
-        const radiusX = Math.abs(Math.sin(result.yaw)) * 10.25 + Math.abs(Math.cos(result.yaw)) * 14.75, radiusZ = Math.abs(Math.cos(result.yaw)) * 10.25 + Math.abs(Math.sin(result.yaw)) * 14.75;
-        if (Math.abs(result.x - parked.home.x) < radiusX + parked.G.halfW && Math.abs(result.z - parked.home.z) < radiusZ + parked.G.halfL) parkedClear = false;
+  });
+  // a whole busy session simulated near the terminal, then far away; flight state (incl. poses) restored afterwards
+  const simulate = (fn) => {
+    const camera = AF.camera.position.clone(), quaternion = AF.camera.quaternion.clone(), runway = traffic.runway, holds = traffic.holds;
+    const saved = traffic.flights.map((flight) => Object.assign({}, flight, { pose: Object.assign({}, flight.pose) }));
+    try { return fn(); }
+    finally { saved.forEach((flight, index) => Object.assign(traffic.flights[index], flight)); traffic.runway = runway; traffic.holds = holds; AF.camera.position.copy(camera); AF.camera.quaternion.copy(quaternion); lastFar = -1; update(0, AF.clock.t); }
+  };
+  AF.test('air traffic: two runways and one-way taxiing keep every aircraft apart', () => simulate(() => {
+    let enabled = 0, closest = Infinity, pair = '', wrong = 0, below = 0, parkedHit = 0, departed = 0;
+    AF.camera.position.set(-480, 20, 110); AF.camera.lookAt(-480, 20, 200);
+    for (let time = 0; time < 2000; time += 0.1) {
+      update(0.1, time);
+      const on = traffic.flights.filter((flight) => flight.enabled && !flight.diverted); enabled = Math.max(enabled, on.length);
+      for (const flight of on) {
+        const P = flight.pose, M = models[flight.model], halfL = M.len * flight.size / 2, halfW = M.span * flight.size / 2;
+        if (flight.phase === 'climb' && P.y < 4) departed++;
+        if (P.y < Math.max(-1.25, AF.W.groundY(P.x, P.z)) - 0.01) below++;
+        if (P.y < 2 && P.x > R1.x0 && P.x < R1.x1 && Math.abs(P.z - R1.z) < R1.w / 2 && !['rollout', 'arrival'].includes(flight.phase) && Math.abs(P.x - WX) > 8 && P.x < -352) wrong++;
+        if (P.y < 2 && P.x > R2.x0 && P.x < R2.x1 && Math.abs(P.z - R2.z) < R2.w / 2 && !['takeoff', 'lineup'].includes(flight.phase) && P.x > WX + 14) wrong++;
+        if (P.y < 3) for (const parked of AF.planes.list) {
+          if (parked === AF.planes.cur) continue;
+          const rx = Math.abs(Math.sin(P.yaw)) * halfL + Math.abs(Math.cos(P.yaw)) * halfW, rz = Math.abs(Math.cos(P.yaw)) * halfL + Math.abs(Math.sin(P.yaw)) * halfW;
+          if (Math.abs(P.x - parked.home.x) < rx + parked.G.halfW && Math.abs(P.z - parked.home.z) < rz + parked.G.halfL) parkedHit++;
+        }
+      }
+      for (let i = 0; i < on.length; i++) for (let j = i + 1; j < on.length; j++) {
+        const a = on[i].pose, b = on[j].pose; if (a.y > 8 || b.y > 8) continue;
+        const d = Math.hypot(a.x - b.x, a.z - b.z); if (d < closest) { closest = d; pair = on[i].phase + '/' + on[j].phase; }
       }
     }
-    return { ok: ok && triangles < 6000 && parkedClear, info: 'runway max=' + maximum + ', clearance=' + minimum.toFixed(2) + 'm, parked clear=' + parkedClear + ', body=' + triangles + ' tris' };
-  });
-  AF.test('air traffic: busy near, light far, transitions stay off-screen',()=>{
-    const camera=AF.camera.position.clone(),quaternion=AF.camera.quaternion.clone(),saved=traffic.flights.map(flight=>Object.assign({},flight)),runway=traffic.runway;
-    let nearCount=0,farCount=0,maximum=0;
-    try{
-      AF.camera.position.set(-480,20,110);AF.camera.lookAt(-480,20,200);
-      for(let time=0;time<1200;time+=0.1){update(0.1,time);nearCount=Math.max(nearCount,traffic.flights.filter(flight=>flight.enabled).length);let users=0;for(const flight of traffic.flights)if(flight.enabled&&!flight.diverted&&runwayUse(time-flight.offset-flight.cycle*flight.period-flight.delay))users++;maximum=Math.max(maximum,users);}
-      AF.camera.position.set(700,20,-200);AF.camera.lookAt(900,20,-200);
-      for(let time=1200;time<2400;time+=0.1)update(0.1,time);
-      farCount=traffic.flights.filter(flight=>flight.enabled).length;
-      return{ok:nearCount===4&&farCount===2&&maximum<=1&&traffic.changes.every(change=>change.oldSafe&&change.newSafe),info:'near '+nearCount+', far '+farCount+', runway max '+maximum+', safe changes '+traffic.changeCount};
-    }finally{saved.forEach((flight,index)=>Object.assign(traffic.flights[index],flight));traffic.runway=runway;AF.camera.position.copy(camera);AF.camera.quaternion.copy(quaternion);lastFar=-1;update(0,AF.clock.t);}
-  });
+    const tris = models.map((model) => model.tris);
+    return { ok: enabled === BUSY && closest > 22 && !wrong && !below && !parkedHit && departed > 0 && tris.every((t) => t < 6000), info: 'flights ' + enabled + ', closest ' + closest.toFixed(1) + ' m (' + pair + '), off-runway ' + wrong + ', below ground ' + below + ', parked hits ' + parkedHit + ', holds ' + traffic.holds.toFixed(0) + ' s, tris ' + tris.join('/') };
+  }));
+  AF.test('air traffic: busy near, light far, transitions stay off-screen', () => simulate(() => {
+    let nearCount = 0;
+    AF.camera.position.set(-480, 20, 110); AF.camera.lookAt(-480, 20, 200);
+    for (let time = 0; time < 1200; time += 0.1) { update(0.1, time); nearCount = Math.max(nearCount, traffic.flights.filter((flight) => flight.enabled).length); }
+    AF.camera.position.set(700, 20, -200); AF.camera.lookAt(900, 20, -200);
+    for (let time = 1200; time < 2400; time += 0.1) update(0.1, time);
+    const farCount = traffic.flights.filter((flight) => flight.enabled).length;
+    return { ok: nearCount === BUSY && farCount === 2 && traffic.changes.every((change) => change.oldSafe && change.newSafe), info: 'near ' + nearCount + ', far ' + farCount + ', safe changes ' + traffic.changeCount };
+  }));
 }
 } catch (error) { AF.partError('53-airtraffic.js', error); }
 

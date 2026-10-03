@@ -1,5 +1,8 @@
 // ================================================================ 07-outland.js
 try {
+// The whole part is one function: it runs here, and its source is shipped to the outland mesh workers (49-outland), which run it on
+// a stub AF (AF.WORKER) and import the generated network with O.netImport, so both threads sample the very same height function.
+function outlandScope(AF) {
 const W = AF.W, P = AF.PLAN.world, smooth = AF.smooth, clamp = AF.clamp, noise = AF.noise2;
 const O = AF.outland = { bounds: P.bounds, play: P.play, props: [], pads: [], edgeReady: false, rivers: [], wayside: [], TUNNEL_H: 6.5 };
 const tiles = new Map(), edges = new Map(), segments = [], roadGrid = new Map(), riverSegs = [], riverGrid = new Map();
@@ -489,10 +492,7 @@ function buildRivers() {
     const river = { name: spec.name, pts, levels, hw: spec.w / 2 }; O.rivers.push(river);
     for (let index = 1; index < pts.length; index++) {
       const a = pts[index - 1], b = pts[index], dx = b[0] - a[0], dz = b[1] - a[1], segment = { x: a[0], z: a[1], dx, dz, len2: dx * dx + dz * dz || 1, y0: levels[index - 1], y1: levels[index], hw: river.hw };
-      riverSegs.push(segment);
-      for (let ix = Math.floor((Math.min(a[0], b[0]) - 100) / 64); ix <= Math.floor((Math.max(a[0], b[0]) + 100) / 64); ix++) for (let iz = Math.floor((Math.min(a[1], b[1]) - 100) / 64); iz <= Math.floor((Math.max(a[1], b[1]) + 100) / 64); iz++) {
-        const key = ix * 10000 + iz; let bucket = riverGrid.get(key); if (!bucket) { bucket = []; riverGrid.set(key, bucket); } bucket.push(segment);
-      }
+      riverSegs.push(segment); bucketRiver(segment);
     }
     const middle = pts[Math.floor(pts.length / 2)]; AF.addLabel(spec.name, middle[0], middle[1], 'place');
   }
@@ -611,10 +611,18 @@ function register(road) {
     const segment = { x: start[0], z: start[1], dx, dz, len2, length, y0: road.heights[index - 1], y1: road.heights[index], acc, kind: road.kind, hw: road.w / 2, flag, deck: road.kind === 0 || flag === 1, road,
       lift: road.lift, grade: Math.abs(road.heights[index] - road.heights[index - 1]) / length, first: index === 1, last: index === road.points.length - 1,
       b0: road.bank ? road.bank[index - 1] : 0, b1: road.bank ? road.bank[index] : 0 };
-    segments.push(segment); acc += segment.length;
-    const x0 = Math.floor((Math.min(segment.x, segment.x + segment.dx) - 44) / 64), x1 = Math.floor((Math.max(segment.x, segment.x + segment.dx) + 44) / 64);
-    const z0 = Math.floor((Math.min(segment.z, segment.z + segment.dz) - 44) / 64), z1 = Math.floor((Math.max(segment.z, segment.z + segment.dz) + 44) / 64);
-    for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) { const key = ix * 10000 + iz; let bucket = roadGrid.get(key); if (!bucket) { bucket = []; roadGrid.set(key, bucket); } bucket.push(segment); }
+    segments.push(segment); acc += segment.length; bucketRoad(segment);
+  }
+}
+function bucketRoad(segment) {
+  const x0 = Math.floor((Math.min(segment.x, segment.x + segment.dx) - 44) / 64), x1 = Math.floor((Math.max(segment.x, segment.x + segment.dx) + 44) / 64);
+  const z0 = Math.floor((Math.min(segment.z, segment.z + segment.dz) - 44) / 64), z1 = Math.floor((Math.max(segment.z, segment.z + segment.dz) + 44) / 64);
+  for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) { const key = ix * 10000 + iz; let bucket = roadGrid.get(key); if (!bucket) { bucket = []; roadGrid.set(key, bucket); } bucket.push(segment); }
+}
+function bucketRiver(segment) {
+  const ax = segment.x, az = segment.z, bx = ax + segment.dx, bz = az + segment.dz;
+  for (let ix = Math.floor((Math.min(ax, bx) - 100) / 64); ix <= Math.floor((Math.max(ax, bx) + 100) / 64); ix++) for (let iz = Math.floor((Math.min(az, bz) - 100) / 64); iz <= Math.floor((Math.max(az, bz) + 100) / 64); iz++) {
+    const key = ix * 10000 + iz; let bucket = riverGrid.get(key); if (!bucket) { bucket = []; riverGrid.set(key, bucket); } bucket.push(segment);
   }
 }
 AF.onBuild('outland-boundary', 496, () => {
@@ -648,4 +656,176 @@ for (const entry of [['Solace Range', 220, -780], ['Park Valley', -40, -440], ['
 AF.addLabel('Mirror Lake', 828, -198);
 AF.addLabel('Ochre Flats', 930, 70);
 for (const road of P.roads) { const point = road.points[1]; AF.addLabel(road.name, point[0], point[1], 'street'); }
+
+// ---------------------------------------------------------------- tile mesher (49-outland quadtree tiles): runs here and on the workers
+const quadP = new Float64Array(12), quadUV = new Float64Array(8);
+const setP = (a, b, c, d, e, f, g, h, i, j, k, l) => { const q = quadP; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; q[8] = i; q[9] = j; q[10] = k; q[11] = l; };
+const setUV = (a, b, c, d, e, f, g, h) => { const q = quadUV; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e; q[5] = f; q[6] = g; q[7] = h; };
+const heights = new Int16Array(66 * 66), colors = new Uint16Array(64 * 64), used = new Uint8Array(64 * 64);
+const terrainBuf = O.terrainBuf = { n: 0, p: new Float32Array(262144 * 3), uv: new Float32Array(262144 * 2), pal: new Uint16Array(262144), an: new Uint8Array(262144), idx: new Uint32Array(393216),
+  quadS(points, tex, first, second, third, fourth, color, normal, ao0, ao1, ao2, ao3) {
+    const base = this.n; if (base + 4 > this.pal.length) throw new Error('outland mesh scratch capacity');
+    for (let corner = 0; corner < 4; corner++) {
+      const source = corner === 0 ? first : corner === 1 ? second : corner === 2 ? third : fourth, vertex = base + corner;
+      for (let axis = 0; axis < 3; axis++) this.p[vertex * 3 + axis] = points[source * 3 + axis];
+      this.uv[vertex * 2] = tex[source * 2]; this.uv[vertex * 2 + 1] = tex[source * 2 + 1]; this.pal[vertex] = color;
+      this.an[vertex] = (corner === 0 ? ao0 : corner === 1 ? ao1 : corner === 2 ? ao2 : ao3) * 8 + normal;
+    }
+    const offset = base / 4 * 6, reverse = ao0 + ao2 < ao1 + ao3;
+    this.idx[offset] = base + (reverse ? 1 : 0); this.idx[offset + 1] = base + (reverse ? 2 : 1); this.idx[offset + 2] = base + (reverse ? 3 : 2);
+    this.idx[offset + 3] = base + (reverse ? 1 : 0); this.idx[offset + 4] = base + (reverse ? 3 : 2); this.idx[offset + 5] = base + (reverse ? 0 : 3); this.n += 4;
+  },
+  *geometryG() { return yield* AF.GeoBuf.prototype.geometryG.call({ n: this.n, p: this.p.subarray(0, this.n * 3), uv: this.uv.subarray(0, this.n * 2), pal: this.pal.subarray(0, this.n), an: this.an.subarray(0, this.n), idx: this.idx.subarray(0, this.n / 4 * 6) }, true); }
+};
+const directions = [[1, 0, 0], [-1, 0, 1], [0, 1, 4], [0, -1, 5]];
+const inside = (x, z) => x >= W.X0 && x < W.x1 && z >= W.Z0 && z < W.z1;
+const rimCache = new Map();
+let padsSeen = -1;
+function rimSample(x, z) {
+  const key = x * 10000 + z;
+  let height = rimCache.get(key);
+  if (height === undefined) { height = O.rimH ? O.rimH(x, z) : Math.round(O.h(x, z) * 4) / 4; rimCache.set(key, height); }
+  return height;
+}
+function boundaryH(x, z) {
+  const ax = -1484 + Math.floor((x + 1484) / 8) * 8, az = -1196 + Math.floor((z + 1196) / 8) * 8;
+  const ux = (x - ax) / 8, uz = (z - az) / 8;
+  return AF.lerp(AF.lerp(rimSample(ax, az), rimSample(ax + 8, az), ux), AF.lerp(rimSample(ax, az + 8), rimSample(ax + 8, az + 8), ux), uz);
+}
+function cornerH(entry, col, row, across, along, height) {
+  const step = entry.size / 64, ix = col + across, iz = row + along;
+  return ix === 0 || ix === 64 || iz === 0 || iz === 64 ? boundaryH(entry.x + ix * step, entry.z + iz * step) : height;
+}
+function apron(buf, entry, col, row, height, color) {
+  const step = entry.size / 64, xa = entry.x + col * step, za = entry.z + row * step;
+  setP(xa, cornerH(entry, col, row, 0, 0, height), za, xa, cornerH(entry, col, row, 0, 1, height), za + step, xa + step, cornerH(entry, col, row, 1, 1, height), za + step, xa + step, cornerH(entry, col, row, 1, 0, height), za);
+  setUV(xa * 4, za * 4, xa * 4, (za + step) * 4, (xa + step) * 4, (za + step) * 4, (xa + step) * 4, za * 4);
+  buf.quadS(quadP, quadUV, 0, 1, 2, 3, color, 2, 3, 3, 3, 3);
+}
+function wall(buf, xa, za, xb, zb, lowA, lowB, highA, highB, color, normal, soft) {
+  if (highA <= lowA && highB <= lowB) return;
+  setP(xa, Math.min(lowA, highA), za, xb, Math.min(lowB, highB), zb, xb, highB, zb, xa, highA, za);
+  const ua = (normal < 2 ? za : xa) * 4, ub = (normal < 2 ? zb : xb) * 4;
+  setUV(ua, lowA * 4, ub, lowB * 4, ub, highB * 4, ua, highA * 4);
+  const reverse = normal === 0 || normal === 5;
+  buf.quadS(quadP, quadUV, 0, reverse ? 3 : 1, 2, reverse ? 1 : 3, color, normal + (soft ? 32 : 0), 3, 3, 3, 3);
+}
+function emit(buf, xa, za, xb, zb, lo, hi, color, normal, soft = false) {
+  if (normal === 2) {
+    setP(xa, hi, za, xa, hi, zb, xb, hi, zb, xb, hi, za);
+    setUV(xa * 4, za * 4, xa * 4, zb * 4, xb * 4, zb * 4, xb * 4, za * 4);
+    buf.quadS(quadP, quadUV, 0, 1, 2, 3, color, 2, 3, 3, 3, 3); return;
+  }
+  if (hi <= lo) return;
+  if (normal < 2) {
+    setP(xa, lo, za, xa, lo, zb, xa, hi, zb, xa, hi, za);
+    setUV(za * 4, lo * 4, zb * 4, lo * 4, zb * 4, hi * 4, za * 4, hi * 4);
+  } else {
+    setP(xa, lo, za, xb, lo, za, xb, hi, za, xa, hi, za);
+    setUV(xa * 4, lo * 4, xb * 4, lo * 4, xb * 4, hi * 4, xa * 4, hi * 4);
+  }
+  const reverse = normal === 0 || normal === 5;
+  buf.quadS(quadP, quadUV, 0, reverse ? 3 : 1, 2, reverse ? 1 : 3, color, normal + (soft ? 32 : 0), 3, 3, 3, 3);
+}
+// one tile { x, z, size } (64 x 64 cells) into O.terrainBuf; rim = Float32Array(260) edge profile. Returns the vertex count.
+O.meshTileG = function* (entry, rim) {
+  if (O.pads.length !== padsSeen) { padsSeen = O.pads.length; rimCache.clear(); }
+  const step = entry.size / 64, quantum = step <= 1 ? step * 0.5 : step * 0.75, buf = terrainBuf;
+  buf.n = 0; colors.fill(0); used.fill(0);
+  for (let index = 0; index <= 64; index++) {
+    rim[index] = boundaryH(entry.x, entry.z + index * step); rim[65 + index] = boundaryH(entry.x + entry.size, entry.z + index * step);
+    rim[130 + index] = boundaryH(entry.x + index * step, entry.z); rim[195 + index] = boundaryH(entry.x + index * step, entry.z + entry.size);
+    if ((index & 7) === 7) yield;
+  }
+  for (let row = -1; row <= 64; row++) {
+    for (let col = -1; col <= 64; col++) {
+      const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step, offset = (row + 1) * 66 + col + 1;
+      heights[offset] = (O.meshH ? O.meshH(x, z, step) : Math.round(O.h(x, z) / quantum) * quantum) * 4;
+    }
+    yield;
+  }
+  for (let row = 0; row < 64; row++) { for (let col = 0; col < 64; col++) {
+    const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step, offset = (row + 1) * 66 + col + 1;
+    if (!inside(x, z) && heights[offset] > -6) colors[row * 64 + col] = O.colTop(x, z, heights[offset] * 0.25, (Math.abs(heights[offset + 1] - heights[offset - 1]) + Math.abs(heights[offset + 66] - heights[offset - 66])) / (8 * step), step);
+  } yield; }
+  for (let row = 0; row < 64; row++) {
+    const za = entry.z + row * step, zb = za + step;
+    for (let col = 0; col < 64;) {
+      const color = colors[row * 64 + col], offset = (row + 1) * 66 + col + 1, height = heights[offset] * 0.25;
+      if (!color || used[row * 64 + col]) { col++; continue; }
+      if (!row || row === 63 || !col || col === 63) { apron(buf, entry, col, row, height, color); col++; continue; }
+      let run = 1;
+      while (col + run < 63 && !used[row * 64 + col + run] && colors[row * 64 + col + run] === color && heights[offset + run] === heights[offset]) run++;
+      let depth = 1, match = true;
+      while (row + depth < 63 && match) {
+        for (let along = 0; along < run; along++) if (used[(row + depth) * 64 + col + along] || colors[(row + depth) * 64 + col + along] !== color || heights[offset + depth * 66 + along] !== heights[offset]) { match = false; break; }
+        if (match) depth++;
+      }
+      for (let across = 0; across < depth; across++) used.fill(1, (row + across) * 64 + col, (row + across) * 64 + col + run);
+      const xa = entry.x + col * step;
+      emit(buf, xa, za, xa + run * step, za + depth * step, height, height, color, 2);
+      col += run;
+    }
+    for (let col = 0; col < 64; col++) {
+      const color = colors[row * 64 + col]; if (!color) continue;
+      const xa = entry.x + col * step, xb = xa + step, offset = (row + 1) * 66 + col + 1, height = heights[offset] * 0.25;
+      for (const direction of directions) {
+        const dx = direction[0], dz = direction[1], normal = direction[2], nextX = xa + step * (0.5 + dx), nextZ = za + step * (0.5 + dz);
+        const grid = inside(nextX, nextZ), boundary = col + dx < 0 || col + dx >= 64 || row + dz < 0 || row + dz >= 64;
+        const fx = dx > 0 ? xb : xa, fz = dz > 0 ? zb : za;
+        if (grid) {
+          // The city emits no outer faces; both height directions belong to this wall.
+          for (let along = 0; along < step; along += 0.25) {
+            const gx = dx ? fx + dx * 0.125 : xa + along + 0.125, gz = dz ? fz + dz * 0.125 : za + along + 0.125;
+            const gridHeight = W.groundY(gx, gz), n = gridHeight > height ? normal ^ 1 : normal;
+            emit(buf, dx ? fx : xa + along, dz ? fz : za + along, dx ? fx : xa + along + 0.25, dz ? fz : za + along + 0.25, Math.min(height, gridHeight), Math.max(height, gridHeight), color, n);
+          }
+          continue;
+        }
+        if (boundary) continue;
+        const neighbor = heights[offset + dx + dz * 66] * 0.25;
+        if (neighbor < height) {
+          const across = dx > 0 ? 1 : 0, along = dz > 0 ? 1 : 0;
+          const highA = cornerH(entry, col, row, across, along, height), highB = cornerH(entry, col, row, dx ? across : 1, dz ? along : 1, height);
+          const lowA = cornerH(entry, col + dx, row + dz, dx ? 1 - across : 0, dz ? 1 - along : 0, neighbor), lowB = cornerH(entry, col + dx, row + dz, dx ? 1 - across : 1, dz ? 1 - along : 1, neighbor);
+          const gentle = height - neighbor <= step * 2;
+          wall(buf, dx ? fx : xa, dz ? fz : za, dx ? fx : xb, dz ? fz : zb, lowA, lowB, highA, highB, gentle ? color : O.colSide(xa + step / 2, za + step / 2, height), normal, gentle);
+        }
+      }
+    }
+    yield;
+  }
+  return buf.n;
+};
+// worker side: a whole tile as exact-length transferable arrays (the attributes of GeoBuf.geometryG(true)) + bounds as AF.geometryBoundsG
+O.meshTileArrays = (x, z, size) => {
+  const rim = new Float32Array(260), gen = O.meshTileG({ x, z, size }, rim); while (!gen.next().done);
+  const buf = terrainBuf, n = buf.n, p = buf.p.slice(0, n * 3), uv = buf.uv.slice(0, n * 2), ix = buf.idx.subarray(0, n / 4 * 6);
+  for (let i = 0; i < uv.length; i++) uv[i] *= 0.25;
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity, r2 = 0;
+  for (let i = 0; i < p.length; i += 3) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); z0 = Math.min(z0, p[i + 2]); z1 = Math.max(z1, p[i + 2]); }
+  const cx = (x0 + x1) * 0.5, cy = (y0 + y1) * 0.5, cz = (z0 + z1) * 0.5;
+  for (let i = 0; i < p.length; i += 3) r2 = Math.max(r2, (p[i] - cx) ** 2 + (p[i + 1] - cy) ** 2 + (p[i + 2] - cz) ** 2);
+  return { n, p, uv, pal: buf.pal.slice(0, n), an: buf.an.slice(0, n), idx: n > 65535 ? new Uint32Array(ix) : new Uint16Array(ix), box: [x0, y0, z0, x1, y1, z1], sphere: [cx, cy, cz, Math.sqrt(r2)], rim };
+};
+// the generated network + every city-edge height for the workers (structured-clone safe: roads reduced to what the samplers read)
+O.padsExport = () => O.pads.map((pad) => ({ x: pad.x, z: pad.z, rx: pad.rx, rz: pad.rz, y: pad.y, bank: pad.bank, kind: pad.kind, face: pad.face, pave: pad.pave }));
+O.netExport = () => {
+  for (let bx = 0; bx < W.NX; bx++) { const x = W.xOf(bx) + 0.125; edge(x, W.Z0 - 1); edge(x, W.z1 + 1); }
+  for (let bz = 0; bz < W.NZ; bz++) { const z = W.zOf(bz) + 0.125; edge(W.X0 - 1, z); edge(W.x1 + 1, z); }
+  const lite = new Map(), roadOf = (road) => { let v = lite.get(road); if (!v) { v = { kind: road.kind, w: road.w, ring: !!road.ring, driveway: !!road.driveway, order: road.order, ends: road.ends.slice() }; lite.set(road, v); } return v; };
+  const plan = { roads: [] };
+  for (const key in P) if (key !== 'roads') { try { plan[key] = structuredClone(P[key]); } catch (e) { /* functions stay main-thread only */ } }
+  return { plan, segments: segments.map((s) => Object.assign({}, s, { road: roadOf(s.road) })), rivers: riverSegs.slice(), edges: new Map(edges), pads: O.padsExport(), shore: AF.land && AF.land.BEACH ? AF.land.BEACH.shore(W.X0) : 210 };
+};
+O.netImport = (net) => {
+  segments.length = 0; roadGrid.clear(); for (const s of net.segments) { segments.push(s); bucketRoad(s); }
+  riverSegs.length = 0; riverGrid.clear(); for (const s of net.rivers) { riverSegs.push(s); bucketRiver(s); }
+  riverReady = true; edges.clear(); for (const [key, value] of net.edges) edges.set(key, value); O.edgeReady = true;
+  O.setPads(net.pads);
+};
+O.setPads = (pads) => { O.pads.length = 0; for (const pad of pads) O.pads.push(pad); };
+}
+outlandScope(AF);
+AF.outland.scopeFn = outlandScope;
 } catch (e) { AF.partError('07-outland.js', e); }

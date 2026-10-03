@@ -1377,16 +1377,20 @@ AF.onTick('lod-fade', 881, (dt) => {
   if (FADE.act.length) { FADE.k += dt / FADE.dur; if (FADE.k >= 1) fadeEnd(); }
   if (!FADE.act.length && FADE.pend.length) fadeStart();
   U.uFadeK.value = Math.min(1, FADE.k);
-  // first use of a fade variant would compile a big program mid-game: compile both whenever the voxel program inputs change
-  // (tier = light / shadow state, env map) by drawing a degenerate triangle with each for one frame
-  if (!AF.ready || !FADE.on) return;
-  const key = AF.GFX.name + (AF.mat.voxel.envMap ? 'e' : '');
-  if (FADE.warm) { for (const w of FADE.warm) AF.scene.remove(w); FADE.warm = null; }
+  // first use of a fade variant would compile a big program mid-game (measured 0.2-1.5 s on ANGLE): whenever the voxel material gains
+  // a program variant (tier, light / shadow state, env map) compile both fade variants for receive-shadow on and off with
+  // compileAsync (KHR_parallel_shader_compile: the driver compiles off the main thread) against the scene's lights
+  if (!AF.ready || !FADE.on || FADE.compiling) return;
+  const vp = AF.renderer.properties.get(AF.mat.voxel).programs;
+  const key = AF.GFX.name + (AF.mat.voxel.envMap ? 'e' : '') + (vp ? vp.size : 0);
   if (key !== FADE.warmKey) {
     FADE.warmKey = key; const M = fadeMats(), V = AF.mat.voxel;
     for (const m of [M.in, M.out]) { if (!!m.envMap !== !!V.envMap) m.needsUpdate = true; m.envMap = V.envMap; }
     const g = FADE.warmGeo || (FADE.warmGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)));
-    FADE.warm = [M.in, M.out].map((mat) => { const w = new THREE.Mesh(g, mat); w.frustumCulled = false; w.receiveShadow = true; AF.scene.add(w); return w; });
+    const group = FADE.warmGroup || (FADE.warmGroup = []);
+    if (!group.length) for (const mat of [M.in, M.out]) for (const recv of [true, false]) { const w = new THREE.Mesh(g, mat); w.frustumCulled = false; w.receiveShadow = recv; w.castShadow = recv; group.push(w); }
+    FADE.compiling = true;
+    Promise.all(group.map((w) => AF.stream.compileAhead(w))).finally(() => { FADE.compiling = false; });
   }
 });
 // FAR clusters: 4 x 4 regions (128 m) merged into ONE 1 m mesh (voxels + terrain) — ~16x fewer far draw calls,

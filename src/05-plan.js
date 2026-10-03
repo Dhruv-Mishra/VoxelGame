@@ -245,7 +245,9 @@ AF.PLAN = (() => {
     // 12 plots, 6 each side of Friends Lane, 35 m frontage. side -1 = west side (door faces east), +1 = east side (door faces west)
     plots: [],
     zoo: { x0: -650, z0: -290, x1: -448, z1: -16, gate: [-548, -14] },
-    air: { x0: -650, z0: 12, x1: -308, z1: 204, runway: { x0: -640, x1: -326, z: 152, w: 24 }, taxiZ: 124, apron: [-600, 72, -330, 112], terminal: [-548, 44, -434, 70], tower: [-424, 50], hangars: [[-632, 40, -598, 96], [-590, 40, -556, 96]] },
+    // runway = R1 (arrivals, land eastbound), runway2 = R2 (departures, take off eastbound); stands = AI airliner stands (bridge index)
+    air: { x0: -650, z0: 12, x1: -308, z1: 204, runway: { x0: -640, x1: -326, z: 152, w: 24 }, runway2: { x0: -640, x1: -326, z: 188, w: 22 }, taxiZ: 124, westX: -626, apron: [-600, 72, -330, 112], terminal: [-548, 44, -434, 70], tower: [-424, 50], hangars: [[-632, 40, -598, 96], [-590, 40, -556, 96]],
+      stands: [{ x: -450, bridge: 0, max: 1.05 }, { x: -360, bridge: 1, max: 1.05 }, { x: -325, max: 0.9 }] },
   };
   for (let i = 0; i < 6; i++) for (const side of [-1, 1]) {
     const z1 = -10 - i * 36, z0 = z1 - 34;
