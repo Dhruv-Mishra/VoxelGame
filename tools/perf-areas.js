@@ -1,6 +1,6 @@
 // Playwright harness (MCP run_code with filename): boots globalThis.__psUrl (default output.html) on tier globalThis.__psTier
 // (default 'lite' = the desktop default) and returns per-pose CPU+GPU-synced ms, draw calls, triangles, top ticks, GPU ms.
-// globalThis.__psMobile = true emulates a phone (?mobile). Compare against tools/output-pre.html (pre-optimisation build).
+// globalThis.__psMobile = true emulates a phone (?mobile). Baseline: `git show HEAD:output.html > tools/output-base.html`, set __psUrl.
 async (page) => {
   const b = page.context().browser();
   for (const c of b.contexts().slice(1)) await c.close();

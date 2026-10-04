@@ -3,6 +3,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="icon" href="data:,">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js" crossorigin>
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js" crossorigin>
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/utils/BufferGeometryUtils.js" crossorigin>
 <title>Port Solace</title>
 <style>
   :root{--bg:rgba(14,16,20,.55);--bg2:rgba(14,16,20,.94);--line:rgba(255,255,255,.12);--ink:#eef1f2;--dim:#a9b1b6;--accent:#8bd8c3;--r:12px;--font:system-ui,-apple-system,'Segoe UI',sans-serif}
@@ -30,7 +35,7 @@
 </script>
 <script type="module">
 // Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.
-// Parts: 00-prologue, 01-core, 01-stream, 02-voxel, 03-render, 04-vehicle, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-farms, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 98-tests, 99-boot
+// Parts: 00-prologue, 01-core, 01-stream, 02-voxel, 03-render, 04-vehicle, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-farms, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 75-extras, 98-tests, 99-boot
 // ===== prologue: module scope shared by every part (only THREE + ADDONS live here) =====
 window.AF = window.AF || {};
 {
@@ -80,8 +85,8 @@ window.AF.partError = (part, e) => {
 // ================================================================ 01-core.js
 try {
 // ===== 01-core: namespace, hooks, utils, palette, input, time  (OWNER: coordinator) =====
-const AF = window.AF;
-AF.BUILD = '2026-09-23 10:52:50';
+// AF is the global window.AF (set by the prologue): no local alias, so worker sources built from Function.toString() keep the name
+AF.BUILD = '2026-10-04';
 AF.Q = new URLSearchParams(location.search);
 AF.TEST = AF.Q.has('test');
 AF.SHOT = AF.Q.has('shot');
@@ -466,14 +471,17 @@ try {
   const warmed = new WeakSet();
   ST.warm = async () => {
     const R = AF.renderer, t0 = performance.now(), pool = (AF.atmos && AF.atmos.pool) || [], P = AF.post;
-    const compile = async () => {
+    // compileAsync: the driver links in parallel (KHR_parallel_shader_compile) while the loader keeps animating
+    const compile = () => {
       const prev = R.getRenderTarget();
-      try { R.setRenderTarget(P && P.enabled && P.sceneRT ? P.sceneRT : null); R.compile(AF.scene, AF.camera); } catch (e) { AF.warnOnce('stream compile', e); }
+      try { R.setRenderTarget(P && P.enabled && P.sceneRT ? P.sceneRT : null); if (R.compileAsync) return R.compileAsync(AF.scene, AF.camera).catch((e) => AF.warnOnce('stream compile', e)); R.compile(AF.scene, AF.camera); }
+      catch (e) { AF.warnOnce('stream compile', e); }
       finally { R.setRenderTarget(prev); }
-      await ST.nextFrame();
+      return Promise.resolve();
     };
-    await compile();
-    if (pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; await compile(); for (const l of pool) l.visible = v; }
+    const jobs = [compile()];
+    if (pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; jobs.push(compile()); for (const l of pool) l.visible = v; }
+    await Promise.all(jobs); await ST.nextFrame();
     const proxies = [], tri = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)), seen = new Set();
     AF.scene.traverse((o) => {
       const d = o.customDepthMaterial; if (!d || warmed.has(d)) return;
@@ -502,12 +510,15 @@ try {
   // wait until no system misses anything near the view (3 calm frames), at most maxMs
   const settle = async (maxMs, onProgress) => {
     const t0 = performance.now(); let calm = 0, frames = 0;
-    while (performance.now() - t0 < maxMs) {
-      await ST.nextFrame(); frames++;
-      const n = ST.near(); ST.stats.waitingOn = n;
-      if (onProgress) onProgress(1 - Math.exp(-(performance.now() - t0) / 1500), n);
-      if (n || frames < 3) calm = 0; else if (++calm >= 3) return true;
-    }
+    ST.settling = true;
+    try {
+      while (performance.now() - t0 < maxMs) {
+        await ST.nextFrame(); frames++;
+        const n = ST.near(); ST.stats.waitingOn = n;
+        if (onProgress) onProgress(1 - Math.exp(-(performance.now() - t0) / 1500), n);
+        if (n || frames < 3) calm = 0; else if (++calm >= 3) return true;
+      }
+    } finally { ST.settling = false; }
     ST.stats.timeouts++; return false;
   };
   const LABEL = { 'region-stream': 'raising the streets', 'outland-build': 'shaping the hills', 'flora-build': 'growing the forests', farms: 'sowing the fields', 'outland-sites': 'building the villages', 'outland-roads': 'paving the country roads', 'outland-wayside': 'stocking the roadside stops', 'water-shore': 'charting the shoreline' };
@@ -580,34 +591,42 @@ W.chunks = new Array(CX * CY * CZ).fill(null);
 const uniformChunks = new Map(), sharedChunks = new WeakSet(), compactPending = new Set();
 let compactEnabled = false;
 const chunkValue = (chunk, index) => !chunk ? 0 : !chunk.pal ? chunk[index] : chunk.pal[chunk.bits === 4 ? (chunk.idx[index >> 1] >> ((index & 1) * 4)) & 15 : chunk.idx[index]];
-const expandChunk = (chunk) => {
-  const dense = new Uint16Array(4096);
-  for (let index = 0; index < 4096; index++) dense[index] = chunkValue(chunk, index);
-  return dense;
+const expandChunk = (chunk) => { const d = new Uint16Array(4096), s = denseOf(chunk, d); if (s !== d) d.set(s); return d; };
+// a chunk as a dense 4096-cell array: dense chunks as they are, compacted ones decoded into dst
+const denseOf = (ch, dst) => {
+  if (!ch.pal) return ch;
+  const pal = ch.pal, idx = ch.idx;
+  if (ch.bits === 4) for (let i = 0; i < 2048; i++) { const b = idx[i]; dst[i * 2] = pal[b & 15]; dst[i * 2 + 1] = pal[b >> 4]; }
+  else for (let i = 0; i < 4096; i++) dst[i] = pal[idx[i]];
+  return dst;
 };
+const DEC_V = new Uint16Array(4096), DEC_C = new Uint16Array(4096);
+const LUT = new Int16Array(65536).fill(-1), LPAL = new Uint16Array(257);
 const compactChunk = (key) => {
   const chunk = W.chunks[key];
   compactPending.delete(key);
   if (!chunk || chunk.pal || sharedChunks.has(chunk)) return;
-  const palette = [], lookup = new Map();
+  // palette via a flat lookup table (a Map per voxel made the end-of-boot compaction take ~2 s)
+  let n = 0;
   for (let index = 0; index < 4096; index++) {
     const value = chunk[index];
-    if (!lookup.has(value)) { lookup.set(value, palette.length); palette.push(value); if (palette.length > 256) return; }
+    if (LUT[value] < 0) { if (n === 256) { n++; break; } LUT[value] = n; LPAL[n++] = value; }
   }
-  if (palette.length === 1) {
-    const value = palette[0];
+  const done = () => { for (let i = 0; i < Math.min(n, 256); i++) LUT[LPAL[i]] = -1; };
+  if (n > 256) { done(); return; }
+  if (n === 1) {
+    const value = LPAL[0]; done();
     if (!value) { W.chunks[key] = null; return; }
     let shared = uniformChunks.get(value);
     if (!shared) { shared = new Uint16Array(4096).fill(value); uniformChunks.set(value, shared); sharedChunks.add(shared); }
     W.chunks[key] = shared;
     return;
   }
-  const bits = palette.length <= 16 ? 4 : 8, indices = new Uint8Array(bits === 4 ? 2048 : 4096);
-  for (let index = 0; index < 4096; index++) {
-    const value = lookup.get(chunk[index]);
-    if (bits === 4) indices[index >> 1] |= value << ((index & 1) * 4); else indices[index] = value;
-  }
-  W.chunks[key] = { pal: new Uint16Array(palette), idx: indices, bits };
+  const bits = n <= 16 ? 4 : 8, indices = new Uint8Array(bits === 4 ? 2048 : 4096);
+  if (bits === 4) for (let index = 0; index < 4096; index += 2) indices[index >> 1] = LUT[chunk[index]] | (LUT[chunk[index + 1]] << 4);
+  else for (let index = 0; index < 4096; index++) indices[index] = LUT[chunk[index]];
+  W.chunks[key] = { pal: LPAL.slice(0, n), idx: indices, bits };
+  done();
 };
 W.compactChunks = () => {
   let samples = 0, mismatches = 0;
@@ -752,6 +771,15 @@ class GeoBuf {
     this.grow(o.n); const n = o.n;
     this.p.set(o.p.subarray(0, n * 3)); this.uv.set(o.uv.subarray(0, n * 2)); this.pal.set(o.pal.subarray(0, n)); this.an.set(o.an.subarray(0, n)); this.idx.set(o.idx.subarray(0, n / 4 * 6));
     this.n = n;
+  }
+  // append another buffer's quads (a mesher worker's result: exact-length arrays with local indices)
+  append(o) {
+    if (!o.n) return;
+    const b = this.n; if (b + o.n > this.cap) this.grow(b + o.n);
+    this.p.set(o.p, b * 3); this.uv.set(o.uv, b * 2); this.pal.set(o.pal, b); this.an.set(o.an, b);
+    const ix = this.idx, src = o.idx, i0 = b / 4 * 6;
+    for (let i = 0; i < src.length; i++) ix[i0 + i] = src[i] + b;
+    this.n = b + o.n;
   }
   quad(v0, v1, v2, v3, uv0, uv1, uv2, uv3, pal, nIdx, ao, fl = 0) { // v* = [x,y,z], ao = [a0..a3] 0..3 ; CCW when seen from outside
     const b = this.n; if (b + 4 > this.cap) this.grow(b + 4);
@@ -1528,19 +1556,22 @@ function* meshTerrainRegionG(rx, rz, buf) {
   const H = W.H, C = W.C, S = W.S, dirtI = AF.col('dirt');
   const bx0 = rx * REG, bz0 = rz * REG, bx1 = Math.min(NX, bx0 + REG), bz1 = Math.min(NZ, bz0 + REG);
   const w = bx1 - bx0, d = bz1 - bz0;
-  const vox = (bx, by, bz) => { const c = W.get(bx, by, bz); return c && AF.PAL.opaque[c]; };
-  const occCol = (bx, bz, h) => (W.hB(bx, bz) > h) || vox(bx, h + GOFF, bz);
+  const vox = (bx, by, bz) => { const c = W.get(bx, by, bz); return c && AF.PAL.opaque[c] ? 1 : 0; };
+  // ground height + "a voxel stands on this column's ground" for the region and a 1-column border, read once: a flat neighbour
+  // at the same height answers the AO test from the table, only steps down need a voxel lookup
+  const PW = d + 2, hh = new Int32Array((w + 2) * PW), gv = new Uint8Array((w + 2) * PW);
+  for (let i = -1; i <= w; i++) for (let k = -1; k <= d; k++) { const j = (i + 1) * PW + k + 1, h = W.hB(bx0 + i, bz0 + k); hh[j] = h; gv[j] = vox(bx0 + i, h + GOFF, bz0 + k); }
+  const occ = (j, bx, bz, h) => { const n = hh[j]; return n > h ? 1 : n === h ? gv[j] : vox(bx, h + GOFF, bz); };
   // top faces, greedy over (h, colour, ao)
   const key = new Float64Array(w * d);
   for (let i = 0; i < w; i++) { for (let k = 0; k < d; k++) {
-    const bx = bx0 + i, bz = bz0 + k, ci = bx * NZ + bz, h = H[ci];
-    if (vox(bx, h + GOFF, bz)) { key[i * d + k] = 0; continue; }   // covered by a voxel floor: hidden
-    const s10 = occCol(bx - 1, bz, h) ? 1 : 0, s12 = occCol(bx + 1, bz, h) ? 1 : 0, s01 = occCol(bx, bz - 1, h) ? 1 : 0, s21 = occCol(bx, bz + 1, h) ? 1 : 0;
+    const bx = bx0 + i, bz = bz0 + k, ci = bx * NZ + bz, j = (i + 1) * PW + k + 1, h = hh[j];
+    if (gv[j]) { key[i * d + k] = 0; continue; }   // covered by a voxel floor: hidden
+    const s10 = occ(j - PW, bx - 1, bz, h), s12 = occ(j + PW, bx + 1, bz, h), s01 = occ(j - 1, bx, bz - 1, h), s21 = occ(j + 1, bx, bz + 1, h);
+    const c00 = occ(j - PW - 1, bx - 1, bz - 1, h), c20 = occ(j + PW - 1, bx + 1, bz - 1, h), c22 = occ(j + PW + 1, bx + 1, bz + 1, h), c02 = occ(j - PW + 1, bx - 1, bz + 1, h);
     let ao = 255;
-    if (s10 | s12 | s01 | s21 | (occCol(bx - 1, bz - 1, h) ? 1 : 0) | (occCol(bx + 1, bz - 1, h) ? 1 : 0) | (occCol(bx + 1, bz + 1, h) ? 1 : 0) | (occCol(bx - 1, bz + 1, h) ? 1 : 0)) {
-      const c00 = occCol(bx - 1, bz - 1, h) ? 1 : 0, c20 = occCol(bx + 1, bz - 1, h) ? 1 : 0, c22 = occCol(bx + 1, bz + 1, h) ? 1 : 0, c02 = occCol(bx - 1, bz + 1, h) ? 1 : 0;
+    if (s10 | s12 | s01 | s21 | c00 | c20 | c22 | c02) {
       const A = (a, b, c) => (a && b) ? 0 : 3 - (a + b + c);
-      // corners in (u=z? ) we use u = x, v = z for the top plane
       ao = A(s10, s01, c00) | (A(s12, s01, c20) << 2) | (A(s12, s21, c22) << 4) | (A(s10, s21, c02) << 6);
     }
     key[i * d + k] = ((h + 32768) * 8192 + C[ci]) * 256 + ao + 1;
@@ -1606,9 +1637,99 @@ function* meshTerrainRegionG(rx, rz, buf) {
 
 // region meshers are generators (yield after every chunk) so regions can be streamed in a few ms per frame; runSync drives one to the end
 const runSync = (g) => { let r = g.next(); while (!r.done) r = g.next(); return r.value; };
+
+// ---- MESHER WORKERS (PERF.md §5): the greedy pass (~75 % of a region's voxel time) runs on a pool of Web Workers. The main thread
+// builds each chunk's padded grid, ships batches of 16, and appends the quads in submission order (output identical to the sync
+// path). Async generators yield WAIT while a batch is out; runSync (runtime edits) meshes in place instead.
+const WAIT = Symbol('wait');
+const BATCH = 16;
+const VW = AF.world.workers = { list: [], on: false, tried: false, next: 1, jobs: new Map(), wake: null, stats: { workers: 0, batches: 0, chunks: 0, ms: 0, failed: 0 } };
+// a batch: { S (16 full chunk | 8 coarse 0.5 m | 4 far 1 m cells), F (cell size in blocks), count, pads ((S+2)^3 each), meta (origin
+// xyz, uv offset xyz), cnt (drawable voxels per slice, full chunks only) }; vwRun meshes one, on a worker or here
+function vwRun(m, out) {
+  const S = m.S, F = m.F, N = (S + 2) * (S + 2) * (S + 2);
+  for (let i = 0; i < m.count; i++) {
+    const o = m.meta.subarray(i * 6, i * 6 + 6), c = m.cnt && m.cnt.subarray(i * 3 * S, (i + 1) * 3 * S);
+    const g = greedyPadG(S, S, S, m.pads.subarray(i * N, (i + 1) * N), VS * F, [o[0], o[1], o[2]], [o[3], o[4], o[5]], out, F > 1, c && [c.subarray(0, S), c.subarray(S, 2 * S), c.subarray(2 * S)], F);
+    while (!g.next().done);
+  }
+}
+const vwSource = () => `'use strict';
+const AF = { PAL: { opaque: new Uint8Array(8192), glass: new Uint8Array(8192) } }, VS = ${VS};
+const AOK = [0, 1, 2, 3], QP = new Float64Array(12), QT = new Float64Array(8);
+const GeoBuf = ${GeoBuf.toString()};
+const greedyPadG = ${greedyPadG.toString()};
+const vwRun = ${vwRun.toString()};
+const pack = (b, tr) => { const n = b.n; if (!n) return { n: 0 }; const o = { n, p: b.p.slice(0, n * 3), uv: b.uv.slice(0, n * 2), pal: b.pal.slice(0, n), an: b.an.slice(0, n), idx: b.idx.slice(0, n / 4 * 6) }; tr.push(o.p.buffer, o.uv.buffer, o.pal.buffer, o.an.buffer, o.idx.buffer); return o; };
+onmessage = (e) => {
+  const m = e.data; if (m.pal) { AF.PAL.opaque.set(m.pal.o); AF.PAL.glass.set(m.pal.g); return; }
+  const t0 = performance.now(), out = { opaque: new GeoBuf(), glass: new GeoBuf() };
+  vwRun(m, out);
+  const tr = [], res = { id: m.id, ms: performance.now() - t0, opaque: pack(out.opaque, tr), glass: pack(out.glass, tr) };
+  postMessage(res, tr);
+};`;
+const vwFail = (err) => {
+  if (VW.on) AF.warnOnce('mesher workers failed: meshing on the main thread', err && (err.message || err));
+  VW.on = false; VW.stats.failed++;
+  for (const j of VW.jobs.values()) j.done = true;   // the region falls back to vwRun for batches without a result
+  VW.jobs.clear(); if (VW.wake) VW.wake();
+};
+const vwStart = () => {
+  if (VW.tried) return VW.on; VW.tried = true;
+  if (typeof Worker === 'undefined' || AF.Q.has('noworker')) return false;
+  try {
+    const url = URL.createObjectURL(new Blob([vwSource()], { type: 'text/javascript' }));
+    const n = Math.max(1, Math.min(AF.MOBILE ? 2 : 4, (navigator.hardwareConcurrency || 4) - 2));
+    for (let i = 0; i < n; i++) {
+      const w = new Worker(url); w.busy = 0; w.palN = -1; w.onerror = vwFail;
+      w.onmessage = (e) => {
+        const m = e.data, j = VW.jobs.get(m.id); w.busy--;
+        if (!j) return;
+        VW.jobs.delete(m.id); j.res = m; j.done = true; VW.stats.ms += m.ms; VW.pinged = true;
+        if (VW.wake) { const f = VW.wake; VW.wake = null; f(); }
+      };
+      VW.list.push(w);
+    }
+    VW.on = true; VW.stats.workers = n;
+  } catch (err) { vwFail(err); }
+  return VW.on;
+};
+// a batch is { count, pads, meta (origin xyz, uv offset xyz), cnt (drawable voxels per slice, 3 x 16) }
+const vwBatch = (S = 16, F = 1) => ({ S, F, count: 0, pads: new Uint16Array((S + 2) ** 3 * BATCH), meta: new Float64Array(6 * BATCH), cnt: S === 16 ? new Int32Array(48 * BATCH) : null, done: false, res: null });
+const vwSubmit = (b) => {
+  if (!VW.on) { b.done = true; return b; }
+  let w = VW.list[0]; for (const x of VW.list) if (x.busy < w.busy) w = x;
+  const P = AF.PAL; if (w.palN !== P.n) { w.palN = P.n; w.postMessage({ pal: { o: P.opaque, g: P.glass } }); }
+  const id = VW.next++; VW.jobs.set(id, b); w.busy++; VW.stats.batches++; VW.stats.chunks += b.count;
+  w.postMessage({ id, S: b.S, F: b.F, count: b.count, pads: b.pads, meta: b.meta, cnt: b.cnt });
+  return b;
+};
+// add one padded grid to the region's open batch (submitted when full); returns the open batch
+const vwAdd = (batch, jobs, S, F, pad, ox, oy, oz, ux, uy, uz, cnt) => {
+  if (!batch) batch = vwBatch(S, F);
+  const i = batch.count++, N = (S + 2) ** 3;
+  batch.pads.set(pad, i * N);
+  const m = batch.meta; m[i * 6] = ox; m[i * 6 + 1] = oy; m[i * 6 + 2] = oz; m[i * 6 + 3] = ux; m[i * 6 + 4] = uy; m[i * 6 + 5] = uz;
+  if (cnt) { batch.cnt.set(cnt[0], i * 48); batch.cnt.set(cnt[1], i * 48 + 16); batch.cnt.set(cnt[2], i * 48 + 32); }
+  if (batch.count === BATCH) { jobs.push(vwSubmit(batch)); return null; }
+  return batch;
+};
+// wait for a region's batches, then append their quads in submission order
+function* vwCollect(jobs, batch, out) {
+  if (batch) jobs.push(vwSubmit(batch));
+  while (jobs.some((j) => !j.done)) yield WAIT;
+  for (const j of jobs) { if (j.res) { out.opaque.append(j.res.opaque); out.glass.append(j.res.glass); } else vwRun(j, out); }
+}
+// resolves on the next worker result (or after 30 ms): boot and the stream pump wait on it instead of spinning
+VW.idle = () => new Promise((resolve) => {
+  if (VW.pinged) { VW.pinged = false; resolve(); return; }
+  const t = setTimeout(resolve, 30); VW.wake = () => { clearTimeout(t); VW.pinged = false; resolve(); };
+});
 function meshVoxelRegion(rx, rz, out) { runSync(meshVoxelRegionG(rx, rz, out)); }
-function* meshVoxelRegionG(rx, rz, out) {
+function* meshVoxelRegionG(rx, rz, out, par = false) {
   const bx0 = rx * REG, bz0 = rz * REG;
+  par = par && vwStart();
+  const jobs = []; let batch = null;
   const fullC = new Map(), OPq = AF.PAL.opaque;
   const isFull = (cx, cy, cz) => {
     if (cx < 0 || cz < 0 || cx >= CX || cz >= CZ || cy < 0 || cy >= CY) return false;
@@ -1625,9 +1746,10 @@ function* meshVoxelRegionG(rx, rz, out) {
     let colsReady = false;
     for (let cy = 0; cy < CY; cy++) {
       const ch = W.chunks[(cx * CY + cy) * CZ + cz]; if (!ch) continue;
+      const D = denseOf(ch, DEC_V);
       cnt[0].fill(0); cnt[1].fill(0); cnt[2].fill(0);
       let any = false;
-      for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { const b = (x * 16 + y) * 16; for (let z = 0; z < 16; z++) if (chunkValue(ch, b + z)) { any = true; cnt[0][x]++; cnt[1][y]++; cnt[2][z]++; } }
+      for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { const b = (x * 16 + y) * 16; for (let z = 0; z < 16; z++) if (D[b + z]) { any = true; cnt[0][x]++; cnt[1][y]++; cnt[2][z]++; } }
       if (!any) continue;
       // skip chunks buried inside solid mass (all 6 neighbours fully opaque): no face can be visible (coordinator perf, Port Solace)
       if (isFull(cx, cy, cz) && isFull(cx - 1, cy, cz) && isFull(cx + 1, cy, cz) && isFull(cx, cy, cz - 1) && isFull(cx, cy, cz + 1) && isFull(cx, cy + 1, cz) && (cy === 0 || isFull(cx, cy - 1, cz))) { AF.stats.skipFull = (AF.stats.skipFull || 0) + 1; continue; }
@@ -1636,8 +1758,8 @@ function* meshVoxelRegionG(rx, rz, out) {
       pad.fill(0);
       // interior
       for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) {
-        const src = (x * 16 + y) * 16, dst = ((x + 1) * 18 + (y + 1)) * 18 + 1;
-        for (let z = 0; z < 16; z++) pad[dst + z] = chunkValue(ch, src + z);
+        const src = (x * 16 + y) * 16;
+        pad.set(D.subarray(src, src + 16), ((x + 1) * 18 + (y + 1)) * 18 + 1);
       }
       // border shell from the 26 neighbour chunks, read directly (engine R2 boot: no per-voxel W.get; same values —
       // an out-of-world or empty neighbour chunk reads 0 exactly like W.get)
@@ -1665,11 +1787,13 @@ function* meshVoxelRegionG(rx, rz, out) {
         for (let y = -1; y <= yMax; y++) { const i = ((x + 1) * 18 + (y + 1)) * 18 + (z + 1); if (pad[i] === 0) pad[i] = 65535; }
       }
       const tg = performance.now();
-      greedyPad(16, 16, 16, pad, VS, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox, oy, oz], out, false, cnt);
+      if (par) batch = vwAdd(batch, jobs, 16, 1, pad, X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS, ox, oy, oz, cnt);
+      else greedyPad(16, 16, 16, pad, VS, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox, oy, oz], out, false, cnt);
       AF.stats.greedyMs = (AF.stats.greedyMs || 0) + performance.now() - tg; AF.stats.chunksMeshed = (AF.stats.chunksMeshed || 0) + 1;
       yield;
     }
   }
+  if (par) yield* vwCollect(jobs, batch, out);
 }
 
 // ---- COARSE region LOD: every chunk downsampled 2x (0.5 m cells, no AO) for regions far from the camera. A coarse cell is solid when
@@ -1678,12 +1802,13 @@ const coarseCache = new Map();
 const coarseChunk = (key) => {
   let c = coarseCache.get(key); if (c !== undefined) return c;
   const ch = W.chunks[key]; if (!ch) { coarseCache.set(key, null); return null; }
+  const D = denseOf(ch, DEC_C);
   c = new Uint16Array(512); let any = false;
   const OP = AF.PAL.opaque, cols = new Uint16Array(8), cnts = new Uint8Array(8);
   for (let X = 0; X < 8; X++) for (let Y = 0; Y < 8; Y++) for (let Z = 0; Z < 8; Z++) {
     let n = 0, nOp = 0, gl = 0, nc = 0;
     for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) for (let d = 0; d < 2; d++) {
-      const v = chunkValue(ch, (((X * 2 + a) * 16) + Y * 2 + b) * 16 + Z * 2 + d); if (!v) continue;
+      const v = D[(((X * 2 + a) * 16) + Y * 2 + b) * 16 + Z * 2 + d]; if (!v) continue;
       n++;
       if (OP[v] !== 1) { gl = v; continue; }
       nOp++;
@@ -1727,9 +1852,11 @@ const farChunk = (key) => {
 };
 // F = 2 (coarse, 0.5 m cells) or 4 (far, 1 m cells)
 function meshVoxelRegionCoarse(rx, rz, out, F = 2) { runSync(meshVoxelRegionCoarseG(rx, rz, out, F)); }
-function* meshVoxelRegionCoarseG(rx, rz, out, F = 2) {
+function* meshVoxelRegionCoarseG(rx, rz, out, F = 2, par = false) {
   const S = 16 / F, P = S + 2, get = F === 2 ? coarseChunk : farChunk;
   const bx0 = rx * REG, bz0 = rz * REG;
+  par = par && vwStart();
+  const jobs = []; let batch = null;
   const pad = new Uint16Array(P * P * P), hcol = new Int32Array(P * P);
   for (let cx = bx0 >> 4; cx < Math.min(CX, (bx0 + REG) >> 4); cx++) for (let cz = bz0 >> 4; cz < Math.min(CZ, (bz0 + REG) >> 4); cz++) {
     const ox = cx * 16, oz = cz * 16;
@@ -1754,10 +1881,12 @@ function* meshVoxelRegionCoarseG(rx, rz, out, F = 2) {
         const top = hcol[(X + 1) * P + Z + 1] - oy;   // fine y below which everything is underground
         for (let Y = -1; Y <= S; Y++) { if (Y * F + F - 1 >= top) break; const i = ((X + 1) * P + Y + 1) * P + Z + 1; if (pad[i] === 0) pad[i] = 65535; }
       }
-      greedyPad(S, S, S, pad, VS * F, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox / F, oy / F, oz / F], out, true, null, F);
+      if (par) batch = vwAdd(batch, jobs, S, F, pad, X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS, ox / F, oy / F, oz / F, null);
+      else greedyPad(S, S, S, pad, VS * F, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox / F, oy / F, oz / F], out, true, null, F);
       yield;
     }
   }
+  if (par) yield* vwCollect(jobs, batch, out);
 }
 // FAR level terrain: F x F columns -> one cell at their most common height; low same-colour steps are soft risers
 function meshTerrainRegionFar(rx, rz, buf, F) {
@@ -1988,13 +2117,28 @@ function farStep(c) {
   meshVoxelRegionCoarse(k >> 6, k & 63, c.out, 4);
   (c.ranges || (c.ranges = [])).push({ k, os: o0 * 1.5, oc: (c.out.opaque.n - o0) * 1.5, gs: g0 * 1.5, gc: (c.out.glass.n - g0) * 1.5 });
   coarseCache.clear(); farCache.clear();
-  if (c.i >= c.regs.length) {
-    const o = c.out; c.out = null; c.built = true; FS.built++;
-    if (o.opaque.n) { const m = regMesh(o.opaque.geometry(), AF.mat.voxel, true); m.userData.far = true; m.userData.cluster = c.ck; m.visible = false; c.far.push(m); c.farO = m; FS.kept++; }
-    if (o.glass.n) { const g = regMesh(o.glass.geometry(), AF.mat.glass, false); g.userData.far = true; g.visible = false; c.far.push(g); c.farG = g; }
-  }
+  if (c.i >= c.regs.length) farFinish(c);
   FS.ms += performance.now() - t;
   return c.built;
+}
+function farFinish(c) {
+  const o = c.out; c.out = null; c.built = true; FS.built++;
+  if (o.opaque.n) { const m = regMesh(o.opaque.geometry(), AF.mat.voxel, true); m.userData.far = true; m.userData.cluster = c.ck; m.visible = false; c.far.push(m); c.farO = m; FS.kept++; }
+  if (o.glass.n) { const g = regMesh(o.glass.geometry(), AF.mat.glass, false); g.userData.far = true; g.visible = false; c.far.push(g); c.farG = g; }
+}
+// boot: the same build with the cells meshed on the workers (meshWorld runs several clusters at once)
+function* buildFarG(c) {
+  if (c.built || !c.regs.length) return 0;
+  if (!c.out) c.out = { opaque: new GeoBuf(), glass: new GeoBuf() };
+  while (c.i < c.regs.length) {
+    const k = c.regs[c.i++], o0 = c.out.opaque.n, g0 = c.out.glass.n;
+    meshTerrainRegionFar(k >> 6, k & 63, c.out.opaque, 4);
+    yield* meshVoxelRegionCoarseG(k >> 6, k & 63, c.out, 4, true);
+    (c.ranges || (c.ranges = [])).push({ k, os: o0 * 1.5, oc: (c.out.opaque.n - o0) * 1.5, gs: g0 * 1.5, gc: (c.out.glass.n - g0) * 1.5 });
+    coarseCache.clear(); farCache.clear();
+  }
+  farFinish(c);
+  return 0;
 }
 const buildFar = (c) => { while (!farStep(c)); };
 AF.world.buildFarAll = () => { while (farQueue.length) buildFar(farQueue.pop()); FS.pending = 0; };
@@ -2064,7 +2208,7 @@ const COARSE_ON = !AF.Q.has('nocoarse');
 // mode 'both' (boot, edits): full 0.25 m + 0.5 m copy from scratch. Streaming builds only what the distance asks for: 'full' near the
 // camera (no 0.5 m copy that the full mesh would replace at once), 'coarse' farther out; a full region moving away back-fills its
 // 0.5 m copy later. Nothing is attached before the last yield, so a streamed job can be abandoned at any step.
-function* meshRegionG(rx, rz, mode = 'both') {
+function* meshRegionG(rx, rz, mode = 'both', par = false) {
   const k = rx * 64 + rz, wantF = mode !== 'coarse', wantC = COARSE_ON && mode !== 'full';
   if (mode === 'both') dropRegion(k);
   const RL = AF.world.regLod || (AF.world.regLod = new Map()), old = RL.get(k);
@@ -2080,11 +2224,11 @@ function* meshRegionG(rx, rz, mode = 'both') {
   const cout = { opaque: new GeoBuf(), glass: new GeoBuf() };
   if (wantC && !wantF) cout.opaque = out.opaque;
   else if (wantC && terrainQ) cout.opaque.copyFrom(out.opaque);
-  if (wantF) { STR.phase = 'voxel'; yield* meshVoxelRegionG(rx, rz, out); }
+  if (wantF) { STR.phase = 'voxel'; yield* meshVoxelRegionG(rx, rz, out, par); }
   T.voxel += performance.now() - tt; tt = performance.now();
   if (wantC) {
     for (let cx = (rx * REG) >> 4, e = Math.min(CX, (rx * REG + REG) >> 4); cx < e; cx++) for (let cz = (rz * REG) >> 4, f = Math.min(CZ, (rz * REG + REG) >> 4); cz < f; cz++) for (let cy = 0; cy < CY; cy++) coarseCache.delete((cx * CY + cy) * CZ + cz);
-    STR.phase = 'coarse'; yield* meshVoxelRegionCoarseG(rx, rz, cout);
+    STR.phase = 'coarse'; yield* meshVoxelRegionCoarseG(rx, rz, cout, 2, par);
   }
   T.coarse += performance.now() - tt;
   yield;
@@ -2149,7 +2293,9 @@ function* meshRegionG(rx, rz, mode = 'both') {
 // Jobs inside the display ranges are "urgent": they also get a slice of every rendered frame and preempt a running far job. Full meshes the
 // camera left behind stay resident until a byte budget is used up (zipping back is instant); then the farthest drop to their 0.5 m
 // copy, and whole clusters showing their 1 m copy unload farthest first (always beyond FAR_LOD + 600 m, phones + 300 m).
-const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, kind: '', phase: '', urgent: false, rest: 0, chk: 0, done: 0, unloaded: 0, demoted: 0, aborted: 0, t: 0, maxStep: 0, maxPhase: '', ms: {}, bytes: 0, fullBytes: 0, jobs: { full: 0, coarse: 0, props: 0 } };
+const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, kind: '', phase: '', urgent: false, parked: [], rest: 0, chk: 0, done: 0, unloaded: 0, demoted: 0, aborted: 0, t: 0, maxStep: 0, maxPhase: '', ms: {}, bytes: 0, fullBytes: 0, jobs: { full: 0, coarse: 0, props: 0 } };
+// regions with a job in flight: the foreground one (STR.gen) or one parked while its chunks are on the mesher workers
+const busyKey = (k) => (STR.gen && STR.key === k) || STR.parked.some((p) => p.key === k);
 const BUDGET = AF.MOBILE ? { full: 48, all: 128, drop: 300 } : { full: 192, all: 448, drop: 600 };   // MB, MB, m beyond FAR_LOD
 const regionCluster = (k) => CLS.get(((k >> 6) >> 2) * 64 + ((k & 63) >> 2));
 const clDist = (cl, c, vy) => Math.hypot(Math.max(cl.x0 - c.x, 0, c.x - cl.x1), Math.max(cl.z0 - c.z, 0, c.z - cl.z1), vy);
@@ -2169,7 +2315,7 @@ function pickJob() {
   PK.k = -1; PK.t = 0; PK.s = 1e9;
   for (let i = 0; i < ALL.length; i++) {
     const g = ALL[i], k = g.k, d = Math.hypot(g.x - c.x, g.z - c.z, vy), de = Math.min(d, Math.hypot(g.x - LA.x, g.z - LA.z, vy) + 16);
-    if (de - 8 >= PK.s || (k === STR.key && STR.gen)) continue;
+    if (de - 8 >= PK.s || busyKey(k)) continue;
     const r = RL.get(k);
     let s = 1e9, t = 0;
     if (STR.on) {
@@ -2188,28 +2334,44 @@ const isUrgent = () => (PK.t === 3 && PK.s < AF.LOD_DIST) || (PK.t === 1 && PK.s
 // the view still lacks detail it shows (or is about to): urgent work, or any full / props job, or a coarse copy inside 2x REGION_LOD
 STR.near = () => {
   if (!AF.world.regLod) return false;
-  if (STR.gen && STR.urgent) return true;
-  if (!pickJob()) return !!STR.gen && STR.kind !== 'coarse';
+  if ((STR.gen && STR.urgent) || STR.parked.some((p) => p.urgent)) return true;
+  if (!pickJob()) return (!!STR.gen && STR.kind !== 'coarse') || STR.parked.some((p) => p.kind !== 'coarse');
   return PK.t !== 2 || PK.s < AF.REGION_LOD * 2;
+};
+const jobDone = (kind) => { if (kind !== 'props') { STR.done++; coarseCache.clear(); } };
+// a parked job whose batches are back becomes the foreground job again (or finishes)
+const resume = () => {
+  for (let i = 0; i < STR.parked.length; i++) {
+    const p = STR.parked[i], s = p.gen.next();
+    if (s.value === WAIT) continue;
+    STR.parked.splice(i, 1);
+    if (s.done) { jobDone(p.kind); return true; }
+    STR.gen = p.gen; STR.key = p.key; STR.kind = p.kind; STR.urgent = p.urgent;
+    return true;
+  }
+  return false;
 };
 const streamWork = (budget) => {
   if (!AF.ready || !AF.world.regLod) return false;
   const t0 = performance.now();
   while (performance.now() - t0 < budget) {
     if (!STR.gen) {
+      if (resume()) continue;
+      if (STR.parked.length > VW.list.length) return false;   // every worker has work: wait for answers
       if (!PK.fresh && (AF.clock.t < STR.rest || !pickJob())) return false;
       PK.fresh = false;
       const k = STR.key = PK.k, r = AF.world.regLod.get(k), reg = AF.world.lod.get(k);
       if (PK.t === 3 ? !reg || reg.nearBuilt : PK.t === 1 ? r && r.fullOk : r && r.coarseOk) continue;   // stale pick: rescan
       STR.urgent = isUrgent();
       if (PK.t === 3) { STR.kind = 'props'; STR.phase = 'near'; STR.gen = buildNearG(reg); }
-      else { STR.kind = PK.t === 1 ? 'full' : 'coarse'; STR.gen = meshRegionG(k >> 6, k & 63, STR.kind); }
+      else { STR.kind = PK.t === 1 ? 'full' : 'coarse'; STR.gen = meshRegionG(k >> 6, k & 63, STR.kind, true); }
       STR.jobs[STR.kind]++;
     }
-    const ts = performance.now(), fin = STR.gen.next().done, st = performance.now() - ts;
+    const ts = performance.now(), step = STR.gen.next(), fin = step.done, st = performance.now() - ts;
     if (st > STR.maxStep) { STR.maxStep = st; STR.maxPhase = STR.kind + ':' + STR.phase; }
     STR.ms[STR.phase] = (STR.ms[STR.phase] || 0) + st;
-    if (fin) { STR.gen = null; STR.urgent = false; STR.rest = 0; if (STR.kind !== 'props') { STR.done++; coarseCache.clear(); } }
+    if (fin) { STR.gen = null; STR.urgent = false; STR.rest = 0; jobDone(STR.kind); }
+    else if (step.value === WAIT) { STR.parked.push({ gen: STR.gen, key: STR.key, kind: STR.kind, urgent: STR.urgent }); STR.gen = null; STR.urgent = false; }
   }
   return true;
 };
@@ -2217,16 +2379,16 @@ function evict() {
   const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, RD = AF.REGION_LOD * AF.LOD.prefetch, FD = Math.min(AF.FAR_LOD || 1e9, 5000), MB = 1048576;
   let bF = 0, bA = 0;
   for (const r of RL.values()) { bF += r.bF; bA += r.bF + r.bC; }
-  const busy = STR.gen ? STR.key : -1;
+  const busy = (k) => busyKey(k);
   if (bF > BUDGET.full * MB) {
     const cand = [];
-    for (const [k, r] of RL) if (r.fullOk && r.coarse.length && !r.fadeE && (r.hid || r.lvl === 1) && k !== busy) { const d = Math.hypot(r.cx - c.x, r.cz - c.z, vy); if (d > RD + 40) cand.push({ k, r, d }); }
+    for (const [k, r] of RL) if (r.fullOk && r.coarse.length && !r.fadeE && (r.hid || r.lvl === 1) && !busy(k)) { const d = Math.hypot(r.cx - c.x, r.cz - c.z, vy); if (d > RD + 40) cand.push({ k, r, d }); }
     cand.sort((a, b) => b.d - a.d);
     for (const e of cand) { if (bF <= BUDGET.full * MB) break; bF -= e.r.bF; bA -= e.r.bF; demote(e.k, e.r); STR.demoted++; }
   }
   const cls = [];
   for (const cl of CLS.values()) {
-    if (!cl.built || cl.part || cl.lvl !== 1 || cl.fadeE || (busy >= 0 && regionCluster(busy) === cl)) continue;
+    if (!cl.built || cl.part || cl.lvl !== 1 || cl.fadeE || cl.regs.some(busy)) continue;
     const d = clDist(cl, c, vy); if (d < FD + 64) continue;
     let b = 0, any = false; for (const k of cl.regs) { const r = RL.get(k); if (r) { any = true; b += r.bF + r.bC; } else if (AF.world.lod.has(k)) any = true; }
     if (any) cls.push({ cl, d, b });
@@ -2429,21 +2591,43 @@ AF.meshWorld = async (progress) => {
   if (NEAR && NEAR.length === 3 && NEAR.every(isFinite)) { AF.NEAR = { x: NEAR[0], z: NEAR[1], r: NEAR[2] }; console.log('[af] near mode', nearQ); }
   const rm = REG * VS;
   STR.on = !AF.TEST && !AF.SHOT && !AF.NEAR && !(AF.Q && AF.Q.has('nostream'));
-  const BF = AF.PLAN.bootFocus || { x: 100, z: -60, r: 110 };
+  const BF = AF.PLAN.bootFocus || { x: 100, z: -60, r: 110 }, boot = [], total = NRX * NRZ;
   for (let rx = 0; rx < NRX; rx++) {
     for (let rz = 0; rz < NRZ; rz++) {
       if (AF.NEAR && Math.hypot(X0 + (rx + 0.5) * rm - AF.NEAR.x, Z0 + (rz + 0.5) * rm - AF.NEAR.z) > AF.NEAR.r + rm * 0.71) { done++; continue; }
       const k = rx * 64 + rz, cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
       ALL.push({ k, x: X0 + (rx + 0.5) * rm, z: Z0 + (rz + 0.5) * rm });
       if (STR.on && Math.hypot(X0 + (rx + 0.5) * rm - BF.x, Z0 + (rz + 0.5) * rm - BF.z) > BF.r) { setMissing(k, true); done++; continue; }
-      quads += AF.meshRegion(rx, rz); done++;
+      boot.push(k);
     }
-    if (progress) await progress(done / (NRX * NRZ));
   }
+  // a few jobs in flight at once keep every mesher worker busy while the main thread builds pads, terrain and props
+  const drain = async (gens, onDone) => {
+    const act = [], conc = vwStart() ? VW.list.length + 2 : 1;
+    while (gens.length || act.length) {
+      while (act.length < conc && gens.length) act.push(gens.shift()());
+      let moved = false;
+      for (let i = act.length - 1; i >= 0; i--) {
+        let r = act[i].next();
+        while (!r.done && r.value !== WAIT) r = act[i].next();
+        if (r.done) { act.splice(i, 1); moved = true; await onDone(r.value); }
+      }
+      if (!moved) await VW.idle();
+    }
+  };
+  let shown = 0;
+  await drain(boot.map((k) => () => meshRegionG(k >> 6, k & 63, 'both', true)), async (q) => {
+    quads += q; done++;
+    if (progress && done - shown >= 4) { shown = done; await progress(done / total); }
+  });
+  if (progress) await progress(1);
+  const tFar = performance.now();
   // streaming: every cluster's 1 m copy now (the whole island is visible from the first frame), full detail follows the camera
-  if (STR.on) { farQ0 = true; for (const cl of CLS.values()) buildFar(cl); coarseCache.clear(); farCache.clear(); }
+  if (STR.on) { farQ0 = true; await drain([...CLS.values()].map((c) => () => buildFarG(c)), () => {}); coarseCache.clear(); farCache.clear(); }
   coarseCache.clear();
+  const tCompact = performance.now();
   W.compactChunks();
+  AF.stats.bootMeshMs = { regions: Math.round(tFar - t0), far: Math.round(tCompact - tFar), compact: Math.round(performance.now() - tCompact) };
   for (const w of AF.world.water) { AF.releaseStaticGeometry(w.geo); const m = new THREE.Mesh(w.geo, w.mat || AF.mat.water); m.receiveShadow = true; m.renderOrder = 1; m.name = 'water'; AF.world.group.add(m); w.mesh = m; }
   W.dirty.clear(); W.tDirty = false;
   AF.stats = Object.assign(AF.stats || {}, { quads, meshMs: Math.round(performance.now() - t0) });
@@ -2455,6 +2639,7 @@ AF.meshWorld = async (progress) => {
 AF.remeshDirty = () => {
   for (const k of W.dirty) {
     if (STR.gen && STR.key === k) STR.gen = null;
+    STR.parked = STR.parked.filter((p) => p.key !== k);
     if (!STR.on || (AF.world.regLod && AF.world.regLod.has(k))) AF.meshRegion(k >> 6, k & 63);
   }
   W.dirty.clear(); coarseCache.clear(); for (const key of compactPending) compactChunk(key);
@@ -2819,6 +3004,13 @@ try {
     return Math.min(dpr, G.res > 0 ? G.res : G.tier === 'low' ? 0.8 : G.tier === 'high' ? 1 : 1.25);
   };
   R.setPixelRatio(AF.basePR());
+  // render vs display resolution: the scene + post chain render at AF.renderPR() (base x dynamic scale); while AF.upscaleOn (61-post)
+  // the canvas keeps the display's resolution (<= 2x CSS px) and the last post pass upscales + sharpens instead of the browser's
+  // bilinear stretch. Everything that changes the resolution calls AF.applyPR().
+  AF.upscaleOn = false;
+  AF.renderPR = () => AF.basePR() * AF.GFX.scale;
+  AF.outputPR = () => { const r = AF.renderPR(); return AF.upscaleOn ? Math.max(r, Math.min(devicePixelRatio || 1, 2)) : r; };
+  AF.applyPR = () => { const pr = AF.outputPR(); if (Math.abs(R.getPixelRatio() - pr) > 1e-3) R.setPixelRatio(pr); if (AF.resize) AF.resize(); };
   R.outputColorSpace = THREE.SRGBColorSpace;
   R.toneMapping = THREE.ACESFilmicToneMapping;
   R.toneMappingExposure = 1.0;
@@ -2885,7 +3077,7 @@ try {
   // dynamic near plane (PERF.md §3, locked): 24-bit depth precision is ~ d^2 / (near * 2^24), so a fixed 0.08 m near plane
   // z-fights from ~150 m on Windows (ANGLE / D3D11). On foot / driving 0.1 m; from the air it grows with altitude and the
   // distance to the followed target (plane, orbit centre) up to 6 m.
-  const HIGH_MODES = new Set(['fly', 'skydive', 'aerial', 'cine', 'probe', 'ferry-ride']);
+  const HIGH_MODES = new Set(['fly', 'skydive', 'aerial', 'cine', 'probe', 'ferry-ride', 'photo']);
   AF.onTick('cam-near', 886, () => {
     let n = 0.1;
     if (HIGH_MODES.has(AF.mode)) {
@@ -2911,7 +3103,7 @@ try {
   // resize
   AF.resize = () => {
     const w = AF.SHOT ? (+AF.Q.get('w') || 1280) : (innerWidth || 1280), h = AF.SHOT ? (+AF.Q.get('h') || 720) : (innerHeight || 720);
-    if (AF.GFX.resH > 0 && !AF.SHOT) { const pr = AF.basePR() * AF.GFX.scale; if (Math.abs(R.getPixelRatio() - pr) > 1e-3) R.setPixelRatio(pr); }
+    if (!AF.SHOT) { const pr = AF.outputPR(); if (Math.abs(R.getPixelRatio() - pr) > 1e-3) R.setPixelRatio(pr); }
     R.setSize(w, h, !AF.SHOT); cam.aspect = w / h; cam.updateProjectionMatrix();
     AF.emit('resize', w, h);
   };
@@ -2979,9 +3171,11 @@ try {
   const smRender = R.shadowMap.render.bind(R.shadowMap);
   R.shadowMap.render = (lights, scene, camera) => { if (scene !== S) return smRender(lights, scene, camera); shadowView.layers.mask = camera.layers.mask | 2; return smRender(lights, scene, shadowView); };
   const lastSF = { x: 0, z: 0 };
-  const frame = (dt) => {
+  const frame = (rdt) => {
     if (graphicsReset) return;
-    AF.clock.dt = dt; AF.clock.t += dt; AF.clock.frame++;
+    // AF.timeScale 0 freezes the world (photo mode); AF.clock.real keeps the wall-clock step for cameras
+    const dt = rdt * AF.timeScale;
+    AF.clock.real = rdt; AF.clock.dt = dt; AF.clock.t += dt; AF.clock.frame++;
     for (const h of AF.hooks.tick) {
       try { h.fn(dt, AF.clock.t); }
       catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (AF.MOBILE) AF.reportError(e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
@@ -2993,10 +3187,13 @@ try {
     const sf = AF.shadowFocus, moved = Math.abs(sf.x - lastSF.x) + Math.abs(sf.z - lastSF.z) > 0.05 && AF.mode !== 'aerial' && AF.mode !== 'cine';
     lastSF.x = sf.x; lastSF.z = sf.z;
     if (AF.shadowQ !== 'off' && (moved || AF.clock.frame % every === 0 || AF.shadowDirty)) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
-    try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
+    // behind the loader veil (AF.stream settle) only every 6th frame renders (keeps uploads incremental); the rest goes to streaming
+    const veiled = AF.stream.settling && AF.clock.frame % 6 !== 0;
+    if (!veiled) try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
   };
   AF.frame = frame;
+  AF.timeScale = 1;
   let lastTick = 0, slot = 0, rafEma = 16.7, rafLast = 0;
   // idle work (PERF.md §2): rAF slots skipped by the fps cap run AF.onIdle hooks (streaming, far builds) for ~60 % of a display
   // interval; 60/Max also gets a token fallback every second frame if no skipped slot ran
@@ -3204,7 +3401,7 @@ try {
     if (AF.atmos && AF.atmos.setLights) AF.atmos.setLights(T.lights);
     AF.shadowDirty = true;
     if (G.cinema) G.scale = 1;
-    const pr = AF.basePR() * G.scale; if (Math.abs(R.getPixelRatio() - pr) > 1e-3) { R.setPixelRatio(pr); if (AF.ready) AF.resize(); }
+    if (AF.ready) AF.applyPR(); else R.setPixelRatio(AF.outputPR());
     if (AF.ready) { try { sharpenTextures(); } catch (e) { AF.warnOnce('aniso', e); } }
     const nearSize = AF.shadowQ === 'low' ? Math.min(T.near, 1024) : T.near;
     if (sun && sun.shadow.mapSize.x !== nearSize) { sun.shadow.mapSize.set(nearSize, nearSize); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
@@ -3222,13 +3419,13 @@ try {
   AF.gfx.setResH = (h) => {
     G.resH = Math.max(0, Math.round(+h || 0));
     try { localStorage.setItem('portSolace.resH', String(G.resH)); } catch (e) {}
-    R.setPixelRatio(AF.basePR() * G.scale); AF.resize();
+    AF.applyPR();
   };
   // ---------------------------------------------------------------- auto tier (only while G.auto: no saved/forced choice; never in ?shot / ?test)
   // Down one step after 3 s of frames 32 % over the frame target (the fps cap interval, 16.7 ms uncapped); never up.
   // Phones: adaptive resolution (0.8..1 of the base pixel ratio, checked every 4 s) holds the 30 fps target.
   {
-    const base = AF.basePR, LADDER = ['low', 'lite', 'high', 'ultra'];
+    const LADDER = ['low', 'lite', 'high', 'ultra'];
     const target = () => (AF.fpsCap > 0 ? 1000 / AF.fpsCap : 16.7);
     let ema = target(), slowT = 0, adjT = 0, grace = 2;
     G.onChange(() => { ema = target(); slowT = 0; grace = 2; });
@@ -3243,7 +3440,7 @@ try {
       if (dyn && adjT > (AF.MOBILE ? 4 : 1)) {
         adjT = 0; const T = cur(); let s = G.scale;
         if (ema > tg * 1.14) s = Math.max(T.dynMin, s - (AF.MOBILE ? 0.1 : 0.05)); else if (ema < tg * 1.04) s = Math.min(1, s + 0.05);
-        if (Math.abs(s - G.scale) > 1e-3) { G.scale = s; R.setPixelRatio(base() * s); AF.resize(); }
+        if (Math.abs(s - G.scale) > 1e-3) { G.scale = s; AF.applyPR(); }
       }
       if (!G.auto) return;
       const i = LADDER.indexOf(G.name);
@@ -3404,9 +3601,9 @@ try {
     const was = G.name, wasAuto = G.auto, wasRes = G.res;
     G.set('lite'); AF.renderFrame();
     const P = AF.post, lite = G.tier === 'high' && cur() === TIER.lite && AF.FAR_LOD === TIER.lite.farLod && (!P.composer || (P.sceneRT.samples === 0 && P.fxaa.enabled && !(P.aoPass && P.aoPass.enabled)));
-    const prLite = R.getPixelRatio();
-    G.res = 0.75; R.setPixelRatio(AF.basePR() * G.scale); const pr75 = R.getPixelRatio();
-    G.res = wasRes; G.set(was); G.auto = wasAuto; R.setPixelRatio(AF.basePR() * G.scale); AF.resize();
+    const prLite = AF.renderPR();
+    G.res = 0.75; const pr75 = AF.renderPR();
+    G.res = wasRes; G.set(was); G.auto = wasAuto; AF.applyPR();
     const near = (a, b) => Math.abs(a - b) < 1e-3;
     const ok = lite && near(prLite, Math.min(devicePixelRatio || 1, 1)) && near(pr75, Math.min(devicePixelRatio || 1, 0.75)) && G.name === was;
     return { ok, info: 'lite ' + lite + ', pr ' + prLite + ' / 75% ' + pr75 + ', back to ' + G.name + ', gpu integrated ' + !!AF.gfx.integrated };
@@ -3546,19 +3743,6 @@ try {
     AF.gfx.aoPass = pass;
     return pass;
   };
-  // v1 post (no insertAO / no scene depth): R1 wires the pass in itself so the AO works stand-alone. R2's 61-post supersedes this.
-  AF.on('ready', () => {
-    const P = AF.post; if (!P || !P.composer || P.insertAO || AF.gfx.aoPass || AF.Q.has('noao')) return;
-    try {
-      const comp = P.composer, rp = P.renderPass; if (!rp) return;
-      const s = R.getSize(new THREE.Vector2()), pr = R.getPixelRatio();
-      for (const t of [comp.renderTarget1, comp.renderTarget2]) { if (!t.depthTexture) { t.depthTexture = new THREE.DepthTexture(Math.round(s.x * pr), Math.round(s.y * pr)); t.depthTexture.type = THREE.UnsignedIntType; t.dispose(); } }
-      const pass = AF.gfx.makeAOPass(R, AF.scene, AF.camera);
-      comp.insertPass(pass, comp.passes.indexOf(rp) + 1);
-      pass.setSize(Math.round(s.x * pr), Math.round(s.y * pr));
-      AF.gfx.aoSelfWired = true;
-    } catch (e) { AF.warnOnce('r1 AO self-wire failed', e); }
-  });
 }
 
 // ================================================================ R1: night light pools — feeds the 24 nearest outdoor lights to the voxel shader
@@ -30391,7 +30575,7 @@ try {
     G.attributes.position.needsUpdate = true; G.attributes.aSize.needsUpdate = true; G.attributes.aAlpha.needsUpdate = true;
     const U = pts.material.uniforms;
     AF.renderer.getDrawingBufferSize(drawSize);
-    U.uScale.value = drawSize.y * 0.5 / Math.tan(AF.camera.fov * Math.PI / 360);
+    U.uScale.value = drawSize.y * AF.renderPR() / AF.renderer.getPixelRatio() * 0.5 / Math.tan(AF.camera.fov * Math.PI / 360);
     const lk = 0.1 + 0.85 * smooth(-0.08, 0.35, sunVec.y);
     U.uCol.value.setRGB(0.72, 0.7, 0.67).multiplyScalar(lk).lerp(SU.uGlow.value, 0.25 * SU.uSunset.value * lk);
     if (A.pm > 0 || SU.uSunset.value > 0) U.uCol.value.lerp(tmpC2.copy(SU.uSunCol.value).multiplyScalar(0.8 * lk), 0.3 * Math.max(A.pm || 0, SU.uSunset.value));
@@ -30846,7 +31030,7 @@ try {
         FW.hg.attributes.position.needsUpdate = true; FW.hg.attributes.aCol.needsUpdate = true; FW.hg.attributes.aSize.needsUpdate = true;
         FW.lg.attributes.position.needsUpdate = true; FW.lg.attributes.color.needsUpdate = true;
         AF.renderer.getDrawingBufferSize(tmpS);
-        FW.hm.uniforms.uScale.value = tmpS.y * 0.5 / Math.tan(AF.camera.fov * Math.PI / 360);
+        FW.hm.uniforms.uScale.value = tmpS.y * AF.renderPR() / AF.renderer.getPixelRatio() * 0.5 / Math.tan(AF.camera.fov * Math.PI / 360);
       }
       const W2 = AF.water2; if (W2 && W2.dyn) for (const e of W2.dyn) e.t += dt;
     });
@@ -30865,16 +31049,15 @@ try {
 
 // ================================================================ 61-post.js
 try {
-// ===== 61-post: composer (R2) — scene (MSAA + depth) → god rays → AO (R1) → bloom → grade + tone map → tilt/DOF → FXAA → screen =====
+// ===== 61-post: composer (R2) — scene (MSAA + depth) → god rays → AO (R1) → bloom → grade + tone map → FXAA → upscale → screen =====
 // r160: the scene renders into a linear HalfFloat MSAA target with a DepthTexture (AF.gfx.depthTexture). Tone mapping + sRGB
 // happen ONCE in the FINAL pass (AgX-punchy or ACES, per-hour grade), so every pass after it works in display space.
+// The chain runs at AF.renderPR(); when that is below the display, the last pass upscales to the canvas (Catmull-Rom + contrast-
+// adaptive sharpening, FSR-1 style) so a 720p render reads crisp on a 1080p/1440p screen.
 {
   const P = AF.post = AF.post || {};
   P.bypass = AF.MOBILE || AF.Q.has('nopost') || !AF.gfx.halfFloatTargets || !AF.gfx.depthTextures;
   P.enabled = !P.bypass;
-  P.quality = AF.Q.get('post') || 'high';     // legacy: 'high' | 'low' (low = no MSAA). The GFX tier decides now.
-  P.tiltEnabled = AF.Q.has('tilt');   // ROUND 2: clarity is sacred — no miniature blur by default (?tilt to enable)
-  P.dofEnabled = AF.Q.has('dof');   // owner 09-23: 'a bit fuzzy/foggy — needs to be clearer and sharper' → depth of field off by default (?dof to enable)
   P.raysEnabled = true;
   P.tone = AF.Q.get('tone') || 'aces';           // 'agx' (punchy look) | 'aces'
   const X = AF.addons || {};
@@ -30890,14 +31073,14 @@ try {
       tDiffuse: { value: null }, tRays: { value: null }, uRaysK: { value: 0 }, uSunCol: { value: new THREE.Color(1, 0.8, 0.5) }, uSunUV: { value: new THREE.Vector2(0.5, 0.5) },
       uGlare: { value: 0 }, uAspect: { value: 16 / 9 }, uExposure: { value: 1 }, uTM: { value: 1 },
       uLo: { value: new THREE.Vector3(1, 1, 1) }, uHi: { value: new THREE.Vector3(1, 1, 1) }, uSat: { value: 1.05 }, uContrast: { value: 0.12 },
-      uT: { value: 0 }, uVig: { value: 0.26 }, uGrain: { value: 0.0 }, uLift: { value: 0.002 }, uSharp: { value: 0.5 }, uMini: { value: 0 }, uRes: { value: new THREE.Vector2(1280, 720) },
+      uT: { value: 0 }, uVig: { value: 0.26 }, uGrain: { value: 0.0 }, uLift: { value: 0.002 }, uSharp: { value: 0.5 }, uRes: { value: new THREE.Vector2(1280, 720) },
       uNight: { value: 0 }, uDbg: { value: 0 }, tDepth: { value: null }, uNF: { value: new THREE.Vector2(0.08, 2500) },
     },
     vertexShader: VS,
     fragmentShader: `
       uniform sampler2D tDiffuse; uniform sampler2D tRays; uniform float uRaysK; uniform vec3 uSunCol; uniform vec2 uSunUV; uniform float uGlare; uniform float uAspect;
       uniform float uExposure; uniform int uTM; uniform vec3 uLo; uniform vec3 uHi; uniform float uSat; uniform float uContrast;
-      uniform float uT; uniform float uVig; uniform float uGrain; uniform float uLift; uniform float uSharp; uniform float uMini; uniform vec2 uRes; uniform float uNight; uniform float uDbg; uniform sampler2D tDepth; uniform vec2 uNF;
+      uniform float uT; uniform float uVig; uniform float uGrain; uniform float uLift; uniform float uSharp; uniform vec2 uRes; uniform float uNight; uniform float uDbg; uniform sampler2D tDepth; uniform vec2 uNF;
       varying vec2 vUv;
       float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
       float gh(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
@@ -30954,7 +31137,7 @@ try {
         c *= uExposure;
         // per-hour grade in linear light: saturation + tone-dependent tint (cool/teal lows, warm highs; blue night)
         float l = lum(c);
-        c = max(mix(vec3(l), c, uSat + uMini * 0.16), 0.0);
+        c = max(mix(vec3(l), c, uSat), 0.0);
         c *= mix(uLo, uHi, smoothstep(0.0, 0.75, l / (1.0 + l)));
         c += uLift * vec3(1.0, 0.9, 0.78) * (1.0 - smoothstep(0.0, 0.05, l));
         c = uTM == 1 ? agx(c) : aces(c);
@@ -30971,31 +31154,27 @@ try {
         gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
       }`,
   };
-  // ------------------------------------------------------------ BLUR: tilt-shift band (aerial) + depth of field (walk / interiors), separable
-  const BLUR = {
-    uniforms: { tDiffuse: { value: null }, tDepth: { value: null }, uHasDepth: { value: 0 }, uDir: { value: new THREE.Vector2(1, 0) }, uAmt: { value: 0 }, uFocus: { value: 0.5 }, uBand: { value: 0.08 },
-      uRes: { value: new THREE.Vector2(1280, 720) }, uDof: { value: 0 }, uFocusZ: { value: 10 }, uNF: { value: new THREE.Vector2(0.08, 2500) } },
+  // ------------------------------------------------------------ UPSCALE: render resolution -> canvas. 5-tap Catmull-Rom (bilinear taps) +
+  // contrast-adaptive sharpening against the 4 source neighbours (AMD CAS / FSR-1 RCAS idea): sharp edges, no ringing on flat colour
+  const UPSCALE = {
+    uniforms: { tDiffuse: { value: null }, uIn: { value: new THREE.Vector2(1280, 720) }, uSharp: { value: 0.6 } },
     vertexShader: VS,
     fragmentShader: `
-      uniform sampler2D tDiffuse; uniform sampler2D tDepth; uniform float uHasDepth; uniform vec2 uDir; uniform float uAmt; uniform float uFocus; uniform float uBand; uniform vec2 uRes;
-      uniform float uDof; uniform float uFocusZ; uniform vec2 uNF;
-      varying vec2 vUv;
-      float linZ(float d) { float z = d * 2.0 - 1.0; return 2.0 * uNF.x * uNF.y / (uNF.y + uNF.x - z * (uNF.y - uNF.x)); }
+      uniform sampler2D tDiffuse; uniform vec2 uIn; uniform float uSharp; varying vec2 vUv;
+      vec3 T(vec2 uv) { return texture2D(tDiffuse, uv).rgb; }
       void main() {
-        float dy = abs(vUv.y - uFocus);
-        float k = smoothstep(uBand, uBand + 0.42, dy) * uAmt;
-        if (uDof > 0.001 && uHasDepth > 0.5) {
-          float z = linZ(texture2D(tDepth, vUv).r);
-          float coc = smoothstep(0.15, 1.0, abs(z - uFocusZ) / max(z, 0.1));
-          k = max(k, coc * uDof);
-        }
-        vec4 c0 = texture2D(tDiffuse, vUv);
-        if (k < 0.01) { gl_FragColor = c0; return; }
-        vec2 off = uDir / uRes * k * (uRes.y / 720.0) * 3.2;
-        vec4 s = c0 * 0.2270;
-        s += (texture2D(tDiffuse, vUv + off * 1.3846) + texture2D(tDiffuse, vUv - off * 1.3846)) * 0.3162;
-        s += (texture2D(tDiffuse, vUv + off * 3.2308) + texture2D(tDiffuse, vUv - off * 3.2308)) * 0.0703;
-        gl_FragColor = s;
+        vec2 pos = vUv * uIn, tc = floor(pos - 0.5) + 0.5, f = pos - tc;
+        vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f)), w1 = 1.0 + f * f * (-2.5 + 1.5 * f), w2 = f * (0.5 + f * (2.0 - 1.5 * f)), w3 = f * f * (-0.5 + 0.5 * f);
+        vec2 w12 = w1 + w2, t0 = (tc - 1.0) / uIn, t3 = (tc + 2.0) / uIn, t12 = (tc + w2 / w12) / uIn;
+        float a = w12.x * w0.y, b = w0.x * w12.y, c = w12.x * w12.y, d = w3.x * w12.y, e = w12.x * w3.y;
+        vec3 col = (T(vec2(t12.x, t0.y)) * a + T(vec2(t0.x, t12.y)) * b + T(t12) * c + T(vec2(t3.x, t12.y)) * d + T(vec2(t12.x, t3.y)) * e) / (a + b + c + d + e);
+        vec2 px = 1.0 / uIn;
+        vec3 n = T(vUv - vec2(0.0, px.y)), s = T(vUv + vec2(0.0, px.y)), w = T(vUv - vec2(px.x, 0.0)), r = T(vUv + vec2(px.x, 0.0));
+        vec3 mn = min(min(n, s), min(w, r)), mx = max(max(n, s), max(w, r));
+        vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0));
+        vec3 k = amp * (-1.0 / mix(8.0, 5.0, uSharp));
+        col = (col + (n + s + w + r) * k) / (1.0 + 4.0 * k);
+        gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
       }`,
   };
   // ------------------------------------------------------------ FXAA (low tier; display space)
@@ -31056,14 +31235,14 @@ try {
     if (P.bypass) return;
     if (!X.EffectComposer || !X.RenderPass || !X.UnrealBloomPass || !X.ShaderPass || !X.OutputPass) { P.enabled = false; AF.warnOnce('post: addons missing'); return; }
     const size = R.getSize(new THREE.Vector2());
-    const pr = R.getPixelRatio();
+    const pr = AF.renderPR();
     const isGL2 = R.capabilities.isWebGL2;
     const W0 = Math.max(1, Math.round(size.x * pr)), H0 = Math.max(1, Math.round(size.y * pr));
     const gl = R.getContext();
     const sampleCounts = isGL2 ? gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES) : [];
     const depthSamples = isGL2 ? gl.getInternalformatParameter(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, gl.SAMPLES) : [];
     const msaa = () => {
-      const want = isGL2 && tier() !== 'low' && !AF.GFX.lite && P.quality !== 'low' ? (tier() === 'high' ? 2 : 4) : 0;
+      const want = isGL2 && tier() !== 'low' && !AF.GFX.lite ? (tier() === 'high' ? 2 : 4) : 0;
       for (const count of sampleCounts) if (count <= want && depthSamples.includes(count)) return count;
       return 0;
     };
@@ -31129,7 +31308,7 @@ try {
       P.aoPass = pass;
       const at = comp.passes.indexOf(P.raysPass) + 1;
       comp.insertPass(pass, at);
-      try { const s = R.getSize(new THREE.Vector2()); pass.setSize && pass.setSize(s.x * R.getPixelRatio(), s.y * R.getPixelRatio()); } catch (e) {}
+      try { const s = R.getSize(new THREE.Vector2()), k = AF.renderPR(); pass.setSize && pass.setSize(s.x * k, s.y * k); } catch (e) {}
     };
     try {
       const ao = (AF.gfx && AF.gfx.aoPass) || (typeof (AF.gfx && AF.gfx.makeAOPass) === 'function' ? AF.gfx.makeAOPass(R, S, C) : null);
@@ -31139,31 +31318,31 @@ try {
     comp.addPass(P.bloom);
     P.final = noDepth(new X.ShaderPass(FINAL));
     P.final.uniforms.tDepth.value = P.sceneRT.depthTexture;
-    P.grade = P.final;   // legacy name
     comp.addPass(P.final);
-    P.tiltH = noDepth(new X.ShaderPass(BLUR)); P.tiltH.uniforms.uDir.value.set(1, 0);
-    P.tiltV = noDepth(new X.ShaderPass(BLUR)); P.tiltV.uniforms.uDir.value.set(0, 1);
-    for (const p of [P.tiltH, P.tiltV]) { p.uniforms.tDepth.value = P.sceneRT.depthTexture; p.uniforms.uHasDepth.value = 1; }
-    comp.addPass(P.tiltH); comp.addPass(P.tiltV);
     P.fxaa = noDepth(new X.ShaderPass(FXAA));
     comp.addPass(P.fxaa);
-    P.output = null;   // tone mapping + sRGB are done in P.final
+    P.up = noDepth(new X.ShaderPass(UPSCALE));
+    comp.addPass(P.up);
     const setRes = (w, h) => {
-      const W = w * R.getPixelRatio(), H = h * R.getPixelRatio();
-      for (const p of [P.final, P.tiltH, P.tiltV, P.fxaa]) p.uniforms.uRes.value.set(W, H);
+      const W = w * AF.renderPR(), H = h * AF.renderPR();
+      for (const p of [P.final, P.fxaa]) p.uniforms.uRes.value.set(W, H);
+      P.up.uniforms.uIn.value.set(Math.round(W), Math.round(H));
+      P.up.enabled = R.getPixelRatio() > AF.renderPR() * 1.02;
       P.final.uniforms.uAspect.value = W / H; P.rays.mask.uniforms.uAspect.value = W / H;
     };
     setRes(size.x, size.y);
-    AF.on('resize', (w, h) => { try { comp.setPixelRatio(R.getPixelRatio()); comp.setSize(w, h); setRes(w, h); } catch (e) { AF.warnOnce('post resize', e); } });
+    AF.on('resize', (w, h) => { try { comp.setPixelRatio(AF.renderPR()); comp.setSize(w, h); setRes(w, h); } catch (e) { AF.warnOnce('post resize', e); } });
     // live tier changes: MSAA on/off, ray resolution
     const applyTier = () => {
       const want = msaa();
       if (P.sceneRT.samples !== want) { P.sceneRT.samples = want; P.sceneRT.dispose(); }
-      const s = R.getSize(new THREE.Vector2()); P.rays.resize(s.x * R.getPixelRatio(), s.y * R.getPixelRatio());
+      const s = R.getSize(new THREE.Vector2()); P.rays.resize(s.x * AF.renderPR(), s.y * AF.renderPR());
     };
     if (AF.GFX && AF.GFX.onChange) AF.GFX.onChange(() => { try { applyTier(); } catch (e) { AF.warnOnce('post tier', e); } });
+    // the canvas goes to display resolution; the chain keeps rendering at AF.renderPR()
+    AF.upscaleOn = !AF.SHOT && !AF.Q.has('noupscale');
+    AF.applyPR();
 
-    P.tilt = 0; P.dof = 0; P.focusZ = 12;
     const plain = () => R.render(S, C);
     const v = new THREE.Vector3(), camDir = new THREE.Vector3(), sunW = new THREE.Vector3();
     const tc = new THREE.Color();
@@ -31182,9 +31361,8 @@ try {
       const a = GK[i - 1], b = GK[i], t = AF.clamp((s - a[0]) / (b[0] - a[0]), 0, 1);
       U.uLo.value.set(AF.lerp(a[1][0], b[1][0], t), AF.lerp(a[1][1], b[1][1], t), AF.lerp(a[1][2], b[1][2], t));
       U.uHi.value.set(AF.lerp(a[2][0], b[2][0], t), AF.lerp(a[2][1], b[2][1], t), AF.lerp(a[2][2], b[2][2], t));
-      U.uSat.value = AF.lerp(a[3], b[3], t); U.uContrast.value = AF.lerp(a[4], b[4], t) + 0.05 * (P.tilt || 0);
+      U.uSat.value = AF.lerp(a[3], b[3], t); U.uContrast.value = AF.lerp(a[4], b[4], t);
     };
-    const depthProbe = { buf: new Uint8Array(4), t: 0 };
     P.update = () => {
       const n = AF.time.night || 0, ind = (AF.atmos && AF.atmos.indoor) || 0, T = tier();
       const cam = AF.camera, cp = cam.position;
@@ -31192,7 +31370,7 @@ try {
       const alt = cp.y - gy, low = 1 - AF.smooth(6, 45, alt);
       // bloom: neon/marquees/windows glow from the air; softer at street level; never fogs the frame by day
       P.bloom.strength = AF.lerp(AF.lerp(0.14, AF.lerp(0.55, 0.26, low), n), 0.16, ind);
-      P.bloom.threshold = AF.lerp(AF.lerp(1.4, AF.lerp(AF.lerp(0.95, 0.8, P.tilt), 1.2, low), n), 1.3, ind);
+      P.bloom.threshold = AF.lerp(AF.lerp(1.4, AF.lerp(0.95, 1.2, low), n), 1.3, ind);
       P.bloom.radius = AF.lerp(0.3, AF.lerp(0.48, 0.38, low), n);
       const U = P.final.uniforms;
       U.uNF.value.set(cam.near, cam.far); U.uT.value = AF.clock.t; U.uNight.value = n; U.uDbg.value = AF.Q.has('raysdebug') ? 1 : 0;
@@ -31203,7 +31381,8 @@ try {
       gradeAt(s, U);
       if (ind > 0) { U.uLo.value.lerp(v.set(0.97, 0.97, 1.02), ind * 0.7); U.uHi.value.lerp(v.set(1.06, 1.0, 0.92), ind * 0.7); }
       U.uVig.value = AF.lerp(0.26, 0.32, n); U.uLift.value = AF.lerp(0.0015, 0.006, n); U.uGrain.value = 0;
-      U.uSharp.value = T === 'low' ? 0.2 : (AF.GFX && AF.GFX.cinema) ? 0.3 : 0.22;   // lower: the sharpen was amplifying sub-pixel noise into grain   // R2b: capture quality gets a crisper sharpen
+      U.uSharp.value = T === 'low' ? 0.2 : (AF.GFX && AF.GFX.cinema) ? 0.3 : 0.22;   // higher amplified sub-pixel noise into grain
+      P.up.uniforms.uSharp.value = T === 'low' ? 0.45 : 0.6;
       // sun on screen: god rays + glare
       const sd = (AF.atmos && AF.atmos.sunVec) || AF.time.sunDir;
       cam.getWorldDirection(camDir);
@@ -31224,45 +31403,13 @@ try {
       U.tRays.value = P.rays.k > 0.004 && P.rays.out ? P.rays.out.texture : null;
       if (!U.tRays.value) U.uRaysK.value = 0;
       U.uGlare.value = onScreen * AF.smooth(-0.03, 0.03, s) * (1 - ind) * 0.07 * (0.5 + 0.5 * golden);
-      // tilt-shift miniature: aerial (or no mode) and high above the ground
-      let amt = 0;
-      if (P.tiltEnabled && (AF.mode === 'aerial' || !AF.mode)) {
-        amt = AF.smooth(30, 140, alt) * 0.2;   // was 0.75: the miniature blur made the aerial read fuzzy
-        amt *= AF.smooth(-0.05, -0.35, camDir.y);
-      }
-      P.tilt += (amt - P.tilt) * (AF.clock.dt > 0 ? Math.min(1, AF.clock.dt * 3) : 1);
-      if (AF.SHOT) P.tilt = amt;
-      U.uMini.value = P.tilt;
-      // depth of field: walk mode / interiors (ultra + high), focus = depth under the crosshair (probed a few times a second)
-      let dofT = 0;
-      if (P.dofEnabled && T !== 'low' && (AF.mode === 'walk' || ind > 0.5 || (!AF.mode && alt < 8))) dofT = AF.lerp(0.16, 0.24, ind);
-      P.dof += (dofT - P.dof) * (AF.clock.dt > 0 ? Math.min(1, AF.clock.dt * 3) : 1);
-      if (AF.SHOT) P.dof = dofT;
-      if (P.dof > 0.01) {
-        depthProbe.t -= AF.clock.dt || 0;
-        if (depthProbe.t <= 0 || AF.SHOT) {
-          depthProbe.t = 0.25;
-          // raycast-free focus: walk the view ray through the voxel grid (cheap, 0.5 m steps up to 60 m)
-          let fz = 60;
-          if (typeof AF.solidAt === 'function') { for (let d = 0.6; d < 60; d += 0.5) { if (AF.solidAt(cp.x + camDir.x * d, cp.y + camDir.y * d, cp.z + camDir.z * d)) { fz = d; break; } } }
-          P.focusTarget = fz;
-        }
-        P.focusZ += ((P.focusTarget || 12) - P.focusZ) * (AF.SHOT ? 1 : Math.min(1, (AF.clock.dt || 0) * 4));
-      }
-      const on = P.tilt > 0.02 || P.dof > 0.01;
-      P.tiltH.enabled = P.tiltV.enabled = on;
-      if (on) for (const p of [P.tiltH, P.tiltV]) {
-        const u = p.uniforms; u.uAmt.value = P.tilt; u.uFocus.value = 0.5; u.uBand.value = AF.lerp(0.34, 0.28, P.tilt);
-        u.uDof.value = P.dof; u.uFocusZ.value = Math.max(0.5, P.focusZ); u.uNF.value.set(cam.near, cam.far);
-      }
       P.fxaa.enabled = msaa() === 0;
       if (P.aoPass) P.aoPass.enabled = T !== 'low' && !AF.GFX.lite && !AF.Q.has('noao');   // off: skip its full-screen composite too
     };
-    P.adapt = () => {};   // the GFX tier (R1) handles adaptive quality now
     AF.renderFrame = () => {
       if (!P.enabled) return plain();
       try { P.update(); P.renderPass.camera = AF.camera; comp.render(AF.clock.dt || 1 / 60); }
-      catch (e) { AF.warnOnce('post render failed — falling back', e); P.enabled = false; plain(); }
+      catch (e) { AF.warnOnce('post render failed — falling back', e); P.enabled = false; AF.upscaleOn = false; AF.applyPR(); plain(); }
     };
   });
 
@@ -33346,8 +33493,8 @@ try {
     text(menu.querySelector('.rv'), (G.resH ? Math.min(native, G.resH) + 'p' : 'native'));
     const lod = menu.querySelector('[data-k=lod]'), lv = String(AF.lodScale || 1); if (AF.MOBILE && lod.max !== '1.5') lod.max = '1.5'; if (document.activeElement !== lod && lod.value !== lv) lod.value = lv;
     text(menu.querySelector('.lv'), '\u00d7' + (+lv).toFixed(1));
-    const cv = AF.renderer.domElement, pr = AF.renderer.getPixelRatio();
-    text(menu.querySelector('.rr'), `Render ${cv.width}\u00d7${cv.height} (${pr.toFixed(2)}\u00d7 CSS px${devicePixelRatio > pr + 0.01 ? ', ' + Math.round(pr / devicePixelRatio * 100) + '% of display' : ''})${G.auto ? ' \u00b7 auto ' + G.name : ''}`);
+    const cv = AF.renderer.domElement, pr = AF.renderer.getPixelRatio(), rp = AF.renderPR(), rw = Math.round(cv.width * rp / pr), rh = Math.round(cv.height * rp / pr);
+    text(menu.querySelector('.rr'), `Render ${rw}\u00d7${rh}${pr > rp * 1.02 ? ' \u2192 ' + cv.width + '\u00d7' + cv.height + ' upscaled' : devicePixelRatio > pr + 0.01 ? ' (' + Math.round(pr / devicePixelRatio * 100) + '% of display)' : ''}${G.auto ? ' \u00b7 auto ' + G.name : ''}`);
     menu.querySelectorAll('[data-k=clock] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'stop') === !!AF.time.paused));
     const hr = menu.querySelector('[data-k=hour]'), hour = AF.time.hours.toFixed(2); if (document.activeElement !== hr && hr.value !== hour) hr.value = hour;
     const sens = menu.querySelector('[data-k=sens]'), sv = String(AF.lookSens()), bright = menu.querySelector('[data-k=bright]'), bv = String(AF.brightness ?? 1);
@@ -33372,7 +33519,7 @@ try {
     if (seg === 'gfx') { G.auto = false; G.set(b.dataset.v, 'menu'); try { localStorage.setItem('portSolace.gfx', b.dataset.v); } catch (er) {} }
     else if (seg === 'res') {
       G.res = +b.dataset.v; try { localStorage.setItem('portSolace.res', b.dataset.v); } catch (er) {}
-      AF.renderer.setPixelRatio(AF.basePR() * G.scale); AF.resize();
+      AF.applyPR();
     }
     else if (seg === 'clock') AF.time.paused = b.dataset.v === 'stop';
     else if (seg === 'fps') AF.setFpsCap(b.dataset.v);
@@ -33685,6 +33832,7 @@ try {
     if (labelCount !== AF.labels.length) syncLabels();
     const ratio = cv.width / map.width; g.setTransform(ratio, 0, 0, ratio, 0, 0);
     drawLayers(g, map.x, map.z, map.scale, map.width, map.height); drawLabels();
+    if (map.overlays) for (const draw of map.overlays) draw(g, map);
     const src = focus(); playerMarker(g, (src.x - map.x) * map.scale + map.width / 2, (src.z - map.z) * map.scale + map.height / 2, heading(src));
     const car = AF.vehicles.player, plane = AF.planes.cur;
     g.fillStyle = '#597b8b';
@@ -33783,6 +33931,190 @@ try {
   });
 }
 } catch (e) { AF.partError('74-map.js', e); }
+
+// ================================================================ 75-extras.js
+try {
+// ===== 75-extras: photo mode + the Solace Stars hunt  (OWNER: player) =====
+// Photo mode (P, or Menu > Photo mode): the world freezes (AF.timeScale 0), a free camera flies within 150 m of where it started;
+//   wheel = zoom, [ ] = time of day, F = freeze on/off, K / Enter = save a PNG, P / Esc = back. No new draws.
+// Solace Stars: 30 glowing stars over streets, trails, the island and the sky (6 only a plane reaches). One InstancedMesh (1 draw,
+//   no shadow), spun at 20 Hz, picked up at 10 Hz by whoever the player is (on foot, car, plane). Progress in localStorage.
+{
+  const UI = AF.ui, root = document.getElementById('ui'), I = AF.input;
+  const style = document.createElement('style');
+  style.textContent = `
+    #ui.photo .hud,#ui.photo #h-toasts,#ui.photo #h-banner,#ui.photo .bubble,#ui.photo #h-prompt{display:none!important}
+    #ui #h-photo{position:absolute;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translateX(-50%);padding:8px 12px;display:none;gap:12px;align-items:center;font-size:12px;color:var(--dim);transition:opacity .4s}
+    #ui.photo #h-photo{display:flex}
+    #ui #h-photo b{color:var(--ink);font-weight:600}
+    #ui #h-clock .st{font-size:11px;color:#f3c84b;margin-left:2px;white-space:nowrap}
+  `;
+  document.head.appendChild(style);
+
+  // ------------------------------------------------------------------ photo mode
+  const PH = AF.photo = { on: false, prev: null, freeze: true, yaw: 0, pitch: 0, fov0: 50, pos: new THREE.Vector3(), origin: new THREE.Vector3(), shots: 0 };
+  const dir = new THREE.Vector3(), fwd = new THREE.Vector3(), right = new THREE.Vector3();
+  const bar = document.createElement('div'); bar.id = 'h-photo'; bar.className = 'panel pe';
+  bar.innerHTML = AF.touch
+    ? '<b>Photo mode</b><button class="btn" data-p="shot">Save photo</button><button class="btn" data-p="freeze">Freeze</button><button class="btn" data-p="exit">Done</button>'
+    : '<b>Photo mode</b><span>WASD + mouse fly \u00b7 Space/C up/down \u00b7 Wheel zoom \u00b7 [ ] time \u00b7 F freeze \u00b7 K save \u00b7 P exit</span>';
+  root.appendChild(bar);
+  const ground = (x, z) => { try { return AF.W.groundY(x, z) || 0; } catch (e) { return 0; } };
+  PH.enter = () => {
+    if (PH.on || !AF.ready || !AF.mode || AF.mode === 'cine' || UI.modalOpen() || (UI.dialogueOpen && UI.dialogueOpen())) return false;
+    const cam = AF.camera;
+    PH.on = true; PH.prev = AF.mode; AF.mode = 'photo';   // no setMode: the frozen mode is resumed as it was, without exit/enter
+    PH.fov0 = cam.fov; PH.pos.copy(cam.position); PH.origin.copy(cam.position);
+    cam.getWorldDirection(dir); PH.yaw = Math.atan2(dir.x, dir.z); PH.pitch = Math.asin(AF.clamp(dir.y, -1, 1));
+    AF.timeScale = PH.freeze ? 0 : 1;
+    root.classList.add('photo'); bar.style.opacity = '1'; PH.hintT = 5;
+    return true;
+  };
+  PH.exit = () => {
+    if (!PH.on) return;
+    PH.on = false; AF.mode = PH.prev; AF.timeScale = 1;
+    AF.camera.fov = PH.fov0; AF.camera.updateProjectionMatrix();
+    root.classList.remove('photo');
+  };
+  PH.capture = () => {
+    const a = document.createElement('a'), d = new Date();
+    a.download = 'port-solace-' + d.toISOString().slice(0, 19).replace(/[T:]/g, '-') + '.png';
+    a.href = AF.capture(); a.click(); PH.shots++;
+    UI.toast && setTimeout(() => UI.toast('Photo saved \u2014 ' + a.download), 0);
+  };
+  bar.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-p]'); if (!b) return;
+    if (b.dataset.p === 'shot') PH.capture(); else if (b.dataset.p === 'freeze') { PH.freeze = !PH.freeze; AF.timeScale = PH.freeze ? 0 : 1; } else PH.exit();
+  });
+  AF.modes.photo = {
+    update() {
+      if (UI.modalOpen()) { PH.exit(); return; }
+      const dt = Math.min(0.1, AF.clock.real || 0), cam = AF.camera, m = I.mouse, k = 0.0022 * (AF.lookSens ? AF.lookSens() : 1);
+      if (document.pointerLockElement || m.buttons) { PH.yaw -= m.dx * k; PH.pitch = AF.clamp(PH.pitch - m.dy * k, -1.5, 1.5); }
+      fwd.set(Math.sin(PH.yaw) * Math.cos(PH.pitch), Math.sin(PH.pitch), Math.cos(PH.yaw) * Math.cos(PH.pitch));
+      right.set(-Math.cos(PH.yaw), 0, Math.sin(PH.yaw));
+      const sp = (I.key('ShiftLeft') || I.key('ShiftRight') ? 24 : 6) * dt;
+      const f = (I.key('KeyW') ? 1 : 0) - (I.key('KeyS') ? 1 : 0) + (I.stick ? -(I.stick.y || 0) : 0), s = (I.key('KeyD') ? 1 : 0) - (I.key('KeyA') ? 1 : 0) + (I.stick ? (I.stick.x || 0) : 0);
+      const u = (I.key('Space') ? 1 : 0) - (I.key('KeyC') || I.key('ControlLeft') ? 1 : 0);
+      PH.pos.addScaledVector(fwd, f * sp).addScaledVector(right, s * sp); PH.pos.y += u * sp;
+      // stay near the subject: 150 m leash, never below the ground
+      dir.subVectors(PH.pos, PH.origin); if (dir.length() > 150) PH.pos.copy(PH.origin).addScaledVector(dir.normalize(), 150);
+      PH.pos.y = Math.max(PH.pos.y, ground(PH.pos.x, PH.pos.z) + 0.4);
+      if (m.wheel) { cam.fov = AF.clamp(cam.fov * Math.exp(m.wheel * 0.001), 12, 90); cam.updateProjectionMatrix(); }
+      const T = AF.time; if (I.key('BracketLeft')) T.hours = (T.hours - dt * 1.5 + 24) % 24; if (I.key('BracketRight')) T.hours = (T.hours + dt * 1.5) % 24;
+      if (I.hit('KeyF')) { PH.freeze = !PH.freeze; AF.timeScale = PH.freeze ? 0 : 1; }
+      if (I.hit('KeyK') || I.hit('Enter')) PH.capture();
+      cam.position.copy(PH.pos); AF.camTarget.copy(PH.pos).addScaledVector(fwd, 10); cam.lookAt(AF.camTarget);
+      AF.shadowFocus.set(AF.camTarget.x, 0, AF.camTarget.z);
+      if (PH.hintT > 0 && (PH.hintT -= dt) <= 0) bar.style.opacity = AF.touch ? '1' : '0.35';
+    },
+  };
+  AF.onTick('photo-key', 149, () => {
+    if (!AF.ready || !I.hit('KeyP') || (UI.state && UI.state.title)) return;
+    if (PH.on) PH.exit(); else PH.enter();
+  });
+  AF.on('ready', () => {
+    const stack = document.querySelector('#m-menu .stack'); if (!stack) return;
+    const b = document.createElement('button'); b.className = 'btn'; b.textContent = 'Photo mode'; b.dataset.k = 'photo';
+    b.addEventListener('click', () => { UI.toggleMenu(false); PH.enter(); });
+    stack.insertBefore(b, stack.children[2] || null);
+  });
+
+  // ------------------------------------------------------------------ Solace Stars
+  // [x, z, y] y = null: 1.3 m over the ground / road deck; a number: a sky star at that height (planes only, 14 m catch radius)
+  const SPOTS = [
+    [40, -80], [-120, 80], [-80, -40], [80, 120], [-240, -200], [160, -240], [-372, -120], [-560, 0], [320, -120], [444, 120],
+    [240, -120], [380, 160], [-820, -10], [-980, 50], [-1200, 120], [50, -480], [700, -40], [820, 20], [800, -120], [290, -660],
+    [-270, -640], [-600, -600], [-170, 640], [0, 540],
+    [70, -80, 150], [-41, -110, 70], [-40, -650, 70], [-10, 625, 95], [-550, -150, 80], [0, 230, 55],
+  ];
+  const ST = AF.stars = { list: [], found: new Set(), total: SPOTS.length, mesh: null };
+  try { for (const id of JSON.parse(localStorage.getItem('portSolace.stars') || '[]')) if (id >= 0 && id < SPOTS.length) ST.found.add(id); } catch (e) {}
+  const save = () => { try { localStorage.setItem('portSolace.stars', JSON.stringify([...ST.found])); } catch (e) {} };
+  const mat4 = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+  let counter = null;
+  const showCount = () => { if (counter) counter.textContent = '\u2605 ' + ST.found.size + '/' + ST.total; };
+  AF.onBuild('solace-stars', 890, () => {
+    const gold = AF.col(0xffd24a, { emit: 0xffc23a, emitK: 2.4, mode: 'always', jitter: 0, edge: 0 }), m = new AF.Model(13, 13, 2);
+    // five-point star in the xy plane (outer r 6.4, inner 2.6 voxels), 2 voxels thick
+    const pts = []; for (let i = 0; i < 10; i++) { const a = Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 2.6 : 6.4; pts.push([6.5 + Math.cos(a) * r, 6.5 + Math.sin(a) * r]); }
+    const inside = (x, y) => { let c = false; for (let i = 0, j = 9; i < 10; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+    for (let x = 0; x < 13; x++) for (let y = 0; y < 13; y++) if (inside(x + 0.5, y + 0.5)) { m.set(x, y, 0, gold); m.set(x, y, 1, gold); }
+    const geo = AF.meshModel(m, { vs: 0.1, anchor: [0.5, 0.5, 0.5], flat: true });
+    for (let i = 0; i < SPOTS.length; i++) {
+      const [x, z, sky] = SPOTS[i], g = ground(x, z);
+      let y = sky != null ? g + sky : g;
+      if (sky == null) { const s = AF.surfaceBelow(x, z, g + 3, 8); if (s > -50) y = s; y += 1.3; }
+      ST.list.push({ id: i, x, y, z, sky: sky != null, ph: i * 1.7 });
+    }
+    const mesh = ST.mesh = new THREE.InstancedMesh(geo, AF.mat.voxelInst, SPOTS.length);
+    mesh.name = 'solace-stars'; mesh.frustumCulled = false; mesh.castShadow = false; mesh.receiveShadow = false; mesh.count = 0;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.matrixAutoUpdate = false;
+    AF.scene.add(mesh);
+    const clock = document.getElementById('h-clock');
+    if (clock) { counter = document.createElement('div'); counter.className = 'st'; clock.appendChild(counter); showCount(); }
+  });
+  let spinT = 0, pickT = 0;
+  const focus = () => AF.mode === 'walk' ? AF.player : AF.mode === 'drive' ? AF.vehicles && AF.vehicles.player : AF.mode === 'fly' ? AF.planes && AF.planes.cur : null;
+  ST.collect = (s) => {
+    if (ST.found.has(s.id)) return;
+    ST.found.add(s.id); save(); showCount();
+    if (UI.map) UI.map.revision++;
+    const n = ST.found.size;
+    UI.toast && UI.toast(n === ST.total ? '\u2605 You found every Solace Star! Fireworks over the harbour tonight.' : '\u2605 Solace Star ' + n + ' of ' + ST.total + (s.sky ? ' \u2014 a sky star!' : '') + ' \u00b7 the map (M) shows the rest');
+    if (n === ST.total && AF.fireworks && AF.fireworks.launch) AF.fireworks.launch(12);
+  };
+  AF.onTick('solace-stars', 640, (dt, t) => {
+    const mesh = ST.mesh; if (!mesh || !AF.ready) return;
+    if ((spinT += dt) >= 0.05) {
+      spinT = 0; let n = 0;
+      for (const s of ST.list) {
+        if (ST.found.has(s.id)) continue;
+        q.setFromAxisAngle(up, t * 1.6 + s.ph); pos.set(s.x, s.y + Math.sin(t * 2 + s.ph) * 0.18, s.z);
+        mat4.compose(pos, q, s.sky ? one.setScalar(4) : one.setScalar(1)); mesh.setMatrixAt(n++, mat4);
+      }
+      mesh.count = n; mesh.instanceMatrix.needsUpdate = true;
+    }
+    if ((pickT += dt) < 0.1) return;
+    pickT = 0;
+    const f = focus(); if (!f) return;
+    const r = AF.mode === 'fly' ? 14 : AF.mode === 'drive' ? 4.5 : 2.2, fy = (f.y ?? 0) + (AF.mode === 'walk' ? 0.9 : 0);
+    for (const s of ST.list) {
+      if (ST.found.has(s.id) || (s.sky && AF.mode !== 'fly')) continue;
+      const dx = s.x - f.x, dz = s.z - f.z; if (dx * dx + dz * dz > r * r) continue;
+      if (Math.abs(s.y - fy) < r + 1) ST.collect(s);
+    }
+  });
+  // map: uncollected stars as gold marks
+  AF.on('ready', () => {
+    const map = UI.map; if (!map) return;
+    (map.overlays || (map.overlays = [])).push((g) => {
+      g.save(); g.fillStyle = '#f3c84b'; g.strokeStyle = 'rgba(60,40,0,.7)'; g.lineWidth = 1.5; g.font = '700 14px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (const s of ST.list) { if (ST.found.has(s.id)) continue; const p = map.worldToScreen(s.x, s.z); g.strokeText('\u2605', p.x, p.y); g.fillText('\u2605', p.x, p.y); }
+      g.restore();
+    });
+  });
+
+  AF.test('extras: photo mode freezes the world and hands the camera back', () => {
+    const S = UI.state, saved = { title: S.title, menu: S.menu, help: S.help, map: S.map, dlg: S.dlg }, mode = AF.mode, hook = AF.hooks.tick.find((h) => h.name === 'photo-key');
+    Object.assign(S, { title: false, menu: false, help: false, map: false, dlg: null }); const p0 = AF.camera.position.clone();
+    I.tap('KeyP'); hook.fn(0); const on = PH.on && AF.mode === 'photo' && AF.timeScale === 0; I.pressed.delete('KeyP');
+    AF.step(2);
+    I.tap('KeyP'); hook.fn(0); I.pressed.delete('KeyP');
+    const back = !PH.on && AF.mode === mode && AF.timeScale === 1;
+    Object.assign(S, saved); AF.camera.position.copy(p0);
+    return { ok: (!mode || on) && back, info: 'mode ' + mode + ', entered ' + on + ', restored ' + back };
+  });
+  AF.test('extras: Solace Stars are placed, drawn in one batch and collectable', () => {
+    const before = new Set(ST.found), s = ST.list.find((x) => !ST.found.has(x.id));
+    const placed = ST.list.length === SPOTS.length && ST.list.every((x) => isFinite(x.y) && x.y > -20 && x.y < 400);
+    if (s) ST.collect(s);
+    const got = !s || ST.found.has(s.id);
+    ST.found = before; save(); showCount();
+    return { ok: placed && got && !!ST.mesh && ST.mesh.isInstancedMesh, info: ST.list.length + ' stars, ' + before.size + ' found before' };
+  });
+}
+} catch (e) { AF.partError('75-extras.js', e); }
 
 // ================================================================ 98-tests.js
 try {

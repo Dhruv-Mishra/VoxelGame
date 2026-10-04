@@ -1,5 +1,5 @@
 // Playwright harness: like stream-fly.js (24 s real-time probe flight over the city at plane speed) but waits for the boot preload and
-// reads the build from the calling page's URL fragment (about:blank#url=tools/output-head.html; default output.html).
+// reads the build from the calling page's URL fragment (about:blank#url=tools/output-base.html; default output.html).
 // Reports every frame gap (worst 8, count over 50 ms), "late" pending city regions within 160 m and the region streamer's phase times.
 async (page) => {
   const b = page.context().browser();

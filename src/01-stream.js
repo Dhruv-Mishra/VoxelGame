@@ -54,14 +54,17 @@ try {
   const warmed = new WeakSet();
   ST.warm = async () => {
     const R = AF.renderer, t0 = performance.now(), pool = (AF.atmos && AF.atmos.pool) || [], P = AF.post;
-    const compile = async () => {
+    // compileAsync: the driver links in parallel (KHR_parallel_shader_compile) while the loader keeps animating
+    const compile = () => {
       const prev = R.getRenderTarget();
-      try { R.setRenderTarget(P && P.enabled && P.sceneRT ? P.sceneRT : null); R.compile(AF.scene, AF.camera); } catch (e) { AF.warnOnce('stream compile', e); }
+      try { R.setRenderTarget(P && P.enabled && P.sceneRT ? P.sceneRT : null); if (R.compileAsync) return R.compileAsync(AF.scene, AF.camera).catch((e) => AF.warnOnce('stream compile', e)); R.compile(AF.scene, AF.camera); }
+      catch (e) { AF.warnOnce('stream compile', e); }
       finally { R.setRenderTarget(prev); }
-      await ST.nextFrame();
+      return Promise.resolve();
     };
-    await compile();
-    if (pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; await compile(); for (const l of pool) l.visible = v; }
+    const jobs = [compile()];
+    if (pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; jobs.push(compile()); for (const l of pool) l.visible = v; }
+    await Promise.all(jobs); await ST.nextFrame();
     const proxies = [], tri = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)), seen = new Set();
     AF.scene.traverse((o) => {
       const d = o.customDepthMaterial; if (!d || warmed.has(d)) return;
@@ -90,12 +93,15 @@ try {
   // wait until no system misses anything near the view (3 calm frames), at most maxMs
   const settle = async (maxMs, onProgress) => {
     const t0 = performance.now(); let calm = 0, frames = 0;
-    while (performance.now() - t0 < maxMs) {
-      await ST.nextFrame(); frames++;
-      const n = ST.near(); ST.stats.waitingOn = n;
-      if (onProgress) onProgress(1 - Math.exp(-(performance.now() - t0) / 1500), n);
-      if (n || frames < 3) calm = 0; else if (++calm >= 3) return true;
-    }
+    ST.settling = true;
+    try {
+      while (performance.now() - t0 < maxMs) {
+        await ST.nextFrame(); frames++;
+        const n = ST.near(); ST.stats.waitingOn = n;
+        if (onProgress) onProgress(1 - Math.exp(-(performance.now() - t0) / 1500), n);
+        if (n || frames < 3) calm = 0; else if (++calm >= 3) return true;
+      }
+    } finally { ST.settling = false; }
     ST.stats.timeouts++; return false;
   };
   const LABEL = { 'region-stream': 'raising the streets', 'outland-build': 'shaping the hills', 'flora-build': 'growing the forests', farms: 'sowing the fields', 'outland-sites': 'building the villages', 'outland-roads': 'paving the country roads', 'outland-wayside': 'stocking the roadside stops', 'water-shore': 'charting the shoreline' };

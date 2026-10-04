@@ -1,5 +1,5 @@
 // Playwright harness (run via the MCP run_code tool with filename): boots tools/output-base.html and output.html on a fixed
-// 'high' tier in a desktop context and returns per-pose perf for both.
+// 'high' tier in a desktop context and returns per-pose perf for both. Baseline: `git show HEAD:output.html > tools/output-base.html`.
 async (page) => {
   const b = page.context().browser();
   for (const c of b.contexts().slice(1)) await c.close();

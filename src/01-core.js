@@ -1,8 +1,8 @@
 // ================================================================ 01-core.js
 try {
 // ===== 01-core: namespace, hooks, utils, palette, input, time  (OWNER: coordinator) =====
-const AF = window.AF;
-AF.BUILD = '2026-09-23 10:52:50';
+// AF is the global window.AF (set by the prologue): no local alias, so worker sources built from Function.toString() keep the name
+AF.BUILD = '2026-10-04';
 AF.Q = new URLSearchParams(location.search);
 AF.TEST = AF.Q.has('test');
 AF.SHOT = AF.Q.has('shot');

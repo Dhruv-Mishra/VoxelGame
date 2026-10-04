@@ -1,4 +1,4 @@
-// Assemble shell.html + src/*.js into output.html (one self-contained page). `node tools/build.mjs [--check] [--out=name.html]`
+// Assemble shell.html + src/*.js into output.html (one self-contained page). `node tools/build.mjs [--check] [--min] [--out=name.html]`
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -15,7 +15,11 @@ if (process.argv.includes('--check')) {
   if (bad) process.exit(1);
 }
 const toc = '// Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.\n// Parts: ' + parts.map((f) => f.replace(/\.js$/, '')).join(', ') + '\n';
-const code = toc + parts.map((f) => fs.readFileSync(path.join(dir, f), 'utf8').replace(/\r\n/g, '\n').trimEnd().replace(/<\/script/gi, '<\\/script')).join('\n\n');
+let code = toc + parts.map((f) => fs.readFileSync(path.join(dir, f), 'utf8').replace(/\r\n/g, '\n').trimEnd()).join('\n\n');
+// --min (deploys): esbuild strips comments/whitespace and simplifies syntax; identifiers keep their names because worker sources are
+// rebuilt from Function.toString() and must still match the constants they name
+if (process.argv.includes('--min')) code = execFileSync('npx', ['--yes', 'esbuild', '--minify-whitespace', '--minify-syntax', '--format=esm', '--target=es2022', '--loader=js', '--log-level=warning'], { input: code, maxBuffer: 64 << 20, shell: true }).toString();
+code = code.replace(/<\/script/gi, '<\\/script');
 const html = fs.readFileSync(path.join(root, 'shell.html'), 'utf8').replace(/\r\n/g, '\n').replace('/*@@PARTS@@*/', () => code);
 const outArg = process.argv.find((a) => a.startsWith('--out='));
 const out = path.join(root, outArg ? path.basename(outArg.slice(6)) : 'output.html');

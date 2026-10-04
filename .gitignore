@@ -2,3 +2,6 @@
 .env*
 out-*.html
 tools/tmp-*/
+tools/shots/
+tools/output-*.html
+.vscode/

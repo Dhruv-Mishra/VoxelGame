@@ -118,6 +118,7 @@ try {
     if (labelCount !== AF.labels.length) syncLabels();
     const ratio = cv.width / map.width; g.setTransform(ratio, 0, 0, ratio, 0, 0);
     drawLayers(g, map.x, map.z, map.scale, map.width, map.height); drawLabels();
+    if (map.overlays) for (const draw of map.overlays) draw(g, map);
     const src = focus(); playerMarker(g, (src.x - map.x) * map.scale + map.width / 2, (src.z - map.z) * map.scale + map.height / 2, heading(src));
     const car = AF.vehicles.player, plane = AF.planes.cur;
     g.fillStyle = '#597b8b';

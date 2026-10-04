@@ -17,6 +17,13 @@ try {
     return Math.min(dpr, G.res > 0 ? G.res : G.tier === 'low' ? 0.8 : G.tier === 'high' ? 1 : 1.25);
   };
   R.setPixelRatio(AF.basePR());
+  // render vs display resolution: the scene + post chain render at AF.renderPR() (base x dynamic scale); while AF.upscaleOn (61-post)
+  // the canvas keeps the display's resolution (<= 2x CSS px) and the last post pass upscales + sharpens instead of the browser's
+  // bilinear stretch. Everything that changes the resolution calls AF.applyPR().
+  AF.upscaleOn = false;
+  AF.renderPR = () => AF.basePR() * AF.GFX.scale;
+  AF.outputPR = () => { const r = AF.renderPR(); return AF.upscaleOn ? Math.max(r, Math.min(devicePixelRatio || 1, 2)) : r; };
+  AF.applyPR = () => { const pr = AF.outputPR(); if (Math.abs(R.getPixelRatio() - pr) > 1e-3) R.setPixelRatio(pr); if (AF.resize) AF.resize(); };
   R.outputColorSpace = THREE.SRGBColorSpace;
   R.toneMapping = THREE.ACESFilmicToneMapping;
   R.toneMappingExposure = 1.0;
@@ -83,7 +90,7 @@ try {
   // dynamic near plane (PERF.md §3, locked): 24-bit depth precision is ~ d^2 / (near * 2^24), so a fixed 0.08 m near plane
   // z-fights from ~150 m on Windows (ANGLE / D3D11). On foot / driving 0.1 m; from the air it grows with altitude and the
   // distance to the followed target (plane, orbit centre) up to 6 m.
-  const HIGH_MODES = new Set(['fly', 'skydive', 'aerial', 'cine', 'probe', 'ferry-ride']);
+  const HIGH_MODES = new Set(['fly', 'skydive', 'aerial', 'cine', 'probe', 'ferry-ride', 'photo']);
   AF.onTick('cam-near', 886, () => {
     let n = 0.1;
     if (HIGH_MODES.has(AF.mode)) {
@@ -109,7 +116,7 @@ try {
   // resize
   AF.resize = () => {
     const w = AF.SHOT ? (+AF.Q.get('w') || 1280) : (innerWidth || 1280), h = AF.SHOT ? (+AF.Q.get('h') || 720) : (innerHeight || 720);
-    if (AF.GFX.resH > 0 && !AF.SHOT) { const pr = AF.basePR() * AF.GFX.scale; if (Math.abs(R.getPixelRatio() - pr) > 1e-3) R.setPixelRatio(pr); }
+    if (!AF.SHOT) { const pr = AF.outputPR(); if (Math.abs(R.getPixelRatio() - pr) > 1e-3) R.setPixelRatio(pr); }
     R.setSize(w, h, !AF.SHOT); cam.aspect = w / h; cam.updateProjectionMatrix();
     AF.emit('resize', w, h);
   };
@@ -177,9 +184,11 @@ try {
   const smRender = R.shadowMap.render.bind(R.shadowMap);
   R.shadowMap.render = (lights, scene, camera) => { if (scene !== S) return smRender(lights, scene, camera); shadowView.layers.mask = camera.layers.mask | 2; return smRender(lights, scene, shadowView); };
   const lastSF = { x: 0, z: 0 };
-  const frame = (dt) => {
+  const frame = (rdt) => {
     if (graphicsReset) return;
-    AF.clock.dt = dt; AF.clock.t += dt; AF.clock.frame++;
+    // AF.timeScale 0 freezes the world (photo mode); AF.clock.real keeps the wall-clock step for cameras
+    const dt = rdt * AF.timeScale;
+    AF.clock.real = rdt; AF.clock.dt = dt; AF.clock.t += dt; AF.clock.frame++;
     for (const h of AF.hooks.tick) {
       try { h.fn(dt, AF.clock.t); }
       catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (AF.MOBILE) AF.reportError(e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
@@ -191,10 +200,13 @@ try {
     const sf = AF.shadowFocus, moved = Math.abs(sf.x - lastSF.x) + Math.abs(sf.z - lastSF.z) > 0.05 && AF.mode !== 'aerial' && AF.mode !== 'cine';
     lastSF.x = sf.x; lastSF.z = sf.z;
     if (AF.shadowQ !== 'off' && (moved || AF.clock.frame % every === 0 || AF.shadowDirty)) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
-    try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
+    // behind the loader veil (AF.stream settle) only every 6th frame renders (keeps uploads incremental); the rest goes to streaming
+    const veiled = AF.stream.settling && AF.clock.frame % 6 !== 0;
+    if (!veiled) try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
   };
   AF.frame = frame;
+  AF.timeScale = 1;
   let lastTick = 0, slot = 0, rafEma = 16.7, rafLast = 0;
   // idle work (PERF.md §2): rAF slots skipped by the fps cap run AF.onIdle hooks (streaming, far builds) for ~60 % of a display
   // interval; 60/Max also gets a token fallback every second frame if no skipped slot ran
@@ -402,7 +414,7 @@ try {
     if (AF.atmos && AF.atmos.setLights) AF.atmos.setLights(T.lights);
     AF.shadowDirty = true;
     if (G.cinema) G.scale = 1;
-    const pr = AF.basePR() * G.scale; if (Math.abs(R.getPixelRatio() - pr) > 1e-3) { R.setPixelRatio(pr); if (AF.ready) AF.resize(); }
+    if (AF.ready) AF.applyPR(); else R.setPixelRatio(AF.outputPR());
     if (AF.ready) { try { sharpenTextures(); } catch (e) { AF.warnOnce('aniso', e); } }
     const nearSize = AF.shadowQ === 'low' ? Math.min(T.near, 1024) : T.near;
     if (sun && sun.shadow.mapSize.x !== nearSize) { sun.shadow.mapSize.set(nearSize, nearSize); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
@@ -420,13 +432,13 @@ try {
   AF.gfx.setResH = (h) => {
     G.resH = Math.max(0, Math.round(+h || 0));
     try { localStorage.setItem('portSolace.resH', String(G.resH)); } catch (e) {}
-    R.setPixelRatio(AF.basePR() * G.scale); AF.resize();
+    AF.applyPR();
   };
   // ---------------------------------------------------------------- auto tier (only while G.auto: no saved/forced choice; never in ?shot / ?test)
   // Down one step after 3 s of frames 32 % over the frame target (the fps cap interval, 16.7 ms uncapped); never up.
   // Phones: adaptive resolution (0.8..1 of the base pixel ratio, checked every 4 s) holds the 30 fps target.
   {
-    const base = AF.basePR, LADDER = ['low', 'lite', 'high', 'ultra'];
+    const LADDER = ['low', 'lite', 'high', 'ultra'];
     const target = () => (AF.fpsCap > 0 ? 1000 / AF.fpsCap : 16.7);
     let ema = target(), slowT = 0, adjT = 0, grace = 2;
     G.onChange(() => { ema = target(); slowT = 0; grace = 2; });
@@ -441,7 +453,7 @@ try {
       if (dyn && adjT > (AF.MOBILE ? 4 : 1)) {
         adjT = 0; const T = cur(); let s = G.scale;
         if (ema > tg * 1.14) s = Math.max(T.dynMin, s - (AF.MOBILE ? 0.1 : 0.05)); else if (ema < tg * 1.04) s = Math.min(1, s + 0.05);
-        if (Math.abs(s - G.scale) > 1e-3) { G.scale = s; R.setPixelRatio(base() * s); AF.resize(); }
+        if (Math.abs(s - G.scale) > 1e-3) { G.scale = s; AF.applyPR(); }
       }
       if (!G.auto) return;
       const i = LADDER.indexOf(G.name);
@@ -602,9 +614,9 @@ try {
     const was = G.name, wasAuto = G.auto, wasRes = G.res;
     G.set('lite'); AF.renderFrame();
     const P = AF.post, lite = G.tier === 'high' && cur() === TIER.lite && AF.FAR_LOD === TIER.lite.farLod && (!P.composer || (P.sceneRT.samples === 0 && P.fxaa.enabled && !(P.aoPass && P.aoPass.enabled)));
-    const prLite = R.getPixelRatio();
-    G.res = 0.75; R.setPixelRatio(AF.basePR() * G.scale); const pr75 = R.getPixelRatio();
-    G.res = wasRes; G.set(was); G.auto = wasAuto; R.setPixelRatio(AF.basePR() * G.scale); AF.resize();
+    const prLite = AF.renderPR();
+    G.res = 0.75; const pr75 = AF.renderPR();
+    G.res = wasRes; G.set(was); G.auto = wasAuto; AF.applyPR();
     const near = (a, b) => Math.abs(a - b) < 1e-3;
     const ok = lite && near(prLite, Math.min(devicePixelRatio || 1, 1)) && near(pr75, Math.min(devicePixelRatio || 1, 0.75)) && G.name === was;
     return { ok, info: 'lite ' + lite + ', pr ' + prLite + ' / 75% ' + pr75 + ', back to ' + G.name + ', gpu integrated ' + !!AF.gfx.integrated };
@@ -744,19 +756,6 @@ try {
     AF.gfx.aoPass = pass;
     return pass;
   };
-  // v1 post (no insertAO / no scene depth): R1 wires the pass in itself so the AO works stand-alone. R2's 61-post supersedes this.
-  AF.on('ready', () => {
-    const P = AF.post; if (!P || !P.composer || P.insertAO || AF.gfx.aoPass || AF.Q.has('noao')) return;
-    try {
-      const comp = P.composer, rp = P.renderPass; if (!rp) return;
-      const s = R.getSize(new THREE.Vector2()), pr = R.getPixelRatio();
-      for (const t of [comp.renderTarget1, comp.renderTarget2]) { if (!t.depthTexture) { t.depthTexture = new THREE.DepthTexture(Math.round(s.x * pr), Math.round(s.y * pr)); t.depthTexture.type = THREE.UnsignedIntType; t.dispose(); } }
-      const pass = AF.gfx.makeAOPass(R, AF.scene, AF.camera);
-      comp.insertPass(pass, comp.passes.indexOf(rp) + 1);
-      pass.setSize(Math.round(s.x * pr), Math.round(s.y * pr));
-      AF.gfx.aoSelfWired = true;
-    } catch (e) { AF.warnOnce('r1 AO self-wire failed', e); }
-  });
 }
 
 // ================================================================ R1: night light pools — feeds the 24 nearest outdoor lights to the voxel shader

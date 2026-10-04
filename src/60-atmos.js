@@ -863,7 +863,7 @@ try {
     G.attributes.position.needsUpdate = true; G.attributes.aSize.needsUpdate = true; G.attributes.aAlpha.needsUpdate = true;
     const U = pts.material.uniforms;
     AF.renderer.getDrawingBufferSize(drawSize);
-    U.uScale.value = drawSize.y * 0.5 / Math.tan(AF.camera.fov * Math.PI / 360);
+    U.uScale.value = drawSize.y * AF.renderPR() / AF.renderer.getPixelRatio() * 0.5 / Math.tan(AF.camera.fov * Math.PI / 360);
     const lk = 0.1 + 0.85 * smooth(-0.08, 0.35, sunVec.y);
     U.uCol.value.setRGB(0.72, 0.7, 0.67).multiplyScalar(lk).lerp(SU.uGlow.value, 0.25 * SU.uSunset.value * lk);
     if (A.pm > 0 || SU.uSunset.value > 0) U.uCol.value.lerp(tmpC2.copy(SU.uSunCol.value).multiplyScalar(0.8 * lk), 0.3 * Math.max(A.pm || 0, SU.uSunset.value));
@@ -1318,7 +1318,7 @@ try {
         FW.hg.attributes.position.needsUpdate = true; FW.hg.attributes.aCol.needsUpdate = true; FW.hg.attributes.aSize.needsUpdate = true;
         FW.lg.attributes.position.needsUpdate = true; FW.lg.attributes.color.needsUpdate = true;
         AF.renderer.getDrawingBufferSize(tmpS);
-        FW.hm.uniforms.uScale.value = tmpS.y * 0.5 / Math.tan(AF.camera.fov * Math.PI / 360);
+        FW.hm.uniforms.uScale.value = tmpS.y * AF.renderPR() / AF.renderer.getPixelRatio() * 0.5 / Math.tan(AF.camera.fov * Math.PI / 360);
       }
       const W2 = AF.water2; if (W2 && W2.dyn) for (const e of W2.dyn) e.t += dt;
     });

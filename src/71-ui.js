@@ -458,8 +458,8 @@ try {
     text(menu.querySelector('.rv'), (G.resH ? Math.min(native, G.resH) + 'p' : 'native'));
     const lod = menu.querySelector('[data-k=lod]'), lv = String(AF.lodScale || 1); if (AF.MOBILE && lod.max !== '1.5') lod.max = '1.5'; if (document.activeElement !== lod && lod.value !== lv) lod.value = lv;
     text(menu.querySelector('.lv'), '\u00d7' + (+lv).toFixed(1));
-    const cv = AF.renderer.domElement, pr = AF.renderer.getPixelRatio();
-    text(menu.querySelector('.rr'), `Render ${cv.width}\u00d7${cv.height} (${pr.toFixed(2)}\u00d7 CSS px${devicePixelRatio > pr + 0.01 ? ', ' + Math.round(pr / devicePixelRatio * 100) + '% of display' : ''})${G.auto ? ' \u00b7 auto ' + G.name : ''}`);
+    const cv = AF.renderer.domElement, pr = AF.renderer.getPixelRatio(), rp = AF.renderPR(), rw = Math.round(cv.width * rp / pr), rh = Math.round(cv.height * rp / pr);
+    text(menu.querySelector('.rr'), `Render ${rw}\u00d7${rh}${pr > rp * 1.02 ? ' \u2192 ' + cv.width + '\u00d7' + cv.height + ' upscaled' : devicePixelRatio > pr + 0.01 ? ' (' + Math.round(pr / devicePixelRatio * 100) + '% of display)' : ''}${G.auto ? ' \u00b7 auto ' + G.name : ''}`);
     menu.querySelectorAll('[data-k=clock] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'stop') === !!AF.time.paused));
     const hr = menu.querySelector('[data-k=hour]'), hour = AF.time.hours.toFixed(2); if (document.activeElement !== hr && hr.value !== hour) hr.value = hour;
     const sens = menu.querySelector('[data-k=sens]'), sv = String(AF.lookSens()), bright = menu.querySelector('[data-k=bright]'), bv = String(AF.brightness ?? 1);
@@ -484,7 +484,7 @@ try {
     if (seg === 'gfx') { G.auto = false; G.set(b.dataset.v, 'menu'); try { localStorage.setItem('portSolace.gfx', b.dataset.v); } catch (er) {} }
     else if (seg === 'res') {
       G.res = +b.dataset.v; try { localStorage.setItem('portSolace.res', b.dataset.v); } catch (er) {}
-      AF.renderer.setPixelRatio(AF.basePR() * G.scale); AF.resize();
+      AF.applyPR();
     }
     else if (seg === 'clock') AF.time.paused = b.dataset.v === 'stop';
     else if (seg === 'fps') AF.setFpsCap(b.dataset.v);

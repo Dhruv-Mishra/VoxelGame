@@ -12,34 +12,42 @@ W.chunks = new Array(CX * CY * CZ).fill(null);
 const uniformChunks = new Map(), sharedChunks = new WeakSet(), compactPending = new Set();
 let compactEnabled = false;
 const chunkValue = (chunk, index) => !chunk ? 0 : !chunk.pal ? chunk[index] : chunk.pal[chunk.bits === 4 ? (chunk.idx[index >> 1] >> ((index & 1) * 4)) & 15 : chunk.idx[index]];
-const expandChunk = (chunk) => {
-  const dense = new Uint16Array(4096);
-  for (let index = 0; index < 4096; index++) dense[index] = chunkValue(chunk, index);
-  return dense;
+const expandChunk = (chunk) => { const d = new Uint16Array(4096), s = denseOf(chunk, d); if (s !== d) d.set(s); return d; };
+// a chunk as a dense 4096-cell array: dense chunks as they are, compacted ones decoded into dst
+const denseOf = (ch, dst) => {
+  if (!ch.pal) return ch;
+  const pal = ch.pal, idx = ch.idx;
+  if (ch.bits === 4) for (let i = 0; i < 2048; i++) { const b = idx[i]; dst[i * 2] = pal[b & 15]; dst[i * 2 + 1] = pal[b >> 4]; }
+  else for (let i = 0; i < 4096; i++) dst[i] = pal[idx[i]];
+  return dst;
 };
+const DEC_V = new Uint16Array(4096), DEC_C = new Uint16Array(4096);
+const LUT = new Int16Array(65536).fill(-1), LPAL = new Uint16Array(257);
 const compactChunk = (key) => {
   const chunk = W.chunks[key];
   compactPending.delete(key);
   if (!chunk || chunk.pal || sharedChunks.has(chunk)) return;
-  const palette = [], lookup = new Map();
+  // palette via a flat lookup table (a Map per voxel made the end-of-boot compaction take ~2 s)
+  let n = 0;
   for (let index = 0; index < 4096; index++) {
     const value = chunk[index];
-    if (!lookup.has(value)) { lookup.set(value, palette.length); palette.push(value); if (palette.length > 256) return; }
+    if (LUT[value] < 0) { if (n === 256) { n++; break; } LUT[value] = n; LPAL[n++] = value; }
   }
-  if (palette.length === 1) {
-    const value = palette[0];
+  const done = () => { for (let i = 0; i < Math.min(n, 256); i++) LUT[LPAL[i]] = -1; };
+  if (n > 256) { done(); return; }
+  if (n === 1) {
+    const value = LPAL[0]; done();
     if (!value) { W.chunks[key] = null; return; }
     let shared = uniformChunks.get(value);
     if (!shared) { shared = new Uint16Array(4096).fill(value); uniformChunks.set(value, shared); sharedChunks.add(shared); }
     W.chunks[key] = shared;
     return;
   }
-  const bits = palette.length <= 16 ? 4 : 8, indices = new Uint8Array(bits === 4 ? 2048 : 4096);
-  for (let index = 0; index < 4096; index++) {
-    const value = lookup.get(chunk[index]);
-    if (bits === 4) indices[index >> 1] |= value << ((index & 1) * 4); else indices[index] = value;
-  }
-  W.chunks[key] = { pal: new Uint16Array(palette), idx: indices, bits };
+  const bits = n <= 16 ? 4 : 8, indices = new Uint8Array(bits === 4 ? 2048 : 4096);
+  if (bits === 4) for (let index = 0; index < 4096; index += 2) indices[index >> 1] = LUT[chunk[index]] | (LUT[chunk[index + 1]] << 4);
+  else for (let index = 0; index < 4096; index++) indices[index] = LUT[chunk[index]];
+  W.chunks[key] = { pal: LPAL.slice(0, n), idx: indices, bits };
+  done();
 };
 W.compactChunks = () => {
   let samples = 0, mismatches = 0;
@@ -184,6 +192,15 @@ class GeoBuf {
     this.grow(o.n); const n = o.n;
     this.p.set(o.p.subarray(0, n * 3)); this.uv.set(o.uv.subarray(0, n * 2)); this.pal.set(o.pal.subarray(0, n)); this.an.set(o.an.subarray(0, n)); this.idx.set(o.idx.subarray(0, n / 4 * 6));
     this.n = n;
+  }
+  // append another buffer's quads (a mesher worker's result: exact-length arrays with local indices)
+  append(o) {
+    if (!o.n) return;
+    const b = this.n; if (b + o.n > this.cap) this.grow(b + o.n);
+    this.p.set(o.p, b * 3); this.uv.set(o.uv, b * 2); this.pal.set(o.pal, b); this.an.set(o.an, b);
+    const ix = this.idx, src = o.idx, i0 = b / 4 * 6;
+    for (let i = 0; i < src.length; i++) ix[i0 + i] = src[i] + b;
+    this.n = b + o.n;
   }
   quad(v0, v1, v2, v3, uv0, uv1, uv2, uv3, pal, nIdx, ao, fl = 0) { // v* = [x,y,z], ao = [a0..a3] 0..3 ; CCW when seen from outside
     const b = this.n; if (b + 4 > this.cap) this.grow(b + 4);
@@ -960,19 +977,22 @@ function* meshTerrainRegionG(rx, rz, buf) {
   const H = W.H, C = W.C, S = W.S, dirtI = AF.col('dirt');
   const bx0 = rx * REG, bz0 = rz * REG, bx1 = Math.min(NX, bx0 + REG), bz1 = Math.min(NZ, bz0 + REG);
   const w = bx1 - bx0, d = bz1 - bz0;
-  const vox = (bx, by, bz) => { const c = W.get(bx, by, bz); return c && AF.PAL.opaque[c]; };
-  const occCol = (bx, bz, h) => (W.hB(bx, bz) > h) || vox(bx, h + GOFF, bz);
+  const vox = (bx, by, bz) => { const c = W.get(bx, by, bz); return c && AF.PAL.opaque[c] ? 1 : 0; };
+  // ground height + "a voxel stands on this column's ground" for the region and a 1-column border, read once: a flat neighbour
+  // at the same height answers the AO test from the table, only steps down need a voxel lookup
+  const PW = d + 2, hh = new Int32Array((w + 2) * PW), gv = new Uint8Array((w + 2) * PW);
+  for (let i = -1; i <= w; i++) for (let k = -1; k <= d; k++) { const j = (i + 1) * PW + k + 1, h = W.hB(bx0 + i, bz0 + k); hh[j] = h; gv[j] = vox(bx0 + i, h + GOFF, bz0 + k); }
+  const occ = (j, bx, bz, h) => { const n = hh[j]; return n > h ? 1 : n === h ? gv[j] : vox(bx, h + GOFF, bz); };
   // top faces, greedy over (h, colour, ao)
   const key = new Float64Array(w * d);
   for (let i = 0; i < w; i++) { for (let k = 0; k < d; k++) {
-    const bx = bx0 + i, bz = bz0 + k, ci = bx * NZ + bz, h = H[ci];
-    if (vox(bx, h + GOFF, bz)) { key[i * d + k] = 0; continue; }   // covered by a voxel floor: hidden
-    const s10 = occCol(bx - 1, bz, h) ? 1 : 0, s12 = occCol(bx + 1, bz, h) ? 1 : 0, s01 = occCol(bx, bz - 1, h) ? 1 : 0, s21 = occCol(bx, bz + 1, h) ? 1 : 0;
+    const bx = bx0 + i, bz = bz0 + k, ci = bx * NZ + bz, j = (i + 1) * PW + k + 1, h = hh[j];
+    if (gv[j]) { key[i * d + k] = 0; continue; }   // covered by a voxel floor: hidden
+    const s10 = occ(j - PW, bx - 1, bz, h), s12 = occ(j + PW, bx + 1, bz, h), s01 = occ(j - 1, bx, bz - 1, h), s21 = occ(j + 1, bx, bz + 1, h);
+    const c00 = occ(j - PW - 1, bx - 1, bz - 1, h), c20 = occ(j + PW - 1, bx + 1, bz - 1, h), c22 = occ(j + PW + 1, bx + 1, bz + 1, h), c02 = occ(j - PW + 1, bx - 1, bz + 1, h);
     let ao = 255;
-    if (s10 | s12 | s01 | s21 | (occCol(bx - 1, bz - 1, h) ? 1 : 0) | (occCol(bx + 1, bz - 1, h) ? 1 : 0) | (occCol(bx + 1, bz + 1, h) ? 1 : 0) | (occCol(bx - 1, bz + 1, h) ? 1 : 0)) {
-      const c00 = occCol(bx - 1, bz - 1, h) ? 1 : 0, c20 = occCol(bx + 1, bz - 1, h) ? 1 : 0, c22 = occCol(bx + 1, bz + 1, h) ? 1 : 0, c02 = occCol(bx - 1, bz + 1, h) ? 1 : 0;
+    if (s10 | s12 | s01 | s21 | c00 | c20 | c22 | c02) {
       const A = (a, b, c) => (a && b) ? 0 : 3 - (a + b + c);
-      // corners in (u=z? ) we use u = x, v = z for the top plane
       ao = A(s10, s01, c00) | (A(s12, s01, c20) << 2) | (A(s12, s21, c22) << 4) | (A(s10, s21, c02) << 6);
     }
     key[i * d + k] = ((h + 32768) * 8192 + C[ci]) * 256 + ao + 1;
@@ -1038,9 +1058,99 @@ function* meshTerrainRegionG(rx, rz, buf) {
 
 // region meshers are generators (yield after every chunk) so regions can be streamed in a few ms per frame; runSync drives one to the end
 const runSync = (g) => { let r = g.next(); while (!r.done) r = g.next(); return r.value; };
+
+// ---- MESHER WORKERS (PERF.md §5): the greedy pass (~75 % of a region's voxel time) runs on a pool of Web Workers. The main thread
+// builds each chunk's padded grid, ships batches of 16, and appends the quads in submission order (output identical to the sync
+// path). Async generators yield WAIT while a batch is out; runSync (runtime edits) meshes in place instead.
+const WAIT = Symbol('wait');
+const BATCH = 16;
+const VW = AF.world.workers = { list: [], on: false, tried: false, next: 1, jobs: new Map(), wake: null, stats: { workers: 0, batches: 0, chunks: 0, ms: 0, failed: 0 } };
+// a batch: { S (16 full chunk | 8 coarse 0.5 m | 4 far 1 m cells), F (cell size in blocks), count, pads ((S+2)^3 each), meta (origin
+// xyz, uv offset xyz), cnt (drawable voxels per slice, full chunks only) }; vwRun meshes one, on a worker or here
+function vwRun(m, out) {
+  const S = m.S, F = m.F, N = (S + 2) * (S + 2) * (S + 2);
+  for (let i = 0; i < m.count; i++) {
+    const o = m.meta.subarray(i * 6, i * 6 + 6), c = m.cnt && m.cnt.subarray(i * 3 * S, (i + 1) * 3 * S);
+    const g = greedyPadG(S, S, S, m.pads.subarray(i * N, (i + 1) * N), VS * F, [o[0], o[1], o[2]], [o[3], o[4], o[5]], out, F > 1, c && [c.subarray(0, S), c.subarray(S, 2 * S), c.subarray(2 * S)], F);
+    while (!g.next().done);
+  }
+}
+const vwSource = () => `'use strict';
+const AF = { PAL: { opaque: new Uint8Array(8192), glass: new Uint8Array(8192) } }, VS = ${VS};
+const AOK = [0, 1, 2, 3], QP = new Float64Array(12), QT = new Float64Array(8);
+const GeoBuf = ${GeoBuf.toString()};
+const greedyPadG = ${greedyPadG.toString()};
+const vwRun = ${vwRun.toString()};
+const pack = (b, tr) => { const n = b.n; if (!n) return { n: 0 }; const o = { n, p: b.p.slice(0, n * 3), uv: b.uv.slice(0, n * 2), pal: b.pal.slice(0, n), an: b.an.slice(0, n), idx: b.idx.slice(0, n / 4 * 6) }; tr.push(o.p.buffer, o.uv.buffer, o.pal.buffer, o.an.buffer, o.idx.buffer); return o; };
+onmessage = (e) => {
+  const m = e.data; if (m.pal) { AF.PAL.opaque.set(m.pal.o); AF.PAL.glass.set(m.pal.g); return; }
+  const t0 = performance.now(), out = { opaque: new GeoBuf(), glass: new GeoBuf() };
+  vwRun(m, out);
+  const tr = [], res = { id: m.id, ms: performance.now() - t0, opaque: pack(out.opaque, tr), glass: pack(out.glass, tr) };
+  postMessage(res, tr);
+};`;
+const vwFail = (err) => {
+  if (VW.on) AF.warnOnce('mesher workers failed: meshing on the main thread', err && (err.message || err));
+  VW.on = false; VW.stats.failed++;
+  for (const j of VW.jobs.values()) j.done = true;   // the region falls back to vwRun for batches without a result
+  VW.jobs.clear(); if (VW.wake) VW.wake();
+};
+const vwStart = () => {
+  if (VW.tried) return VW.on; VW.tried = true;
+  if (typeof Worker === 'undefined' || AF.Q.has('noworker')) return false;
+  try {
+    const url = URL.createObjectURL(new Blob([vwSource()], { type: 'text/javascript' }));
+    const n = Math.max(1, Math.min(AF.MOBILE ? 2 : 4, (navigator.hardwareConcurrency || 4) - 2));
+    for (let i = 0; i < n; i++) {
+      const w = new Worker(url); w.busy = 0; w.palN = -1; w.onerror = vwFail;
+      w.onmessage = (e) => {
+        const m = e.data, j = VW.jobs.get(m.id); w.busy--;
+        if (!j) return;
+        VW.jobs.delete(m.id); j.res = m; j.done = true; VW.stats.ms += m.ms; VW.pinged = true;
+        if (VW.wake) { const f = VW.wake; VW.wake = null; f(); }
+      };
+      VW.list.push(w);
+    }
+    VW.on = true; VW.stats.workers = n;
+  } catch (err) { vwFail(err); }
+  return VW.on;
+};
+// a batch is { count, pads, meta (origin xyz, uv offset xyz), cnt (drawable voxels per slice, 3 x 16) }
+const vwBatch = (S = 16, F = 1) => ({ S, F, count: 0, pads: new Uint16Array((S + 2) ** 3 * BATCH), meta: new Float64Array(6 * BATCH), cnt: S === 16 ? new Int32Array(48 * BATCH) : null, done: false, res: null });
+const vwSubmit = (b) => {
+  if (!VW.on) { b.done = true; return b; }
+  let w = VW.list[0]; for (const x of VW.list) if (x.busy < w.busy) w = x;
+  const P = AF.PAL; if (w.palN !== P.n) { w.palN = P.n; w.postMessage({ pal: { o: P.opaque, g: P.glass } }); }
+  const id = VW.next++; VW.jobs.set(id, b); w.busy++; VW.stats.batches++; VW.stats.chunks += b.count;
+  w.postMessage({ id, S: b.S, F: b.F, count: b.count, pads: b.pads, meta: b.meta, cnt: b.cnt });
+  return b;
+};
+// add one padded grid to the region's open batch (submitted when full); returns the open batch
+const vwAdd = (batch, jobs, S, F, pad, ox, oy, oz, ux, uy, uz, cnt) => {
+  if (!batch) batch = vwBatch(S, F);
+  const i = batch.count++, N = (S + 2) ** 3;
+  batch.pads.set(pad, i * N);
+  const m = batch.meta; m[i * 6] = ox; m[i * 6 + 1] = oy; m[i * 6 + 2] = oz; m[i * 6 + 3] = ux; m[i * 6 + 4] = uy; m[i * 6 + 5] = uz;
+  if (cnt) { batch.cnt.set(cnt[0], i * 48); batch.cnt.set(cnt[1], i * 48 + 16); batch.cnt.set(cnt[2], i * 48 + 32); }
+  if (batch.count === BATCH) { jobs.push(vwSubmit(batch)); return null; }
+  return batch;
+};
+// wait for a region's batches, then append their quads in submission order
+function* vwCollect(jobs, batch, out) {
+  if (batch) jobs.push(vwSubmit(batch));
+  while (jobs.some((j) => !j.done)) yield WAIT;
+  for (const j of jobs) { if (j.res) { out.opaque.append(j.res.opaque); out.glass.append(j.res.glass); } else vwRun(j, out); }
+}
+// resolves on the next worker result (or after 30 ms): boot and the stream pump wait on it instead of spinning
+VW.idle = () => new Promise((resolve) => {
+  if (VW.pinged) { VW.pinged = false; resolve(); return; }
+  const t = setTimeout(resolve, 30); VW.wake = () => { clearTimeout(t); VW.pinged = false; resolve(); };
+});
 function meshVoxelRegion(rx, rz, out) { runSync(meshVoxelRegionG(rx, rz, out)); }
-function* meshVoxelRegionG(rx, rz, out) {
+function* meshVoxelRegionG(rx, rz, out, par = false) {
   const bx0 = rx * REG, bz0 = rz * REG;
+  par = par && vwStart();
+  const jobs = []; let batch = null;
   const fullC = new Map(), OPq = AF.PAL.opaque;
   const isFull = (cx, cy, cz) => {
     if (cx < 0 || cz < 0 || cx >= CX || cz >= CZ || cy < 0 || cy >= CY) return false;
@@ -1057,9 +1167,10 @@ function* meshVoxelRegionG(rx, rz, out) {
     let colsReady = false;
     for (let cy = 0; cy < CY; cy++) {
       const ch = W.chunks[(cx * CY + cy) * CZ + cz]; if (!ch) continue;
+      const D = denseOf(ch, DEC_V);
       cnt[0].fill(0); cnt[1].fill(0); cnt[2].fill(0);
       let any = false;
-      for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { const b = (x * 16 + y) * 16; for (let z = 0; z < 16; z++) if (chunkValue(ch, b + z)) { any = true; cnt[0][x]++; cnt[1][y]++; cnt[2][z]++; } }
+      for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { const b = (x * 16 + y) * 16; for (let z = 0; z < 16; z++) if (D[b + z]) { any = true; cnt[0][x]++; cnt[1][y]++; cnt[2][z]++; } }
       if (!any) continue;
       // skip chunks buried inside solid mass (all 6 neighbours fully opaque): no face can be visible (coordinator perf, Port Solace)
       if (isFull(cx, cy, cz) && isFull(cx - 1, cy, cz) && isFull(cx + 1, cy, cz) && isFull(cx, cy, cz - 1) && isFull(cx, cy, cz + 1) && isFull(cx, cy + 1, cz) && (cy === 0 || isFull(cx, cy - 1, cz))) { AF.stats.skipFull = (AF.stats.skipFull || 0) + 1; continue; }
@@ -1068,8 +1179,8 @@ function* meshVoxelRegionG(rx, rz, out) {
       pad.fill(0);
       // interior
       for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) {
-        const src = (x * 16 + y) * 16, dst = ((x + 1) * 18 + (y + 1)) * 18 + 1;
-        for (let z = 0; z < 16; z++) pad[dst + z] = chunkValue(ch, src + z);
+        const src = (x * 16 + y) * 16;
+        pad.set(D.subarray(src, src + 16), ((x + 1) * 18 + (y + 1)) * 18 + 1);
       }
       // border shell from the 26 neighbour chunks, read directly (engine R2 boot: no per-voxel W.get; same values —
       // an out-of-world or empty neighbour chunk reads 0 exactly like W.get)
@@ -1097,11 +1208,13 @@ function* meshVoxelRegionG(rx, rz, out) {
         for (let y = -1; y <= yMax; y++) { const i = ((x + 1) * 18 + (y + 1)) * 18 + (z + 1); if (pad[i] === 0) pad[i] = 65535; }
       }
       const tg = performance.now();
-      greedyPad(16, 16, 16, pad, VS, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox, oy, oz], out, false, cnt);
+      if (par) batch = vwAdd(batch, jobs, 16, 1, pad, X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS, ox, oy, oz, cnt);
+      else greedyPad(16, 16, 16, pad, VS, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox, oy, oz], out, false, cnt);
       AF.stats.greedyMs = (AF.stats.greedyMs || 0) + performance.now() - tg; AF.stats.chunksMeshed = (AF.stats.chunksMeshed || 0) + 1;
       yield;
     }
   }
+  if (par) yield* vwCollect(jobs, batch, out);
 }
 
 // ---- COARSE region LOD: every chunk downsampled 2x (0.5 m cells, no AO) for regions far from the camera. A coarse cell is solid when
@@ -1110,12 +1223,13 @@ const coarseCache = new Map();
 const coarseChunk = (key) => {
   let c = coarseCache.get(key); if (c !== undefined) return c;
   const ch = W.chunks[key]; if (!ch) { coarseCache.set(key, null); return null; }
+  const D = denseOf(ch, DEC_C);
   c = new Uint16Array(512); let any = false;
   const OP = AF.PAL.opaque, cols = new Uint16Array(8), cnts = new Uint8Array(8);
   for (let X = 0; X < 8; X++) for (let Y = 0; Y < 8; Y++) for (let Z = 0; Z < 8; Z++) {
     let n = 0, nOp = 0, gl = 0, nc = 0;
     for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) for (let d = 0; d < 2; d++) {
-      const v = chunkValue(ch, (((X * 2 + a) * 16) + Y * 2 + b) * 16 + Z * 2 + d); if (!v) continue;
+      const v = D[(((X * 2 + a) * 16) + Y * 2 + b) * 16 + Z * 2 + d]; if (!v) continue;
       n++;
       if (OP[v] !== 1) { gl = v; continue; }
       nOp++;
@@ -1159,9 +1273,11 @@ const farChunk = (key) => {
 };
 // F = 2 (coarse, 0.5 m cells) or 4 (far, 1 m cells)
 function meshVoxelRegionCoarse(rx, rz, out, F = 2) { runSync(meshVoxelRegionCoarseG(rx, rz, out, F)); }
-function* meshVoxelRegionCoarseG(rx, rz, out, F = 2) {
+function* meshVoxelRegionCoarseG(rx, rz, out, F = 2, par = false) {
   const S = 16 / F, P = S + 2, get = F === 2 ? coarseChunk : farChunk;
   const bx0 = rx * REG, bz0 = rz * REG;
+  par = par && vwStart();
+  const jobs = []; let batch = null;
   const pad = new Uint16Array(P * P * P), hcol = new Int32Array(P * P);
   for (let cx = bx0 >> 4; cx < Math.min(CX, (bx0 + REG) >> 4); cx++) for (let cz = bz0 >> 4; cz < Math.min(CZ, (bz0 + REG) >> 4); cz++) {
     const ox = cx * 16, oz = cz * 16;
@@ -1186,10 +1302,12 @@ function* meshVoxelRegionCoarseG(rx, rz, out, F = 2) {
         const top = hcol[(X + 1) * P + Z + 1] - oy;   // fine y below which everything is underground
         for (let Y = -1; Y <= S; Y++) { if (Y * F + F - 1 >= top) break; const i = ((X + 1) * P + Y + 1) * P + Z + 1; if (pad[i] === 0) pad[i] = 65535; }
       }
-      greedyPad(S, S, S, pad, VS * F, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox / F, oy / F, oz / F], out, true, null, F);
+      if (par) batch = vwAdd(batch, jobs, S, F, pad, X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS, ox / F, oy / F, oz / F, null);
+      else greedyPad(S, S, S, pad, VS * F, [X0 + ox * VS, Y0 + oy * VS, Z0 + oz * VS], [ox / F, oy / F, oz / F], out, true, null, F);
       yield;
     }
   }
+  if (par) yield* vwCollect(jobs, batch, out);
 }
 // FAR level terrain: F x F columns -> one cell at their most common height; low same-colour steps are soft risers
 function meshTerrainRegionFar(rx, rz, buf, F) {
@@ -1420,13 +1538,28 @@ function farStep(c) {
   meshVoxelRegionCoarse(k >> 6, k & 63, c.out, 4);
   (c.ranges || (c.ranges = [])).push({ k, os: o0 * 1.5, oc: (c.out.opaque.n - o0) * 1.5, gs: g0 * 1.5, gc: (c.out.glass.n - g0) * 1.5 });
   coarseCache.clear(); farCache.clear();
-  if (c.i >= c.regs.length) {
-    const o = c.out; c.out = null; c.built = true; FS.built++;
-    if (o.opaque.n) { const m = regMesh(o.opaque.geometry(), AF.mat.voxel, true); m.userData.far = true; m.userData.cluster = c.ck; m.visible = false; c.far.push(m); c.farO = m; FS.kept++; }
-    if (o.glass.n) { const g = regMesh(o.glass.geometry(), AF.mat.glass, false); g.userData.far = true; g.visible = false; c.far.push(g); c.farG = g; }
-  }
+  if (c.i >= c.regs.length) farFinish(c);
   FS.ms += performance.now() - t;
   return c.built;
+}
+function farFinish(c) {
+  const o = c.out; c.out = null; c.built = true; FS.built++;
+  if (o.opaque.n) { const m = regMesh(o.opaque.geometry(), AF.mat.voxel, true); m.userData.far = true; m.userData.cluster = c.ck; m.visible = false; c.far.push(m); c.farO = m; FS.kept++; }
+  if (o.glass.n) { const g = regMesh(o.glass.geometry(), AF.mat.glass, false); g.userData.far = true; g.visible = false; c.far.push(g); c.farG = g; }
+}
+// boot: the same build with the cells meshed on the workers (meshWorld runs several clusters at once)
+function* buildFarG(c) {
+  if (c.built || !c.regs.length) return 0;
+  if (!c.out) c.out = { opaque: new GeoBuf(), glass: new GeoBuf() };
+  while (c.i < c.regs.length) {
+    const k = c.regs[c.i++], o0 = c.out.opaque.n, g0 = c.out.glass.n;
+    meshTerrainRegionFar(k >> 6, k & 63, c.out.opaque, 4);
+    yield* meshVoxelRegionCoarseG(k >> 6, k & 63, c.out, 4, true);
+    (c.ranges || (c.ranges = [])).push({ k, os: o0 * 1.5, oc: (c.out.opaque.n - o0) * 1.5, gs: g0 * 1.5, gc: (c.out.glass.n - g0) * 1.5 });
+    coarseCache.clear(); farCache.clear();
+  }
+  farFinish(c);
+  return 0;
 }
 const buildFar = (c) => { while (!farStep(c)); };
 AF.world.buildFarAll = () => { while (farQueue.length) buildFar(farQueue.pop()); FS.pending = 0; };
@@ -1496,7 +1629,7 @@ const COARSE_ON = !AF.Q.has('nocoarse');
 // mode 'both' (boot, edits): full 0.25 m + 0.5 m copy from scratch. Streaming builds only what the distance asks for: 'full' near the
 // camera (no 0.5 m copy that the full mesh would replace at once), 'coarse' farther out; a full region moving away back-fills its
 // 0.5 m copy later. Nothing is attached before the last yield, so a streamed job can be abandoned at any step.
-function* meshRegionG(rx, rz, mode = 'both') {
+function* meshRegionG(rx, rz, mode = 'both', par = false) {
   const k = rx * 64 + rz, wantF = mode !== 'coarse', wantC = COARSE_ON && mode !== 'full';
   if (mode === 'both') dropRegion(k);
   const RL = AF.world.regLod || (AF.world.regLod = new Map()), old = RL.get(k);
@@ -1512,11 +1645,11 @@ function* meshRegionG(rx, rz, mode = 'both') {
   const cout = { opaque: new GeoBuf(), glass: new GeoBuf() };
   if (wantC && !wantF) cout.opaque = out.opaque;
   else if (wantC && terrainQ) cout.opaque.copyFrom(out.opaque);
-  if (wantF) { STR.phase = 'voxel'; yield* meshVoxelRegionG(rx, rz, out); }
+  if (wantF) { STR.phase = 'voxel'; yield* meshVoxelRegionG(rx, rz, out, par); }
   T.voxel += performance.now() - tt; tt = performance.now();
   if (wantC) {
     for (let cx = (rx * REG) >> 4, e = Math.min(CX, (rx * REG + REG) >> 4); cx < e; cx++) for (let cz = (rz * REG) >> 4, f = Math.min(CZ, (rz * REG + REG) >> 4); cz < f; cz++) for (let cy = 0; cy < CY; cy++) coarseCache.delete((cx * CY + cy) * CZ + cz);
-    STR.phase = 'coarse'; yield* meshVoxelRegionCoarseG(rx, rz, cout);
+    STR.phase = 'coarse'; yield* meshVoxelRegionCoarseG(rx, rz, cout, 2, par);
   }
   T.coarse += performance.now() - tt;
   yield;
@@ -1581,7 +1714,9 @@ function* meshRegionG(rx, rz, mode = 'both') {
 // Jobs inside the display ranges are "urgent": they also get a slice of every rendered frame and preempt a running far job. Full meshes the
 // camera left behind stay resident until a byte budget is used up (zipping back is instant); then the farthest drop to their 0.5 m
 // copy, and whole clusters showing their 1 m copy unload farthest first (always beyond FAR_LOD + 600 m, phones + 300 m).
-const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, kind: '', phase: '', urgent: false, rest: 0, chk: 0, done: 0, unloaded: 0, demoted: 0, aborted: 0, t: 0, maxStep: 0, maxPhase: '', ms: {}, bytes: 0, fullBytes: 0, jobs: { full: 0, coarse: 0, props: 0 } };
+const STR = AF.world.stream = { on: false, pending: new Set(), gen: null, key: -1, kind: '', phase: '', urgent: false, parked: [], rest: 0, chk: 0, done: 0, unloaded: 0, demoted: 0, aborted: 0, t: 0, maxStep: 0, maxPhase: '', ms: {}, bytes: 0, fullBytes: 0, jobs: { full: 0, coarse: 0, props: 0 } };
+// regions with a job in flight: the foreground one (STR.gen) or one parked while its chunks are on the mesher workers
+const busyKey = (k) => (STR.gen && STR.key === k) || STR.parked.some((p) => p.key === k);
 const BUDGET = AF.MOBILE ? { full: 48, all: 128, drop: 300 } : { full: 192, all: 448, drop: 600 };   // MB, MB, m beyond FAR_LOD
 const regionCluster = (k) => CLS.get(((k >> 6) >> 2) * 64 + ((k & 63) >> 2));
 const clDist = (cl, c, vy) => Math.hypot(Math.max(cl.x0 - c.x, 0, c.x - cl.x1), Math.max(cl.z0 - c.z, 0, c.z - cl.z1), vy);
@@ -1601,7 +1736,7 @@ function pickJob() {
   PK.k = -1; PK.t = 0; PK.s = 1e9;
   for (let i = 0; i < ALL.length; i++) {
     const g = ALL[i], k = g.k, d = Math.hypot(g.x - c.x, g.z - c.z, vy), de = Math.min(d, Math.hypot(g.x - LA.x, g.z - LA.z, vy) + 16);
-    if (de - 8 >= PK.s || (k === STR.key && STR.gen)) continue;
+    if (de - 8 >= PK.s || busyKey(k)) continue;
     const r = RL.get(k);
     let s = 1e9, t = 0;
     if (STR.on) {
@@ -1620,28 +1755,44 @@ const isUrgent = () => (PK.t === 3 && PK.s < AF.LOD_DIST) || (PK.t === 1 && PK.s
 // the view still lacks detail it shows (or is about to): urgent work, or any full / props job, or a coarse copy inside 2x REGION_LOD
 STR.near = () => {
   if (!AF.world.regLod) return false;
-  if (STR.gen && STR.urgent) return true;
-  if (!pickJob()) return !!STR.gen && STR.kind !== 'coarse';
+  if ((STR.gen && STR.urgent) || STR.parked.some((p) => p.urgent)) return true;
+  if (!pickJob()) return (!!STR.gen && STR.kind !== 'coarse') || STR.parked.some((p) => p.kind !== 'coarse');
   return PK.t !== 2 || PK.s < AF.REGION_LOD * 2;
+};
+const jobDone = (kind) => { if (kind !== 'props') { STR.done++; coarseCache.clear(); } };
+// a parked job whose batches are back becomes the foreground job again (or finishes)
+const resume = () => {
+  for (let i = 0; i < STR.parked.length; i++) {
+    const p = STR.parked[i], s = p.gen.next();
+    if (s.value === WAIT) continue;
+    STR.parked.splice(i, 1);
+    if (s.done) { jobDone(p.kind); return true; }
+    STR.gen = p.gen; STR.key = p.key; STR.kind = p.kind; STR.urgent = p.urgent;
+    return true;
+  }
+  return false;
 };
 const streamWork = (budget) => {
   if (!AF.ready || !AF.world.regLod) return false;
   const t0 = performance.now();
   while (performance.now() - t0 < budget) {
     if (!STR.gen) {
+      if (resume()) continue;
+      if (STR.parked.length > VW.list.length) return false;   // every worker has work: wait for answers
       if (!PK.fresh && (AF.clock.t < STR.rest || !pickJob())) return false;
       PK.fresh = false;
       const k = STR.key = PK.k, r = AF.world.regLod.get(k), reg = AF.world.lod.get(k);
       if (PK.t === 3 ? !reg || reg.nearBuilt : PK.t === 1 ? r && r.fullOk : r && r.coarseOk) continue;   // stale pick: rescan
       STR.urgent = isUrgent();
       if (PK.t === 3) { STR.kind = 'props'; STR.phase = 'near'; STR.gen = buildNearG(reg); }
-      else { STR.kind = PK.t === 1 ? 'full' : 'coarse'; STR.gen = meshRegionG(k >> 6, k & 63, STR.kind); }
+      else { STR.kind = PK.t === 1 ? 'full' : 'coarse'; STR.gen = meshRegionG(k >> 6, k & 63, STR.kind, true); }
       STR.jobs[STR.kind]++;
     }
-    const ts = performance.now(), fin = STR.gen.next().done, st = performance.now() - ts;
+    const ts = performance.now(), step = STR.gen.next(), fin = step.done, st = performance.now() - ts;
     if (st > STR.maxStep) { STR.maxStep = st; STR.maxPhase = STR.kind + ':' + STR.phase; }
     STR.ms[STR.phase] = (STR.ms[STR.phase] || 0) + st;
-    if (fin) { STR.gen = null; STR.urgent = false; STR.rest = 0; if (STR.kind !== 'props') { STR.done++; coarseCache.clear(); } }
+    if (fin) { STR.gen = null; STR.urgent = false; STR.rest = 0; jobDone(STR.kind); }
+    else if (step.value === WAIT) { STR.parked.push({ gen: STR.gen, key: STR.key, kind: STR.kind, urgent: STR.urgent }); STR.gen = null; STR.urgent = false; }
   }
   return true;
 };
@@ -1649,16 +1800,16 @@ function evict() {
   const c = AF.camera.position, vy = Math.max(0, c.y - 12) * 0.7, RL = AF.world.regLod, RD = AF.REGION_LOD * AF.LOD.prefetch, FD = Math.min(AF.FAR_LOD || 1e9, 5000), MB = 1048576;
   let bF = 0, bA = 0;
   for (const r of RL.values()) { bF += r.bF; bA += r.bF + r.bC; }
-  const busy = STR.gen ? STR.key : -1;
+  const busy = (k) => busyKey(k);
   if (bF > BUDGET.full * MB) {
     const cand = [];
-    for (const [k, r] of RL) if (r.fullOk && r.coarse.length && !r.fadeE && (r.hid || r.lvl === 1) && k !== busy) { const d = Math.hypot(r.cx - c.x, r.cz - c.z, vy); if (d > RD + 40) cand.push({ k, r, d }); }
+    for (const [k, r] of RL) if (r.fullOk && r.coarse.length && !r.fadeE && (r.hid || r.lvl === 1) && !busy(k)) { const d = Math.hypot(r.cx - c.x, r.cz - c.z, vy); if (d > RD + 40) cand.push({ k, r, d }); }
     cand.sort((a, b) => b.d - a.d);
     for (const e of cand) { if (bF <= BUDGET.full * MB) break; bF -= e.r.bF; bA -= e.r.bF; demote(e.k, e.r); STR.demoted++; }
   }
   const cls = [];
   for (const cl of CLS.values()) {
-    if (!cl.built || cl.part || cl.lvl !== 1 || cl.fadeE || (busy >= 0 && regionCluster(busy) === cl)) continue;
+    if (!cl.built || cl.part || cl.lvl !== 1 || cl.fadeE || cl.regs.some(busy)) continue;
     const d = clDist(cl, c, vy); if (d < FD + 64) continue;
     let b = 0, any = false; for (const k of cl.regs) { const r = RL.get(k); if (r) { any = true; b += r.bF + r.bC; } else if (AF.world.lod.has(k)) any = true; }
     if (any) cls.push({ cl, d, b });
@@ -1861,21 +2012,43 @@ AF.meshWorld = async (progress) => {
   if (NEAR && NEAR.length === 3 && NEAR.every(isFinite)) { AF.NEAR = { x: NEAR[0], z: NEAR[1], r: NEAR[2] }; console.log('[af] near mode', nearQ); }
   const rm = REG * VS;
   STR.on = !AF.TEST && !AF.SHOT && !AF.NEAR && !(AF.Q && AF.Q.has('nostream'));
-  const BF = AF.PLAN.bootFocus || { x: 100, z: -60, r: 110 };
+  const BF = AF.PLAN.bootFocus || { x: 100, z: -60, r: 110 }, boot = [], total = NRX * NRZ;
   for (let rx = 0; rx < NRX; rx++) {
     for (let rz = 0; rz < NRZ; rz++) {
       if (AF.NEAR && Math.hypot(X0 + (rx + 0.5) * rm - AF.NEAR.x, Z0 + (rz + 0.5) * rm - AF.NEAR.z) > AF.NEAR.r + rm * 0.71) { done++; continue; }
       const k = rx * 64 + rz, cl = clusterOf(rx, rz); if (!cl.regs.includes(k)) cl.regs.push(k);
       ALL.push({ k, x: X0 + (rx + 0.5) * rm, z: Z0 + (rz + 0.5) * rm });
       if (STR.on && Math.hypot(X0 + (rx + 0.5) * rm - BF.x, Z0 + (rz + 0.5) * rm - BF.z) > BF.r) { setMissing(k, true); done++; continue; }
-      quads += AF.meshRegion(rx, rz); done++;
+      boot.push(k);
     }
-    if (progress) await progress(done / (NRX * NRZ));
   }
+  // a few jobs in flight at once keep every mesher worker busy while the main thread builds pads, terrain and props
+  const drain = async (gens, onDone) => {
+    const act = [], conc = vwStart() ? VW.list.length + 2 : 1;
+    while (gens.length || act.length) {
+      while (act.length < conc && gens.length) act.push(gens.shift()());
+      let moved = false;
+      for (let i = act.length - 1; i >= 0; i--) {
+        let r = act[i].next();
+        while (!r.done && r.value !== WAIT) r = act[i].next();
+        if (r.done) { act.splice(i, 1); moved = true; await onDone(r.value); }
+      }
+      if (!moved) await VW.idle();
+    }
+  };
+  let shown = 0;
+  await drain(boot.map((k) => () => meshRegionG(k >> 6, k & 63, 'both', true)), async (q) => {
+    quads += q; done++;
+    if (progress && done - shown >= 4) { shown = done; await progress(done / total); }
+  });
+  if (progress) await progress(1);
+  const tFar = performance.now();
   // streaming: every cluster's 1 m copy now (the whole island is visible from the first frame), full detail follows the camera
-  if (STR.on) { farQ0 = true; for (const cl of CLS.values()) buildFar(cl); coarseCache.clear(); farCache.clear(); }
+  if (STR.on) { farQ0 = true; await drain([...CLS.values()].map((c) => () => buildFarG(c)), () => {}); coarseCache.clear(); farCache.clear(); }
   coarseCache.clear();
+  const tCompact = performance.now();
   W.compactChunks();
+  AF.stats.bootMeshMs = { regions: Math.round(tFar - t0), far: Math.round(tCompact - tFar), compact: Math.round(performance.now() - tCompact) };
   for (const w of AF.world.water) { AF.releaseStaticGeometry(w.geo); const m = new THREE.Mesh(w.geo, w.mat || AF.mat.water); m.receiveShadow = true; m.renderOrder = 1; m.name = 'water'; AF.world.group.add(m); w.mesh = m; }
   W.dirty.clear(); W.tDirty = false;
   AF.stats = Object.assign(AF.stats || {}, { quads, meshMs: Math.round(performance.now() - t0) });
@@ -1887,6 +2060,7 @@ AF.meshWorld = async (progress) => {
 AF.remeshDirty = () => {
   for (const k of W.dirty) {
     if (STR.gen && STR.key === k) STR.gen = null;
+    STR.parked = STR.parked.filter((p) => p.key !== k);
     if (!STR.on || (AF.world.regLod && AF.world.regLod.has(k))) AF.meshRegion(k >> 6, k & 63);
   }
   W.dirty.clear(); coarseCache.clear(); for (const key of compactPending) compactChunk(key);
