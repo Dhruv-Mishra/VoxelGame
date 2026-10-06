@@ -67,9 +67,9 @@ try {
   CB.gun = cur; CB.GUNS = GUNS; CB.melee = melee;
   CB.label = () => {
     const g = CB.gallery ? 'gallery' : cur();
-    if (g === 'gallery') return `Gallery rifle<span>${CB.gallery.shots}</span>`;
-    if (!g) return melee()[0];
-    return `${GUNS[g].name}<span>${CB.reloadT > 0 ? '\u21bb' : CB.mag[g] || 0}/${S.ammo[g] || 0}</span>`;
+    if (g === 'gallery') return `<i>Gallery rifle</i><span>${CB.gallery.shots}</span>`;
+    if (!g) return '<i>' + melee()[0] + '</i>';
+    return `<i>${GUNS[g].name}</i><span>${CB.reloadT > 0 ? '\u21bb' : CB.mag[g] || 0}/${S.ammo[g] || 0}</span>`;
   };
   CB.give = (id) => { S.guns[id] = true; S.ammo[id] = (S.ammo[id] || 0) + GUNS[id].pack; CB.mag[id] = CB.mag[id] || 0; AF.saveSoon(); };
   const select = (slot) => { const o = owned(); CB.slot = ((slot % o.length) + o.length) % o.length; CB.reloadT = 0; attachHeld(); SFX.play('click'); };
@@ -136,10 +136,23 @@ try {
     if (!innocent && (!A.reported || fell)) { A.reported = true; CB.crime(w.cop ? (fell ? G.heat.copKill : G.heat.copHit) : fell ? (A.ko ? G.heat.ko : G.heat.kill) : G.heat.assault); }
   };
   const panic = (x, z, r) => {
-    const C = CR(); if (!C) return;
-    for (const w of C.walkers) if (w.act && !w.agg && !w.cop && (w.x - x) ** 2 + (w.z - z) ** 2 < r * r) { const A = engage(w, 'panic'); if (!A) break; }
+    const C = CR();
+    if (C) for (const w of C.walkers) if (w.act && !w.agg && !w.cop && (w.x - x) ** 2 + (w.z - z) ** 2 < r * r) { const A = engage(w, 'panic'); if (!A) break; }
+    scareWalkers(x, z, r);
   };
   CB.panic = panic;
+  // path walkers (54: airport, outland paths, the island) never fight back: shoved, knocked flat (then they get up), sent running.
+  // Same crimes as the crowd. hitWalker never calls WK.near (callers may be iterating its shared array).
+  const scareWalkers = (x, z, r) => { const WK = AF.walkers; if (WK && WK.near) for (const a of WK.near(x, z, r)) WK.scare(a, 6 + Math.random() * 4); };
+  const hitWalker = (a, dmg, kind, fx, fz, innocent) => {
+    const WK = AF.walkers; if (WK.isDown(a)) return;
+    FX.burst('hit', a.x, a.y + 1.3, a.z, 1);
+    a.hp = (a.hp ?? G.pedHp) - dmg;
+    const fell = kind !== 'melee' || a.hp <= 0;
+    if (fell) { WK.knock(a, fx, fz, kind === 'car' || kind === 'boom' ? 6 : 1.5, kind === 'melee' ? 7 : 25); a.hp = G.pedHp; FX.burst('dust', a.x, a.y + 0.2, a.z, 4); }
+    else { WK.stagger(a, fx, fz); say(a, FLEE_LINES[(a.ph * 7 | 0) % 4]); }
+    if (!innocent) CB.crime(fell ? (kind === 'melee' ? G.heat.ko : G.heat.kill) : G.heat.assault);
+  };
 
   // ---------------------------------------------------------------- the player's target picture (on foot / in a car / out of reach)
   const TG = { x: 0, y: 0, z: 0, car: null, away: true, speed: 0 };
@@ -226,6 +239,11 @@ try {
       if (!w.act || (w.agg && w.agg.lie) || (w.x - ox) ** 2 + (w.z - oz) ** 2 > R2 || exempt(w)) continue;
       const t = rayCapsule(ox, oy, oz, dx, dy, dz, w.x, w.y, w.z, 1.75 * w.s, 0.32); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'ped'; HIT.obj = w; }
     }
+    const WK = AF.walkers;
+    if (WK && WK.near && !CB.gallery) for (const a of WK.near(ox, oz, range)) {
+      if (WK.isDown(a)) continue;
+      const t = rayCapsule(ox, oy, oz, dx, dy, dz, a.x, a.y, a.z, 1.75, 0.32); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'walker'; HIT.obj = a; }
+    }
     if (!CB.gallery) for (const c of VV.cars) {
       if (c.active === false || c.player || (c.x - ox) ** 2 + (c.z - oz) ** 2 > R2) continue;
       const t = raySphere(ox, oy, oz, dx, dy, dz, c.x, c.y + 0.8, c.z, Math.min(c.halfL, 2.2)); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'car'; HIT.obj = c; }
@@ -244,6 +262,13 @@ try {
       const dx = w.x - ox, dz = w.z - oz, d = Math.hypot(dx, dz); if (d > bd || d < 0.5) continue;
       if ((dx * fx + dz * fz) / d < 0.9 || !los(ox, AF.player.y + 1.4, oz, w.x, w.y + 1.3, w.z)) continue;
       bd = d; best = w;
+    }
+    const WK = AF.walkers;
+    if (WK && WK.near) for (const a of WK.near(ox, oz, bd)) {
+      if (WK.isDown(a)) continue;
+      const dx = a.x - ox, dz = a.z - oz, d = Math.hypot(dx, dz); if (d > bd || d < 0.5) continue;
+      if ((dx * fx + dz * fz) / d < 0.9 || !los(ox, AF.player.y + 1.4, oz, a.x, a.y + 1.3, a.z)) continue;
+      bd = d; best = a;
     }
     return best;
   };
@@ -269,7 +294,7 @@ try {
     } else {
       const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw), w = autoTarget(p.x, p.z, fx, fz, W.range);
       ox = MZ.x; oy = MZ.y; oz = MZ.z;
-      if (w) { DIR.set(w.x - ox, w.y + 1.2 * w.s - oy, w.z - oz).normalize(); p.yaw = Math.atan2(DIR.x, DIR.z); } else DIR.set(fx, 0, fz);
+      if (w) { DIR.set(w.x - ox, w.y + 1.2 * (w.s || 1) - oy, w.z - oz).normalize(); p.yaw = Math.atan2(DIR.x, DIR.z); } else DIR.set(fx, 0, fz);
     }
     let any = false;
     for (let k = 0; k < (W.pellets || 1); k++) {
@@ -278,6 +303,7 @@ try {
       const h = ray(ox, oy, oz, TMP.x, TMP.y, TMP.z, W.range, t0);
       FX.line(MZ.x, MZ.y, MZ.z, h.x, h.y, h.z);
       if (h.kind === 'ped') { hitPed(h.obj, W.dmg, 'gun', TMP.x, TMP.z); any = true; }
+      else if (h.kind === 'walker') { hitWalker(h.obj, W.dmg, 'gun', TMP.x, TMP.z); any = true; }
       else if (h.kind === 'car') { dmgCar(h.obj, W.dmg * 0.35, true); FX.burst('spark', h.x, h.y, h.z, 3, { spread: 4 }); any = true; }
       else if (h.kind === 'heli') { heliHit(W.dmg); FX.burst('spark', h.x, h.y, h.z, 3, { spread: 4 }); any = true; }
       else if (h.kind === 'duck') { gal.hit(h.obj); any = true; }
@@ -301,6 +327,14 @@ try {
       if (d > 0.4 && (dx * fx + dz * fz) / d < 0.35) continue;
       bd = d; best = w;
     }
+    let walker = null; const WK = AF.walkers;
+    if (WK && WK.near) for (const a of WK.near(p.x, p.z, bd)) {
+      if (WK.isDown(a) || Math.abs(a.y - p.y) > 1.4) continue;
+      const dx = a.x - p.x, dz = a.z - p.z, d = Math.hypot(dx, dz); if (d > bd) continue;
+      if (d > 0.4 && (dx * fx + dz * fz) / d < 0.35) continue;
+      bd = d; walker = a;
+    }
+    if (walker) { hitWalker(walker, W[1], 'melee', fx, fz); SFX.play('punch', p.x, p.z); AF.hud.hitMark(); scareWalkers(p.x, p.z, 12); return; }
     if (best) { hitPed(best, W[1], 'melee', fx, fz); SFX.play('punch', p.x, p.z); AF.hud.hitMark(); return; }
     for (const c of VV.cars) if (c.active !== false && !c.player && Math.abs(c.x - p.x) < 4 && Math.abs(c.z - p.z) < 4 && VV.bodyDist(c, p.x + fx * 0.8, p.z + fz * 0.8) < 0.3) { dmgCar(c, 2, true); SFX.play('crash', c.x, c.z); return; }
   };
@@ -334,6 +368,8 @@ try {
     if (VV.player === car) { VV.exitCar(); H.hurt(55, 'boom'); }
     const R = G.boomR, C = CR();
     if (C) for (const w of C.walkers) { if (!w.act || (w.agg && w.agg.lie)) continue; const dx = w.x - car.x, dz = w.z - car.z, d = Math.hypot(dx, dz); if (d < R) hitPed(w, G.boomDmg * (1 - d / R), 'boom', dx / (d || 1), dz / (d || 1), !car.byPlayer); }
+    const WK = AF.walkers;
+    if (WK && WK.near) for (const a of WK.near(car.x, car.z, R)) { const dx = a.x - car.x, dz = a.z - car.z, d = Math.hypot(dx, dz) || 1; hitWalker(a, G.boomDmg, 'boom', dx / d, dz / d, !car.byPlayer); }
     if (AF.mode === 'walk') { const p = AF.player, dx = p.x - car.x, dz = p.z - car.z, d = Math.hypot(dx, dz); if (d < R) { H.hurt(G.boomDmg * (1 - d / R), 'boom'); AF.PL.push(dx / (d || 1) * 8, dz / (d || 1) * 8, 6); } }
     for (const c of VV.cars) if (c !== car && !c.dead && Math.abs(c.x - car.x) < R && Math.abs(c.z - car.z) < R) { const d = Math.hypot(c.x - car.x, c.z - car.z); if (d < R) dmgCar(c, 70 * (1 - d / R), car.byPlayer); }
     if (car.byPlayer) CB.crime(G.heat.carBoom);
@@ -374,25 +410,42 @@ try {
         FX.burst('hit', w.x, w.y + 0.9, w.z, 1); SFX.play('punch', w.x, w.z);
         if (car.player) { dmgCar(car, 2, true); if (!A.reported) { A.reported = true; CB.crime(G.heat.runOver); } }
       }
+      const WK = AF.walkers;
+      if (rogue && WK && WK.near) for (const a of WK.near(car.x, car.z, RO.R)) {
+        if (WK.isDown(a) || Math.abs(a.y - car.y) > 1.5 || !underCar(a.x, a.z)) continue;
+        WK.knock(a, fx, fz, Math.min(9, v * 0.6), 25); FX.burst('hit', a.x, a.y + 0.9, a.z, 1); SFX.play('punch', a.x, a.z);
+        if (car.player) { dmgCar(car, 2, true); CB.crime(G.heat.runOver); }
+      }
       if (walk && !car.player && hitCd <= 0 && Math.abs(p.y - car.y) < 1.5 && underCar(p.x, p.z)) {
         hitCd = 1; H.hurt(Math.max(0, v - G.carHitMin) * G.carHitK + 5, 'car'); AF.PL.push(fx * v * 0.7, fz * v * 0.7, 5); SFX.play('crash', p.x, p.z);
       }
     }
   };
-  let bumpCd = 0;
+  let bumpCd = 0, bumpN = 0;
+  const BUMP_LINES = ['Hey! Watch it!', 'Oof!', 'Mind your step, pal!'];
+  // keep the player's body out of a ped at (x, y, z): true on contact, BP = the unit push (ped -> player)
+  const BP = { nx: 0, nz: 0 };
+  const shove = (b, x, y, z) => {
+    const dx = b.x - x, dz = b.z - z; if (dx > 0.7 || dx < -0.7 || dz > 0.7 || dz < -0.7 || Math.abs(y - b.y) > 1.2) return false;
+    const d = Math.hypot(dx, dz); if (d > 0.62 || d < 1e-3) return false;
+    const k = (0.62 - d) / d, nx = b.x + dx * k, nz = b.z + dz * k;
+    if (!AF.boxBlocked(nx, b.y, nz, 0.3, 1.7)) { b.x = nx; b.z = nz; AF.player.x = nx; AF.player.z = nz; }
+    BP.nx = dx / d; BP.nz = dz / d; return true;
+  };
   const bodyPush = (dt) => {
-    const C = CR(), b = AF.player.body; if (!C) return;
+    const C = CR(), b = AF.player.body, sprint = (AF.PL.walk.speed || 0) > 7; if (!C) return;
     bumpCd -= dt;
     for (const w of C.walkers) {
-      if (!w.act || (w.agg && w.agg.lie)) continue;
-      const dx = b.x - w.x, dz = b.z - w.z; if (dx > 0.7 || dx < -0.7 || dz > 0.7 || dz < -0.7 || Math.abs(w.y - b.y) > 1.2) continue;
-      const d = Math.hypot(dx, dz); if (d > 0.62 || d < 1e-3) continue;
-      const k = (0.62 - d) / d, nx = b.x + dx * k, nz = b.z + dz * k;
-      if (!AF.boxBlocked(nx, b.y, nz, 0.3, 1.7)) { b.x = nx; b.z = nz; AF.player.x = nx; AF.player.z = nz; }
+      if (!w.act || (w.agg && w.agg.lie) || !shove(b, w.x, w.y, w.z)) continue;
       // barging through at a sprint: the ped staggers and complains (not a crime)
-      if ((AF.PL.walk.speed || 0) > 7 && !w.agg && !w.cop && bumpCd <= 0 && !exempt(w)) {
-        bumpCd = 0.6; const A = engage(w, 'bump'); if (A) { A.kind = 'flee'; down(w, 'stagger', -dx / d, -dz / d, 2); say(w, ['Hey! Watch it!', 'Oof!', 'Mind your step, pal!'][w.id % 3]); SFX.play('punch', w.x, w.z); }
+      if (sprint && !w.agg && !w.cop && bumpCd <= 0 && !exempt(w)) {
+        bumpCd = 0.6; const A = engage(w, 'bump'); if (A) { A.kind = 'flee'; down(w, 'stagger', -BP.nx, -BP.nz, 2); say(w, BUMP_LINES[w.id % 3]); SFX.play('punch', w.x, w.z); }
       }
+    }
+    const WK = AF.walkers; if (!WK || !WK.near) return;
+    for (const a of WK.near(b.x, b.z, 0.8)) {
+      if (WK.isDown(a) || !shove(b, a.x, a.y, a.z)) continue;
+      if (sprint && bumpCd <= 0) { bumpCd = 0.6; WK.stagger(a, -BP.nx, -BP.nz); say(a, BUMP_LINES[bumpN++ % 3]); SFX.play('punch', a.x, a.z); }
     }
   };
 
@@ -494,9 +547,11 @@ try {
   };
   const wanted = (dt) => {
     const C = CR(); if (!C) return;
+    if (!CB.stars && !SQUADS.length && !CB.copsUp) { SFX.siren(0); return; }   // nobody on duty: skip the crowd scan
     const T = target();
     let seen = false, copsUp = 0, sirenK = 0;
     for (const w of C.walkers) if (w.cop && w.act) { copsUp++; if (!seen && CB.stars && (w.x - T.x) ** 2 + (w.z - T.z) ** 2 < 55 * 55 && los(w.x, w.y + 1.6, w.z, T.x, T.y + 1.2, T.z)) seen = true; }
+    CB.copsUp = copsUp;
     for (let i = SQUADS.length - 1; i >= 0; i--) {
       const c = SQUADS[i]; if (!c.squad || c.dead || c.player || c.active === false) { SQUADS.splice(i, 1); continue; }
       const d = Math.hypot(c.x - T.x, c.z - T.z); if (d < 40) seen = true; sirenK = Math.max(sirenK, 1 / (1 + d / 40));
@@ -596,6 +651,22 @@ try {
     const cop = C.walkers.find((q) => q.cop && q.act), armed = !!cop && cop.agg.kind === 'gun';
     if (cop) CB.release(cop);
     clearWanted(); return { ok: two && spawned && armed && CB.stars === 0, info: `stars2 ${two}, spawned ${spawned}, armed ${armed}` };
+  });
+  AF.test('combat: airport passengers (path walkers) stagger, go down to a bullet and scatter at gunfire', () => {
+    const WK = AF.walkers, path = WK.paths.find((p) => /^airport-/.test(p.name) && p.actors.filter((a) => !a.look.pose).length > 1);
+    if (!path) return { ok: false, info: 'no airport path' };
+    const cam = AF.camera.position.clone(), heat = CB.heat, stars = CB.stars;
+    try {
+      AF.camera.position.set(path.minX, 2, path.minZ); WK.update(0.1, 1);
+      const [a, b] = path.actors.filter((q) => !q.look.pose);
+      hitWalker(a, 5, 'melee', 1, 0); const shoved = !!a.rxOn && a.rx.st > 0 && !WK.isDown(a);
+      hitWalker(a, GUNS.revolver.dmg, 'gun', 1, 0); WK.update(0.2, 1.2); const down = WK.isDown(a);
+      scareWalkers(b.x, b.z, 2); const scared = b.rxOn && b.rx.fear > 0, crime = CB.heat > heat;
+      return { ok: shoved && down && scared && crime, info: `shoved ${shoved}, down ${down}, scared ${scared}, crime ${crime}` };
+    } finally {
+      for (const q of path.actors) if (q.rx) { Object.assign(q.rx, { down: 0, fall: 0, st: 0, fear: 0, ox: 0, oz: 0, vx: 0, vz: 0 }); q.rxOn = false; q.tilt = q.lift = 0; }
+      CB.heat = heat; CB.stars = stars; AF.camera.position.copy(cam); WK.update(0, AF.clock.t);
+    }
   });
 }
 } catch (e) { AF.partError('77-combat.js', e); }

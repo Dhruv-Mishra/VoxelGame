@@ -63,7 +63,8 @@ try {
       const d = Math.hypot(s.x - f.x, s.z - f.z);
       if (d < (s.r || 5) && speedNow() < 2.5) { if ((s.hold += dt) >= (s.wait || 0)) this.arrive(s); } else s.hold = 0;
       if (this.tick) this.tick(dt, s);
-      HUD.job = { title: this.title, line: (s.short || s.label) + ' \u00b7 ' + Math.round(d) + ' m', t: s.t, pay: this.earned || null };
+      const H = this.hud || (this.hud = { title: this.title, line: '', t: null, pay: null });
+      H.line = (s.short || s.label) + ' \u00b7 ' + Math.round(d) + ' m'; H.t = s.t; H.pay = this.earned || null; HUD.job = H;
     }
     arrive(s) {
       if (s.pay) { const p = Math.round(s.pay * (s.t0 ? 1 + G.pay.early * AF.clamp(s.t / s.t0, 0, 1) : 1)); AF.money.add(p); this.earned += p; }
@@ -290,9 +291,9 @@ try {
   const galleryTick = (dt) => {
     const GAL = AF.combat.gallery; if (!GAL) return;
     for (const d of J.gallery) if (d.down > 0 && (d.down -= dt) <= 0) d.m.rotation.x = 0;
-    GAL.t -= dt; HUD.job = { title: 'Shooting gallery', line: GAL.hits + ' hits \u00b7 ' + GAL.shots + ' shots left', t: GAL.t };
+    GAL.t -= dt; const GH = GAL.hud || (GAL.hud = { title: 'Shooting gallery', line: '', t: 0 }); GH.line = GAL.hits + ' hits \u00b7 ' + GAL.shots + ' shots left'; GH.t = GAL.t; HUD.job = GH;
     if ((GAL.shots <= 0 && AF.combat.cd <= 0) || GAL.t <= 0 || AF.mode !== 'walk') {
-      AF.combat.gallery = null; AF.PL.still = false; HUD.job = J.cur ? HUD.job : null;
+      AF.combat.gallery = null; AF.PL.still = false; HUD.job = J.cur ? J.cur.hud || null : null;
       const p = GAL.hits >= 8 ? 15 : GAL.hits >= 5 ? 6 : GAL.hits >= 3 ? 2 : 0;
       if (p) AF.money.add(p); toast(GAL.hits + ' ducks down. ' + (p ? 'The barker pays out ' + cash(p) + '!' : 'Step right up and try again!'));
     }

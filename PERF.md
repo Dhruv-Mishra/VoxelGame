@@ -68,13 +68,15 @@ compare draws and GPU ms.
 - Traffic (`51`): lane graph, 15 Hz step + interpolation; full rate ≤ 240 m, 1/4 beyond in view, 1/8 off screen.
   `AF.vehicles.addRoute`, `placeParked` (merged static until used). Vehicles at `SPEED_K` 0.82.
 - Walkers (`54`): `AF.walkers.addPath` — every path pedestrian shares 4 instanced draws (512 cap), limbs 5 Hz beyond 60 m.
+  Reactions (shoved / knocked flat / scared) are per-actor state on the same instances; only touched actors run `react`.
 - Air traffic (`53`): 7 instanced batches with per-instance livery; busy timetable only within 900 m.
 - Park actors, zoo far LOD (merged per species, dithered), island jet skis: shared instanced/merged meshes.
 - All ticks together cost 1.7–3.2 ms anywhere (`tools/tick-survey.js`). Keep new simulations distance/view gated.
 - Crowd (`55`): 70 / 140 / 170 ambient walkers (low / Balanced / High). Fights, cops, run-overs only step peds the player engaged
   (`w.agg`, ≤ `G.engagedMax` + 8 cops), drawn through the same instanced frames (lying = a rotated instance, no new geometry).
-- Gameplay (`76–78`): FX = 2 Points draws (glow additive, smoke dithered opaque) with an empty draw range when idle; job marker
-  (2 draws), autogyro (2) and squad cars exist only while in use; police / run-over checks at 15 Hz within 60 m.
+- Gameplay (`76–78`): FX = 2 Points draws (glow additive, smoke dithered opaque), hidden while empty (programs compiled at
+  `preloaded`); job marker (2 draws), autogyro (2) and squad cars exist only while in use; police / run-over checks at 15 Hz within
+  60 m, the wanted scan skipped while nobody is on duty. A driver seated in a closed car casts no shadow.
 
 ## 8. Content rules (locked)
 1. Static → voxels (`W.fill`) or `AF.placeStatic`; outland → `AF.outland.addProp`.

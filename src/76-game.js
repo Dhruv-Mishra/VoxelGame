@@ -44,15 +44,16 @@ try {
   AF.cash = cash;
   const st = document.createElement('style');
   st.textContent = `
-  #ui #h-stat{width:112px;padding:8px 10px;display:grid;gap:6px;border-radius:14px;position:relative}
+  #ui #h-stat{width:112px;padding:8px 10px;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;border-radius:14px;position:relative;box-sizing:border-box}
   #ui #h-stat .hp{height:5px;border-radius:5px;background:rgba(255,255,255,.12);overflow:hidden}
   #ui #h-stat .hp i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#e0524a,#f2906c);transition:width .25s}
   #ui #h-stat .hp.low i{background:#ff4a3a;animation:gPulse 1s infinite}
-  #ui #h-stat .r{display:flex;justify-content:space-between;align-items:center;gap:4px}
+  #ui #h-stat .r{display:flex;justify-content:space-between;align-items:center;gap:4px;min-width:0}
   #ui #h-stat .m{font-weight:600;font-size:13px;color:#a6e8b4;font-variant-numeric:tabular-nums}
-  #ui #h-stat .st{font-size:10px;letter-spacing:1px;color:rgba(255,255,255,.16);white-space:nowrap}
-  #ui #h-stat .st b{color:#ffd24a;font-weight:400} #ui #h-stat .st.ev b{animation:gPulse .7s infinite}
-  #ui #h-stat .w{font-size:11px;color:var(--dim)} #ui #h-stat .w span{float:right;color:var(--ink);font-variant-numeric:tabular-nums}
+  #ui #h-stat .st{font-size:10px;letter-spacing:.5px;color:rgba(255,255,255,.16);white-space:nowrap;overflow:hidden}
+  #ui #h-stat .st b{color:#ffd24a;font-weight:400} #ui #h-stat .st.ev b{animation:gPulse .7s infinite} #ui.touch #h-stat .st.none{display:none}
+  #ui #h-stat .w{font-size:11px;color:var(--dim);display:flex;gap:6px;white-space:nowrap;min-width:0} #ui #h-stat .w i{font-style:normal;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  #ui #h-stat .w span{margin-left:auto;flex:none;color:var(--ink);font-variant-numeric:tabular-nums}
   #ui #h-stat .gain{position:absolute;right:calc(100% + 8px);top:18px;font-weight:600;font-size:13px;white-space:nowrap;opacity:0;transition:opacity .3s,transform .9s;pointer-events:none;text-shadow:0 1px 4px #000}
   #ui #h-stat .gain.on{opacity:1;transform:translateY(-8px)} #ui #h-stat .gain.neg{color:#ff9a8a} #ui #h-stat .gain.pos{color:#a6e8b4}
   #ui #h-job{position:absolute;left:max(16px,env(safe-area-inset-left));top:calc(max(16px,env(safe-area-inset-top)) + 50px);padding:7px 12px;border-radius:12px;max-width:min(330px,46vw);font-size:12px;display:none}
@@ -69,16 +70,19 @@ try {
   #ui #h-meter .bar{position:relative;height:12px;border-radius:12px;background:rgba(255,255,255,.1);margin-top:9px;overflow:hidden}
   #ui #h-meter .z{position:absolute;top:0;bottom:0;background:rgba(120,230,170,.5);border-radius:12px}
   #ui #h-meter .n{position:absolute;top:0;bottom:0;width:4px;margin-left:-2px;border-radius:3px;background:#fff;box-shadow:0 0 6px #fff}
-  #ui #m-shop>.panel{width:min(460px,100%);border-radius:18px}
+  #ui #m-shop>.panel{width:min(460px,100%);border-radius:18px;display:flex;flex-direction:column}
   #ui #m-shop h2{margin-bottom:4px} #ui #m-shop .sub{display:flex;justify-content:space-between;color:var(--dim);font-size:12px;margin-bottom:12px}
   #ui #m-shop .sub b{color:#a6e8b4;font-weight:600} #ui #m-shop .tabs{margin-bottom:10px;flex-wrap:wrap;border-radius:10px} #ui #m-shop .tabs:empty{display:none}
-  #ui #m-shop .items{display:grid;gap:6px;max-height:min(54vh,430px);overflow:auto;padding-right:2px}
+  #ui #m-shop .items{display:grid;gap:6px;flex:0 1 auto;min-height:0;max-height:min(54vh,430px);overflow:auto;padding-right:2px}
+  @media (max-height:520px){#ui #m-shop>.panel{padding:12px 14px} #ui #m-shop h2{font-size:16px;margin-bottom:0} #ui #m-shop .sub{margin-bottom:8px} #ui #m-shop .tabs{margin-bottom:6px} #ui #m-shop .items{max-height:none} #ui #m-shop .it{padding:7px 10px} #ui #m-shop .stack{margin-top:8px}}
   #ui #m-shop .it{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;text-align:left;padding:9px 12px;border-radius:12px;background:rgba(255,255,255,.05);transition:background .15s}
   #ui #m-shop .it:hover:not([disabled]){background:rgba(255,255,255,.11)} #ui #m-shop .it[disabled]{opacity:.42;cursor:default}
   #ui #m-shop .it i{width:14px;height:14px;border-radius:50%;border:1px solid rgba(255,255,255,.35)} #ui #m-shop .it i.no{visibility:hidden;width:0;margin-right:-10px}
   #ui #m-shop .it small{display:block;color:var(--dim);font-size:11px;margin-top:1px}
   #ui #m-shop .it em{font-style:normal;font-weight:600;color:#a6e8b4;white-space:nowrap} #ui #m-shop .it em.t{color:var(--dim);font-weight:500}
-  #ui.touch #h-stat{width:84px;padding:6px 8px;gap:4px} #ui.touch #h-stat .w{font-size:10px}
+  #ui.touch #h-stat{width:104px;padding:6px 8px;gap:4px} #ui.touch #h-stat .w{font-size:10px} #ui.touch #h-stat .m{font-size:12px}
+  #ui.touch #h-job{max-width:min(220px,40vw);font-size:11px;padding:6px 10px}
+  @media (orientation:portrait){#ui.touch #h-job{top:auto;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 178px);max-width:calc(100% - 32px)}}
   #ui.photo #h-job,#ui.photo #h-cross,#ui.photo #h-meter,#ui.mapping #h-cross,#ui.mapping #h-meter{display:none!important}
   @keyframes gPulse{50%{opacity:.35}}`;
   document.head.appendChild(st);
@@ -208,7 +212,7 @@ try {
       this.attrs = [['position', this.pos, 3], ['color', this.col, 3], ['aSize', this.size, 1], ['aA', this.alpha, 1]].map(([k, a, d]) => { const at = new THREE.BufferAttribute(a, d).setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, at); return at; });
       geo.setDrawRange(0, 0);
       const mat = new THREE.ShaderMaterial({ uniforms: { uScale: SCALE }, vertexShader: VS, fragmentShader: add ? FS_ADD : FS_DIT, transparent: add, depthWrite: !add, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending, fog: false });
-      this.pts = new THREE.Points(geo, mat); this.pts.frustumCulled = false; this.pts.renderOrder = add ? 7 : 0; this.pts.name = add ? 'fx-glow' : 'fx-smoke';
+      this.pts = new THREE.Points(geo, mat); this.pts.frustumCulled = false; this.pts.visible = false; this.pts.renderOrder = add ? 7 : 0; this.pts.name = add ? 'fx-glow' : 'fx-smoke';
       AF.scene.add(this.pts);
     }
     spawn(x, y, z, vx, vy, vz, life, size, grow, g, r, gc, b) {
@@ -233,7 +237,7 @@ try {
         this.size[i] = this.s0[i] + this.grow[i] * a; this.alpha[i] = this.add ? 1 - u : Math.min(1, u * 8) * (1 - u) * 0.95;
         i++;
       }
-      this.n = n; this.was = n > 0;
+      this.n = n; this.was = n > 0; this.pts.visible = n > 0;
       this.pts.geometry.setDrawRange(0, n);
       for (const at of this.attrs) { at.clearUpdateRanges(); at.addUpdateRange(0, n * at.itemSize); at.needsUpdate = true; }
     }
@@ -315,6 +319,8 @@ try {
 
   // ---------------------------------------------------------------- build + ticks
   AF.onBuild('game-fx', 870, () => { FX.glow = new Pool(AF.MOBILE ? 256 : 512, true); FX.smoke = new Pool(AF.MOBILE ? 160 : 320, false); });
+  // the pools draw nothing while empty: compile their programs behind the boot veil so the first shot never hitches
+  AF.on('preloaded', () => { if (!FX.glow || !AF.stream.compileAhead) return; for (const P of [FX.glow, FX.smoke]) { P.pts.visible = true; AF.stream.compileAhead(P.pts).then(() => { P.pts.visible = P.n > 0; }); } });
   let hudT = 0, reapT = 0;
   const focus = () => AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.player;
   AF.onTick('game', 960, (dt) => {
@@ -340,10 +346,10 @@ try {
     // HUD panel at 6 Hz
     if ((hudT += dt) > 0.16) {
       hudT = 0;
-      hpFill.style.width = (H.v / H.max * 100).toFixed(0) + '%'; hpBar.classList.toggle('low', H.v < 25);
+      const hw = (H.v / H.max * 100).toFixed(0) + '%'; if (hpFill._w !== hw) { hpFill.style.width = hw; hpFill._w = hw; } hpBar.classList.toggle('low', H.v < 25);
       text(mEl, cash(S.money));
       const CB = AF.combat, n = CB ? CB.stars : 0, sh = '<b>' + '\u2605'.repeat(n) + '</b>' + '\u2605'.repeat(5 - n);
-      if (starEl._h !== sh) { starEl.innerHTML = sh; starEl._h = sh; } starEl.classList.toggle('ev', !!(CB && n && CB.seenT > 1));
+      if (starEl._h !== sh) { starEl.innerHTML = sh; starEl._h = sh; starEl.classList.toggle('none', !n); } starEl.classList.toggle('ev', !!(CB && n && CB.seenT > 1));
       const wl = CB ? CB.label() : ''; if (wEl._h !== wl) { wEl.innerHTML = wl; wEl._h = wl; }
       const J = HUD.job, jl = J ? `<b>${esc(J.title)}</b>${esc(J.line)}${J.t != null ? '<span>' + Math.max(0, Math.ceil(J.t)) + 's</span>' : ''}${J.pay ? '<span>' + cash(J.pay) + '</span>' : ''}` : '';
       if (job._h !== jl) { job.innerHTML = jl; job._h = jl; } show(job, !!J);

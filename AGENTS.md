@@ -49,7 +49,9 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   first person / near / far) for walk, chase cams and planes — no wheel zoom.
 - Jobs extend `class Job` (78): implement `plan()` → next stop `{x,z,r,wait,t,pay,label,done}` (null ends the shift).
   Counters: `counter(x,y,z,label,open)` + `AF.shop.open({title,sub,tabs,items(tab)})`; drive-in zones via `zone()`.
-- Keys: Q / click attack, Z / right mouse aim, wheel / 1–5 / X weapon, R reload, C camera, J job. Touch: HIT AIM WPN CAM JOB.
+- Keys: Q / click attack, Z / right mouse aim, wheel / 1–5 / X weapon, R reload, C camera, J job. Touch (72): stick to the rim runs;
+  one context cluster bottom-right (big primary + ≤ 3 secondaries chosen per mode / weapon, `AF.touchUI`) + CAM / JOB utilities.
+- Path walkers (54: airport, outland, island) react via `AF.walkers.near/knock/stagger/scare/isDown` (77 bumps, hits, run-overs, panic).
 
 ## Rules of thumb
 - Settings live in `localStorage['portSolace.*']` (gfx, fps, resH, lod, shadows, bright2, stars, view, sound; game state in `save`).

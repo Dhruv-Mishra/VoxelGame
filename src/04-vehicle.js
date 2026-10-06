@@ -13,7 +13,7 @@ try {
 {
   // one camera distance setting for every mode: 0 first person, 1 third person near, 2 third person far (saved per browser)
   const VIEW = AF.view = { i: 1, names: ['First person', 'Third person \u00b7 near', 'Third person \u00b7 far'], dist: [0, 0.72, 1.4] };
-  try { const v = +localStorage.getItem('portSolace.view'); if (v >= 0 && v <= 2) VIEW.i = v | 0; } catch (e) { /* storage blocked */ }
+  try { const s = localStorage.getItem('portSolace.view'), v = +s; if (s != null && s !== '' && v >= 0 && v <= 2) VIEW.i = v | 0; } catch (e) { /* storage blocked */ }
   VIEW.cycle = () => { VIEW.i = (VIEW.i + 1) % 3; try { localStorage.setItem('portSolace.view', String(VIEW.i)); } catch (e) { /* storage blocked */ } AF.emit('toast', VIEW.names[VIEW.i]); };
   VIEW.fp = () => VIEW.i === 0;
   AF.onTick('view-key', 148, () => { if (AF.input.hit('KeyC') && AF.mode !== 'photo' && !(AF.ui && AF.ui.modalOpen && AF.ui.modalOpen())) VIEW.cycle(); });

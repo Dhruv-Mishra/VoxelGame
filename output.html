@@ -3859,7 +3859,7 @@ try {
 {
   // one camera distance setting for every mode: 0 first person, 1 third person near, 2 third person far (saved per browser)
   const VIEW = AF.view = { i: 1, names: ['First person', 'Third person \u00b7 near', 'Third person \u00b7 far'], dist: [0, 0.72, 1.4] };
-  try { const v = +localStorage.getItem('portSolace.view'); if (v >= 0 && v <= 2) VIEW.i = v | 0; } catch (e) { /* storage blocked */ }
+  try { const s = localStorage.getItem('portSolace.view'), v = +s; if (s != null && s !== '' && v >= 0 && v <= 2) VIEW.i = v | 0; } catch (e) { /* storage blocked */ }
   VIEW.cycle = () => { VIEW.i = (VIEW.i + 1) % 3; try { localStorage.setItem('portSolace.view', String(VIEW.i)); } catch (e) { /* storage blocked */ } AF.emit('toast', VIEW.names[VIEW.i]); };
   VIEW.fp = () => VIEW.i === 0;
   AF.onTick('view-key', 148, () => { if (AF.input.hit('KeyC') && AF.mode !== 'photo' && !(AF.ui && AF.ui.modalOpen && AF.ui.modalOpen())) VIEW.cycle(); });
@@ -25295,6 +25295,8 @@ VV.exitCar = () => {
   const p = exitSpot(car);
   AF.setMode('walk', { x: p.x, y: p.y, z: p.z, yaw: car.yaw + Math.PI });
 };
+// the seated driver inside a car body sits in the car's own shadow: skip its shadow draws (bikes keep them)
+const avatarShadow = (on) => { const m = AF.player && AF.player.mesh; if (m) m.traverse((o) => { if (o.isMesh && o.name !== 'held') o.castShadow = on; }); };
 AF.modes.drive = {
   enter(opts = {}, from) {
     const car = opts.car || VV.cars.find((c) => c.parked) || VV.cars[0];
@@ -25306,6 +25308,7 @@ AF.modes.drive = {
     car.vx = Math.sin(car.yaw) * car.v; car.vz = Math.cos(car.yaw) * car.v;
     DR.bike = car.type.kind === 'bike' && !!car.type.solo;
     if (AF.player && AF.player.setVisible) AF.player.setVisible(true);
+    avatarShadow(DR.bike);
     const L = seatLocal(car);
     DR.chase.set({ dist: car.type.big ? 13 : DR.bike ? 5.5 : 8.5, height: (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), eye: [L[0], L[1] + (DR.bike ? 1.4 : 1.0), L[2] + 0.1] });
     AF.emit('toast', (DR.bike ? 'You swing onto the ' : 'You slide behind the wheel of the ') + car.name + '.');
@@ -25316,6 +25319,7 @@ AF.modes.drive = {
     if (car) { car.player = false; car.parked = true; car.v = 0; car.vx = car.vz = 0; car.steer *= 0.5; car.roll = 0; placeMesh(car); if (car.interact) car.sync(); }
     DR.car = null; VV.player = null; if (AF.PL) AF.PL.seat = null;
     if (AF.player && AF.player.setVisible) AF.player.setVisible(true);
+    avatarShadow(true);
     AF.emit('hud', { speed: null, mode: to });
     AF.emit('hint', '');
   },
@@ -25366,7 +25370,7 @@ function paintMaterial() {
     compile(shader, renderer);
     shader.vertexShader = shader.vertexShader.replace('attribute float aPal;', 'attribute float aPal; attribute vec3 carPaint; attribute float carDmg; varying float vCarDmg;').replace('vec2 pUV =', 'vCarDmg = carDmg; float carPal = aPal < -2.5 ? carPaint.z : aPal < -1.5 ? carPaint.y : aPal < -0.5 ? carPaint.x : aPal;\nvec2 pUV =').replace('mod(aPal,', 'mod(carPal,').replace('floor(aPal /', 'floor(carPal /');
     // damage (0..1): soot and dents in blotches keyed to the model position, so a wreck reads charred, not just dark
-    shader.fragmentShader = shader.fragmentShader.replace('varying vec3 vAlb;', 'varying float vCarDmg; varying vec3 vAlb;').replace('diffuseColor.rgb *= vAlb * ao * shade * patMul;', 'diffuseColor.rgb *= vAlb * ao * shade * patMul;\n      diffuseColor.rgb *= 1.0 - vCarDmg * (0.3 + 0.62 * step(1.0 - vCarDmg, afHash(floor(vAfOP * 6.0))));');
+    shader.fragmentShader = shader.fragmentShader.replace('varying vec3 vAlb;', 'varying float vCarDmg; varying vec3 vAlb;').replace('diffuseColor.rgb *= vAlb * ao * shade * patMul;', 'diffuseColor.rgb *= vAlb * ao * shade * patMul;\n      if (vCarDmg > 0.0) diffuseColor.rgb *= 1.0 - vCarDmg * (0.3 + 0.62 * step(1.0 - vCarDmg, afHash(floor(vAfOP * 6.0))));');
   }; return PAINT_MAT;
 }
 function ensureIM(key, cap) {
@@ -26868,6 +26872,36 @@ try {
     locate(path,actor);
   }
   WK.distance2=(path,camera)=>Math.max(path.minX-camera.x,0,camera.x-path.maxX)**2+Math.max(path.minY-camera.y,0,camera.y-path.maxY)**2+Math.max(path.minZ-camera.z,0,camera.z-path.maxZ)**2;
+  // reactions to the player (77-combat): shoved (stagger), knocked flat (down s, then they get up), scared (run along the path, or cower
+  // in place when the path has no speed). Offsets from the path ease back once they walk on. State lives on the actor (actor.rx), made once.
+  const rx=(a)=>{if(!a.rx)a.rx={down:0,fall:0,st:0,fear:0,ox:0,oz:0,vx:0,vz:0,yaw:0};a.rxOn=true;return a.rx;};
+  const reacts=(a)=>a.look.pose!=='dance'&&a.look.pose!=='ride';
+  WK.knock=(a,fx,fz,v,t)=>{const R=rx(a);R.down=Math.max(R.down,t);R.vx=fx*v;R.vz=fz*v;R.yaw=Math.atan2(-fx,-fz);R.st=0;R.fear=0;};
+  WK.stagger=(a,fx,fz)=>{const R=rx(a);if(R.down>0||R.fall>0)return;R.st=0.7;R.vx=fx*1.8;R.vz=fz*1.8;R.yaw=Math.atan2(-fx,-fz);R.fear=Math.max(R.fear,3);};
+  WK.scare=(a,t)=>{const R=rx(a);if(!(R.down>0))R.fear=Math.max(R.fear,t);};
+  WK.isDown=(a)=>!!(a.rxOn&&(a.rx.down>0||a.rx.fall>0.4));
+  // actors of active paths within r of (x, z) that can react (a shared scratch array: copy it before calling near() again)
+  const NEAR=[];
+  WK.near=(x,z,r)=>{
+    NEAR.length=0;const r2=r*r;
+    for(const path of WK.paths){if(!path.active||x<path.minX-r||x>path.maxX+r||z<path.minZ-r||z>path.maxZ+r)continue;
+      for(const a of path.actors)if(!(a.gap>0)&&(a.x-x)**2+(a.z-z)**2<r2&&reacts(a))NEAR.push(a);}
+    return NEAR;
+  };
+  function react(path,a,dt){
+    const R=a.rx;let still=false;
+    if(R.down>0){R.down-=dt;R.fall=Math.min(1,R.fall+dt*5);still=true;}
+    else if(R.fall>0){R.fall=Math.max(0,R.fall-dt*1.4);still=true;}
+    if(R.st>0)R.st=Math.max(0,R.st-dt);
+    if(R.fear>0)R.fear-=dt;
+    if(still||!path.speed||!path.length){a.moving=false;locate(path,a);}else advance(path,a,R.fear>0?dt*2.6:dt);
+    const k=Math.exp(-dt*5);R.ox+=R.vx*dt;R.oz+=R.vz*dt;R.vx*=k;R.vz*=k;
+    if(!still&&!(R.st>0)){const e=Math.exp(-dt*0.7);R.ox*=e;R.oz*=e;}
+    a.x+=R.ox;a.z+=R.oz;
+    if(still||R.st>0)a.yaw=R.yaw;
+    a.tilt=-R.fall*Math.PI/2-(R.st>0?Math.sin(R.st/0.7*Math.PI)*0.38:0);a.lift=0.13*R.fall;
+    if(!still&&!(R.st>0)&&!(R.fear>0)&&Math.abs(R.ox)+Math.abs(R.oz)<0.02){a.rxOn=false;a.tilt=a.lift=0;R.ox=R.oz=R.vx=R.vz=0;}
+  }
   const build=()=>{
     const look=AF.peopleKit.makeLook('traveler','m','adult',AF.rng(54));
     Object.assign(look,{skin:0xefc19f,hair:0x3f2a1c,hairStyle:'part',hat:'fedora',hatCol:0x3f2a1c,hatCol2:0x3f2a1c,top:{style:'shirt',col:0x3f7f7c},bottom:{style:'pants',col:0x45464b},propR:null,propL:null,skirt:null,glasses:null,beard:false,moustache:false});
@@ -26890,6 +26924,7 @@ try {
     ready=true;
   };
   function put(mesh,index,actor,lx,ly,lz,angle=0,sx=1,sy=1,sz=1){
+    const t=actor.tilt;if(t){const c=Math.cos(t),s=Math.sin(t),y=ly*c-lz*s;lz=ly*s+lz*c;ly=y+actor.lift;angle+=t;}   // tipped about the feet (Rx)
     const sn=actor.sin,cs=actor.cos;position.set(actor.x+lx*cs+lz*sn,actor.y+ly,actor.z-lx*sn+lz*cs);
     euler.set(angle,actor.yaw,0,'YXZ');rotation.setFromEuler(euler);scale.set(sx,sy,sz);matrix.compose(position,rotation,scale);mesh.setMatrixAt(index,matrix);
     mesh.geometry.attributes.walkerPalette.array.set(actor.pal,index*4);
@@ -26901,7 +26936,7 @@ try {
     if(!active){if(visibleBefore)for(const mesh of WK.meshes){mesh.count=0;mesh.visible=false;}visibleBefore=false;WK.stats.visible=WK.stats.draws=0;return;}
     let count=0,bags=0;
     for(const path of WK.paths){if(!path.active)continue;
-      for(const actor of path.actors){advance(path,actor,dt);if(actor.gap>0)continue;
+      for(const actor of path.actors){if(actor.rxOn)react(path,actor,dt);else advance(path,actor,dt);if(actor.gap>0)continue;
         const distance2=(actor.x-camera.x)**2+(actor.y-camera.y)**2+(actor.z-camera.z)**2;if(distance2>path.activeRadius**2)continue;
         actor.sin=Math.sin(actor.yaw);actor.cos=Math.cos(actor.yaw);
         if(distance2<3600||Math.floor(time*5)!==actor.frame){actor.frame=Math.floor(time*5);actor.stride=actor.moving?Math.sin(actor.ph)*0.42:0;actor.wave=Math.sin(time*3)*0.35;}
@@ -26918,10 +26953,10 @@ try {
           put(WK.meshes[0],count,actor,0,hip,0,0.25);put(WK.meshes[1],count*2,actor,arm,shoulder-0.05,0.12,-1.25);put(WK.meshes[1],count*2+1,actor,-arm,shoulder-0.05,0.12,-1.25);
           put(WK.meshes[2],count*2,actor,leg,hip,0,-1.2);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-1.2);count++;continue;
         }
-        const stride=actor.stride||0,hip=bodyPlan.lh/16,shoulder=hip+bodyPlan.th/16,arm=(bodyPlan.tw+bodyPlan.aw)/32,leg=(bodyPlan.lw+1)/32,work=actor.look.pose==='marshal';
-        put(WK.meshes[0],count,actor,0,hip,0);put(WK.meshes[1],count*2,actor,arm,shoulder,0,work?-1.5+(actor.wave||0):-stride*0.8);put(WK.meshes[1],count*2+1,actor,-arm,shoulder,0,work?-1.5-(actor.wave||0):actor.bag?-0.22:stride*0.8);
+        const stride=actor.stride||0,hip=bodyPlan.lh/16,shoulder=hip+bodyPlan.th/16,arm=(bodyPlan.tw+bodyPlan.aw)/32,leg=(bodyPlan.lw+1)/32,work=actor.look.pose==='marshal',cower=actor.rxOn&&actor.rx.fear>0&&!actor.moving&&!actor.tilt;
+        put(WK.meshes[0],count,actor,0,hip,0);put(WK.meshes[1],count*2,actor,arm,shoulder,0,cower?-2.9:work?-1.5+(actor.wave||0):-stride*0.8);put(WK.meshes[1],count*2+1,actor,-arm,shoulder,0,cower?-2.9:work?-1.5-(actor.wave||0):actor.bag?-0.22:stride*0.8);
         put(WK.meshes[2],count*2,actor,leg,hip,0,stride);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-stride);
-        if(actor.bag)put(WK.meshes[3],bags++,actor,-0.48,0,-0.45,-0.18);
+        if(actor.bag&&!(actor.lift>0.03))put(WK.meshes[3],bags++,actor,-0.48,0,-0.45,-0.18);
         if(work){put(WK.meshes[3],bags++,actor,-0.4,shoulder-0.1,0.5,-Math.PI/2,0.12,0.65,0.12);put(WK.meshes[3],bags++,actor,0.4,shoulder-0.1,0.5,-Math.PI/2,0.12,0.65,0.12);}
         count++;
       }
@@ -26938,6 +26973,17 @@ try {
   AF.test('walkers: dwell, pingpong and flow obey dt',()=>{
     const path={points:[[0,0,0],[1,0,0],[2,0,0]],lengths:new Float64Array([0,1,2]),waits:new Float64Array([0,1,0]),speed:1,length:2,mode:'pingpong'},actor={s:0,dir:1,wait:0,gap:0,ph:0,look:{}};
     advance(path,actor,1);const dwell=actor.s===1&&actor.wait===1;advance(path,actor,0.5);const waiting=actor.s===1;advance(path,actor,1.5);const reverse=actor.dir===-1;path.mode='flow';actor.s=1.9;actor.dir=1;actor.wait=0;advance(path,actor,0.2);return{ok:dwell&&waiting&&reverse&&actor.s===0&&actor.gap>0,info:'dwell '+dwell+', reverse '+reverse+', flow gap '+actor.gap};
+  });
+  AF.test('walkers: an airport passenger is knocked flat, gets up and rejoins the path',()=>{
+    const path=WK.paths.find(p=>/^airport-/.test(p.name)&&p.speed>0&&p.actors.some(a=>!a.look.pose));if(!path)return{ok:false,info:'no airport path'};
+    const camera=AF.camera.position.clone();
+    try{
+      AF.camera.position.set(path.minX,2,path.minZ);update(0.1,1);
+      const a=path.actors.find(q=>!q.look.pose&&!(q.gap>0))||path.actors[0],found=WK.near(a.x,a.z,1).includes(a);
+      WK.knock(a,1,0,3,1);for(let i=0;i<8;i++)update(0.1,1+i*0.1);const down=WK.isDown(a)&&a.tilt<-1.2;
+      for(let i=0;i<90;i++)update(0.1,2+i*0.1);const up=!a.rxOn&&!a.tilt;
+      return{ok:found&&down&&up,info:'near '+found+', down '+down+', back on path '+up};
+    }finally{AF.camera.position.copy(camera);update(0,AF.clock.t);}
   });
 }
 }catch(error){AF.partError('54-walkers.js',error);}
@@ -33256,7 +33302,7 @@ try {
   #ui #m-help .k{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:2px 0}
   @media (max-width:520px){#ui #m-help .cols{grid-template-columns:1fr}}
   @media(max-width:480px){#ui #t-title h1{font-size:30px}#ui #h-clock{flex-direction:column;align-items:flex-start;gap:0}#ui .row{flex-wrap:wrap}#ui .sheet{padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}}
-  @media(max-width:520px) and (orientation:portrait){#ui #h-toasts{top:max(176px,env(safe-area-inset-top));width:calc(100% - 40px)}}
+  @media(max-width:520px) and (orientation:portrait){#ui #h-toasts{left:max(16px,env(safe-area-inset-left));transform:none;align-items:flex-start;top:calc(max(16px,env(safe-area-inset-top)) + 92px);width:calc(100% - 156px)} #ui #h-toasts .panel{text-align:left}}
   `;
   const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
   try { const fl = document.createElement('link'); fl.rel = 'stylesheet'; fl.href = 'https://fonts.googleapis.com/css2?family=Limelight&display=swap'; document.head.appendChild(fl); } catch (e) {}
@@ -33335,8 +33381,8 @@ try {
     <div class="stack"><button class="btn primary" data-k="resume">Resume</button><button class="btn" data-k="map">Map</button><button class="btn" data-k="help">Controls</button><button class="btn" data-k="switch">Switch friend</button></div></div>`); menu.id = 'm-menu';
   const help = h('div', 'sheet pe', ''); help.id = 'm-help';
   const K = (k, d) => `<div class="k"><span>${d}</span><span>${k.split('+').map((x) => '<kbd>' + x + '</kbd>').join(' ')}</span></div>`;
-  help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>RUN button</span></div><div class="k"><span>Camera</span><span>CAM button</span></div></div>
-    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Attack \u00b7 aim \u00b7 weapon</span><span>HIT \u00b7 AIM \u00b7 WPN</span></div><div class="k"><span>Jump \u00b7 brake</span><span>round button</span></div><div class="k"><span>Jobs</span><span>JOB button</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
+  help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>push the stick to its edge</span></div><div class="k"><span>Camera \u00b7 job</span><span>small buttons</span></div></div>
+    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Main action</span><span>big button (HIT, FIRE, BRAKE, THR\u2026)</span></div><div class="k"><span>More</span><span>buttons around it change with what you do</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
     : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('C', 'Camera: first person / near / far')}${K('Tab', 'Aerial view')}</div>
     <div><h3>Fighting</h3>${K('Click+Q', 'Attack / shoot')}${K('Right-drag+Z', 'Aim (hold / toggle)')}${K('Wheel+1+2+3+4+5', 'Switch weapon')}${K('R', 'Reload')}<h3>Work</h3>${K('J', 'Start / quit a job (taxi, bus, van, fire engine, on foot: courier)')}</div>
     <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('F', 'Get out (on the ground)')}</div>
@@ -33720,23 +33766,29 @@ try {
 
 // ================================================================ 72-touch.js
 try {
-// ===== 72-touch: phone + tablet controls — a floating stick on the left, drag-to-look on the right, pinch to zoom from the sky,
-//       and a few mode-aware buttons (jump / run, brake / exit, throttle / exit). Everything feeds AF.input, so the modes don't care.  (OWNER: player) =====
+// ===== 72-touch: phone + tablet controls — a floating stick on the left (push it to the rim to run), drag-to-look on the right, pinch to
+//       zoom from the sky, and ONE context cluster bottom-right: a big primary action plus up to three secondaries picked from what the
+//       player is doing (fists / melee, a gun drawn, driving, flying, riding, skydiving), with small utilities (camera, job) beside it.
+//       Everything feeds AF.input, so the modes don't care.  (OWNER: player) =====
 {
   if (AF.touch) {
     const I = AF.input, root = document.getElementById('ui'), cv = document.getElementById('cv');
     const st = document.createElement('style');
     st.textContent = `
-      #ui .tc-stick{position:absolute;width:112px;height:112px;margin:-56px 0 0 -56px;border-radius:50%;background:var(--bg);border:1px solid var(--line);display:none;pointer-events:none}
+      #ui .tc-stick{position:absolute;width:112px;height:112px;margin:-56px 0 0 -56px;border-radius:50%;background:var(--bg);border:1px solid var(--line);display:none;pointer-events:none;transition:border-color .15s}
       #ui .tc-stick i{position:absolute;left:50%;top:50%;width:42px;height:42px;margin:-21px 0 0 -21px;border-radius:50%;background:rgba(238,241,242,.3)}
-      #ui .tc-btns{position:absolute;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:flex-end;gap:10px}
-      #ui .tc-row{display:flex;gap:10px;align-items:flex-end}
-      #ui .tc{width:46px;height:46px;border-radius:50%;background:var(--bg);border:1px solid var(--line);color:var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;touch-action:none;user-select:none;-webkit-user-select:none;transition:background .18s}
+      #ui .tc-stick.run{border-color:var(--accent)} #ui .tc-stick.run i{background:var(--accent)}
+      #ui .tc-btns{position:absolute;right:max(14px,env(safe-area-inset-right));bottom:max(14px,env(safe-area-inset-bottom));width:150px;height:150px;pointer-events:none}
+      #ui .tc-util{position:absolute;right:calc(max(14px,env(safe-area-inset-right)) + 156px);bottom:max(14px,env(safe-area-inset-bottom));display:flex;gap:8px;align-items:flex-end}
+      #ui .tc{position:absolute;width:54px;height:54px;border-radius:50%;background:var(--bg);border:1px solid var(--line);color:var(--ink);display:none;flex-direction:column;align-items:center;justify-content:center;gap:1px;touch-action:none;user-select:none;-webkit-user-select:none;pointer-events:auto;transition:background .18s}
       #ui .tc svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
-      #ui .tc small{font:500 8px var(--font);opacity:.7}
-      #ui .tc.big{width:58px;height:58px} #ui .tc.big svg{width:26px;height:26px}
+      #ui .tc small{font:600 8px var(--font);letter-spacing:.4px;opacity:.75}
+      #ui .tc.s0{right:0;bottom:0;width:72px;height:72px} #ui .tc.s0 svg{width:28px;height:28px}
+      #ui .tc.s1{right:88px;bottom:4px} #ui .tc.s2{right:64px;bottom:64px} #ui .tc.s3{right:4px;bottom:88px}
+      #ui .tc.s0,#ui .tc.s1,#ui .tc.s2,#ui .tc.s3{display:flex}
+      #ui .tc-util .tc{position:static;width:42px;height:42px;display:none} #ui .tc-util .tc.u{display:flex} #ui .tc-util .tc svg{width:18px;height:18px}
       #ui .tc.on,#ui .tc:active{background:var(--accent);color:#112723}
-      #ui.titling .tc-btns,#ui.titling .tc-stick{display:none!important}
+      #ui.titling .tc-btns,#ui.titling .tc-util,#ui.titling .tc-stick,#ui.photo .tc-btns,#ui.photo .tc-util{display:none!important}
       #ui.touch #h-clock{padding:5px 11px;min-width:0} #ui.touch #h-clock .t{font-size:15px} #ui.touch #h-clock .p{font-size:11px;max-width:150px}
       #ui.touch #h-mini{width:84px;height:84px} #ui.touch .round{width:34px;height:34px;font-size:14px} #ui.touch #h-right{gap:6px}
       #ui.touch #h-prompt{font-size:12px;padding:7px 12px 7px 7px}`;
@@ -33744,42 +33796,77 @@ try {
     const stick = document.createElement('div'); stick.className = 'tc-stick'; stick.innerHTML = '<i></i>'; root.appendChild(stick);
     const knob = stick.firstChild;
     const pad = document.createElement('div'); pad.className = 'tc-btns hud'; root.appendChild(pad);
+    const util = document.createElement('div'); util.className = 'tc-util hud'; root.appendChild(util);
     const ic = (d, lab) => `<svg viewBox="0 0 24 24">${d}</svg>` + (lab ? `<small>${lab}</small>` : '');
-    const IC = {
-      jump: ic('<path d="M12 19V5M5 12l7-7 7 7"/>'), run: ic('<path d="M5 6l6 6-6 6M13 6l6 6-6 6"/>'), brake: ic('<rect x="6" y="6" width="12" height="12" rx="2"/>'),
-      exit: ic('<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>'), up: ic('<path d="M12 5v14M5 12h14"/>', 'THR'), down: ic('<path d="M5 12h14"/>', 'THR'),
-      walk: ic('<circle cx="12" cy="4.5" r="2"/><path d="M12 7v7M12 14l-3 6M12 14l3 6M8 10h8"/>'), chute: ic('<path d="M3 11a9 7 0 0 1 18 0zM4 11l8 8 8-8M12 11v8"/>'),
-      hit: ic('<path d="M7 11V7a2 2 0 0 1 4 0v3M11 10V6a2 2 0 0 1 4 0v4M15 10V8a2 2 0 0 1 4 0v5a7 7 0 0 1-7 7h-1a6 6 0 0 1-6-6v-2a2 2 0 0 1 2-2z"/>', 'HIT'),
-      aim: ic('<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>', 'AIM'), wpn: ic('<path d="M4 12h11l3-3h2v6h-2l-3-3M7 12v4h3"/>', 'WPN'),
-      cam: ic('<rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13.5" r="3.5"/><path d="M9 7l1.5-3h3L15 7"/>', 'CAM'), job: ic('<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V5h6v3M3 13h18"/>', 'JOB'),
+    const P = {
+      up: '<path d="M12 19V5M5 12l7-7 7 7"/>', stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>', exit: '<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>',
+      fist: '<path d="M7 11V7a2 2 0 0 1 4 0v3M11 10V6a2 2 0 0 1 4 0v4M15 10V8a2 2 0 0 1 4 0v5a7 7 0 0 1-7 7h-1a6 6 0 0 1-6-6v-2a2 2 0 0 1 2-2z"/>',
+      aim: '<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>', fire: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>',
+      gun: '<path d="M4 12h11l3-3h2v6h-2l-3-3M7 12v4h3"/>', cam: '<rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13.5" r="3.5"/><path d="M9 7l1.5-3h3L15 7"/>',
+      job: '<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V5h6v3M3 13h18"/>', plus: '<path d="M12 5v14M5 12h14"/>', minus: '<path d="M5 12h14"/>',
+      walk: '<circle cx="12" cy="4.5" r="2"/><path d="M12 7v7M12 14l-3 6M12 14l3 6M8 10h8"/>', chute: '<path d="M3 11a9 7 0 0 1 18 0zM4 11l8 8 8-8M12 11v8"/>',
     };
-    // buttons: [icon, key, hold?, modes, cls]
-    const DEF = [
-      [IC.run, 'run', 'toggle', ['walk']], [IC.jump, 'Space', 'tap', ['walk'], 'big'],
-      [IC.aim, 'KeyZ', 'tap', ['walk']], [IC.hit, 'KeyQ', 'hold', ['walk'], 'big'], [IC.wpn, 'KeyX', 'tap', ['walk']], [IC.job, 'KeyJ', 'tap', ['walk', 'drive']], [IC.cam, 'KeyC', 'tap', ['walk', 'drive', 'fly', 'jetski']],
-      [IC.exit, 'KeyE', 'tap', ['drive']], [IC.brake, 'Space', 'hold', ['drive'], 'big'],
-      [IC.down, 'thr-', 'hold', ['fly']], [IC.up, 'thr+', 'hold', ['fly'], 'big'], [IC.exit, 'KeyF', 'tap', ['fly']], [IC.brake, 'KeyB', 'hold', ['fly']],
-      [IC.walk, 'Tab', 'tap', ['aerial']], [IC.chute, 'Space', 'tap', ['skydive'], 'big'], [IC.exit, 'KeyE', 'tap', ['row', 'ride', 'funride', 'jetski', 'carousel'], 'big'],
-    ];
-    const rows = [document.createElement('div'), document.createElement('div')]; rows.forEach((r) => { r.className = 'tc-row'; pad.appendChild(r); });
-    const btns = DEF.map(([label, key, kind, modes, cls], i) => {
-      const b = document.createElement('button'); b.className = 'tc pe' + (cls ? ' ' + cls : ''); b.innerHTML = label; b.dataset.key = key;
-      b.setAttribute('aria-label', { run: 'Run', Space: modes[0] === 'walk' ? 'Jump' : 'Brake', KeyE: 'Exit', KeyF: 'Exit plane', KeyB: 'Wheel brake', 'thr+': 'Increase throttle', 'thr-': 'Decrease throttle', Tab: 'Walk', KeyQ: 'Attack', KeyZ: 'Aim', KeyX: 'Switch weapon', KeyC: 'Camera view', KeyJ: 'Job' }[key] || 'Deploy parachute');
-      (i % 2 ? rows[1] : rows[0]).appendChild(b);
+    // id: [icon, label, key, kind ('tap' one-frame press | 'hold' while touched | 'thr' throttle), aria]
+    const DEF = {
+      hit: [P.fist, 'HIT', 'KeyQ', 'hold', 'Attack'], fire: [P.fire, 'FIRE', 'KeyQ', 'hold', 'Fire'], aim: [P.aim, 'AIM', 'KeyZ', 'tap', 'Aim'],
+      wpn: [P.gun, 'WPN', 'KeyX', 'tap', 'Switch weapon'], jump: [P.up, '', 'Space', 'tap', 'Jump'], stop: [P.stop, 'STOP', 'KeyE', 'tap', 'Stop the needle'],
+      brake: [P.stop, 'BRAKE', 'Space', 'hold', 'Brake'], exit: [P.exit, 'EXIT', 'KeyE', 'tap', 'Get out'], fexit: [P.exit, 'EXIT', 'KeyF', 'tap', 'Get out of the plane'],
+      thrU: [P.plus, 'THR', 'thr+', 'thr', 'Increase throttle'], thrD: [P.minus, 'THR', 'thr-', 'thr', 'Decrease throttle'], wbrake: [P.stop, 'BRAKE', 'KeyB', 'hold', 'Wheel brakes'],
+      walk: [P.walk, 'WALK', 'Tab', 'tap', 'Walk'], chute: [P.chute, 'CHUTE', 'Space', 'tap', 'Deploy parachute'],
+      cam: [P.cam, 'CAM', 'KeyC', 'tap', 'Camera view'], job: [P.job, 'JOB', 'KeyJ', 'tap', 'Job'],
+    };
+    const UTIL = new Set(['cam', 'job']), B = {};
+    for (const id in DEF) {
+      const [icon, label, key, kind, aria] = DEF[id];
+      const b = document.createElement('button'); b.className = 'tc pe'; b.innerHTML = ic(icon, label); b.setAttribute('aria-label', aria);
+      (UTIL.has(id) ? util : pad).appendChild(b);
       const down = (e) => {
         e.preventDefault(); e.stopPropagation();
-        if (kind === 'toggle') { stickState.run = !stickState.run; b.classList.toggle('on', stickState.run); return; }
-        if (key === 'thr+') { I.throttle = 1; return; } if (key === 'thr-') { I.throttle = -1; return; }
+        if (kind === 'thr') { I.throttle = key === 'thr+' ? 1 : -1; return; }
         I.pressed.add(key); if (kind === 'hold') I.down.add(key);
       };
-      const up = (e) => { e.preventDefault(); if (key === 'thr+' || key === 'thr-') I.throttle = 0; else if (kind === 'hold') I.down.delete(key); };
+      const up = (e) => { e.preventDefault(); if (kind === 'thr') I.throttle = 0; else if (kind === 'hold') I.down.delete(key); };
       b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
-      return { b, modes };
-    });
-    const sync = () => { const m = AF.mode; for (const { b, modes } of btns) b.style.display = modes.includes(m) ? '' : 'none'; };
-    AF.on('mode', sync); sync();
+      B[id] = b;
+    }
 
-    // the stick (left 45% of the screen) and drag-to-look (the rest)
+    // ---------------------------------------------------------------- context: which buttons the current action needs (5 Hz, DOM only on change)
+    const RIDES = new Set(['row', 'ride', 'funride', 'jetski', 'carousel']), CAM_MODES = new Set(['walk', 'drive', 'fly', 'jetski']);
+    const JOB_CAR = (T) => !!(T && (T.cab || T.id === 'bus' || T.kind === 'van' || T.id === 'firetruck' || T.kind === 'bike'));
+    const hasGuns = () => { const g = AF.save && AF.save.guns; if (g) for (const k in g) if (g[k]) return true; return false; };
+    const act = [], use = [];
+    const pick = () => {
+      const m = AF.mode, CB = AF.combat, HUD = AF.hud, J = AF.jobs;
+      act.length = 0; use.length = 0;
+      if (m === 'walk') {
+        const gal = CB && CB.gallery, gun = CB && (gal || CB.gun());
+        if (HUD && HUD.meterOn && HUD.meterOn()) act.push('stop');
+        else { act.push(gun ? 'fire' : 'hit', 'jump'); if (gun && !gal) act.push('aim'); if (!gal && hasGuns()) act.push('wpn'); }
+      } else if (m === 'drive') act.push('brake', 'exit');
+      else if (m === 'fly') { const pl = AF.planes && AF.planes.cur; act.push('thrU', 'thrD', 'fexit'); if (pl && pl.onGround) act.push('wbrake'); }
+      else if (m === 'aerial') act.push('walk');
+      else if (m === 'skydive') act.push('chute');
+      else if (RIDES.has(m)) act.push('exit');
+      if (CAM_MODES.has(m)) use.push('cam');
+      if (J && (J.cur || m === 'walk' || (m === 'drive' && AF.vehicles.player && JOB_CAR(AF.vehicles.player.type)))) use.push('job');
+    };
+    let key = '';
+    const sync = () => {
+      pick();
+      const k = act.join() + '|' + use.join();
+      if (k !== key) {
+        key = k;
+        for (const id in B) { const b = B[id], i = act.indexOf(id); if (UTIL.has(id)) b.classList.toggle('u', use.includes(id)); else b.className = 'tc pe' + (i >= 0 ? ' s' + i : ''); }
+        I.down.delete('KeyQ'); I.down.delete('Space'); I.down.delete('KeyB'); I.throttle = 0;   // a button that vanished mid-hold must not stay held
+      }
+      const CB = AF.combat; B.aim.classList.toggle('on', !!(CB && CB.aimToggle));
+    };
+    AF.on('mode', sync); sync();
+    let syncT = 0;
+    AF.onTick('touch-ui', 950, (dt) => { if ((syncT += dt) >= 0.2) { syncT = 0; sync(); } });
+    AF.touchUI = { sync, buttons: () => act.slice(), utils: () => use.slice() };
+
+    // the stick (left 45% of the screen) and drag-to-look (the rest); the stick pushed to its rim runs
     const stickState = { x: 0, y: 0, run: false };
     let sId = null, sx = 0, sy = 0, lookId = null, lx = 0, ly = 0;
     const pinch = new Map();
@@ -33801,6 +33888,7 @@ try {
         if (d > R) { dx *= R / d; dy *= R / d; }
         knob.style.transform = `translate(${dx}px,${dy}px)`;
         stickState.x = dx / R; stickState.y = -dy / R;
+        const run = d > R * 0.92; if (run !== stickState.run) { stickState.run = run; stick.classList.toggle('run', run); }
         I.stick = stickState;
       } else if (pinch.size >= 2 && pinch.has(e.pointerId)) {
         const pts = [...pinch.values()], d0 = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]);
@@ -33815,7 +33903,7 @@ try {
     const end = (e) => {
       if (e.pointerType !== 'touch') return;
       pinch.delete(e.pointerId);
-      if (e.pointerId === sId) { sId = null; stick.style.display = 'none'; stickState.x = stickState.y = 0; I.stick = stickState; }
+      if (e.pointerId === sId) { sId = null; stick.style.display = 'none'; stick.classList.remove('run'); stickState.x = stickState.y = 0; stickState.run = false; I.stick = stickState; }
       if (e.pointerId === lookId) { lookId = null; I.mouse.buttons = 0; }
     };
     cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
@@ -33823,6 +33911,17 @@ try {
     let lastTap = 0;
     cv.addEventListener('pointerup', (e) => { if (e.pointerType !== 'touch' || AF.mode !== 'aerial') return; const n = performance.now(); if (n - lastTap < 320) { const p = AF.pickWorld(e.clientX, e.clientY); if (p && AF.PL.flyDownTo) AF.PL.flyDownTo(p); } lastTap = n; });
     I.stick = stickState;
+
+    AF.test('touch: the action cluster follows the context (fists, gun drawn)', () => {
+      const CB = AF.combat, S = AF.save, was = AF.mode, slot = CB.slot, had = S.guns.revolver;
+      try {
+        if (AF.mode !== 'walk') AF.setMode('walk', {});
+        CB.slot = 0; sync(); const fists = act[0] === 'hit' && !act.includes('aim');
+        S.guns.revolver = true; CB.slot = 1; sync(); const gun = act[0] === 'fire' && act.includes('aim') && act.includes('wpn');
+        const max = act.length <= 4;
+        return { ok: fists && gun && max && B.fire.classList.contains('s0'), info: `fists ${fists}, gun ${gun}, <=4 ${max}: ${act.join()}` };
+      } finally { CB.slot = slot; if (!had) delete S.guns.revolver; if (was && was !== AF.mode) AF.setMode(was); sync(); }
+    });
   }
 }
 
@@ -34282,15 +34381,16 @@ try {
   AF.cash = cash;
   const st = document.createElement('style');
   st.textContent = `
-  #ui #h-stat{width:112px;padding:8px 10px;display:grid;gap:6px;border-radius:14px;position:relative}
+  #ui #h-stat{width:112px;padding:8px 10px;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;border-radius:14px;position:relative;box-sizing:border-box}
   #ui #h-stat .hp{height:5px;border-radius:5px;background:rgba(255,255,255,.12);overflow:hidden}
   #ui #h-stat .hp i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#e0524a,#f2906c);transition:width .25s}
   #ui #h-stat .hp.low i{background:#ff4a3a;animation:gPulse 1s infinite}
-  #ui #h-stat .r{display:flex;justify-content:space-between;align-items:center;gap:4px}
+  #ui #h-stat .r{display:flex;justify-content:space-between;align-items:center;gap:4px;min-width:0}
   #ui #h-stat .m{font-weight:600;font-size:13px;color:#a6e8b4;font-variant-numeric:tabular-nums}
-  #ui #h-stat .st{font-size:10px;letter-spacing:1px;color:rgba(255,255,255,.16);white-space:nowrap}
-  #ui #h-stat .st b{color:#ffd24a;font-weight:400} #ui #h-stat .st.ev b{animation:gPulse .7s infinite}
-  #ui #h-stat .w{font-size:11px;color:var(--dim)} #ui #h-stat .w span{float:right;color:var(--ink);font-variant-numeric:tabular-nums}
+  #ui #h-stat .st{font-size:10px;letter-spacing:.5px;color:rgba(255,255,255,.16);white-space:nowrap;overflow:hidden}
+  #ui #h-stat .st b{color:#ffd24a;font-weight:400} #ui #h-stat .st.ev b{animation:gPulse .7s infinite} #ui.touch #h-stat .st.none{display:none}
+  #ui #h-stat .w{font-size:11px;color:var(--dim);display:flex;gap:6px;white-space:nowrap;min-width:0} #ui #h-stat .w i{font-style:normal;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  #ui #h-stat .w span{margin-left:auto;flex:none;color:var(--ink);font-variant-numeric:tabular-nums}
   #ui #h-stat .gain{position:absolute;right:calc(100% + 8px);top:18px;font-weight:600;font-size:13px;white-space:nowrap;opacity:0;transition:opacity .3s,transform .9s;pointer-events:none;text-shadow:0 1px 4px #000}
   #ui #h-stat .gain.on{opacity:1;transform:translateY(-8px)} #ui #h-stat .gain.neg{color:#ff9a8a} #ui #h-stat .gain.pos{color:#a6e8b4}
   #ui #h-job{position:absolute;left:max(16px,env(safe-area-inset-left));top:calc(max(16px,env(safe-area-inset-top)) + 50px);padding:7px 12px;border-radius:12px;max-width:min(330px,46vw);font-size:12px;display:none}
@@ -34307,16 +34407,19 @@ try {
   #ui #h-meter .bar{position:relative;height:12px;border-radius:12px;background:rgba(255,255,255,.1);margin-top:9px;overflow:hidden}
   #ui #h-meter .z{position:absolute;top:0;bottom:0;background:rgba(120,230,170,.5);border-radius:12px}
   #ui #h-meter .n{position:absolute;top:0;bottom:0;width:4px;margin-left:-2px;border-radius:3px;background:#fff;box-shadow:0 0 6px #fff}
-  #ui #m-shop>.panel{width:min(460px,100%);border-radius:18px}
+  #ui #m-shop>.panel{width:min(460px,100%);border-radius:18px;display:flex;flex-direction:column}
   #ui #m-shop h2{margin-bottom:4px} #ui #m-shop .sub{display:flex;justify-content:space-between;color:var(--dim);font-size:12px;margin-bottom:12px}
   #ui #m-shop .sub b{color:#a6e8b4;font-weight:600} #ui #m-shop .tabs{margin-bottom:10px;flex-wrap:wrap;border-radius:10px} #ui #m-shop .tabs:empty{display:none}
-  #ui #m-shop .items{display:grid;gap:6px;max-height:min(54vh,430px);overflow:auto;padding-right:2px}
+  #ui #m-shop .items{display:grid;gap:6px;flex:0 1 auto;min-height:0;max-height:min(54vh,430px);overflow:auto;padding-right:2px}
+  @media (max-height:520px){#ui #m-shop>.panel{padding:12px 14px} #ui #m-shop h2{font-size:16px;margin-bottom:0} #ui #m-shop .sub{margin-bottom:8px} #ui #m-shop .tabs{margin-bottom:6px} #ui #m-shop .items{max-height:none} #ui #m-shop .it{padding:7px 10px} #ui #m-shop .stack{margin-top:8px}}
   #ui #m-shop .it{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;text-align:left;padding:9px 12px;border-radius:12px;background:rgba(255,255,255,.05);transition:background .15s}
   #ui #m-shop .it:hover:not([disabled]){background:rgba(255,255,255,.11)} #ui #m-shop .it[disabled]{opacity:.42;cursor:default}
   #ui #m-shop .it i{width:14px;height:14px;border-radius:50%;border:1px solid rgba(255,255,255,.35)} #ui #m-shop .it i.no{visibility:hidden;width:0;margin-right:-10px}
   #ui #m-shop .it small{display:block;color:var(--dim);font-size:11px;margin-top:1px}
   #ui #m-shop .it em{font-style:normal;font-weight:600;color:#a6e8b4;white-space:nowrap} #ui #m-shop .it em.t{color:var(--dim);font-weight:500}
-  #ui.touch #h-stat{width:84px;padding:6px 8px;gap:4px} #ui.touch #h-stat .w{font-size:10px}
+  #ui.touch #h-stat{width:104px;padding:6px 8px;gap:4px} #ui.touch #h-stat .w{font-size:10px} #ui.touch #h-stat .m{font-size:12px}
+  #ui.touch #h-job{max-width:min(220px,40vw);font-size:11px;padding:6px 10px}
+  @media (orientation:portrait){#ui.touch #h-job{top:auto;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 178px);max-width:calc(100% - 32px)}}
   #ui.photo #h-job,#ui.photo #h-cross,#ui.photo #h-meter,#ui.mapping #h-cross,#ui.mapping #h-meter{display:none!important}
   @keyframes gPulse{50%{opacity:.35}}`;
   document.head.appendChild(st);
@@ -34446,7 +34549,7 @@ try {
       this.attrs = [['position', this.pos, 3], ['color', this.col, 3], ['aSize', this.size, 1], ['aA', this.alpha, 1]].map(([k, a, d]) => { const at = new THREE.BufferAttribute(a, d).setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, at); return at; });
       geo.setDrawRange(0, 0);
       const mat = new THREE.ShaderMaterial({ uniforms: { uScale: SCALE }, vertexShader: VS, fragmentShader: add ? FS_ADD : FS_DIT, transparent: add, depthWrite: !add, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending, fog: false });
-      this.pts = new THREE.Points(geo, mat); this.pts.frustumCulled = false; this.pts.renderOrder = add ? 7 : 0; this.pts.name = add ? 'fx-glow' : 'fx-smoke';
+      this.pts = new THREE.Points(geo, mat); this.pts.frustumCulled = false; this.pts.visible = false; this.pts.renderOrder = add ? 7 : 0; this.pts.name = add ? 'fx-glow' : 'fx-smoke';
       AF.scene.add(this.pts);
     }
     spawn(x, y, z, vx, vy, vz, life, size, grow, g, r, gc, b) {
@@ -34471,7 +34574,7 @@ try {
         this.size[i] = this.s0[i] + this.grow[i] * a; this.alpha[i] = this.add ? 1 - u : Math.min(1, u * 8) * (1 - u) * 0.95;
         i++;
       }
-      this.n = n; this.was = n > 0;
+      this.n = n; this.was = n > 0; this.pts.visible = n > 0;
       this.pts.geometry.setDrawRange(0, n);
       for (const at of this.attrs) { at.clearUpdateRanges(); at.addUpdateRange(0, n * at.itemSize); at.needsUpdate = true; }
     }
@@ -34553,6 +34656,8 @@ try {
 
   // ---------------------------------------------------------------- build + ticks
   AF.onBuild('game-fx', 870, () => { FX.glow = new Pool(AF.MOBILE ? 256 : 512, true); FX.smoke = new Pool(AF.MOBILE ? 160 : 320, false); });
+  // the pools draw nothing while empty: compile their programs behind the boot veil so the first shot never hitches
+  AF.on('preloaded', () => { if (!FX.glow || !AF.stream.compileAhead) return; for (const P of [FX.glow, FX.smoke]) { P.pts.visible = true; AF.stream.compileAhead(P.pts).then(() => { P.pts.visible = P.n > 0; }); } });
   let hudT = 0, reapT = 0;
   const focus = () => AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.player;
   AF.onTick('game', 960, (dt) => {
@@ -34578,10 +34683,10 @@ try {
     // HUD panel at 6 Hz
     if ((hudT += dt) > 0.16) {
       hudT = 0;
-      hpFill.style.width = (H.v / H.max * 100).toFixed(0) + '%'; hpBar.classList.toggle('low', H.v < 25);
+      const hw = (H.v / H.max * 100).toFixed(0) + '%'; if (hpFill._w !== hw) { hpFill.style.width = hw; hpFill._w = hw; } hpBar.classList.toggle('low', H.v < 25);
       text(mEl, cash(S.money));
       const CB = AF.combat, n = CB ? CB.stars : 0, sh = '<b>' + '\u2605'.repeat(n) + '</b>' + '\u2605'.repeat(5 - n);
-      if (starEl._h !== sh) { starEl.innerHTML = sh; starEl._h = sh; } starEl.classList.toggle('ev', !!(CB && n && CB.seenT > 1));
+      if (starEl._h !== sh) { starEl.innerHTML = sh; starEl._h = sh; starEl.classList.toggle('none', !n); } starEl.classList.toggle('ev', !!(CB && n && CB.seenT > 1));
       const wl = CB ? CB.label() : ''; if (wEl._h !== wl) { wEl.innerHTML = wl; wEl._h = wl; }
       const J = HUD.job, jl = J ? `<b>${esc(J.title)}</b>${esc(J.line)}${J.t != null ? '<span>' + Math.max(0, Math.ceil(J.t)) + 's</span>' : ''}${J.pay ? '<span>' + cash(J.pay) + '</span>' : ''}` : '';
       if (job._h !== jl) { job.innerHTML = jl; job._h = jl; } show(job, !!J);
@@ -34688,9 +34793,9 @@ try {
   CB.gun = cur; CB.GUNS = GUNS; CB.melee = melee;
   CB.label = () => {
     const g = CB.gallery ? 'gallery' : cur();
-    if (g === 'gallery') return `Gallery rifle<span>${CB.gallery.shots}</span>`;
-    if (!g) return melee()[0];
-    return `${GUNS[g].name}<span>${CB.reloadT > 0 ? '\u21bb' : CB.mag[g] || 0}/${S.ammo[g] || 0}</span>`;
+    if (g === 'gallery') return `<i>Gallery rifle</i><span>${CB.gallery.shots}</span>`;
+    if (!g) return '<i>' + melee()[0] + '</i>';
+    return `<i>${GUNS[g].name}</i><span>${CB.reloadT > 0 ? '\u21bb' : CB.mag[g] || 0}/${S.ammo[g] || 0}</span>`;
   };
   CB.give = (id) => { S.guns[id] = true; S.ammo[id] = (S.ammo[id] || 0) + GUNS[id].pack; CB.mag[id] = CB.mag[id] || 0; AF.saveSoon(); };
   const select = (slot) => { const o = owned(); CB.slot = ((slot % o.length) + o.length) % o.length; CB.reloadT = 0; attachHeld(); SFX.play('click'); };
@@ -34757,10 +34862,23 @@ try {
     if (!innocent && (!A.reported || fell)) { A.reported = true; CB.crime(w.cop ? (fell ? G.heat.copKill : G.heat.copHit) : fell ? (A.ko ? G.heat.ko : G.heat.kill) : G.heat.assault); }
   };
   const panic = (x, z, r) => {
-    const C = CR(); if (!C) return;
-    for (const w of C.walkers) if (w.act && !w.agg && !w.cop && (w.x - x) ** 2 + (w.z - z) ** 2 < r * r) { const A = engage(w, 'panic'); if (!A) break; }
+    const C = CR();
+    if (C) for (const w of C.walkers) if (w.act && !w.agg && !w.cop && (w.x - x) ** 2 + (w.z - z) ** 2 < r * r) { const A = engage(w, 'panic'); if (!A) break; }
+    scareWalkers(x, z, r);
   };
   CB.panic = panic;
+  // path walkers (54: airport, outland paths, the island) never fight back: shoved, knocked flat (then they get up), sent running.
+  // Same crimes as the crowd. hitWalker never calls WK.near (callers may be iterating its shared array).
+  const scareWalkers = (x, z, r) => { const WK = AF.walkers; if (WK && WK.near) for (const a of WK.near(x, z, r)) WK.scare(a, 6 + Math.random() * 4); };
+  const hitWalker = (a, dmg, kind, fx, fz, innocent) => {
+    const WK = AF.walkers; if (WK.isDown(a)) return;
+    FX.burst('hit', a.x, a.y + 1.3, a.z, 1);
+    a.hp = (a.hp ?? G.pedHp) - dmg;
+    const fell = kind !== 'melee' || a.hp <= 0;
+    if (fell) { WK.knock(a, fx, fz, kind === 'car' || kind === 'boom' ? 6 : 1.5, kind === 'melee' ? 7 : 25); a.hp = G.pedHp; FX.burst('dust', a.x, a.y + 0.2, a.z, 4); }
+    else { WK.stagger(a, fx, fz); say(a, FLEE_LINES[(a.ph * 7 | 0) % 4]); }
+    if (!innocent) CB.crime(fell ? (kind === 'melee' ? G.heat.ko : G.heat.kill) : G.heat.assault);
+  };
 
   // ---------------------------------------------------------------- the player's target picture (on foot / in a car / out of reach)
   const TG = { x: 0, y: 0, z: 0, car: null, away: true, speed: 0 };
@@ -34847,6 +34965,11 @@ try {
       if (!w.act || (w.agg && w.agg.lie) || (w.x - ox) ** 2 + (w.z - oz) ** 2 > R2 || exempt(w)) continue;
       const t = rayCapsule(ox, oy, oz, dx, dy, dz, w.x, w.y, w.z, 1.75 * w.s, 0.32); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'ped'; HIT.obj = w; }
     }
+    const WK = AF.walkers;
+    if (WK && WK.near && !CB.gallery) for (const a of WK.near(ox, oz, range)) {
+      if (WK.isDown(a)) continue;
+      const t = rayCapsule(ox, oy, oz, dx, dy, dz, a.x, a.y, a.z, 1.75, 0.32); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'walker'; HIT.obj = a; }
+    }
     if (!CB.gallery) for (const c of VV.cars) {
       if (c.active === false || c.player || (c.x - ox) ** 2 + (c.z - oz) ** 2 > R2) continue;
       const t = raySphere(ox, oy, oz, dx, dy, dz, c.x, c.y + 0.8, c.z, Math.min(c.halfL, 2.2)); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'car'; HIT.obj = c; }
@@ -34865,6 +34988,13 @@ try {
       const dx = w.x - ox, dz = w.z - oz, d = Math.hypot(dx, dz); if (d > bd || d < 0.5) continue;
       if ((dx * fx + dz * fz) / d < 0.9 || !los(ox, AF.player.y + 1.4, oz, w.x, w.y + 1.3, w.z)) continue;
       bd = d; best = w;
+    }
+    const WK = AF.walkers;
+    if (WK && WK.near) for (const a of WK.near(ox, oz, bd)) {
+      if (WK.isDown(a)) continue;
+      const dx = a.x - ox, dz = a.z - oz, d = Math.hypot(dx, dz); if (d > bd || d < 0.5) continue;
+      if ((dx * fx + dz * fz) / d < 0.9 || !los(ox, AF.player.y + 1.4, oz, a.x, a.y + 1.3, a.z)) continue;
+      bd = d; best = a;
     }
     return best;
   };
@@ -34890,7 +35020,7 @@ try {
     } else {
       const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw), w = autoTarget(p.x, p.z, fx, fz, W.range);
       ox = MZ.x; oy = MZ.y; oz = MZ.z;
-      if (w) { DIR.set(w.x - ox, w.y + 1.2 * w.s - oy, w.z - oz).normalize(); p.yaw = Math.atan2(DIR.x, DIR.z); } else DIR.set(fx, 0, fz);
+      if (w) { DIR.set(w.x - ox, w.y + 1.2 * (w.s || 1) - oy, w.z - oz).normalize(); p.yaw = Math.atan2(DIR.x, DIR.z); } else DIR.set(fx, 0, fz);
     }
     let any = false;
     for (let k = 0; k < (W.pellets || 1); k++) {
@@ -34899,6 +35029,7 @@ try {
       const h = ray(ox, oy, oz, TMP.x, TMP.y, TMP.z, W.range, t0);
       FX.line(MZ.x, MZ.y, MZ.z, h.x, h.y, h.z);
       if (h.kind === 'ped') { hitPed(h.obj, W.dmg, 'gun', TMP.x, TMP.z); any = true; }
+      else if (h.kind === 'walker') { hitWalker(h.obj, W.dmg, 'gun', TMP.x, TMP.z); any = true; }
       else if (h.kind === 'car') { dmgCar(h.obj, W.dmg * 0.35, true); FX.burst('spark', h.x, h.y, h.z, 3, { spread: 4 }); any = true; }
       else if (h.kind === 'heli') { heliHit(W.dmg); FX.burst('spark', h.x, h.y, h.z, 3, { spread: 4 }); any = true; }
       else if (h.kind === 'duck') { gal.hit(h.obj); any = true; }
@@ -34922,6 +35053,14 @@ try {
       if (d > 0.4 && (dx * fx + dz * fz) / d < 0.35) continue;
       bd = d; best = w;
     }
+    let walker = null; const WK = AF.walkers;
+    if (WK && WK.near) for (const a of WK.near(p.x, p.z, bd)) {
+      if (WK.isDown(a) || Math.abs(a.y - p.y) > 1.4) continue;
+      const dx = a.x - p.x, dz = a.z - p.z, d = Math.hypot(dx, dz); if (d > bd) continue;
+      if (d > 0.4 && (dx * fx + dz * fz) / d < 0.35) continue;
+      bd = d; walker = a;
+    }
+    if (walker) { hitWalker(walker, W[1], 'melee', fx, fz); SFX.play('punch', p.x, p.z); AF.hud.hitMark(); scareWalkers(p.x, p.z, 12); return; }
     if (best) { hitPed(best, W[1], 'melee', fx, fz); SFX.play('punch', p.x, p.z); AF.hud.hitMark(); return; }
     for (const c of VV.cars) if (c.active !== false && !c.player && Math.abs(c.x - p.x) < 4 && Math.abs(c.z - p.z) < 4 && VV.bodyDist(c, p.x + fx * 0.8, p.z + fz * 0.8) < 0.3) { dmgCar(c, 2, true); SFX.play('crash', c.x, c.z); return; }
   };
@@ -34955,6 +35094,8 @@ try {
     if (VV.player === car) { VV.exitCar(); H.hurt(55, 'boom'); }
     const R = G.boomR, C = CR();
     if (C) for (const w of C.walkers) { if (!w.act || (w.agg && w.agg.lie)) continue; const dx = w.x - car.x, dz = w.z - car.z, d = Math.hypot(dx, dz); if (d < R) hitPed(w, G.boomDmg * (1 - d / R), 'boom', dx / (d || 1), dz / (d || 1), !car.byPlayer); }
+    const WK = AF.walkers;
+    if (WK && WK.near) for (const a of WK.near(car.x, car.z, R)) { const dx = a.x - car.x, dz = a.z - car.z, d = Math.hypot(dx, dz) || 1; hitWalker(a, G.boomDmg, 'boom', dx / d, dz / d, !car.byPlayer); }
     if (AF.mode === 'walk') { const p = AF.player, dx = p.x - car.x, dz = p.z - car.z, d = Math.hypot(dx, dz); if (d < R) { H.hurt(G.boomDmg * (1 - d / R), 'boom'); AF.PL.push(dx / (d || 1) * 8, dz / (d || 1) * 8, 6); } }
     for (const c of VV.cars) if (c !== car && !c.dead && Math.abs(c.x - car.x) < R && Math.abs(c.z - car.z) < R) { const d = Math.hypot(c.x - car.x, c.z - car.z); if (d < R) dmgCar(c, 70 * (1 - d / R), car.byPlayer); }
     if (car.byPlayer) CB.crime(G.heat.carBoom);
@@ -34995,25 +35136,42 @@ try {
         FX.burst('hit', w.x, w.y + 0.9, w.z, 1); SFX.play('punch', w.x, w.z);
         if (car.player) { dmgCar(car, 2, true); if (!A.reported) { A.reported = true; CB.crime(G.heat.runOver); } }
       }
+      const WK = AF.walkers;
+      if (rogue && WK && WK.near) for (const a of WK.near(car.x, car.z, RO.R)) {
+        if (WK.isDown(a) || Math.abs(a.y - car.y) > 1.5 || !underCar(a.x, a.z)) continue;
+        WK.knock(a, fx, fz, Math.min(9, v * 0.6), 25); FX.burst('hit', a.x, a.y + 0.9, a.z, 1); SFX.play('punch', a.x, a.z);
+        if (car.player) { dmgCar(car, 2, true); CB.crime(G.heat.runOver); }
+      }
       if (walk && !car.player && hitCd <= 0 && Math.abs(p.y - car.y) < 1.5 && underCar(p.x, p.z)) {
         hitCd = 1; H.hurt(Math.max(0, v - G.carHitMin) * G.carHitK + 5, 'car'); AF.PL.push(fx * v * 0.7, fz * v * 0.7, 5); SFX.play('crash', p.x, p.z);
       }
     }
   };
-  let bumpCd = 0;
+  let bumpCd = 0, bumpN = 0;
+  const BUMP_LINES = ['Hey! Watch it!', 'Oof!', 'Mind your step, pal!'];
+  // keep the player's body out of a ped at (x, y, z): true on contact, BP = the unit push (ped -> player)
+  const BP = { nx: 0, nz: 0 };
+  const shove = (b, x, y, z) => {
+    const dx = b.x - x, dz = b.z - z; if (dx > 0.7 || dx < -0.7 || dz > 0.7 || dz < -0.7 || Math.abs(y - b.y) > 1.2) return false;
+    const d = Math.hypot(dx, dz); if (d > 0.62 || d < 1e-3) return false;
+    const k = (0.62 - d) / d, nx = b.x + dx * k, nz = b.z + dz * k;
+    if (!AF.boxBlocked(nx, b.y, nz, 0.3, 1.7)) { b.x = nx; b.z = nz; AF.player.x = nx; AF.player.z = nz; }
+    BP.nx = dx / d; BP.nz = dz / d; return true;
+  };
   const bodyPush = (dt) => {
-    const C = CR(), b = AF.player.body; if (!C) return;
+    const C = CR(), b = AF.player.body, sprint = (AF.PL.walk.speed || 0) > 7; if (!C) return;
     bumpCd -= dt;
     for (const w of C.walkers) {
-      if (!w.act || (w.agg && w.agg.lie)) continue;
-      const dx = b.x - w.x, dz = b.z - w.z; if (dx > 0.7 || dx < -0.7 || dz > 0.7 || dz < -0.7 || Math.abs(w.y - b.y) > 1.2) continue;
-      const d = Math.hypot(dx, dz); if (d > 0.62 || d < 1e-3) continue;
-      const k = (0.62 - d) / d, nx = b.x + dx * k, nz = b.z + dz * k;
-      if (!AF.boxBlocked(nx, b.y, nz, 0.3, 1.7)) { b.x = nx; b.z = nz; AF.player.x = nx; AF.player.z = nz; }
+      if (!w.act || (w.agg && w.agg.lie) || !shove(b, w.x, w.y, w.z)) continue;
       // barging through at a sprint: the ped staggers and complains (not a crime)
-      if ((AF.PL.walk.speed || 0) > 7 && !w.agg && !w.cop && bumpCd <= 0 && !exempt(w)) {
-        bumpCd = 0.6; const A = engage(w, 'bump'); if (A) { A.kind = 'flee'; down(w, 'stagger', -dx / d, -dz / d, 2); say(w, ['Hey! Watch it!', 'Oof!', 'Mind your step, pal!'][w.id % 3]); SFX.play('punch', w.x, w.z); }
+      if (sprint && !w.agg && !w.cop && bumpCd <= 0 && !exempt(w)) {
+        bumpCd = 0.6; const A = engage(w, 'bump'); if (A) { A.kind = 'flee'; down(w, 'stagger', -BP.nx, -BP.nz, 2); say(w, BUMP_LINES[w.id % 3]); SFX.play('punch', w.x, w.z); }
       }
+    }
+    const WK = AF.walkers; if (!WK || !WK.near) return;
+    for (const a of WK.near(b.x, b.z, 0.8)) {
+      if (WK.isDown(a) || !shove(b, a.x, a.y, a.z)) continue;
+      if (sprint && bumpCd <= 0) { bumpCd = 0.6; WK.stagger(a, -BP.nx, -BP.nz); say(a, BUMP_LINES[bumpN++ % 3]); SFX.play('punch', a.x, a.z); }
     }
   };
 
@@ -35115,9 +35273,11 @@ try {
   };
   const wanted = (dt) => {
     const C = CR(); if (!C) return;
+    if (!CB.stars && !SQUADS.length && !CB.copsUp) { SFX.siren(0); return; }   // nobody on duty: skip the crowd scan
     const T = target();
     let seen = false, copsUp = 0, sirenK = 0;
     for (const w of C.walkers) if (w.cop && w.act) { copsUp++; if (!seen && CB.stars && (w.x - T.x) ** 2 + (w.z - T.z) ** 2 < 55 * 55 && los(w.x, w.y + 1.6, w.z, T.x, T.y + 1.2, T.z)) seen = true; }
+    CB.copsUp = copsUp;
     for (let i = SQUADS.length - 1; i >= 0; i--) {
       const c = SQUADS[i]; if (!c.squad || c.dead || c.player || c.active === false) { SQUADS.splice(i, 1); continue; }
       const d = Math.hypot(c.x - T.x, c.z - T.z); if (d < 40) seen = true; sirenK = Math.max(sirenK, 1 / (1 + d / 40));
@@ -35218,6 +35378,22 @@ try {
     if (cop) CB.release(cop);
     clearWanted(); return { ok: two && spawned && armed && CB.stars === 0, info: `stars2 ${two}, spawned ${spawned}, armed ${armed}` };
   });
+  AF.test('combat: airport passengers (path walkers) stagger, go down to a bullet and scatter at gunfire', () => {
+    const WK = AF.walkers, path = WK.paths.find((p) => /^airport-/.test(p.name) && p.actors.filter((a) => !a.look.pose).length > 1);
+    if (!path) return { ok: false, info: 'no airport path' };
+    const cam = AF.camera.position.clone(), heat = CB.heat, stars = CB.stars;
+    try {
+      AF.camera.position.set(path.minX, 2, path.minZ); WK.update(0.1, 1);
+      const [a, b] = path.actors.filter((q) => !q.look.pose);
+      hitWalker(a, 5, 'melee', 1, 0); const shoved = !!a.rxOn && a.rx.st > 0 && !WK.isDown(a);
+      hitWalker(a, GUNS.revolver.dmg, 'gun', 1, 0); WK.update(0.2, 1.2); const down = WK.isDown(a);
+      scareWalkers(b.x, b.z, 2); const scared = b.rxOn && b.rx.fear > 0, crime = CB.heat > heat;
+      return { ok: shoved && down && scared && crime, info: `shoved ${shoved}, down ${down}, scared ${scared}, crime ${crime}` };
+    } finally {
+      for (const q of path.actors) if (q.rx) { Object.assign(q.rx, { down: 0, fall: 0, st: 0, fear: 0, ox: 0, oz: 0, vx: 0, vz: 0 }); q.rxOn = false; q.tilt = q.lift = 0; }
+      CB.heat = heat; CB.stars = stars; AF.camera.position.copy(cam); WK.update(0, AF.clock.t);
+    }
+  });
 }
 } catch (e) { AF.partError('77-combat.js', e); }
 
@@ -35286,7 +35462,8 @@ try {
       const d = Math.hypot(s.x - f.x, s.z - f.z);
       if (d < (s.r || 5) && speedNow() < 2.5) { if ((s.hold += dt) >= (s.wait || 0)) this.arrive(s); } else s.hold = 0;
       if (this.tick) this.tick(dt, s);
-      HUD.job = { title: this.title, line: (s.short || s.label) + ' \u00b7 ' + Math.round(d) + ' m', t: s.t, pay: this.earned || null };
+      const H = this.hud || (this.hud = { title: this.title, line: '', t: null, pay: null });
+      H.line = (s.short || s.label) + ' \u00b7 ' + Math.round(d) + ' m'; H.t = s.t; H.pay = this.earned || null; HUD.job = H;
     }
     arrive(s) {
       if (s.pay) { const p = Math.round(s.pay * (s.t0 ? 1 + G.pay.early * AF.clamp(s.t / s.t0, 0, 1) : 1)); AF.money.add(p); this.earned += p; }
@@ -35513,9 +35690,9 @@ try {
   const galleryTick = (dt) => {
     const GAL = AF.combat.gallery; if (!GAL) return;
     for (const d of J.gallery) if (d.down > 0 && (d.down -= dt) <= 0) d.m.rotation.x = 0;
-    GAL.t -= dt; HUD.job = { title: 'Shooting gallery', line: GAL.hits + ' hits \u00b7 ' + GAL.shots + ' shots left', t: GAL.t };
+    GAL.t -= dt; const GH = GAL.hud || (GAL.hud = { title: 'Shooting gallery', line: '', t: 0 }); GH.line = GAL.hits + ' hits \u00b7 ' + GAL.shots + ' shots left'; GH.t = GAL.t; HUD.job = GH;
     if ((GAL.shots <= 0 && AF.combat.cd <= 0) || GAL.t <= 0 || AF.mode !== 'walk') {
-      AF.combat.gallery = null; AF.PL.still = false; HUD.job = J.cur ? HUD.job : null;
+      AF.combat.gallery = null; AF.PL.still = false; HUD.job = J.cur ? J.cur.hud || null : null;
       const p = GAL.hits >= 8 ? 15 : GAL.hits >= 5 ? 6 : GAL.hits >= 3 ? 2 : 0;
       if (p) AF.money.add(p); toast(GAL.hits + ' ducks down. ' + (p ? 'The barker pays out ' + cash(p) + '!' : 'Step right up and try again!'));
     }

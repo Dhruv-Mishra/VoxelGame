@@ -836,6 +836,8 @@ VV.exitCar = () => {
   const p = exitSpot(car);
   AF.setMode('walk', { x: p.x, y: p.y, z: p.z, yaw: car.yaw + Math.PI });
 };
+// the seated driver inside a car body sits in the car's own shadow: skip its shadow draws (bikes keep them)
+const avatarShadow = (on) => { const m = AF.player && AF.player.mesh; if (m) m.traverse((o) => { if (o.isMesh && o.name !== 'held') o.castShadow = on; }); };
 AF.modes.drive = {
   enter(opts = {}, from) {
     const car = opts.car || VV.cars.find((c) => c.parked) || VV.cars[0];
@@ -847,6 +849,7 @@ AF.modes.drive = {
     car.vx = Math.sin(car.yaw) * car.v; car.vz = Math.cos(car.yaw) * car.v;
     DR.bike = car.type.kind === 'bike' && !!car.type.solo;
     if (AF.player && AF.player.setVisible) AF.player.setVisible(true);
+    avatarShadow(DR.bike);
     const L = seatLocal(car);
     DR.chase.set({ dist: car.type.big ? 13 : DR.bike ? 5.5 : 8.5, height: (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), eye: [L[0], L[1] + (DR.bike ? 1.4 : 1.0), L[2] + 0.1] });
     AF.emit('toast', (DR.bike ? 'You swing onto the ' : 'You slide behind the wheel of the ') + car.name + '.');
@@ -857,6 +860,7 @@ AF.modes.drive = {
     if (car) { car.player = false; car.parked = true; car.v = 0; car.vx = car.vz = 0; car.steer *= 0.5; car.roll = 0; placeMesh(car); if (car.interact) car.sync(); }
     DR.car = null; VV.player = null; if (AF.PL) AF.PL.seat = null;
     if (AF.player && AF.player.setVisible) AF.player.setVisible(true);
+    avatarShadow(true);
     AF.emit('hud', { speed: null, mode: to });
     AF.emit('hint', '');
   },
@@ -907,7 +911,7 @@ function paintMaterial() {
     compile(shader, renderer);
     shader.vertexShader = shader.vertexShader.replace('attribute float aPal;', 'attribute float aPal; attribute vec3 carPaint; attribute float carDmg; varying float vCarDmg;').replace('vec2 pUV =', 'vCarDmg = carDmg; float carPal = aPal < -2.5 ? carPaint.z : aPal < -1.5 ? carPaint.y : aPal < -0.5 ? carPaint.x : aPal;\nvec2 pUV =').replace('mod(aPal,', 'mod(carPal,').replace('floor(aPal /', 'floor(carPal /');
     // damage (0..1): soot and dents in blotches keyed to the model position, so a wreck reads charred, not just dark
-    shader.fragmentShader = shader.fragmentShader.replace('varying vec3 vAlb;', 'varying float vCarDmg; varying vec3 vAlb;').replace('diffuseColor.rgb *= vAlb * ao * shade * patMul;', 'diffuseColor.rgb *= vAlb * ao * shade * patMul;\n      diffuseColor.rgb *= 1.0 - vCarDmg * (0.3 + 0.62 * step(1.0 - vCarDmg, afHash(floor(vAfOP * 6.0))));');
+    shader.fragmentShader = shader.fragmentShader.replace('varying vec3 vAlb;', 'varying float vCarDmg; varying vec3 vAlb;').replace('diffuseColor.rgb *= vAlb * ao * shade * patMul;', 'diffuseColor.rgb *= vAlb * ao * shade * patMul;\n      if (vCarDmg > 0.0) diffuseColor.rgb *= 1.0 - vCarDmg * (0.3 + 0.62 * step(1.0 - vCarDmg, afHash(floor(vAfOP * 6.0))));');
   }; return PAINT_MAT;
 }
 function ensureIM(key, cap) {

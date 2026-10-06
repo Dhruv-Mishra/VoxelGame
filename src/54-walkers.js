@@ -53,6 +53,36 @@ try {
     locate(path,actor);
   }
   WK.distance2=(path,camera)=>Math.max(path.minX-camera.x,0,camera.x-path.maxX)**2+Math.max(path.minY-camera.y,0,camera.y-path.maxY)**2+Math.max(path.minZ-camera.z,0,camera.z-path.maxZ)**2;
+  // reactions to the player (77-combat): shoved (stagger), knocked flat (down s, then they get up), scared (run along the path, or cower
+  // in place when the path has no speed). Offsets from the path ease back once they walk on. State lives on the actor (actor.rx), made once.
+  const rx=(a)=>{if(!a.rx)a.rx={down:0,fall:0,st:0,fear:0,ox:0,oz:0,vx:0,vz:0,yaw:0};a.rxOn=true;return a.rx;};
+  const reacts=(a)=>a.look.pose!=='dance'&&a.look.pose!=='ride';
+  WK.knock=(a,fx,fz,v,t)=>{const R=rx(a);R.down=Math.max(R.down,t);R.vx=fx*v;R.vz=fz*v;R.yaw=Math.atan2(-fx,-fz);R.st=0;R.fear=0;};
+  WK.stagger=(a,fx,fz)=>{const R=rx(a);if(R.down>0||R.fall>0)return;R.st=0.7;R.vx=fx*1.8;R.vz=fz*1.8;R.yaw=Math.atan2(-fx,-fz);R.fear=Math.max(R.fear,3);};
+  WK.scare=(a,t)=>{const R=rx(a);if(!(R.down>0))R.fear=Math.max(R.fear,t);};
+  WK.isDown=(a)=>!!(a.rxOn&&(a.rx.down>0||a.rx.fall>0.4));
+  // actors of active paths within r of (x, z) that can react (a shared scratch array: copy it before calling near() again)
+  const NEAR=[];
+  WK.near=(x,z,r)=>{
+    NEAR.length=0;const r2=r*r;
+    for(const path of WK.paths){if(!path.active||x<path.minX-r||x>path.maxX+r||z<path.minZ-r||z>path.maxZ+r)continue;
+      for(const a of path.actors)if(!(a.gap>0)&&(a.x-x)**2+(a.z-z)**2<r2&&reacts(a))NEAR.push(a);}
+    return NEAR;
+  };
+  function react(path,a,dt){
+    const R=a.rx;let still=false;
+    if(R.down>0){R.down-=dt;R.fall=Math.min(1,R.fall+dt*5);still=true;}
+    else if(R.fall>0){R.fall=Math.max(0,R.fall-dt*1.4);still=true;}
+    if(R.st>0)R.st=Math.max(0,R.st-dt);
+    if(R.fear>0)R.fear-=dt;
+    if(still||!path.speed||!path.length){a.moving=false;locate(path,a);}else advance(path,a,R.fear>0?dt*2.6:dt);
+    const k=Math.exp(-dt*5);R.ox+=R.vx*dt;R.oz+=R.vz*dt;R.vx*=k;R.vz*=k;
+    if(!still&&!(R.st>0)){const e=Math.exp(-dt*0.7);R.ox*=e;R.oz*=e;}
+    a.x+=R.ox;a.z+=R.oz;
+    if(still||R.st>0)a.yaw=R.yaw;
+    a.tilt=-R.fall*Math.PI/2-(R.st>0?Math.sin(R.st/0.7*Math.PI)*0.38:0);a.lift=0.13*R.fall;
+    if(!still&&!(R.st>0)&&!(R.fear>0)&&Math.abs(R.ox)+Math.abs(R.oz)<0.02){a.rxOn=false;a.tilt=a.lift=0;R.ox=R.oz=R.vx=R.vz=0;}
+  }
   const build=()=>{
     const look=AF.peopleKit.makeLook('traveler','m','adult',AF.rng(54));
     Object.assign(look,{skin:0xefc19f,hair:0x3f2a1c,hairStyle:'part',hat:'fedora',hatCol:0x3f2a1c,hatCol2:0x3f2a1c,top:{style:'shirt',col:0x3f7f7c},bottom:{style:'pants',col:0x45464b},propR:null,propL:null,skirt:null,glasses:null,beard:false,moustache:false});
@@ -75,6 +105,7 @@ try {
     ready=true;
   };
   function put(mesh,index,actor,lx,ly,lz,angle=0,sx=1,sy=1,sz=1){
+    const t=actor.tilt;if(t){const c=Math.cos(t),s=Math.sin(t),y=ly*c-lz*s;lz=ly*s+lz*c;ly=y+actor.lift;angle+=t;}   // tipped about the feet (Rx)
     const sn=actor.sin,cs=actor.cos;position.set(actor.x+lx*cs+lz*sn,actor.y+ly,actor.z-lx*sn+lz*cs);
     euler.set(angle,actor.yaw,0,'YXZ');rotation.setFromEuler(euler);scale.set(sx,sy,sz);matrix.compose(position,rotation,scale);mesh.setMatrixAt(index,matrix);
     mesh.geometry.attributes.walkerPalette.array.set(actor.pal,index*4);
@@ -86,7 +117,7 @@ try {
     if(!active){if(visibleBefore)for(const mesh of WK.meshes){mesh.count=0;mesh.visible=false;}visibleBefore=false;WK.stats.visible=WK.stats.draws=0;return;}
     let count=0,bags=0;
     for(const path of WK.paths){if(!path.active)continue;
-      for(const actor of path.actors){advance(path,actor,dt);if(actor.gap>0)continue;
+      for(const actor of path.actors){if(actor.rxOn)react(path,actor,dt);else advance(path,actor,dt);if(actor.gap>0)continue;
         const distance2=(actor.x-camera.x)**2+(actor.y-camera.y)**2+(actor.z-camera.z)**2;if(distance2>path.activeRadius**2)continue;
         actor.sin=Math.sin(actor.yaw);actor.cos=Math.cos(actor.yaw);
         if(distance2<3600||Math.floor(time*5)!==actor.frame){actor.frame=Math.floor(time*5);actor.stride=actor.moving?Math.sin(actor.ph)*0.42:0;actor.wave=Math.sin(time*3)*0.35;}
@@ -103,10 +134,10 @@ try {
           put(WK.meshes[0],count,actor,0,hip,0,0.25);put(WK.meshes[1],count*2,actor,arm,shoulder-0.05,0.12,-1.25);put(WK.meshes[1],count*2+1,actor,-arm,shoulder-0.05,0.12,-1.25);
           put(WK.meshes[2],count*2,actor,leg,hip,0,-1.2);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-1.2);count++;continue;
         }
-        const stride=actor.stride||0,hip=bodyPlan.lh/16,shoulder=hip+bodyPlan.th/16,arm=(bodyPlan.tw+bodyPlan.aw)/32,leg=(bodyPlan.lw+1)/32,work=actor.look.pose==='marshal';
-        put(WK.meshes[0],count,actor,0,hip,0);put(WK.meshes[1],count*2,actor,arm,shoulder,0,work?-1.5+(actor.wave||0):-stride*0.8);put(WK.meshes[1],count*2+1,actor,-arm,shoulder,0,work?-1.5-(actor.wave||0):actor.bag?-0.22:stride*0.8);
+        const stride=actor.stride||0,hip=bodyPlan.lh/16,shoulder=hip+bodyPlan.th/16,arm=(bodyPlan.tw+bodyPlan.aw)/32,leg=(bodyPlan.lw+1)/32,work=actor.look.pose==='marshal',cower=actor.rxOn&&actor.rx.fear>0&&!actor.moving&&!actor.tilt;
+        put(WK.meshes[0],count,actor,0,hip,0);put(WK.meshes[1],count*2,actor,arm,shoulder,0,cower?-2.9:work?-1.5+(actor.wave||0):-stride*0.8);put(WK.meshes[1],count*2+1,actor,-arm,shoulder,0,cower?-2.9:work?-1.5-(actor.wave||0):actor.bag?-0.22:stride*0.8);
         put(WK.meshes[2],count*2,actor,leg,hip,0,stride);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-stride);
-        if(actor.bag)put(WK.meshes[3],bags++,actor,-0.48,0,-0.45,-0.18);
+        if(actor.bag&&!(actor.lift>0.03))put(WK.meshes[3],bags++,actor,-0.48,0,-0.45,-0.18);
         if(work){put(WK.meshes[3],bags++,actor,-0.4,shoulder-0.1,0.5,-Math.PI/2,0.12,0.65,0.12);put(WK.meshes[3],bags++,actor,0.4,shoulder-0.1,0.5,-Math.PI/2,0.12,0.65,0.12);}
         count++;
       }
@@ -123,6 +154,17 @@ try {
   AF.test('walkers: dwell, pingpong and flow obey dt',()=>{
     const path={points:[[0,0,0],[1,0,0],[2,0,0]],lengths:new Float64Array([0,1,2]),waits:new Float64Array([0,1,0]),speed:1,length:2,mode:'pingpong'},actor={s:0,dir:1,wait:0,gap:0,ph:0,look:{}};
     advance(path,actor,1);const dwell=actor.s===1&&actor.wait===1;advance(path,actor,0.5);const waiting=actor.s===1;advance(path,actor,1.5);const reverse=actor.dir===-1;path.mode='flow';actor.s=1.9;actor.dir=1;actor.wait=0;advance(path,actor,0.2);return{ok:dwell&&waiting&&reverse&&actor.s===0&&actor.gap>0,info:'dwell '+dwell+', reverse '+reverse+', flow gap '+actor.gap};
+  });
+  AF.test('walkers: an airport passenger is knocked flat, gets up and rejoins the path',()=>{
+    const path=WK.paths.find(p=>/^airport-/.test(p.name)&&p.speed>0&&p.actors.some(a=>!a.look.pose));if(!path)return{ok:false,info:'no airport path'};
+    const camera=AF.camera.position.clone();
+    try{
+      AF.camera.position.set(path.minX,2,path.minZ);update(0.1,1);
+      const a=path.actors.find(q=>!q.look.pose&&!(q.gap>0))||path.actors[0],found=WK.near(a.x,a.z,1).includes(a);
+      WK.knock(a,1,0,3,1);for(let i=0;i<8;i++)update(0.1,1+i*0.1);const down=WK.isDown(a)&&a.tilt<-1.2;
+      for(let i=0;i<90;i++)update(0.1,2+i*0.1);const up=!a.rxOn&&!a.tilt;
+      return{ok:found&&down&&up,info:'near '+found+', down '+down+', back on path '+up};
+    }finally{AF.camera.position.copy(camera);update(0,AF.clock.t);}
   });
 }
 }catch(error){AF.partError('54-walkers.js',error);}
