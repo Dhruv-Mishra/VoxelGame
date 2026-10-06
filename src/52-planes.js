@@ -98,7 +98,7 @@ try {
       PL.cur = pl; FL.init = false; FL.orbit = FL.orbitP = FL.idle = 0; FL.zoom = 1;
       if (AF.player) AF.player.setVisible(false);
       AF.emit('toast', 'Cleared for take-off in the ' + pl.name + '. ' + (AF.touch ? 'Hold THR + to open the throttle, push the stick up to lift off.' : 'Hold Space to open the throttle, then W to lift off.'));
-      AF.emit('hint', AF.touch ? '' : 'Space/Shift throttle \u00b7 W/S nose up/down \u00b7 A/D bank (ground: steer) \u00b7 Q/E rudder \u00b7 X/B brakes \u00b7 S at idle: reverse \u00b7 I invert pitch \u00b7 Mouse look \u00b7 Wheel zoom \u00b7 F exit');
+      AF.emit('hint', AF.touch ? '' : 'Space/Shift throttle \u00b7 W/S nose up/down \u00b7 A/D bank (ground: steer) \u00b7 Q/E rudder \u00b7 X/B brakes \u00b7 S at idle: reverse \u00b7 I invert pitch \u00b7 Mouse look \u00b7 C camera \u00b7 F exit');
     },
     exit() {
       const pl = PL.cur; PL.cur = null;
@@ -125,7 +125,7 @@ try {
         FL.orbit = (FL.orbit - m.dx * 0.006) % (PI * 2); FL.orbitP = AF.clamp(FL.orbitP + m.dy * 0.004, -0.4, 0.9); FL.idle = 0;
       } else FL.idle += dt;
       if (FL.idle > 1.5) { FL.orbit = AF.angDiff(0, FL.orbit) * Math.exp(-dt * 2); FL.orbitP *= Math.exp(-dt * 2); }
-      FL.zoom = AF.clamp(FL.zoom * Math.exp(m.wheel * 0.001), 0.65, 2.5);
+      FL.zoom = [1, 0.8, 1.6][AF.view.i];
       pl.throttle = AF.clamp(pl.throttle + thrIn * dt * 0.7, 0, 1);
       if ((pl.throttle > 0) !== pl.engine) { pl.engine = pl.throttle > 0; AF.emit('toast', pl.engine ? 'Engine running.' : 'Throttle closed \u2014 engine off.'); }
       // ---- dynamics
@@ -200,7 +200,12 @@ try {
       tmp.set(pl.x + Math.sin(a) * Math.cos(pit) * back, cy + Math.sin(pit) * back, pl.z + Math.cos(a) * Math.cos(pit) * back);
       tmp.y = Math.max(tmp.y, ground(tmp.x, tmp.z) + 1);
       const cp = Math.cos(FL.pit); look.set(pl.x + Math.sin(FL.yaw) * cp * 5, cy + Math.sin(FL.pit) * 5, pl.z + Math.cos(FL.yaw) * cp * 5);
-      const cam = AF.camera; cam.position.copy(tmp); cam.up.copy(UP); cam.lookAt(look); cam.rotateZ(-FL.roll * 0.3);
+      const cam = AF.camera;
+      if (AF.view.fp()) {   // cockpit: just behind the pilot's head, banking with the wings
+        tmp.set(pl.x, pl.y + pl.G.h * 0.62, pl.z).addScaledVector(fwd, -pl.G.halfL * 0.12);
+        const a = pl.yaw + FL.orbit, p = pl.pitch - FL.orbitP; look.set(tmp.x + Math.sin(a) * Math.cos(p) * 10, tmp.y + Math.sin(p) * 10, tmp.z + Math.cos(a) * Math.cos(p) * 10);
+        cam.position.copy(tmp); cam.up.copy(UP); cam.lookAt(look); cam.rotateZ(-pl.roll);
+      } else { cam.position.copy(tmp); cam.up.copy(UP); cam.lookAt(look); cam.rotateZ(-FL.roll * 0.3); }
       AF.camTarget.copy(look); AF.shadowFocus.set(pl.x, 0, pl.z); AF.shadowRadius = 90;
       // approach guidance to the Westgate runway (3-degree glideslope from the nearer threshold)
       let guide = '';

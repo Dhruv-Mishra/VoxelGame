@@ -35,7 +35,7 @@
 </script>
 <script type="module">
 // Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.
-// Parts: 00-prologue, 01-core, 01-stream, 02-voxel, 03-render, 04-vehicle, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-farms, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 75-extras, 98-tests, 99-boot
+// Parts: 00-prologue, 01-core, 01-stream, 02-voxel, 03-render, 04-vehicle, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-farms, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 75-extras, 76-game, 77-combat, 78-jobs, 98-tests, 99-boot
 // ===== prologue: module scope shared by every part (only THREE + ADDONS live here) =====
 window.AF = window.AF || {};
 {
@@ -3851,10 +3851,18 @@ try {
 // - ONE boarding prompt that follows the vehicle wherever it was left (attach / sync), so it can always be ridden again
 // - Vehicle.input(): keyboard + touch stick read once into a shared object (no per-frame allocation): thr -1..1, steer -1..1 (right +),
 //   brake, boost, exit (E/F pressed), modal (a menu is open: everything zero)
-// - Vehicle.Chase: the chase camera (rigid position, smoothed heading / height / boom, mouse orbit, wheel zoom, pulled in front of walls)
+// - Vehicle.Chase: the chase camera (rigid position, smoothed heading / height / boom, mouse orbit, pulled in front of walls); AF.view picks
+//   first person (eye = seat offset) / near / far for every camera owner (walk, chase, planes) — C cycles it
+// - Vehicle.seat(v, local, o): seats the player avatar at a local offset of a vehicle (AF.PL.seat, read by 70-player)
 // - Vehicle.landing(x, z, ...): nearest dry, unblocked spot to hop off onto
 // - Vehicle.all: every vehicle, for central queries
 {
+  // one camera distance setting for every mode: 0 first person, 1 third person near, 2 third person far (saved per browser)
+  const VIEW = AF.view = { i: 1, names: ['First person', 'Third person \u00b7 near', 'Third person \u00b7 far'], dist: [0, 0.72, 1.4] };
+  try { const v = +localStorage.getItem('portSolace.view'); if (v >= 0 && v <= 2) VIEW.i = v | 0; } catch (e) { /* storage blocked */ }
+  VIEW.cycle = () => { VIEW.i = (VIEW.i + 1) % 3; try { localStorage.setItem('portSolace.view', String(VIEW.i)); } catch (e) { /* storage blocked */ } AF.emit('toast', VIEW.names[VIEW.i]); };
+  VIEW.fp = () => VIEW.i === 0;
+  AF.onTick('view-key', 148, () => { if (AF.input.hit('KeyC') && AF.mode !== 'photo' && !(AF.ui && AF.ui.modalOpen && AF.ui.modalOpen())) VIEW.cycle(); });
   class Vehicle {
     constructor(o = {}) {
       this.name = o.name || 'vehicle'; this.x = o.x ?? 0; this.y = o.y ?? 0; this.z = o.z ?? 0; this.yaw = o.yaw ?? 0;
@@ -3899,20 +3907,32 @@ try {
   class Chase {
     constructor(o = {}) { this.want = new THREE.Vector3(); this.look = new THREE.Vector3(); this.set(o); }
     set(o = {}) {
-      this.dist = o.dist ?? 8.5; this.height = o.height ?? 1.3; this.ahead = o.ahead ?? 1.5; this.floor = o.floor || null; this.radius = o.shadow ?? 60;
+      this.dist0 = o.dist ?? 8.5; this.height = o.height ?? 1.3; this.ahead = o.ahead ?? 1.5; this.floor = o.floor || null; this.radius = o.shadow ?? 60;
+      this.eye = o.eye || [0, 1.15, 0.2];   // first-person eye: [right, up, forward] from the vehicle origin
       this.orbit = 0; this.orbitP = 0; this.dragT = 0; this.init = false;
       return this;
     }
-    update(dt, x, y, z, yaw) {
-      const m = AF.input.mouse;
-      if ((document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { this.orbit = (this.orbit - m.dx * 0.006) % (Math.PI * 2); this.orbitP = AF.clamp(this.orbitP + m.dy * 0.004, -0.25, 0.9); this.dragT = 1.5; }
+    update(dt, x, y, z, yaw, pitch = 0, roll = 0) {
+      const m = AF.input.mouse, fp = VIEW.fp(), cam = AF.camera;
+      this.dist = this.dist0 * (VIEW.dist[VIEW.i] || 1);
+      if ((document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { this.orbit = (this.orbit - m.dx * 0.006) % (Math.PI * 2); this.orbitP = AF.clamp(this.orbitP + m.dy * 0.004, fp ? -0.6 : -0.25, 0.9); this.dragT = 1.5; }
       else if ((this.dragT -= dt) < 0) { this.orbit *= Math.exp(-dt * 1.8); this.orbitP *= Math.exp(-dt * 1.8); }
-      if (m.wheel) this.dist = AF.clamp(this.dist * Math.exp(m.wheel * 0.001), 4, 28);
+      if (AF.player && AF.player.mesh) AF.player.mesh.visible = AF.player.visible && !fp;
+      AF.shadowFocus.set(x, y, z); AF.shadowRadius = this.radius;
+      if (fp) {
+        const s = Math.sin(yaw), c = Math.cos(yaw), e = this.eye;
+        cam.position.set(x + c * e[0] + s * e[2], y + e[1] + Math.sin(pitch) * e[2], z - s * e[0] + c * e[2]);
+        const a = yaw + this.orbit, p = -this.orbitP * 0.8 - pitch;
+        this.look.set(cam.position.x + Math.sin(a) * Math.cos(p) * 10, cam.position.y + Math.sin(p) * 10, cam.position.z + Math.cos(a) * Math.cos(p) * 10);
+        cam.up.set(Math.sin(roll) * Math.cos(yaw) * 0.5, 1, -Math.sin(roll) * Math.sin(yaw) * 0.5); cam.lookAt(this.look);
+        if (AF.camTarget) AF.camTarget.copy(this.look);
+        this.init = false; return;
+      }
       const first = !this.init;
       if (first) { this.cyaw = yaw; this.cy = y; this.cd = this.dist; }
       this.cyaw += AF.angDiff(this.cyaw, yaw) * (1 - Math.exp(-dt * 4.5));
       this.cy += (y - this.cy) * (1 - Math.exp(-dt * 6));
-      const a = this.cyaw + this.orbit, pitch = 0.2 + this.orbitP + this.dist * 0.004, cp = Math.cos(pitch), sp = Math.sin(pitch);
+      const a = this.cyaw + this.orbit, camP = 0.2 + this.orbitP + this.dist * 0.004, cp = Math.cos(camP), sp = Math.sin(camP);
       const tx = x + Math.sin(yaw) * this.ahead, ty = this.cy + this.height, tz = z + Math.cos(yaw) * this.ahead;
       let d = this.dist;
       // keep the camera out of walls: pull in fast, ease back out
@@ -3922,16 +3942,22 @@ try {
       }
       this.cd = first ? d : this.cd + (d - this.cd) * (1 - Math.exp(-dt * (d < this.cd ? 14 : 2.5)));
       this.init = true;
-      const cam = AF.camera;
       cam.position.set(tx - Math.sin(a) * cp * this.cd, ty + sp * this.cd, tz - Math.cos(a) * cp * this.cd);
       const low = this.floor ? this.floor(cam.position.x, cam.position.z) : AF.W.groundY(cam.position.x, cam.position.z) + 0.4;
       if (cam.position.y < low) cam.position.y = low;
       this.look.set(tx, ty, tz); cam.up.set(0, 1, 0); cam.lookAt(this.look);
       if (AF.camTarget) AF.camTarget.copy(this.look);
-      AF.shadowFocus.set(x, y, z); AF.shadowRadius = this.radius;
     }
   }
   Vehicle.Chase = Chase;
+  // the player avatar sits at local [right, up, forward] of a vehicle pose (one shared seat object, no allocation)
+  const SEAT = { x: 0, y: 0, z: 0, yaw: 0, roll: 0, pitch: 0, seatH: 0.45, lean: 0.25 };
+  Vehicle.seat = (v, l, o) => {
+    const s = Math.sin(v.yaw), c = Math.cos(v.yaw);
+    SEAT.x = v.x + c * l[0] + s * l[2]; SEAT.y = v.y + (v.bob || 0) + l[1]; SEAT.z = v.z - s * l[0] + c * l[2];
+    SEAT.yaw = v.yaw; SEAT.roll = v.roll || 0; SEAT.pitch = v.pitch || 0; SEAT.seatH = o ? o.seatH : 0.45; SEAT.lean = o ? o.lean : 0.25;
+    AF.PL.seat = SEAT; return SEAT;
+  };
 
   // nearest spot within maxR of (x, z) whose surface is above minY and leaves room to stand (rings of 16 directions)
   const RINGS = [2, 3.5, 5, 6.5, 8, 10], SPOT = { x: 0, y: 0, z: 0, r: 0 };
@@ -8970,9 +8996,10 @@ try {
       return geo(m, 1 / 8);
     };
     put(kiosk(24, 14, C.white, C.pink, C.white, 'TAFFY', C.red, C.white), -176, 0.25, 182, 0, true);
-    AF.addSpot({ building: null, x: -176, y: 0.25, z: 181.4, yaw: 0, kind: 'counter' });
+    AF.addSpot({ building: null, x: -176, y: 0.25, z: 181.6, yaw: Math.PI, kind: 'counter', vendor: true });
     put(kiosk(20, 12, C.red, C.gold, C.red, 'HOT DOGS', C.gold, C.red), -162, 0.25, 182, 0, true);
-    AF.addSpot({ building: null, x: -162, y: 0.25, z: 181.6, yaw: 0, kind: 'counter' });
+    AF.addSpot({ building: null, x: -162, y: 0.25, z: 181.8, yaw: Math.PI, kind: 'counter', vendor: true });
+    L.foodKiosks = [[-176, 182, 'Saltwater taffy', 4, 12], [-162, 182, 'Hot dog', 3, 22], [-214, 181, 'Ice cream cone', 3, 14], [-238, 181, 'Corn dog', 3, 20]];
     for (const qx of [-176, -162, -214, -238]) for (let i = 0; i < 4; i++) AF.addSpot({ building: null, x: qx + (i % 2) * 0.3 - 0.15, y: 0.25, z: 179.9 - i * 0.85, yaw: 0, kind: 'stand' });
     { // photo booth
       const m = new AF.Model(12, 20, 10);
@@ -8984,12 +9011,15 @@ try {
 
     // ---- more stalls along the promenade: ice cream, corn dogs, fortune teller, a high striker, bunting between the lamps
     put(kiosk(18, 12, C.mint, C.white, C.mint, 'ICE CREAM', C.navy, C.white), -214, 0.25, 181, 0, true);
-    AF.addSpot({ building: null, x: -214, y: 0.25, z: 180.6, yaw: 0, kind: 'counter' });
+    AF.addSpot({ building: null, x: -214, y: 0.25, z: 180.8, yaw: Math.PI, kind: 'counter', vendor: true });
     put(kiosk(18, 12, C.gold, C.red, C.gold, 'CORN DOGS', C.red, C.cream), -238, 0.25, 181, 0, true);
-    AF.addSpot({ building: null, x: -238, y: 0.25, z: 180.6, yaw: 0, kind: 'counter' });
+    AF.addSpot({ building: null, x: -238, y: 0.25, z: 180.8, yaw: Math.PI, kind: 'counter', vendor: true });
     put(kiosk(16, 12, c(0x5a2a6a), c(0x8a4aa0), C.gold, 'FORTUNES', C.gold, c(0x3a1a4a)), -245, 0.25, 201, 2, true);
+    AF.addSpot({ building: null, x: -245, y: 0.25, z: 201.2, yaw: 0, kind: 'counter', vendor: true });
     { // high striker: tall post with a bell, a puck that slides up and down, the mallet stand
       const hx = -226, hz = 199;
+      L.striker = { x: hx, z: hz };
+      AF.addSpot({ building: null, x: hx + 1.3, y: 0.25, z: hz + 1.2, yaw: -Math.PI / 2, kind: 'stand', vendor: true });
       F(hx - 0.25, 0.25, hz - 0.75, hx + 0.25, 7.0, hz - 0.25, C.red); F(hx - 0.5, 0.25, hz - 1.0, hx + 0.5, 0.75, hz, C.woodD);
       for (let y = 1; y < 7; y += 0.5) F(hx - 0.375, y, hz - 0.25, hx + 0.375, y + 0.125, hz - 0.125, C.white);
       F(hx - 0.5, 7.0, hz - 0.875, hx + 0.5, 7.5, hz - 0.125, C.gold); F(hx - 0.75, 0.25, hz + 0.25, hx + 0.75, 0.75, hz + 1.25, C.woodD);
@@ -9126,7 +9156,7 @@ try {
         put(LIB.sign('PLAY  WIN  PRIZES', neonT, null, 1 / 24), -285.2, 5.3, 186, 1, false);
         F(-279.5, 0.5, 194.2, -277.5, 1.5, 195.2, C.wood); F(-279.75, 1.5, 194, -277.25, 1.75, 195.4, C.brass); F(-279.5, 1.75, 194.9, -277.5, 2.9, 195.0, AF.col('glass')); F(-279.75, 2.9, 194, -277.25, 3.1, 195.4, C.red);
         put(LIB.sign('CHANGE', C.gold, C.red, 1 / 32), -278.5, 3.12, 194.0, 2, false);
-        AF.addSpot({ building: 'penny-arcade', x: -278.5, y: 0.5, z: 195.8, yaw: Math.PI, kind: 'counter' });
+        AF.addSpot({ building: 'penny-arcade', x: -278.5, y: 0.5, z: 195.8, yaw: Math.PI, kind: 'counter', vendor: true });
         const ap = [], as = [];
         for (let row = 0; row < 3; row++) { const z = 180.5 + row * 6; for (let x = X0 + 1, k = 0; x < X1 - 1; x += 0.6, k++) { ap.push(x, YT - 0.45 - Math.abs(Math.sin((x - X0) / (X1 - X0) * Math.PI * 4)) * 0.5, z); as.push(k); } }
         L.arcadeBulbs = { pts: ap, seq: as };
@@ -9161,6 +9191,9 @@ try {
           L.ducks = ducks;
         }
         AF.addSpot({ building: null, x: PP.x0 + 5.5, y: 0.25, z: COAST + 16, yaw: -Math.PI / 2, kind: 'play' });
+        // the gallery barker stands inside, beside the counter; L.gallery = where the player shoots from (78-jobs)
+        AF.addSpot({ building: null, x: PP.x0 + 3.9, y: 0.25, z: COAST + 13.4, yaw: Math.PI / 2, kind: 'counter', vendor: true });
+        L.gallery = { x: PP.x0 + 5.6, z: COAST + 16, gx: PP.x0 + 3.7, gz: COAST + 16 };
       }
       // THE BIG WHEEL (v2): 44 m tall, facing the pier approach (axle along z), on a widened pier-head platform.
       // Two white A-frames straddle the pier, 24 spokes lined with bulbs, 24 swinging gondolas in red / teal / cream.
@@ -10782,7 +10815,9 @@ try {
     const W = AF.W, red = col(0xc0342e), cream = col(0xf2ead0), gold = col(0xd8b84a, { metal: 0.6, rough: 0.35 }), glass = col(0xa9c9d6, { glass: true });
     const bulb = AF.col(0xfff2c0, { emit: 0xffd070, emitK: 2.6, mode: 'night' });
     W.fill(x - 1.25, 0.25, z - 1, x + 1.25, 2.5, z + 1, cream);
-    W.fill(x - 0.75, 1.1, z - 1.05, x + 0.75, 2.1, z - 1, glass);
+    W.fill(x - 1.0, 0.5, z - 0.75, x + 1.0, 2.25, z + 0.75, 0);                 // hollow booth: the attendant stands inside
+    W.fill(x - 0.75, 1.1, z - 1.05, x + 0.75, 2.1, z - 0.75, glass);
+    AF.addSpot({ building: null, x, y: 0.5, z: z - 0.25, yaw: PI, kind: 'counter', vendor: true });
     W.fill(x - 1.0, 1.0, z - 1.35, x + 1.0, 1.1, z - 1, col(0x8a5a36));
     for (let i = 0; i < 12; i++) W.fill(x - 1.5 + i * 0.25, 2.5, z - 1.4, x - 1.25 + i * 0.25, 2.75, z + 1.25, i % 2 ? red : cream);
     W.fill(x - 1.5, 2.75, z - 1.4, x + 1.5, 3.0, z + 1.25, gold);
@@ -10798,11 +10833,12 @@ try {
     const st = new THREE.Vector3(); CO.curve.getPointAt(0.015, st);
     RD.wheelK = { x: FW.WX - 6.5, z: FW.WZ - 8 };
     RD.coastK = { x: st.x + 6.5, z: 206.5 };
-    kiosk(RD.wheelK.x, RD.wheelK.z, 'BIG WHEEL 10\u00a2');
-    kiosk(RD.coastK.x, RD.coastK.z, 'SEA SERPENT 10\u00a2');
+    kiosk(RD.wheelK.x, RD.wheelK.z, 'BIG WHEEL $' + AF.G.price.ride);
+    kiosk(RD.coastK.x, RD.coastK.z, 'SEA SERPENT $' + AF.G.price.ride);
     RD.coastExit = { x: st.x + 3, z: 207.5 };
-    AF.addInteract({ x: RD.wheelK.x, y: 1.3, z: RD.wheelK.z - 1.7, r: 2.6, label: 'Ride the Big Wheel \u00b7 10\u00a2', prio: 2, can: () => AF.mode === 'walk', act: () => AF.setMode('funride', { ride: 'wheel' }) });
-    AF.addInteract({ x: RD.coastK.x, y: 1.3, z: RD.coastK.z - 1.7, r: 2.6, label: 'Ride the Sea Serpent \u00b7 10\u00a2', prio: 2, can: () => AF.mode === 'walk', act: () => AF.setMode('funride', { ride: 'coaster' }) });
+    const ride = (kind) => () => { if (AF.money.spend(AF.G.price.ride, 'a ticket')) AF.setMode('funride', { ride: kind }); };
+    AF.addInteract({ x: RD.wheelK.x, y: 1.3, z: RD.wheelK.z - 1.7, r: 2.6, label: 'Ride the Big Wheel \u00b7 $' + AF.G.price.ride, prio: 2, can: () => AF.mode === 'walk', act: ride('wheel') });
+    AF.addInteract({ x: RD.coastK.x, y: 1.3, z: RD.coastK.z - 1.7, r: 2.6, label: 'Ride the Sea Serpent \u00b7 $' + AF.G.price.ride, prio: 2, can: () => AF.mode === 'walk', act: ride('coaster') });
   });
 
   const wheelSeat = (R, out) => {
@@ -24985,6 +25021,16 @@ const WHEELS = {
 // distance from (px,pz) to a car's footprint (0 inside): you are "at" a car when you are next to its body, not its middle
 const bodyDist = (car, px, pz) => { const s = Math.sin(car.yaw), c = Math.cos(car.yaw), rx = px - car.x, rz = pz - car.z; const lx = rx * c - rz * s, lz = rx * s + rz * c; return Math.hypot(Math.max(0, Math.abs(lx) - car.halfW), Math.max(0, Math.abs(lz) - car.halfL)); };
 VV.bodyDist = bodyDist;
+// the driver's seat in car-local [right, up, forward] (instanced AI drivers and the seated player share it)
+const SEAT_L = [0, 0, 0];
+const seatLocal = (car) => {
+  const T = car.type, k = T.kind;
+  SEAT_L[0] = k === 'bike' ? 0 : car.halfW - 0.62;
+  SEAT_L[1] = k === 'cart' ? 1.3 : k === 'car' ? 0.4 : k === 'bike' ? 0.02 : T.big ? 0.45 : 0.42;
+  SEAT_L[2] = k === 'bike' ? -0.3 : k === 'cart' ? -0.45 : k === 'car' ? (T.id === 'convertible' ? 0.2 : 0.35) : car.halfL - (T.big ? T.id === 'bus' ? 2.1 : 2.6 : 1.3);
+  return SEAT_L;
+};
+VV.seatLocal = seatLocal;
 function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   const T = TYPES.find((t) => t.id === typeId);
   const G = getGeo(T, paintIdx);
@@ -25006,7 +25052,7 @@ function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   VV.cars.push(car);
   if (WHEEL_IM) { let count = 4; for (const existing of VV.cars) if (existing.type.id === typeId) count++; ensureIM(typeId, count); }
   if (!o.noDrive && !T.horse) car.attach({ r: 1.6, lift: 0.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => bodyDist(car, px, pz), prio: 0.1,
-    can: () => AF.mode === 'walk' && car.active !== false && !car.player && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
+    can: () => AF.mode === 'walk' && car.active !== false && !car.player && !car.dead && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
   placeMesh(car);
   return car;
 }
@@ -25018,7 +25064,7 @@ function placeMesh(car) {
 }
 
 // ---------------------------------------------------------------- drive mode
-const DR = { car: null, chase: new AF.Vehicle.Chase(), seat: { x: 0, y: 0, z: 0, yaw: 0, roll: 0, pitch: 0, seatH: 0.7, lean: 0.35 } };
+const DR = { car: null, chase: new AF.Vehicle.Chase(), seat: { seatH: 0.7, lean: 0.35 } }, CAR_SEAT = { seatH: 0.45, lean: 0.1 };
 const DRIVE_INPUT = { up: false, down: false, left: 0, right: 0, brake: false };
 const POINTS = new Float64Array(24), LOCAL_POINTS = new Float64Array([1, 1, -1, 1, 0, 1, 1, -1, -1, -1, 0, -1, 1, 0, -1, 0, 1, 0.5, -1, 0.5, 1, -0.5, -1, -0.5]);
 const CONTACT = new Float64Array(3), AXES = new Float64Array(8);
@@ -25110,6 +25156,7 @@ function carContacts(car, dt) {
         if (!worldHits(other, ox, oz, other.yaw)) {
           other.x = ox; other.z = oz;
           const impulse = Math.min(12, approach) * share;
+          if (VV.onImpact) VV.onImpact(other, approach * share, car);
           other.pushX = AF.clamp((other.pushX || 0) - normalX * impulse, -12, 12);
           other.pushZ = AF.clamp((other.pushZ || 0) - normalZ * impulse, -12, 12);
           other.pushSpin = AF.clamp((other.pushSpin || 0) + ((car.x - other.x) * normalZ - (car.z - other.z) * normalX) * impulse * 0.12, -1, 1);
@@ -25137,6 +25184,21 @@ function carContacts(car, dt) {
 VV.carBlocked = carBlocked;
 VV.makeCar = (...a) => makeCar(...a);
 VV.placeMesh = (c) => placeMesh(c);
+VV.getGeo = getGeo;
+// drop a runtime car from every registry (the forget policy in 76-game, wrecks, police cars)
+VV.removeCar = (car) => {
+  if (car.player) return false;
+  if (car.ai) { VV.detachTraffic(car); const i = VV.ai.indexOf(car); if (i >= 0) VV.ai.splice(i, 1); car.ai = null; }
+  for (const list of [VV.cars, VV.parked, AF.Vehicle.all]) { const i = list.indexOf(car); if (i >= 0) list.splice(i, 1); }
+  if (car.interact) { AF.removeInteract(car.interact); car.interact = null; }
+  car.active = false; return true;
+};
+// a kerb car taken for a drive goes back to its kerb (merged static) once forgotten, if the spot is still free
+VV.forget = (car) => {
+  const h = car.home;
+  if (!VV.removeCar(car)) return;
+  if (h && !car.dead && !VV.cars.some((c) => Math.abs(c.x - h.x) < 4 && Math.abs(c.z - h.z) < 4)) { try { VV.placeParked(h.type, h.x, h.z, h.yaw, { paint: h.pi, y: h.y }); } catch (e) { /* spot unusable */ } }
+};
 const GROUND = { front: 0, rear: 0, left: 0, right: 0 }, GROUND_HEIGHTS = new Float64Array(4);
 const groundUnder = (car) => {
   const s = Math.sin(car.yaw), c = Math.cos(car.yaw), hb = car.wheelbase / 2, hw = car.halfW - 0.2, top = car.y + 0.6;
@@ -25151,6 +25213,7 @@ const groundUnder = (car) => {
 VV.SPEED_K = 0.82;
 function physics(car, dt, inp) {
   car.crunchCd = Math.max(0, (car.crunchCd || 0) - dt);
+  const sp0 = Math.hypot(car.vx, car.vz);
   carContacts(car, dt);
   const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), rx = -hz, rz = hx;   // right-hand (screen) vector = -local x
   let f = car.vx * hx + car.vz * hz, lat = car.vx * rx + car.vz * rz;
@@ -25199,6 +25262,9 @@ function physics(car, dt, inp) {
     }
   }
   car.v = car.vx * nhx + car.vz * nhz;
+  // a sudden loss of speed (wall, car) is an impact: 77-combat turns it into damage
+  const lost = sp0 - Math.hypot(car.vx, car.vz) - Math.abs(acc) * dt;
+  if (lost > 2.5 && VV.onImpact) VV.onImpact(car, lost, car.lastHit);
   // ground follow: pitch / roll / height
   const g = groundUnder(car);
   const gy = (g.front + g.rear) / 2;
@@ -25239,8 +25305,9 @@ AF.modes.drive = {
     car.pushLife = car.pushX = car.pushZ = car.pushSpin = 0;
     car.vx = Math.sin(car.yaw) * car.v; car.vz = Math.cos(car.yaw) * car.v;
     DR.bike = car.type.kind === 'bike' && !!car.type.solo;
-    if (AF.player && AF.player.setVisible) AF.player.setVisible(DR.bike);
-    DR.chase.set({ dist: car.type.big ? 13 : DR.bike ? 5.5 : 8.5, height: (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0) });
+    if (AF.player && AF.player.setVisible) AF.player.setVisible(true);
+    const L = seatLocal(car);
+    DR.chase.set({ dist: car.type.big ? 13 : DR.bike ? 5.5 : 8.5, height: (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), eye: [L[0], L[1] + (DR.bike ? 1.4 : 1.0), L[2] + 0.1] });
     AF.emit('toast', (DR.bike ? 'You swing onto the ' : 'You slide behind the wheel of the ') + car.name + '.');
     AF.emit('hint', AF.touch ? '' : 'W/S throttle · A/D steer · Space brake · E to get out');
   },
@@ -25264,13 +25331,13 @@ AF.modes.drive = {
     if (DR.bike) {
       const lean = -car.steer * AF.clamp(Math.abs(car.v) / 9, 0, 1) * 1.1;
       car.roll += (lean - car.roll) * Math.min(1, dt * 6);
-      const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), seat = DR.seat;
-      seat.x = car.x - hx * 0.3; seat.y = car.y + car.bob + 0.02; seat.z = car.z - hz * 0.3; seat.yaw = car.yaw; seat.roll = car.roll; seat.pitch = car.pitch;
-      AF.PL.seat = seat;
     }
+    // the player rides in every vehicle (open cars and bikes show them): the avatar root sits seatH + 0.12 below a car's seat surface
+    const L = seatLocal(car); if (!DR.bike) L[1] -= 0.57;
+    AF.Vehicle.seat(car, L, DR.bike ? DR.seat : CAR_SEAT);
     placeMesh(car);
     if (car.interact) car.sync();
-    DR.chase.update(dt, car.x, car.y, car.z, car.yaw);
+    DR.chase.update(dt, car.x, car.y, car.z, car.yaw, car.pitch, car.roll);
     AF.Vehicle.hud(car.v, car.name);
     if (V.exit) VV.exitCar();
   },
@@ -25297,7 +25364,9 @@ function paintMaterial() {
   PAINT_MAT = AF.mat.patchVoxel(AF.mat.voxelInst.clone(), 'car-paint'); const compile = PAINT_MAT.onBeforeCompile;
   PAINT_MAT.onBeforeCompile = (shader, renderer) => {
     compile(shader, renderer);
-    shader.vertexShader = shader.vertexShader.replace('attribute float aPal;', 'attribute float aPal; attribute vec3 carPaint;').replace('vec2 pUV =', 'float carPal = aPal < -2.5 ? carPaint.z : aPal < -1.5 ? carPaint.y : aPal < -0.5 ? carPaint.x : aPal;\nvec2 pUV =').replace('mod(aPal,', 'mod(carPal,').replace('floor(aPal /', 'floor(carPal /');
+    shader.vertexShader = shader.vertexShader.replace('attribute float aPal;', 'attribute float aPal; attribute vec3 carPaint; attribute float carDmg; varying float vCarDmg;').replace('vec2 pUV =', 'vCarDmg = carDmg; float carPal = aPal < -2.5 ? carPaint.z : aPal < -1.5 ? carPaint.y : aPal < -0.5 ? carPaint.x : aPal;\nvec2 pUV =').replace('mod(aPal,', 'mod(carPal,').replace('floor(aPal /', 'floor(carPal /');
+    // damage (0..1): soot and dents in blotches keyed to the model position, so a wreck reads charred, not just dark
+    shader.fragmentShader = shader.fragmentShader.replace('varying vec3 vAlb;', 'varying float vCarDmg; varying vec3 vAlb;').replace('diffuseColor.rgb *= vAlb * ao * shade * patMul;', 'diffuseColor.rgb *= vAlb * ao * shade * patMul;\n      diffuseColor.rgb *= 1.0 - vCarDmg * (0.3 + 0.62 * step(1.0 - vCarDmg, afHash(floor(vAfOP * 6.0))));');
   }; return PAINT_MAT;
 }
 function ensureIM(key, cap) {
@@ -25310,9 +25379,9 @@ function ensureIM(key, cap) {
   const full = mk(G.geo, paintMaterial(), true);
   const glass = G.geo.userData.glass ? mk(G.geo.userData.glass, AF.mat.glass, false) : null; if (glass) glass.renderOrder = 2;
   const lod = G.lod ? mk(G.lod, paintMaterial(), false) : null;
-  const paint = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3), farPaint = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
-  full.geometry.setAttribute('carPaint', paint); if (lod) lod.geometry.setAttribute('carPaint', farPaint);
-  r = { full, glass, lod, paint, farPaint, paintRange: { start: 0, count: 0 }, farRange: { start: 0, count: 0 }, cap, n: 0, nl: 0 }; IMS.set(key, r);
+  const paint = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3), farPaint = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3), dmg = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1);
+  full.geometry.setAttribute('carPaint', paint); full.geometry.setAttribute('carDmg', dmg); if (lod) lod.geometry.setAttribute('carPaint', farPaint);
+  r = { full, glass, lod, paint, farPaint, dmg, dmgRange: { start: 0, count: 0 }, paintRange: { start: 0, count: 0 }, farRange: { start: 0, count: 0 }, cap, n: 0, nl: 0 }; IMS.set(key, r);
   return r;
 }
 // night lamps: one additive Points cloud (2 head + 2 tail per car) + instanced headlight pools on the road
@@ -25363,7 +25432,7 @@ function syncInstances(dt) {
     if (!r) continue;
     if (far) { /* lamps only */ }
     else if (d < LOD_D || !r.lod) {
-      if (r.n < r.cap) { r.full.setMatrixAt(r.n, tmpM); r.paint.setXYZ(r.n, pal.a, pal.b, pal.f); if (r.glass) r.glass.setMatrixAt(r.n, tmpM); r.n++; }
+      if (r.n < r.cap) { r.full.setMatrixAt(r.n, tmpM); r.paint.setXYZ(r.n, pal.a, pal.b, pal.f); r.dmg.array[r.n] = car.dmg || 0; if (r.glass) r.glass.setMatrixAt(r.n, tmpM); r.n++; }
     } else if (r.nl < r.cap) { r.lod.setMatrixAt(r.nl, tmpM); r.farPaint.setXYZ(r.nl++, pal.a, pal.b, pal.f); }
     if (!far && d < DETAIL_D) {
       tmpE.set(car.spin, 0, 0, 'YXZ'); REAR_Q.setFromEuler(tmpE); tmpE.set(car.spin, car.steer, 0, 'YXZ'); FRONT_Q.setFromEuler(tmpE);
@@ -25385,9 +25454,8 @@ function syncInstances(dt) {
       if (car.driver >= 0 && DRV_IM) {
         const im = DRV_IM[car.driver], i = dc[car.driver];
         if (i < im.userData.max) {
-          const seatY = car.type.kind === 'cart' ? 1.3 : car.type.kind === 'car' ? 0.4 : car.type.big ? 0.45 : 0.42;
-          const lz = car.type.kind === 'cart' ? -0.45 : car.type.kind === 'car' ? (car.type.id === 'convertible' ? 0.2 : 0.35) : car.halfL - (car.type.big ? car.type.id === 'bus' ? 2.1 : 2.6 : 1.3);
-          tmpM2.makeTranslation(car.halfW - 0.62, seatY, lz).premultiply(tmpM); im.setMatrixAt(i, tmpM2); dc[car.driver]++;
+          const L = seatLocal(car);
+          tmpM2.makeTranslation(L[0], L[1], L[2]).premultiply(tmpM); im.setMatrixAt(i, tmpM2); dc[car.driver]++;
         }
       }
     }
@@ -25406,7 +25474,7 @@ function syncInstances(dt) {
     }
   }
   for (const r of IMS.values()) {
-    if (r.n) { r.paint.clearUpdateRanges(); r.paintRange.count = r.n * 3; r.paint.updateRanges.push(r.paintRange); r.paint.needsUpdate = true; }
+    if (r.n) { r.paint.clearUpdateRanges(); r.paintRange.count = r.n * 3; r.paint.updateRanges.push(r.paintRange); r.paint.needsUpdate = true; r.dmg.clearUpdateRanges(); r.dmgRange.count = r.n; r.dmg.updateRanges.push(r.dmgRange); r.dmg.needsUpdate = true; }
     if (r.nl) { r.farPaint.clearUpdateRanges(); r.farRange.count = r.nl * 3; r.farPaint.updateRanges.push(r.farRange); r.farPaint.needsUpdate = true; }
     r.full.count = r.n; if (r.n) r.full.instanceMatrix.needsUpdate = true;
     if (r.glass) { r.glass.count = r.n; if (r.n) r.glass.instanceMatrix.needsUpdate = true; }
@@ -25586,6 +25654,7 @@ AF.onBuild('vehicles-parking', 480, () => {
       const j = VV.parked.indexOf(s); if (j >= 0) VV.parked.splice(j, 1);
       proxy.target = null; proxy.y = -999;
       const car = makeCar(s.type.id, s.pi, s.x, s.z, s.yaw, { y: s.y }); VV.parked.push(car);
+      car.temp = true; car.home = { type: s.type.id, pi: s.pi, x: s.x, z: s.z, y: s.y, yaw: s.yaw };
       AF.setMode('drive', { car });
     } });
   let pf = 0;
@@ -26101,7 +26170,7 @@ try {
       PL.cur = pl; FL.init = false; FL.orbit = FL.orbitP = FL.idle = 0; FL.zoom = 1;
       if (AF.player) AF.player.setVisible(false);
       AF.emit('toast', 'Cleared for take-off in the ' + pl.name + '. ' + (AF.touch ? 'Hold THR + to open the throttle, push the stick up to lift off.' : 'Hold Space to open the throttle, then W to lift off.'));
-      AF.emit('hint', AF.touch ? '' : 'Space/Shift throttle \u00b7 W/S nose up/down \u00b7 A/D bank (ground: steer) \u00b7 Q/E rudder \u00b7 X/B brakes \u00b7 S at idle: reverse \u00b7 I invert pitch \u00b7 Mouse look \u00b7 Wheel zoom \u00b7 F exit');
+      AF.emit('hint', AF.touch ? '' : 'Space/Shift throttle \u00b7 W/S nose up/down \u00b7 A/D bank (ground: steer) \u00b7 Q/E rudder \u00b7 X/B brakes \u00b7 S at idle: reverse \u00b7 I invert pitch \u00b7 Mouse look \u00b7 C camera \u00b7 F exit');
     },
     exit() {
       const pl = PL.cur; PL.cur = null;
@@ -26128,7 +26197,7 @@ try {
         FL.orbit = (FL.orbit - m.dx * 0.006) % (PI * 2); FL.orbitP = AF.clamp(FL.orbitP + m.dy * 0.004, -0.4, 0.9); FL.idle = 0;
       } else FL.idle += dt;
       if (FL.idle > 1.5) { FL.orbit = AF.angDiff(0, FL.orbit) * Math.exp(-dt * 2); FL.orbitP *= Math.exp(-dt * 2); }
-      FL.zoom = AF.clamp(FL.zoom * Math.exp(m.wheel * 0.001), 0.65, 2.5);
+      FL.zoom = [1, 0.8, 1.6][AF.view.i];
       pl.throttle = AF.clamp(pl.throttle + thrIn * dt * 0.7, 0, 1);
       if ((pl.throttle > 0) !== pl.engine) { pl.engine = pl.throttle > 0; AF.emit('toast', pl.engine ? 'Engine running.' : 'Throttle closed \u2014 engine off.'); }
       // ---- dynamics
@@ -26203,7 +26272,12 @@ try {
       tmp.set(pl.x + Math.sin(a) * Math.cos(pit) * back, cy + Math.sin(pit) * back, pl.z + Math.cos(a) * Math.cos(pit) * back);
       tmp.y = Math.max(tmp.y, ground(tmp.x, tmp.z) + 1);
       const cp = Math.cos(FL.pit); look.set(pl.x + Math.sin(FL.yaw) * cp * 5, cy + Math.sin(FL.pit) * 5, pl.z + Math.cos(FL.yaw) * cp * 5);
-      const cam = AF.camera; cam.position.copy(tmp); cam.up.copy(UP); cam.lookAt(look); cam.rotateZ(-FL.roll * 0.3);
+      const cam = AF.camera;
+      if (AF.view.fp()) {   // cockpit: just behind the pilot's head, banking with the wings
+        tmp.set(pl.x, pl.y + pl.G.h * 0.62, pl.z).addScaledVector(fwd, -pl.G.halfL * 0.12);
+        const a = pl.yaw + FL.orbit, p = pl.pitch - FL.orbitP; look.set(tmp.x + Math.sin(a) * Math.cos(p) * 10, tmp.y + Math.sin(p) * 10, tmp.z + Math.cos(a) * Math.cos(p) * 10);
+        cam.position.copy(tmp); cam.up.copy(UP); cam.lookAt(look); cam.rotateZ(-pl.roll);
+      } else { cam.position.copy(tmp); cam.up.copy(UP); cam.lookAt(look); cam.rotateZ(-FL.roll * 0.3); }
       AF.camTarget.copy(look); AF.shadowFocus.set(pl.x, 0, pl.z); AF.shadowRadius = 90;
       // approach guidance to the Westgate runway (3-degree glideslope from the nearer threshold)
       let guide = '';
@@ -28076,25 +28150,33 @@ try {
     sp('teenF', wom({ age: 'teen', set: { top: { style: 'cardigan', col: 0xe79aa8, col2: 0xf3f0e6, col3: 0xf3f0e6 }, skirt: { col: 0x86b3d6, len: 5, flare: 3, poodle: true }, bottom: { style: 'skirt', col: 0x86b3d6, sock: 0xf6f2ea }, hat: null, propR: null } }));
     sp('teenM', man({ age: 'teen', set: { top: { style: 'letterman', col: 0x7a2630, col2: 0xf3e7c8, col3: 0xf3e7c8, sleeve: 0xf3e7c8 }, bottom: { style: 'pants', col: 0x3e5f8a, cuff: true }, hat: null, skirt: null, apron: null, propR: null } }));
     sp('teenM2', man({ age: 'teen', set: { top: { style: 'shirt', col: 0xf3f0e6, short: true }, bottom: { style: 'pants', col: 0x45464b, cuff: true }, hat: 'newsboy', hatCol: 0x6a6258, hatCol2: 0x4a4238, skirt: null, apron: null, propR: null } }));
+    // the beat cop (77-combat's police pool): navy tunic, peaked cap, a revolver in the right hand
+    sp('cop', man({ set: { top: { style: 'suit', col: 0x1f2a44, tie: 0x141418, cuffs: true }, bottom: { style: 'pants', col: 0x1f2a44 }, hat: 'conductor', hatCol: 0x1f2a44, hatCol2: 0x141418, skirt: null, apron: null, propR: null, moustache: true } }), { cop: true });
     for (const L of out) { if (L.skirt === null) delete L.skirt; if (!L.bottom) L.bottom = { style: 'pants', col: 0x45464b }; if (L.skirt && L.bottom.style !== 'skirt' && !L.skirt.open) L.bottom = { style: 'skirt', col: L.skirt.col }; }
     return out;
   }
   const FRAMES = ['a', 'p', 'b', 'sit', 'work', 'phone', 'chat', 'look', 'hail', 'runA', 'runB'];
-  const WALK_FRAMES = ['a', 'p', 'b', 'p'];
+  const WALK_FRAMES = ['a', 'p', 'b', 'p'], COP_FRAMES = new Set(['a', 'p', 'b', 'work', 'hail', 'runA', 'runB']);
+  // which baked frames a look gets (draw calls = populated look x frame pairs, so rare frames go to a few looks only)
+  const wantFrame = (vi, V, L, f) => {
+    if (L.cop) return COP_FRAMES.has(f);
+    if ((f === 'runA' || f === 'runB') && (vi % 6 !== 0 || vi >= CR.nEve || V.kid || L.plan === 'elder')) return false;
+    if ((f === 'phone' || f === 'hail') && (vi % 6 !== 0 || vi >= CR.nEve || V.kid)) return false;
+    if ((f === 'chat' || f === 'look') && (V.chair || (vi < CR.nEve && vi % 4 !== 0))) return false;
+    if ((V.kid || vi >= CR.nEve) && (f === 'sit' || f === 'work')) return false;
+    if (V.chair && f !== 'p') return false;
+    return !(vi >= CR.nEve && f === 'b');   // group looks walk on two frames (a / pass) to keep draw calls down
+  };
   function buildCrowdMeshes() {
     const looks = crowdLooks(), tier = AF.GFX && AF.GFX.tier;
-    const NW = tier === 'low' ? 100 : tier === 'high' ? 195 : 247, NE = tier === 'low' ? 100 : 260;
+    // fewer ambient walkers than v2 (the game layer adds fights, cops and jobs on top): 70 / 140 / 170
+    const NW = tier === 'low' ? 70 : tier === 'high' ? 140 : 170, NE = tier === 'low' ? 90 : 220;
     CR.NW = NW; CR.NE = NE;
     for (let vi = 0; vi < looks.length; vi++) {
-      const L = looks[vi], kid = L.plan === 'kid', V = { L, im: {}, hipY: PLANS[L.plan].lh * VS, kid, chair: !!L.chair };
+      const L = looks[vi], kid = L.plan === 'kid', V = { L, im: {}, hipY: PLANS[L.plan].lh * VS, kid, chair: !!L.chair, cop: !!L.cop };
       for (const f of FRAMES) {
-        if ((f === 'runA' || f === 'runB') && (vi % 6 !== 0 || vi >= CR.nEve || kid || L.plan === 'elder')) continue;
-        if ((f === 'phone' || f === 'hail') && (vi % 6 !== 0 || vi >= CR.nEve || kid)) continue;
-        if ((f === 'chat' || f === 'look') && (V.chair || (vi < CR.nEve && vi % 4 !== 0))) continue;
-        if ((kid || vi >= CR.nEve) && (f === 'sit' || f === 'work')) continue;
-        if (V.chair && f !== 'p') continue;
-        if (vi >= CR.nEve && f === 'b') continue;   // group looks walk on two frames (a / pass) to keep draw calls down
-        const g = bakePose(L, V.chair ? 'sit' : f), cap = f === 'sit' || f === 'work' ? NE : vi >= CR.nEve ? 48 : (f === 'p' ? NW + NE : NW);
+        if (!wantFrame(vi, V, L, f)) continue;
+        const g = bakePose(L, V.chair ? 'sit' : f), cap = V.cop ? 12 : f === 'sit' || f === 'work' ? NE : vi >= CR.nEve ? 48 : (f === 'p' ? NW + NE : NW);
         const im = new THREE.InstancedMesh(g, AF.mat.voxel, cap);
         im.count = 0; im.frustumCulled = false; im.castShadow = f !== 'sit' && f !== 'work'; im.receiveShadow = true; im.visible = false; im.name = 'crowd-' + vi + f;
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -28228,6 +28310,8 @@ try {
     }
     if (SP.chairM !== undefined) for (let i = 44, k = 0; i < W.length; i += 45, k++) { const w = W[i]; if (w.lead || w.grp) continue; w.v = w.vd = w.vn = SP[k & 1 ? 'chairF' : 'chairM']; w.grp = 'chair'; w.s = 1; }
     for (const w of W) if (!w.lead) spawnWalker(w, C, false);
+    // the police pool (77-combat): 8 inactive walkers in the cop look, woken with an .agg when the wanted level calls for them
+    if (SP.cop !== undefined) for (let i = 0; i < 8; i++) W.push({ id: CR.NW + i, v: SP.cop, vd: SP.cop, vn: SP.cop, cop: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk' });
     CR.benches = AF.spots.filter((spot) => spot.kind === 'bench' && !spotsTaken.has(spot));
     CR.benchTaken = new Set();
   }
@@ -28236,6 +28320,12 @@ try {
     const c = Math.cos(yaw) * s, sn = Math.sin(yaw) * s, a = im.instanceMatrix.array, o = i * 16;
     a[o] = c * width; a[o + 1] = 0; a[o + 2] = -sn * width; a[o + 3] = 0; a[o + 4] = 0; a[o + 5] = s; a[o + 6] = 0; a[o + 7] = 0;
     a[o + 8] = sn; a[o + 9] = 0; a[o + 10] = c; a[o + 11] = 0; a[o + 12] = x; a[o + 13] = y; a[o + 14] = z; a[o + 15] = 1;
+  }
+  // flat on the back, head away from yaw: Ry(yaw) * Rx(-90deg) (knocked down / KO'd / run over)
+  function putLie(im, i, x, y, z, yaw, s) {
+    const c = Math.cos(yaw) * s, sn = Math.sin(yaw) * s, a = im.instanceMatrix.array, o = i * 16;
+    a[o] = c; a[o + 1] = 0; a[o + 2] = -sn; a[o + 3] = 0; a[o + 4] = -sn; a[o + 5] = 0; a[o + 6] = -c; a[o + 7] = 0;
+    a[o + 8] = 0; a[o + 9] = s; a[o + 10] = 0; a[o + 11] = 0; a[o + 12] = x; a[o + 13] = y + 0.14 * s; a[o + 14] = z; a[o + 15] = 1;
   }
   const crossingAxis = [0, 0];
   function crowdGreen(A, B) {
@@ -28360,6 +28450,7 @@ try {
   }
   const hash = (s) => { const h = Math.sin((s.x * 12.9898 + s.z * 78.233 + (s.y || 0) * 37.719)) * 43758.5453; return h - Math.floor(h); };
   function occupied(s, h) {
+    if (s.vendor) return true;   // kiosk + carnival staff never leave their counter
     const id = (s.building || '') + ' ' + (s.kind || ''), q = hash(s);
     if (spotsTaken.has(s) || (CR.benchTaken && CR.benchTaken.has(s))) return false;
     if (/school/.test(id)) return h >= 8 && h < 15.2 && q < 0.85;
@@ -28406,7 +28497,7 @@ try {
       refreshCand(C);
       if (jump > 45) {
         dens.clear(); flows.clear();
-        for (const w of CR.walkers) if (!w.lead) spawnWalker(w, C, false);
+        for (const w of CR.walkers) if (!w.lead && !w.cop && !w.agg) spawnWalker(w, C, false);
       }
     }
     dt = Math.min(dt, 0.1);
@@ -28422,7 +28513,22 @@ try {
     }
     const fr = AF.clock ? AF.clock.frame | 0 : 0, FAR2 = 65 * 65, LOOK2 = 38 * 38;
     const fc = CR.farCnt; for (const c of fc) c.a = c.p = c.b = 0;
+    const CB = AF.combat;
     for (const w of CR.walkers) {
+      // engaged (77-combat owns them: fleeing, fighting, down) or a cop: stepped there, always drawn at full detail
+      if (w.agg) {
+        if (CB && CB.stepPed(w, dt)) {
+          const V = CR.V[w.v], A = w.agg; let f = A.f;
+          if (!V.im[f]) f = f === 'runA' || f === 'runB' ? WALK_FRAMES[Math.floor(w.ph) & 3] : 'p';
+          const im = V.im[f] || V.im.p, c = cnt[w.v];
+          if (c[f] < im.instanceMatrix.count) { if (!c[f]) draws++; if (A.lie) putLie(im, c[f]++, w.x, w.y, w.z, w.yaw, w.s); else putInst(im, c[f]++, w.x, w.y + (A.dy || 0), w.z, w.yaw, w.s, w.width); }
+          act++; continue;
+        }
+        if (CB) CB.release(w);
+        if (w.cop) continue;
+        if (!w.lead) spawnWalker(w, C, true);
+      }
+      if (w.cop) continue;
       if ((w.lead ? w.lead.id : w.id) >= population) {
         w.act = false;
         if (w.bench) { CR.benchTaken.delete(w.bench); w.bench = null; }
@@ -28483,7 +28589,7 @@ try {
     // talkable passer-by: the nearest walker within 2 m of the player
     if (CR.it && pp.walk) {
       let best = null, bd = 2.2;
-      for (const w of CR.walkers) { if (!w.act || w.lead) continue; const d = Math.abs(w.x - pp.x) + Math.abs(w.z - pp.z); if (d < bd) { bd = d; best = w; } }
+      for (const w of CR.walkers) { if (!w.act || w.lead || w.agg) continue; const d = Math.abs(w.x - pp.x) + Math.abs(w.z - pp.z); if (d < bd) { bd = d; best = w; } }
       for (const e of CR.extras) { if (e.pose !== 'sit' && e.pose !== 'stand') continue; const d = Math.abs(e.x - pp.x) + Math.abs(e.z - pp.z) + Math.abs(e.y - (AF.player.y || 0)) * 0.5; if (d < bd) { bd = d; best = e; } }
       CR.near = best;
       if (best) { if (best.id == null) best.id = Math.floor(hash(best.s) * 1e6); if (!best.name) nameWalker(best); CR.it.x = best.x; CR.it.y = best.y + 1; CR.it.z = best.z; CR.it.label = (best.pose === 'sit' ? 'Chat with ' : 'Talk to ') + best.first; }
@@ -32371,9 +32477,11 @@ try {
   //          top: { col, col2, style: 'tee'|'hoodie'|'cardigan'|'shirt'|'dress'|'vest', print: hex }, bottom: { col, style: 'jeans'|'joggers'|'shorts'|'skirt' },
   //          shoe, hat: null|'cap'|'straw', hatCol, female, height (1 = 1.75 m), extra: 'headphones'|'chain'|'bow'|null }
   const AV = AF.avatar = {};
-  const geoCache = new Map();
+  const geoCache = new Map();   // key -> { g, n } (n live avatars use it; AV.release disposes at 0 so outfit changes don't leak)
   // every avatar part is authored at 1/16 m, then doubled to 1/32 m and given a fine detail pass (see FINE below)
-  const cget = (key, fn, anchor, det) => { let g = geoCache.get(key); if (!g) { const m = up2(fn()); if (det) det(m); g = AF.meshModel(m, { vs: 1 / 32, anchor }); geoCache.set(key, g); } return g; };
+  const cget = (key, fn, anchor, det, keys) => { let e = geoCache.get(key); if (!e) { const m = up2(fn()); if (det) det(m); e = { g: AF.meshModel(m, { vs: 1 / 32, anchor }), n: 0 }; geoCache.set(key, e); } e.n++; keys.push(key); return e.g; };
+  AV.release = (P) => { if (!P || !P.keys) return; for (const k of P.keys) { const e = geoCache.get(k); if (e && --e.n <= 0) { e.g.dispose(); geoCache.delete(k); } } P.keys = null; };
+  AV.cached = () => geoCache.size;
   const up2 = (m) => { const o = new AF.Model(m.w * 2, m.h * 2, m.d * 2); for (let x = 0; x < m.w; x++) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) { const c = m.get(x, y, z); if (c) o.box(x * 2, y * 2, z * 2, x * 2 + 2, y * 2 + 2, z * 2 + 2, c); } return o; };
   const hsh = (x, y, z) => ((Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) >>> 0);
   const shade = (hex, k) => { const f = (s) => Math.max(0, Math.min(255, Math.round(((hex >> s) & 255) * k))); return (f(16) << 16) | (f(8) << 8) | f(0); };
@@ -32524,12 +32632,12 @@ try {
     skirt(m, L, C) { for (let x = 0; x < m.w; x += 3) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) if (m.get(x, y, z) === C.bot) m.set(x, y, z, C.botD); },
   };
   AV.build = (L) => {
-    const C = pal(L), key = JSON.stringify(L);
-    const gLegL = cget('lL' + key, () => legModel(L, C, -1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C)), gLegR = cget('lR' + key, () => legModel(L, C, 1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C));
-    const gBent = cget('lB' + key, () => legModel(L, C, 1, true), [0.5, 1, 2 / 11]);
-    const gTorso = cget('t' + key, () => torsoModel(L, C), [0.5, 0, 0.5], (m) => FINE.torso(m, L, C));
-    const gArm = cget('a' + key, () => armModel(L, C), [0.5, 1, 0.5], (m) => FINE.arm(m, L, C));
-    const gHead = cget('h' + key, () => headModel(L, C), [0.5, 4 / 15, 0.5], (m) => FINE.head(m, L, C));
+    const C = pal(L), key = JSON.stringify(L), keys = [];
+    const gLegL = cget('lL' + key, () => legModel(L, C, -1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C), keys), gLegR = cget('lR' + key, () => legModel(L, C, 1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C), keys);
+    const gBent = cget('lB' + key, () => legModel(L, C, 1, true), [0.5, 1, 2 / 11], null, keys);
+    const gTorso = cget('t' + key, () => torsoModel(L, C), [0.5, 0, 0.5], (m) => FINE.torso(m, L, C), keys);
+    const gArm = cget('a' + key, () => armModel(L, C), [0.5, 1, 0.5], (m) => FINE.arm(m, L, C), keys);
+    const gHead = cget('h' + key, () => headModel(L, C), [0.5, 4 / 15, 0.5], (m) => FINE.head(m, L, C), keys);
     const root = new THREE.Group(); root.name = 'avatar';
     const hips = new THREE.Group(); hips.position.y = 0.75; root.add(hips);
     const hw = L.female ? 0.11 : 0.125;
@@ -32543,9 +32651,9 @@ try {
     const head = new THREE.Group(); head.position.set(0, 0.52, 0); chest.add(head);
     const headM = AF.modelMesh(gHead); headM.position.z = -0.03; head.add(headM);
     let skirt = null;
-    if (L.bottom && L.bottom.style === 'skirt') { skirt = AF.modelMesh(cget('s' + key, () => skirtModel(L, C), [0.5, 1, 0.5], (m) => FINE.skirt(m, L, C))); skirt.position.y = 0.02; hips.add(skirt); }
+    if (L.bottom && L.bottom.style === 'skirt') { skirt = AF.modelMesh(cget('s' + key, () => skirtModel(L, C), [0.5, 1, 0.5], (m) => FINE.skirt(m, L, C), keys)); skirt.position.y = 0.02; hips.add(skirt); }
     root.scale.setScalar(L.height || 1);
-    const parts = { root, hips, legL, legR, chest, torso, armL, armR, head, skirt, gLeg: [gLegL, gLegR], gBent, sitting: false };
+    const parts = { root, hips, legL, legR, chest, torso, armL, armR, head, skirt, gLeg: [gLegL, gLegR], gBent, sitting: false, keys };
     for (const m of [legL, legR, torso, armL, armR, headM, skirt]) if (m) { m.castShadow = true; m.receiveShadow = true; }
     return parts;
   };
@@ -32604,12 +32712,14 @@ try {
       player.look = look || AV.DEFAULT;
       const vis = player.mesh ? player.mesh.visible : true;
       if (player.mesh) AF.scene.remove(player.mesh);
+      AV.release(player.parts);
       const P = AV.build(player.look);
       // the player is always near the camera: keep it out of the distance cull
       P.root.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
       player.parts = P; player.mesh = P.root; P.root.name = 'player';
       P.root.position.set(body.x, body.y, body.z); P.root.rotation.y = player.yaw; P.root.visible = vis;
       AF.scene.add(P.root);
+      AF.emit('look', P);
     },
   };
 
@@ -32796,6 +32906,8 @@ try {
   const TMP = V3(), LOOK = V3(), QT = new THREE.Quaternion();
   const WALK = 5.8, RUN = 9.5;
   const vel = { x: 0, z: 0 };
+  // knockback (hits, explosions, cars): adds to the walk velocity; vy > 0 throws the body up
+  PL.push = (vx, vz, vy) => { vel.x += vx; vel.z += vz; if (vy) { body.vy = vy; body.onGround = false; } };
   // nearest usable interaction; entries may supply dist(px,pz) (e.g. distance to a car's body, not its centre)
   const findInteract = () => {
     let best = null, bd = 1e9;
@@ -32857,8 +32969,10 @@ try {
         if (!WK.inside) WK.inside = !!(AF.buildingAt && AF.buildingAt(hx, body.y + 1, hz));
       }
       WK.indoor = AF.lerp(WK.indoor, WK.inside ? 1 : 0, 1 - Math.exp(-dt * 4));
-      const maxBoom = AF.lerp(5.4 * (WK.zoom || 1), 2.8 * Math.min(1.2, WK.zoom || 1), WK.indoor);
-      let shoulder = AF.lerp(0.62, 0.34, WK.indoor);
+      // AF.view near / far; aiming (PL.aim, 77-combat) pulls in over the shoulder
+      const zoom = PL.aim ? 0.42 : AF.view.dist[AF.view.i];
+      const maxBoom = AF.lerp(5.4 * zoom, 2.8 * Math.min(1.2, zoom), WK.indoor);
+      let shoulder = AF.lerp(PL.aim ? 0.75 : 0.62, 0.34, WK.indoor);
       for (let s = 0.1; s <= shoulder; s += 0.1) if (solid(hx + rx * (s + 0.12), hy, hz + rz * (s + 0.12))) { shoulder = Math.max(0, s - 0.2); break; }
       const px = hx + rx * shoulder, py = hy, pz = hz + rz * shoulder;
       BR.px = px; BR.py = py; BR.pz = pz; BR.dx = dx; BR.dy = dy; BR.dz = dz; BR.rx = rx; BR.rz = rz; BR.max = maxBoom;
@@ -32889,8 +33003,8 @@ try {
       PL.hideMesh = WK.boom < 0.7;
       if (player.mesh) player.mesh.visible = player.visible && !PL.hideMesh;
     }
-    // a running stride widens the view a touch (eased, outdoors only)
-    const fov = 50 + (WK.running && !WK.fp ? 4 * (1 - WK.indoor) : 0);
+    // a running stride widens the view a touch (eased, outdoors only); aiming narrows it (a rifle scope further)
+    const fov = PL.aim ? PL.aimFov || 40 : 50 + (WK.running && !WK.fp ? 4 * (1 - WK.indoor) : 0);
     WK.fov = AF.lerp(WK.fov || 50, fov, 1 - Math.exp(-dt * 4));
     if (Math.abs(c.fov - WK.fov) > 0.02) { c.fov = WK.fov; c.updateProjectionMatrix(); }
     AF.camTarget.set(hx, hy, hz);
@@ -32913,26 +33027,21 @@ try {
     },
     exit() { AF.interactTarget = null; PL.hideMesh = false; if (player.mesh) player.mesh.visible = player.visible; const c = cam(); WK.fov = 50; if (c.fov !== 50) { c.fov = 50; c.updateProjectionMatrix(); } },
     update(dt) {
-      const I = AF.input, m = I.mouse, modal = inModal();
+      const I = AF.input, m = I.mouse, modal = inModal() || !!PL.busy;
       const locked = !!document.pointerLockElement;
       const talking = !!(AF.ui && AF.ui.dialogueOpen && AF.ui.dialogueOpen());
+      WK.fp = AF.view.fp();
       if (!modal) {
         // mouse / touch look: pointer lock (click the view) or drag
         if ((locked || ((m.buttons & 3) && !onPanel())) && (m.dx || m.dy)) {
-          const ks = AF.lookSens(); WK.camYaw -= m.dx * 0.0045 * ks; WK.camPitch = AF.clamp(WK.camPitch + m.dy * 0.0035 * ks, -0.75, 1.25); WK.lastMouse = AF.clock.t;
+          const ks = AF.lookSens() * (PL.aim ? 0.6 : 1); WK.camYaw -= m.dx * 0.0045 * ks; WK.camPitch = AF.clamp(WK.camPitch + m.dy * 0.0035 * ks, -0.75, 1.25); WK.lastMouse = AF.clock.t;
         }
         if (!locked && m.clicked && !onPanel()) I.requestLock();
-        if (m.wheel) {
-          if (WK.fp) { if (m.wheel > 0) { WK.fp = false; PL.hideMesh = false; WK.boom = 0.5; } }
-          else if (m.wheel > 0 && (WK.zoom || 1) >= 2.19) { WK.zout = (WK.zout || 0) + m.wheel; if (WK.zout > 120) { WK.zout = 0; AF.setMode('aerial', { focusPlayer: true }); return; } }
-          else { WK.zout = 0; WK.zoom = AF.clamp((WK.zoom || 1) * Math.exp(m.wheel * 0.0012), 0.45, 2.2); }
-        }
-        if (I.hit('KeyV')) { WK.fp = !WK.fp; if (!WK.fp) { PL.hideMesh = false; WK.boom = 0.5; } AF.emit('toast', WK.fp ? 'First-person view' : 'Over-the-shoulder view'); }
         if (I.hit('Tab')) { AF.setMode('aerial', { focusPlayer: true }); return; }
       }
       // movement (keys, or the analog stick on touch screens: AF.input.stick = {x, y} in -1..1)
       let ix = 0, iz = 0;
-      if (!modal) {
+      if (!modal && !PL.still) {
         if (I.key('KeyW') || I.key('ArrowUp')) iz += 1;
         if (I.key('KeyS') || I.key('ArrowDown')) iz -= 1;
         if (I.key('KeyA') || I.key('ArrowLeft')) ix -= 1;
@@ -32950,16 +33059,17 @@ try {
       const acc = 1 - Math.exp(-dt * (body.onGround ? 18 : 3));
       vel.x = AF.lerp(vel.x, wx, acc); vel.z = AF.lerp(vel.z, wz, acc);
       if (!modal && I.hit('Space') && body.onGround) { body.vy = 7.2; body.onGround = false; }
-      const wasAir = !body.onGround;
+      const wasAir = !body.onGround, vy0 = body.vy;
       const ox = body.x, oz = body.z;
       AF.moveBody(body, vel.x * dt, vel.z * dt, dt, { step: 0.55 });
       const bounds = AF.PLAN.world.play, margin = AF.PLAN.world.margin;
       body.x = AF.clamp(body.x, bounds.x0 - margin, bounds.x1 + margin);
       body.z = AF.clamp(body.z, bounds.z0 - margin, AF.PLAN.world.bounds.z1 - margin);
-      if (wasAir && body.onGround) AN.land = 0.6;
+      if (wasAir && body.onGround) { AN.land = 0.6; AF.emit('land', -vy0); }
       const hs = Math.hypot(body.x - ox, body.z - oz) / Math.max(dt, 1e-4);
+      WK.speed = hs;
       if (body.hitWall) { vel.x *= 0.6; vel.z *= 0.6; }
-      if (WK.fp) player.yaw = WK.camYaw + PI;
+      if (WK.fp || PL.aim) player.yaw = WK.camYaw + PI;
       else if (wl > 0) player.yaw += AF.angDiff(player.yaw, Math.atan2(wx, wz)) * (1 - Math.exp(-dt * 12));
       if (!WK.fp && !locked && wl > 0 && iz > 0 && AF.clock.t - WK.lastMouse > 4) WK.camYaw += AF.angDiff(WK.camYaw, player.yaw + PI) * (1 - Math.exp(-dt * 0.9));
       if (body.y < -14 || !isFinite(body.y)) { const s = AF.PLAN.spawn; player.teleport(s.x, s.y, s.z, s.yaw); AF.emit('toast', 'Whoops \u2014 back to safe ground.'); }
@@ -33011,7 +33121,7 @@ try {
   });
   // outside walk/aerial (driving, flying, riding): the vehicle owner may seat the avatar via PL.seat = {x,y,z,yaw,roll,pitch,bike}
   AF.onTick('player-idle', 160, (dt) => {
-    if (!player.mesh || AF.mode === 'walk' || AF.mode === 'aerial' || AF.mode === 'skydive' || AF.mode === 'row') return;
+    if (!player.mesh || AF.mode === 'walk' || AF.mode === 'aerial' || AF.mode === 'skydive' || AF.mode === 'row' || AF.mode === 'dead') return;
     const S = PL.seat;
     if (S && player.parts) {
       AV.sit(player.parts, true, S.seatH ?? 0.62);
@@ -33066,10 +33176,10 @@ try {
   #ui #t-title .logo{position:absolute;z-index:1;top:max(4vh,18px);left:max(28px,5vw);text-align:left}
   #ui #t-title h1{margin:0;font:400 46px/1.1 Limelight,Georgia,serif;color:var(--ink)}
   #ui #t-title .sub{margin-top:8px;color:var(--dim);font-size:13px}
-  #ui #t-title .modal{pointer-events:auto;width:min(380px,92vw);max-height:100%;padding:14px 16px 20px;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;z-index:0;overflow:hidden;background:none;border:0;backdrop-filter:none;-webkit-backdrop-filter:none;animation:uiIn .18s ease}
+  #ui #t-title .modal{pointer-events:auto;width:min(380px,92vw);max-height:100%;padding:16px 16px 20px;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;z-index:0;overflow:hidden;background:none;border:1px solid rgba(255,255,255,.12);border-radius:22px;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 18px 50px rgba(0,0,0,.3);animation:uiIn .18s ease}
   #ui #t-title .q{font-size:12px;color:var(--dim);text-align:center}
-  #ui #t-title .stage{position:relative;z-index:-1;width:100%;height:min(42vh,340px);min-height:190px;margin:6px 0 4px;border-radius:14px;overflow:hidden;background:none;cursor:grab;touch-action:none}
-  #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:10px;background:var(--bg);font-size:26px;line-height:1;display:grid;place-items:center;color:var(--ink);transition:background .18s}
+  #ui #t-title .stage{position:relative;z-index:-1;width:100%;height:min(42vh,340px);min-height:190px;margin:6px 0 4px;border-radius:16px;overflow:visible;background:none;cursor:grab;touch-action:none;box-shadow:0 0 0 900px rgba(10,16,24,.5)}
+  #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:50%;background:var(--bg);font-size:26px;line-height:1;display:grid;place-items:center;color:var(--ink);transition:background .18s}
   #ui #t-title .arr:hover{background:rgba(255,255,255,.16)}
   #ui #t-title .arr.l{left:10px} #ui #t-title .arr.r{right:10px}
   #ui #t-title .cnt{position:absolute;right:12px;top:10px;font-size:11px;color:var(--dim)}
@@ -33079,7 +33189,7 @@ try {
   #ui #t-title .dots{display:flex;gap:7px;margin:6px 0 10px}
   #ui #t-title .dots button{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.22);padding:0}
   #ui #t-title .dots button.on{background:var(--accent)}
-  #ui #t-title .go{padding:11px 24px;font-size:14px;display:inline-flex;align-items:center;gap:10px}
+  #ui #t-title .go{padding:11px 24px;font-size:14px;display:inline-flex;align-items:center;gap:10px;border-radius:999px}
   #ui #t-title .go .ic{font-size:11px}
   @media (orientation:portrait) and (max-width:760px){#ui #t-title{align-items:center;justify-content:flex-end;padding-top:max(88px,12vh)} #ui #t-title .logo{left:0;right:0;text-align:center} #ui #t-title:before{background:linear-gradient(0deg,rgba(5,10,16,.7),rgba(5,10,16,0) 60%),linear-gradient(180deg,rgba(5,10,16,.5),rgba(5,10,16,0) 25%)}}
   @media (orientation:landscape) and (max-height:560px){
@@ -33225,18 +33335,18 @@ try {
     <div class="stack"><button class="btn primary" data-k="resume">Resume</button><button class="btn" data-k="map">Map</button><button class="btn" data-k="help">Controls</button><button class="btn" data-k="switch">Switch friend</button></div></div>`); menu.id = 'm-menu';
   const help = h('div', 'sheet pe', ''); help.id = 'm-help';
   const K = (k, d) => `<div class="k"><span>${d}</span><span>${k.split('+').map((x) => '<kbd>' + x + '</kbd>').join(' ')}</span></div>`;
-  help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>RUN button</span></div></div>
-    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Jump \u00b7 brake</span><span>round button</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
-    : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('V', 'First person')}${K('Tab', 'Aerial view')}</div>
-    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('S', 'Reverse (ground, throttle closed)')}${K('Mouse', 'Free look')}${K('Wheel', 'Camera zoom')}${K('F', 'Get out (on the ground)')}</div>
-    <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}</div>
-    <div><h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}</div></div>`}
+  help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>RUN button</span></div><div class="k"><span>Camera</span><span>CAM button</span></div></div>
+    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Attack \u00b7 aim \u00b7 weapon</span><span>HIT \u00b7 AIM \u00b7 WPN</span></div><div class="k"><span>Jump \u00b7 brake</span><span>round button</span></div><div class="k"><span>Jobs</span><span>JOB button</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
+    : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('C', 'Camera: first person / near / far')}${K('Tab', 'Aerial view')}</div>
+    <div><h3>Fighting</h3>${K('Click+Q', 'Attack / shoot')}${K('Right-drag+Z', 'Aim (hold / toggle)')}${K('Wheel+1+2+3+4+5', 'Switch weapon')}${K('R', 'Reload')}<h3>Work</h3>${K('J', 'Start / quit a job (taxi, bus, van, fire engine, on foot: courier)')}</div>
+    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('F', 'Get out (on the ground)')}</div>
+    <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}<h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}</div></div>`}
     <div class="stack"><button class="btn primary" data-k="closehelp">Got it</button></div></div>`;
 
   // ------------------------------------------------------------------ state + public api
   const S = UI.state = { title: true, map: false, help: false, menu: false, dlg: null, bannerB: null, bannerT: 0, hudT: -9, hud: null, toasts: [], pick: null };
   UI.titleOpen = () => S.title;
-  UI.modalOpen = () => S.map || S.help || S.menu || S.title;
+  UI.modalOpen = () => S.map || S.help || S.menu || S.title || !!S.shop;
   UI.dialogueOpen = () => !!S.dlg;
   const show = (el, on, disp = 'block') => { const v = on ? disp : 'none'; if (el.style.display !== v) el.style.display = v; };
   const text = (el, value) => { value = String(value); if (el.textContent !== value) el.textContent = value; };
@@ -33345,7 +33455,7 @@ try {
     PV.look = look;
     if (!AF.avatar) return;
     pvInit();
-    if (PV.P) PV.scene.remove(PV.P.root);
+    if (PV.P) { PV.scene.remove(PV.P.root); AF.avatar.release(PV.P); }
     PV.P = AF.avatar.build(look); PV.scene.add(PV.P.root); PV.pop = 0;
   };
   AF.onTick('ui-preview', 946, (dt) => {
@@ -33365,9 +33475,10 @@ try {
     geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 1, 1, 1, 0, 0, 1, 0]), 2));
     geo.setIndex([0, 2, 1, 2, 3, 1]);
     const mat = new THREE.ShaderMaterial({
-      uniforms: { tMap: { value: null } }, depthTest: false, depthWrite: false, toneMapped: true,
+      uniforms: { tMap: { value: null }, uSize: { value: new THREE.Vector2(1, 1) }, uR: { value: 16 } }, depthTest: false, depthWrite: false, toneMapped: true,
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-      fragmentShader: 'uniform sampler2D tMap; varying vec2 vUv; void main(){ gl_FragColor = vec4(texture2D(tMap, vUv).rgb, 1.0);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}',
+      // rounded corners: the card's CSS radius, in drawing-buffer pixels
+      fragmentShader: 'uniform sampler2D tMap; uniform vec2 uSize; uniform float uR; varying vec2 vUv; void main(){ vec2 q = abs(vUv * uSize - 0.5 * uSize) - (0.5 * uSize - uR); if (length(max(q, 0.0)) > uR) discard; gl_FragColor = vec4(texture2D(tMap, vUv).rgb, 1.0);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}',
     });
     const quad = new THREE.Mesh(geo, mat); quad.frustumCulled = false;
     const sc = new THREE.Scene(); sc.add(quad);
@@ -33396,7 +33507,7 @@ try {
     const B = PV.blit || (PV.blit = pvBlit());
     const X0 = x / PV.size.x * 2 - 1, X1 = (x + w) / PV.size.x * 2 - 1, Y0 = 1 - y / PV.size.y * 2, Y1 = 1 - (y + hh) / PV.size.y * 2, p = B.pos.array;
     if (p[0] !== X0 || p[1] !== Y0 || p[3] !== X1 || p[7] !== Y1) { p[0] = p[6] = X0; p[3] = p[9] = X1; p[1] = p[4] = Y0; p[7] = p[10] = Y1; B.pos.needsUpdate = true; }
-    B.mat.uniforms.tMap.value = rt.texture;
+    B.mat.uniforms.tMap.value = rt.texture; B.mat.uniforms.uSize.value.set(w, hh); B.mat.uniforms.uR.value = 16 * k;
     const prev = R.getRenderTarget(), sct = R.getScissorTest(), ac = R.autoClear, tm = R.toneMapping, ex = R.toneMappingExposure;
     try {
       R.setScissorTest(false); R.autoClear = false;
@@ -33508,7 +33619,8 @@ try {
   AF.on('pointerunlock', (intentional) => { if (!intentional && !S.title && !UI.modalOpen() && !S.dlg) toggleMenu(true); });
   AF.on('escape', () => {
     if (S.title) return;
-    if (S.map || S.help) { toggleMap(false); toggleHelp(false); }
+    if (S.shop) AF.shop.close();
+    else if (S.map || S.help) { toggleMap(false); toggleHelp(false); }
     else if (S.dlg) closeDlg();
     else toggleMenu(true);
   });
@@ -33637,18 +33749,22 @@ try {
       jump: ic('<path d="M12 19V5M5 12l7-7 7 7"/>'), run: ic('<path d="M5 6l6 6-6 6M13 6l6 6-6 6"/>'), brake: ic('<rect x="6" y="6" width="12" height="12" rx="2"/>'),
       exit: ic('<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>'), up: ic('<path d="M12 5v14M5 12h14"/>', 'THR'), down: ic('<path d="M5 12h14"/>', 'THR'),
       walk: ic('<circle cx="12" cy="4.5" r="2"/><path d="M12 7v7M12 14l-3 6M12 14l3 6M8 10h8"/>'), chute: ic('<path d="M3 11a9 7 0 0 1 18 0zM4 11l8 8 8-8M12 11v8"/>'),
+      hit: ic('<path d="M7 11V7a2 2 0 0 1 4 0v3M11 10V6a2 2 0 0 1 4 0v4M15 10V8a2 2 0 0 1 4 0v5a7 7 0 0 1-7 7h-1a6 6 0 0 1-6-6v-2a2 2 0 0 1 2-2z"/>', 'HIT'),
+      aim: ic('<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>', 'AIM'), wpn: ic('<path d="M4 12h11l3-3h2v6h-2l-3-3M7 12v4h3"/>', 'WPN'),
+      cam: ic('<rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13.5" r="3.5"/><path d="M9 7l1.5-3h3L15 7"/>', 'CAM'), job: ic('<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V5h6v3M3 13h18"/>', 'JOB'),
     };
     // buttons: [icon, key, hold?, modes, cls]
     const DEF = [
       [IC.run, 'run', 'toggle', ['walk']], [IC.jump, 'Space', 'tap', ['walk'], 'big'],
+      [IC.aim, 'KeyZ', 'tap', ['walk']], [IC.hit, 'KeyQ', 'hold', ['walk'], 'big'], [IC.wpn, 'KeyX', 'tap', ['walk']], [IC.job, 'KeyJ', 'tap', ['walk', 'drive']], [IC.cam, 'KeyC', 'tap', ['walk', 'drive', 'fly', 'jetski']],
       [IC.exit, 'KeyE', 'tap', ['drive']], [IC.brake, 'Space', 'hold', ['drive'], 'big'],
       [IC.down, 'thr-', 'hold', ['fly']], [IC.up, 'thr+', 'hold', ['fly'], 'big'], [IC.exit, 'KeyF', 'tap', ['fly']], [IC.brake, 'KeyB', 'hold', ['fly']],
-      [IC.walk, 'Tab', 'tap', ['aerial']], [IC.chute, 'Space', 'tap', ['skydive'], 'big'], [IC.exit, 'KeyE', 'tap', ['row', 'ride', 'funride', 'jetski'], 'big'],
+      [IC.walk, 'Tab', 'tap', ['aerial']], [IC.chute, 'Space', 'tap', ['skydive'], 'big'], [IC.exit, 'KeyE', 'tap', ['row', 'ride', 'funride', 'jetski', 'carousel'], 'big'],
     ];
     const rows = [document.createElement('div'), document.createElement('div')]; rows.forEach((r) => { r.className = 'tc-row'; pad.appendChild(r); });
     const btns = DEF.map(([label, key, kind, modes, cls], i) => {
       const b = document.createElement('button'); b.className = 'tc pe' + (cls ? ' ' + cls : ''); b.innerHTML = label; b.dataset.key = key;
-      b.setAttribute('aria-label', { run: 'Run', Space: modes[0] === 'walk' ? 'Jump' : 'Brake', KeyE: 'Exit', KeyF: 'Exit plane', KeyB: 'Wheel brake', 'thr+': 'Increase throttle', 'thr-': 'Decrease throttle', Tab: 'Walk' }[key] || 'Deploy parachute');
+      b.setAttribute('aria-label', { run: 'Run', Space: modes[0] === 'walk' ? 'Jump' : 'Brake', KeyE: 'Exit', KeyF: 'Exit plane', KeyB: 'Wheel brake', 'thr+': 'Increase throttle', 'thr-': 'Decrease throttle', Tab: 'Walk', KeyQ: 'Attack', KeyZ: 'Aim', KeyX: 'Switch weapon', KeyC: 'Camera view', KeyJ: 'Job' }[key] || 'Deploy parachute');
       (i % 2 ? rows[1] : rows[0]).appendChild(b);
       const down = (e) => {
         e.preventDefault(); e.stopPropagation();
@@ -33894,6 +34010,8 @@ try {
   cv.addEventListener('pointerup', pointerUp); cv.addEventListener('pointercancel', pointerUp);
   cv.addEventListener('keydown', event => { if (event.code === 'Equal' || event.code === 'NumpadAdd') zoom(1.6); else if (event.code === 'Minus' || event.code === 'NumpadSubtract') zoom(1 / 1.6); else if (event.code === 'ArrowLeft') map.pan(-60 / map.scale, 0); else if (event.code === 'ArrowRight') map.pan(60 / map.scale, 0); else if (event.code === 'ArrowUp') map.pan(0, -60 / map.scale); else if (event.code === 'ArrowDown') map.pan(0, 60 / map.scale); else return; event.preventDefault(); });
   let lastRevision = -1, lastX = NaN, lastZ = NaN, lastYaw = NaN;
+  // map.miniOverlays: draw(ctx, to(x, z) -> {x, y}) on the minimap (one shared point, no allocation)
+  const MP = { cx: 0, cz: 0, s: 1, x: 0, y: 0 }, miniTo = (x, z) => { MP.x = (x - MP.cx) * MP.s + mini.width / 2; MP.y = (z - MP.cz) * MP.s + mini.height / 2; return MP; };
   AF.onTick('map', 951, dt => {
     if (S.title) return;
     miniTimer += dt; mapTimer += dt;
@@ -33912,7 +34030,9 @@ try {
     const span = AF.mode === 'aerial' ? AF.clamp(AF.PL.aerial.d * 1.4, 160, 700) : AF.mode === 'fly' ? 480 : AF.mode === 'drive' ? 220 : 140;
     if (src.x === miniX && src.z === miniZ && yaw === miniYaw && span === miniSpan && map.revision === miniRevision) return;
     miniX = src.x; miniZ = src.z; miniYaw = yaw; miniSpan = span; miniRevision = map.revision;
-    drawLayers(mg, src.x, src.z, mini.width / span, mini.width, mini.height); playerMarker(mg, mini.width / 2, mini.height / 2, yaw);
+    drawLayers(mg, src.x, src.z, mini.width / span, mini.width, mini.height);
+    if (map.miniOverlays) { MP.cx = src.x; MP.cz = src.z; MP.s = mini.width / span; for (const draw of map.miniOverlays) draw(mg, miniTo); }
+    playerMarker(mg, mini.width / 2, mini.height / 2, yaw);
   });
   AF.test('map: baked world and city images load', async () => {
     await map.finish();
@@ -34115,6 +34235,1384 @@ try {
   });
 }
 } catch (e) { AF.partError('75-extras.js', e); }
+
+// ================================================================ 76-game.js
+try {
+// ===== 76-game: the gameplay core shared by 77-combat + 78-jobs  (OWNER: game) =====
+// AF.G       every tuning number of the gameplay layer (economy, health, damage, wanted, forget policy) — balance here only
+// AF.save    the ONLY hard-persisted gameplay state: money, guns + ammo, outfits owned, a look per friend (localStorage)
+// AF.money   add(n) / spend(n, what) -> bool          AF.health  hurt(n, src) / heal(n); 0 hp -> 'dead' mode -> wake at home
+// AF.shop    open({ title, sub, tabs?, items(tab) -> [{ name, desc, price, tag, sw, off, act() }] }) — every counter + wardrobe
+// AF.fx      pooled particles, 2 draws (additive glow + dithered opaque smoke), nothing per frame while empty:
+//            burst(kind, x, y, z, n, o) kinds flash|fire|spark|smoke|steam|dust|hit|glow, line(x0..z1) for tracers
+// AF.sfx     synthesised one-shots + a siren (WebAudio, no files)     AF.hud  panel under the minimap, job line, crosshair, meter
+// Forget policy: runtime cars (taken from the kerb, police, wrecks) are dropped G.forgetS s after the player is G.forgetD away;
+// engaged peds calm down past G.pedForgetD (77). Only AF.save survives a reload.
+{
+  const PI = Math.PI, UI = AF.ui, root = document.getElementById('ui');
+  const G = AF.G = {
+    money0: 150,
+    hp: 100, regenTo: 40, regenRate: 2, regenDelay: 8,
+    fallSafe: 13, fallK: 6,                       // landing faster than 13 m/s (a ~4 m drop) costs 6 hp per extra m/s
+    carHitMin: 4, carHitK: 5,                     // a car hitting you on foot: (v - 4) * 5 hp
+    crashMin: 9, crashK: 3,                       // a hard crash hurts the driver too
+    deathFee: 0.1, deathFeeMax: 400, respawnS: 5,
+    vehHp: 100, vehDmgMin: 3, vehDmgK: 3.2, vehSmoke: 45, vehBurnS: 7, boomR: 8, boomDmg: 95,
+    forgetD: 220, forgetS: 40, wreckS: 60,
+    pedHp: 30, copHp: 60, engagedMax: 12, pedForgetD: 85, panicR: 26,
+    heat: { assault: 22, ko: 30, kill: 60, shots: 8, copHit: 50, copKill: 120, runOver: 45, carBoom: 40, trespass: 25 },
+    stars: [20, 70, 150, 260, 400], evadeS: [0, 10, 14, 18, 24, 30], cops: [0, 2, 3, 4, 6, 8], squad: [0, 0, 1, 2, 3, 3],
+    price: { ride: 2, game: 1, ticket: 40, repairBase: 25, repairK: 4, repaint: 120, sellK: 0.3, sellCooldown: 300 },
+    pay: { taxiBase: 12, taxiPerM: 0.05, busStop: 9, deliver: 16, deliverPerM: 0.04, courier: 10, courierPerM: 0.06, fire: 90, early: 0.4 },
+  };
+
+  // ---------------------------------------------------------------- AF.save
+  const KEY = 'portSolace.save';
+  const S = AF.save = Object.assign({ money: G.money0, guns: {}, ammo: {}, wear: [], looks: {} }, (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } })());
+  let saveT = 0;
+  AF.saveNow = () => { saveT = 0; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* storage blocked */ } };
+  AF.saveSoon = () => { saveT = 1.5; };
+
+  // ---------------------------------------------------------------- DOM helpers + styles
+  const h = (tag, cls, html, parent) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; (parent || root).appendChild(e); return e; };
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const text = (el, v) => { v = String(v); if (el.textContent !== v) el.textContent = v; };
+  const show = (el, on, d = 'block') => { const v = on ? d : 'none'; if (el.style.display !== v) el.style.display = v; };
+  const cash = (n) => '$' + Math.round(n).toLocaleString('en-US');
+  AF.cash = cash;
+  const st = document.createElement('style');
+  st.textContent = `
+  #ui #h-stat{width:112px;padding:8px 10px;display:grid;gap:6px;border-radius:14px;position:relative}
+  #ui #h-stat .hp{height:5px;border-radius:5px;background:rgba(255,255,255,.12);overflow:hidden}
+  #ui #h-stat .hp i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#e0524a,#f2906c);transition:width .25s}
+  #ui #h-stat .hp.low i{background:#ff4a3a;animation:gPulse 1s infinite}
+  #ui #h-stat .r{display:flex;justify-content:space-between;align-items:center;gap:4px}
+  #ui #h-stat .m{font-weight:600;font-size:13px;color:#a6e8b4;font-variant-numeric:tabular-nums}
+  #ui #h-stat .st{font-size:10px;letter-spacing:1px;color:rgba(255,255,255,.16);white-space:nowrap}
+  #ui #h-stat .st b{color:#ffd24a;font-weight:400} #ui #h-stat .st.ev b{animation:gPulse .7s infinite}
+  #ui #h-stat .w{font-size:11px;color:var(--dim)} #ui #h-stat .w span{float:right;color:var(--ink);font-variant-numeric:tabular-nums}
+  #ui #h-stat .gain{position:absolute;right:calc(100% + 8px);top:18px;font-weight:600;font-size:13px;white-space:nowrap;opacity:0;transition:opacity .3s,transform .9s;pointer-events:none;text-shadow:0 1px 4px #000}
+  #ui #h-stat .gain.on{opacity:1;transform:translateY(-8px)} #ui #h-stat .gain.neg{color:#ff9a8a} #ui #h-stat .gain.pos{color:#a6e8b4}
+  #ui #h-job{position:absolute;left:max(16px,env(safe-area-inset-left));top:calc(max(16px,env(safe-area-inset-top)) + 50px);padding:7px 12px;border-radius:12px;max-width:min(330px,46vw);font-size:12px;display:none}
+  #ui #h-job b{color:var(--accent);font-weight:600;margin-right:6px} #ui #h-job span{color:var(--dim);margin-left:8px;font-variant-numeric:tabular-nums}
+  #ui #h-cross{position:absolute;left:50%;top:50%;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;border:1.5px solid rgba(255,255,255,.75);display:none;pointer-events:none;box-shadow:0 0 3px rgba(0,0,0,.6);transition:border-color .1s,transform .1s}
+  #ui #h-cross:after{content:'';position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px;border-radius:50%;background:#fff}
+  #ui #h-cross.hit{border-color:#ff6a5a;transform:scale(1.25)}
+  #ui #h-hurt{position:absolute;inset:0;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 52%,rgba(170,16,16,.6) 100%);transition:opacity .35s}
+  #ui #h-dead{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:6px;pointer-events:none;background:radial-gradient(ellipse at center,rgba(30,8,8,.15),rgba(30,0,0,.6));animation:uiIn .6s ease}
+  #ui #h-dead h1{margin:0;font:400 54px Limelight,Georgia,serif;color:#f6e6d4;letter-spacing:3px;text-shadow:0 2px 14px #000}
+  #ui #h-dead div{color:var(--dim);font-size:13px}
+  #ui #h-meter{position:absolute;left:50%;bottom:24%;transform:translateX(-50%);width:min(340px,72vw);padding:10px 14px 12px;border-radius:16px;display:none;text-align:center;font-size:13px}
+  #ui #h-meter small{display:block;color:var(--dim);font-size:11px;margin-top:2px}
+  #ui #h-meter .bar{position:relative;height:12px;border-radius:12px;background:rgba(255,255,255,.1);margin-top:9px;overflow:hidden}
+  #ui #h-meter .z{position:absolute;top:0;bottom:0;background:rgba(120,230,170,.5);border-radius:12px}
+  #ui #h-meter .n{position:absolute;top:0;bottom:0;width:4px;margin-left:-2px;border-radius:3px;background:#fff;box-shadow:0 0 6px #fff}
+  #ui #m-shop>.panel{width:min(460px,100%);border-radius:18px}
+  #ui #m-shop h2{margin-bottom:4px} #ui #m-shop .sub{display:flex;justify-content:space-between;color:var(--dim);font-size:12px;margin-bottom:12px}
+  #ui #m-shop .sub b{color:#a6e8b4;font-weight:600} #ui #m-shop .tabs{margin-bottom:10px;flex-wrap:wrap;border-radius:10px} #ui #m-shop .tabs:empty{display:none}
+  #ui #m-shop .items{display:grid;gap:6px;max-height:min(54vh,430px);overflow:auto;padding-right:2px}
+  #ui #m-shop .it{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;text-align:left;padding:9px 12px;border-radius:12px;background:rgba(255,255,255,.05);transition:background .15s}
+  #ui #m-shop .it:hover:not([disabled]){background:rgba(255,255,255,.11)} #ui #m-shop .it[disabled]{opacity:.42;cursor:default}
+  #ui #m-shop .it i{width:14px;height:14px;border-radius:50%;border:1px solid rgba(255,255,255,.35)} #ui #m-shop .it i.no{visibility:hidden;width:0;margin-right:-10px}
+  #ui #m-shop .it small{display:block;color:var(--dim);font-size:11px;margin-top:1px}
+  #ui #m-shop .it em{font-style:normal;font-weight:600;color:#a6e8b4;white-space:nowrap} #ui #m-shop .it em.t{color:var(--dim);font-weight:500}
+  #ui.touch #h-stat{width:84px;padding:6px 8px;gap:4px} #ui.touch #h-stat .w{font-size:10px}
+  #ui.photo #h-job,#ui.photo #h-cross,#ui.photo #h-meter,#ui.mapping #h-cross,#ui.mapping #h-meter{display:none!important}
+  @keyframes gPulse{50%{opacity:.35}}`;
+  document.head.appendChild(st);
+
+  // ---------------------------------------------------------------- HUD (under the minimap, GTA-style: health, cash, wanted, weapon)
+  const right = document.getElementById('h-right'), mini = document.getElementById('h-mini');
+  const stat = h('div', 'panel hud', `<div class="hp"><i></i></div><div class="r"><span class="m"></span><span class="st"></span></div><div class="w"></div><div class="gain"></div>`); stat.id = 'h-stat';
+  right.insertBefore(stat, mini.nextSibling);
+  const hpBar = stat.querySelector('.hp'), hpFill = hpBar.firstChild, mEl = stat.querySelector('.m'), starEl = stat.querySelector('.st'), wEl = stat.querySelector('.w'), gainEl = stat.querySelector('.gain');
+  const job = h('div', 'panel hud', ''); job.id = 'h-job';
+  const cross = h('div', '', ''); cross.id = 'h-cross';
+  const hurtEl = h('div', '', ''); hurtEl.id = 'h-hurt';
+  const deadEl = h('div', '', '<h1>KNOCKED OUT</h1><div>The ambulance is on its way\u2026</div>'); deadEl.id = 'h-dead';
+  const meterEl = h('div', 'panel pe', '<div class="l"></div><small></small><div class="bar"><div class="z"></div><div class="n"></div></div>'); meterEl.id = 'h-meter';
+  let gainT = 0, hurtT = 0, crossHitT = 0;
+  const HUD = AF.hud = {
+    job: null,                  // { title, line, t } from 78-jobs
+    gain(n) { gainEl.textContent = (n > 0 ? '+' : '\u2212') + cash(Math.abs(n)); gainEl.className = 'gain on ' + (n > 0 ? 'pos' : 'neg'); gainT = 1.6; },
+    hurt(n) { hurtEl.style.opacity = String(Math.min(1, 0.35 + n / 30)); hurtT = 0.35; },
+    hitMark() { cross.classList.add('hit'); crossHitT = 0.12; },
+    cross(on) { show(cross, on); },
+  };
+  // a timing meter for the carnival games: the needle sweeps, attack / E / tap stops it; done(v 0..1, inZone)
+  const MT = { on: false, v: 0, dir: 1, speed: 1, zone: [0.8, 0.95], done: null, t: 0 };
+  HUD.meter = (o, done) => {
+    Object.assign(MT, { on: true, v: 0, dir: 1, speed: o.speed || 1.2, zone: o.zone || [0.82, 0.96], done, t: 0 });
+    meterEl.querySelector('.l').textContent = o.label || ''; meterEl.querySelector('small').textContent = o.sub || (AF.touch ? 'Tap to stop the needle' : 'Click, E or Q to stop the needle');
+    const z = meterEl.querySelector('.z'); z.style.left = MT.zone[0] * 100 + '%'; z.style.width = (MT.zone[1] - MT.zone[0]) * 100 + '%';
+    show(meterEl, true); AF.PL.busy = true;
+  };
+  HUD.meterOn = () => MT.on;
+  const meterStop = () => { if (!MT.on || MT.t < 0.15) return; MT.on = false; show(meterEl, false); AF.PL.busy = false; const v = MT.v; if (MT.done) MT.done(v, v >= MT.zone[0] && v <= MT.zone[1]); };
+  meterEl.addEventListener('pointerdown', (e) => { e.preventDefault(); meterStop(); });
+
+  // ---------------------------------------------------------------- money
+  AF.money = {
+    get v() { return S.money; },
+    add(n) { n = Math.round(n); if (!n) return; S.money = Math.max(0, S.money + n); AF.saveSoon(); HUD.gain(n); if (n > 0) SFX.play('cash'); },
+    spend(n, what) {
+      if (S.money < n) { AF.emit('toast', `Not enough cash \u2014 ${what || 'that'} costs ${cash(n)}.`); SFX.play('deny'); return false; }
+      AF.money.add(-n); return true;
+    },
+  };
+
+  // ---------------------------------------------------------------- health, death, respawn
+  const H = AF.health = { v: G.hp, max: G.hp, last: -99, dead: false };
+  const HURT_MODES = new Set(['walk', 'drive', 'jetski']);
+  H.hurt = (n, src) => {
+    if (H.dead || !(n > 0) || !AF.ready || !HURT_MODES.has(AF.mode) || (UI.state && UI.state.title)) return;
+    H.v = Math.max(0, H.v - n); H.last = AF.clock.t; HUD.hurt(n); SFX.play('hurt');
+    AF.emit('hurt', n, src);
+    if (H.v <= 0) die(src);
+  };
+  H.heal = (n) => { H.v = Math.min(H.max, H.v + n); };
+  AF.on('land', (v) => { if (v > G.fallSafe) H.hurt((v - G.fallSafe) * G.fallK, 'fall'); });
+  const DEAD = { t: 0, cam: new THREE.Vector3(), look: new THREE.Vector3() };
+  const die = (src) => {
+    H.dead = true;
+    const car = AF.mode === 'drive' && AF.vehicles.player;
+    if (car) { const s = Math.sin(car.yaw), c = Math.cos(car.yaw); AF.player.teleport(car.x + c * (car.halfW + 0.8), car.y + 0.5, car.z - s * (car.halfW + 0.8), car.yaw); }
+    AF.setMode('dead');
+    AF.emit('died', src);
+  };
+  const respawn = () => {
+    const fee = Math.min(G.deathFeeMax, Math.round(S.money * G.deathFee));
+    H.v = H.max; H.dead = false; H.last = -99;
+    AF.emit('respawn');
+    const s = AF.PLAN.spawn, go = () => AF.setMode('walk', { x: s.x, y: s.y, z: s.z, yaw: s.yaw, snap: true });
+    if (AF.stream && AF.stream.travel) AF.stream.travel({ label: 'home', go }); else go();
+    if (fee) AF.money.add(-fee);
+    AF.emit('toast', fee ? `You wake up at home, sore. The doctor's bill: ${cash(fee)}.` : 'You wake up at home, sore but in one piece.');
+  };
+  AF.modes.dead = {
+    enter() { DEAD.t = 0; DEAD.done = false; DEAD.yaw = AF.player.yaw; show(deadEl, true, 'flex'); AF.emit('hint', ''); AF.player.setVisible(true); },
+    exit() { show(deadEl, false); const p = AF.player; if (p.mesh) p.mesh.rotation.set(0, p.yaw, 0); },
+    update(dt) {
+      DEAD.t += dt;
+      const p = AF.player, b = p.body, P = p.parts, e = Math.min(1, DEAD.t / 0.7) ** 2;
+      if (p.mesh) { p.mesh.visible = true; p.mesh.position.set(b.x, b.y + e * 0.1, b.z); p.mesh.rotation.set(-e * PI * 0.49, DEAD.yaw, 0, 'YXZ'); }
+      if (P) { P.armL.rotation.set(-0.3 * e, 0, -1.3 * e); P.armR.rotation.set(-0.3 * e, 0, 1.3 * e); P.legL.rotation.x = 0.15 * e; P.legR.rotation.x = -0.1 * e; P.head.rotation.set(0.2 * e, 0.4 * e, 0); }
+      const a = DEAD.yaw + PI + DEAD.t * 0.16, r = 2.5 + DEAD.t * 0.9;
+      DEAD.look.set(b.x, b.y + 0.3, b.z);
+      DEAD.cam.set(b.x + Math.sin(a) * r, b.y + 1.8 + DEAD.t * 1.3, b.z + Math.cos(a) * r);
+      const cam = AF.camera; cam.position.copy(DEAD.cam); cam.up.set(0, 1, 0); cam.lookAt(DEAD.look); AF.camTarget.copy(DEAD.look);
+      AF.shadowFocus.set(b.x, 0, b.z); AF.shadowRadius = 50;
+      if (DEAD.t > G.respawnS && !DEAD.done) { DEAD.done = true; respawn(); }
+    },
+  };
+
+  // ---------------------------------------------------------------- shop sheet (also the wardrobe, the garage, the ticket desk)
+  const shop = h('div', 'sheet pe', '<div class="panel"><h2></h2><div class="sub"><span class="s"></span><b></b></div><div class="tabs seg"></div><div class="items"></div><div class="stack"><button class="btn" data-k="close">Done</button></div></div>'); shop.id = 'm-shop';
+  const shT = shop.querySelector('h2'), shS = shop.querySelector('.sub .s'), shM = shop.querySelector('.sub b'), shTabs = shop.querySelector('.tabs'), shItems = shop.querySelector('.items');
+  const SH = { cur: null, tab: 0, list: [] };
+  const renderShop = () => {
+    const o = SH.cur; if (!o) return;
+    text(shT, o.title); text(shS, o.sub || ''); text(shM, cash(S.money));
+    shTabs.innerHTML = (o.tabs || []).map((t, i) => `<button data-t="${i}" class="${i === SH.tab ? 'on' : ''}">${esc(t)}</button>`).join('');
+    SH.list = o.items(SH.tab) || [];
+    shItems.innerHTML = SH.list.map((it, i) => `<button class="it" data-i="${i}"${it.off ? ' disabled' : ''}><i class="${it.sw ? '' : 'no'}" style="${it.sw ? 'background:' + it.sw : ''}"></i><span>${esc(it.name)}${it.desc ? '<small>' + esc(it.desc) + '</small>' : ''}</span><em class="${it.tag ? 't' : ''}">${esc(it.tag || (it.price ? cash(it.price) : 'Free'))}</em></button>`).join('');
+  };
+  AF.shop = {
+    open(o) { SH.cur = o; SH.tab = 0; UI.state.shop = true; renderShop(); shop.classList.add('open'); AF.input.releaseLock(); AF.PL.aim = false; },
+    close() { if (!SH.cur) return; const o = SH.cur; SH.cur = null; UI.state.shop = false; shop.classList.remove('open'); if (o.onClose) o.onClose(); AF.input.requestLock(); },
+    refresh: renderShop,
+    // pay, then run fn; true re-renders the sheet
+    buy(price, what, fn) { if (!AF.money.spend(price, what)) return; fn(); AF.saveSoon(); renderShop(); },
+  };
+  shop.addEventListener('click', (e) => {
+    if (e.target === shop || e.target.closest('[data-k=close]')) { AF.shop.close(); return; }
+    const t = e.target.closest('[data-t]'); if (t) { SH.tab = +t.dataset.t; renderShop(); return; }
+    const b = e.target.closest('.it'); if (!b || b.disabled) return;
+    const it = SH.list[+b.dataset.i]; if (it && it.act) { it.act(); if (SH.cur) renderShop(); }
+  });
+
+  // ---------------------------------------------------------------- AF.fx: pooled particles (2 Points draws, idle when empty)
+  const SCALE = { value: 600 };
+  const VS = 'attribute vec3 color; attribute float aSize; attribute float aA; uniform float uScale; varying vec3 vC; varying float vA;\nvoid main(){ vC = color; vA = aA; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; gl_PointSize = clamp(aSize * uScale / max(0.1, -mv.z), 1.0, 256.0); }';
+  const FS_ADD = 'varying vec3 vC; varying float vA;\nvoid main(){ vec2 p = gl_PointCoord * 2.0 - 1.0; float d = dot(p, p); if (d > 1.0) discard; float a = 1.0 - d; gl_FragColor = vec4(vC * a * a * vA, 1.0); }';
+  // smoke stays opaque (PERF.md 8.5): coverage is dithered with interleaved gradient noise instead of alpha-blended
+  const FS_DIT = 'varying vec3 vC; varying float vA;\nvoid main(){ vec2 p = gl_PointCoord * 2.0 - 1.0; float d = dot(p, p); float a = vA * (1.0 - d); float th = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))); if (a < th) discard; gl_FragColor = vec4(vC * (0.8 + 0.2 * (1.0 - d)), 1.0); }';
+  class Pool {
+    constructor(max, add) {
+      this.max = max; this.n = 0; this.add = add;
+      this.pos = new Float32Array(max * 3); this.col = new Float32Array(max * 3); this.size = new Float32Array(max); this.alpha = new Float32Array(max);
+      this.vel = new Float32Array(max * 3); this.life = new Float32Array(max); this.age = new Float32Array(max); this.s0 = new Float32Array(max); this.grow = new Float32Array(max); this.g = new Float32Array(max);
+      const geo = new THREE.BufferGeometry();
+      this.attrs = [['position', this.pos, 3], ['color', this.col, 3], ['aSize', this.size, 1], ['aA', this.alpha, 1]].map(([k, a, d]) => { const at = new THREE.BufferAttribute(a, d).setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, at); return at; });
+      geo.setDrawRange(0, 0);
+      const mat = new THREE.ShaderMaterial({ uniforms: { uScale: SCALE }, vertexShader: VS, fragmentShader: add ? FS_ADD : FS_DIT, transparent: add, depthWrite: !add, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending, fog: false });
+      this.pts = new THREE.Points(geo, mat); this.pts.frustumCulled = false; this.pts.renderOrder = add ? 7 : 0; this.pts.name = add ? 'fx-glow' : 'fx-smoke';
+      AF.scene.add(this.pts);
+    }
+    spawn(x, y, z, vx, vy, vz, life, size, grow, g, r, gc, b) {
+      const i = this.n < this.max ? this.n++ : (Math.random() * this.max) | 0, i3 = i * 3;
+      this.pos[i3] = x; this.pos[i3 + 1] = y; this.pos[i3 + 2] = z; this.vel[i3] = vx; this.vel[i3 + 1] = vy; this.vel[i3 + 2] = vz;
+      this.col[i3] = r; this.col[i3 + 1] = gc; this.col[i3 + 2] = b; this.life[i] = life; this.age[i] = 0; this.s0[i] = size; this.size[i] = size; this.grow[i] = grow; this.g[i] = g; this.alpha[i] = 1;
+    }
+    move(from, to) {
+      const f3 = from * 3, t3 = to * 3;
+      for (let k = 0; k < 3; k++) { this.pos[t3 + k] = this.pos[f3 + k]; this.vel[t3 + k] = this.vel[f3 + k]; this.col[t3 + k] = this.col[f3 + k]; }
+      this.life[to] = this.life[from]; this.age[to] = this.age[from]; this.s0[to] = this.s0[from]; this.grow[to] = this.grow[from]; this.g[to] = this.g[from];
+    }
+    update(dt) {
+      let n = this.n; if (!n && !this.was) return;
+      const drag = Math.exp(-dt * (this.add ? 1.2 : 0.9));
+      for (let i = 0; i < n;) {
+        const a = (this.age[i] += dt), L = this.life[i];
+        if (a >= L) { this.move(--n, i); continue; }
+        const i3 = i * 3, u = a / L;
+        this.vel[i3 + 1] += this.g[i] * dt; this.vel[i3] *= drag; this.vel[i3 + 1] *= drag; this.vel[i3 + 2] *= drag;
+        this.pos[i3] += this.vel[i3] * dt; this.pos[i3 + 1] += this.vel[i3 + 1] * dt; this.pos[i3 + 2] += this.vel[i3 + 2] * dt;
+        this.size[i] = this.s0[i] + this.grow[i] * a; this.alpha[i] = this.add ? 1 - u : Math.min(1, u * 8) * (1 - u) * 0.95;
+        i++;
+      }
+      this.n = n; this.was = n > 0;
+      this.pts.geometry.setDrawRange(0, n);
+      for (const at of this.attrs) { at.clearUpdateRanges(); at.addUpdateRange(0, n * at.itemSize); at.needsUpdate = true; }
+    }
+  }
+  const FX = AF.fx = {};
+  // kind: [pool (1 glow, 0 smoke), life, size, grow/s, gravity, r, g, b, spread speed]
+  const KIND = {
+    flash: [1, 0.07, 2.4, 0, 0, 6, 4.4, 2.2, 0], hit: [1, 0.12, 0.45, 0, 0, 3, 2.2, 1.3, 0], glow: [1, 0.06, 0.9, 0, 0, 3, 3, 3, 0],
+    fire: [1, 0.75, 1.0, 1.4, 2.6, 3.2, 1.25, 0.3, 1.4], spark: [1, 0.45, 0.13, 0, -9, 4, 2.5, 0.9, 7],
+    smoke: [0, 2.6, 0.9, 1.3, 1.1, 0.15, 0.14, 0.13, 0.7], steam: [0, 1.5, 0.5, 0.8, 1.4, 0.6, 0.6, 0.58, 0.4], dust: [0, 0.8, 0.3, 0.9, -0.4, 0.5, 0.45, 0.36, 1.3],
+  };
+  FX.burst = (kind, x, y, z, n = 1, o) => {
+    const K = KIND[kind], P = K[0] ? FX.glow : FX.smoke; if (!P) return;
+    const sp = o && o.spread != null ? o.spread : K[8], vx = (o && o.vx) || 0, vy = (o && o.vy) || 0, vz = (o && o.vz) || 0, c = o && o.col, k = (o && o.size) || 1;
+    for (let i = 0; i < n; i++) {
+      const life = K[1] * (0.7 + Math.random() * 0.6);
+      P.spawn(x, y, z, vx + (Math.random() - 0.5) * sp, vy + Math.random() * sp * 0.6, vz + (Math.random() - 0.5) * sp, life, K[2] * k, K[3] * k, K[4], c ? c[0] : K[5], c ? c[1] : K[6], c ? c[2] : K[7]);
+    }
+  };
+  FX.line = (x0, y0, z0, x1, y1, z1) => { const n = Math.min(14, 2 + Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2 | 0); for (let i = 1; i <= n; i++) { const u = i / n; FX.glow.spawn(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, z0 + (z1 - z0) * u, 0, 0, 0, 0.05, 0.09, 0, 0, 2.6, 2.1, 1.4); } };
+  FX.boom = (x, y, z, k = 1) => {
+    FX.burst('flash', x, y + 1, z, 2, { size: 5 * k }); FX.burst('fire', x, y + 0.8, z, 26 * k, { spread: 6 * k, size: 1.6 * k }); FX.burst('spark', x, y + 1, z, 24 * k, { spread: 12 });
+    FX.burst('smoke', x, y + 1.5, z, 18 * k, { spread: 3, size: 2 * k }); SFX.play('boom', x, z); AF.shake(0.9 * k, x, z);
+  };
+  // camera shake (explosions, crashes): applied after every camera owner, fades with distance
+  const SHK = { a: 0 };
+  AF.shake = (a, x, z) => { const p = AF.camera.position, d = x == null ? 0 : Math.hypot(x - p.x, z - p.z); SHK.a = Math.max(SHK.a, a / (1 + d * 0.06)); };
+
+  // ---------------------------------------------------------------- AF.sfx: synthesised sounds (no files, nothing until first input)
+  const SFX = AF.sfx = { on: (() => { try { return localStorage.getItem('portSolace.sound') !== '0'; } catch (e) { return true; } })() };
+  let ac = null, noise = null, out = null, siren = null;
+  const audio = () => {
+    if (ac || !SFX.on) return ac;
+    try {
+      ac = new (window.AudioContext || window.webkitAudioContext)(); out = ac.createGain(); out.gain.value = 0.32; out.connect(ac.destination);
+      const n = ac.sampleRate; noise = ac.createBuffer(1, n, n); const d = noise.getChannelData(0); for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    } catch (e) { ac = null; }
+    return ac;
+  };
+  const wake = () => { const c = audio(); if (c && c.state === 'suspended') c.resume(); };
+  addEventListener('pointerdown', wake, true); addEventListener('keydown', wake, true);
+  const env = (g, t, d, peak) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + d); };
+  const hiss = (t, d, f0, f1, peak) => { const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = noise; f.type = 'lowpass'; f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + d); env(g, t, d, peak); s.connect(f).connect(g).connect(out); s.start(t, Math.random() * 0.5); s.stop(t + d + 0.05); };
+  const tone = (t, d, f0, f1, peak, type = 'sine') => { const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + d); env(g, t, d, peak); o.connect(g).connect(out); o.start(t); o.stop(t + d + 0.05); };
+  const PLAY = {
+    shot: (t, k) => { hiss(t, 0.22, 4200, 300, 0.9 * k); tone(t, 0.09, 150, 55, 0.6 * k); },
+    shotgun: (t, k) => { hiss(t, 0.42, 3200, 200, k); tone(t, 0.15, 120, 40, 0.8 * k); },
+    rifle: (t, k) => { hiss(t, 0.3, 5200, 260, k); tone(t, 0.12, 180, 50, 0.7 * k); },
+    punch: (t, k) => { hiss(t, 0.07, 900, 200, 0.7 * k); tone(t, 0.08, 110, 60, 0.6 * k); },
+    swing: (t, k) => hiss(t, 0.12, 1800, 700, 0.16 * k),
+    boom: (t, k) => { hiss(t, 1.6, 1400, 50, k); tone(t, 0.5, 70, 28, 0.9 * k); },
+    crash: (t, k) => { hiss(t, 0.35, 2600, 300, 0.7 * k); tone(t, 0.15, 90, 40, 0.5 * k); },
+    cash: (t) => { tone(t, 0.09, 1320, 1320, 0.16, 'square'); tone(t + 0.09, 0.16, 1760, 1760, 0.14, 'square'); },
+    deny: (t) => tone(t, 0.16, 180, 140, 0.2, 'square'), hurt: (t) => tone(t, 0.18, 260, 120, 0.3, 'triangle'),
+    ding: (t) => { tone(t, 0.9, 1568, 1560, 0.3); tone(t, 0.9, 2093, 2090, 0.14); }, click: (t) => tone(t, 0.04, 900, 880, 0.2, 'square'),
+  };
+  SFX.play = (kind, x, z) => {
+    const c = audio(); if (!c || c.state !== 'running' || !PLAY[kind]) return;
+    let k = 1; if (x != null) { const p = AF.camera.position; k = 1 / (1 + Math.hypot(x - p.x, z - p.z) * 0.045); if (k < 0.04) return; }
+    PLAY[kind](c.currentTime, k);
+  };
+  // two-tone police siren while a squad car is near (77 calls it every tick)
+  SFX.siren = (k) => {
+    const c = audio(); if (!c || c.state !== 'running') return;
+    if (k > 0.02 && !siren) { const o = c.createOscillator(), f = c.createBiquadFilter(), g = c.createGain(); o.type = 'sawtooth'; f.type = 'lowpass'; f.frequency.value = 1400; g.gain.value = 0; o.connect(f).connect(g).connect(out); o.start(); siren = { o, g, next: 0, hi: false }; }
+    if (!siren) return;
+    siren.g.gain.setTargetAtTime(k * 0.07, c.currentTime, 0.2);
+    if (c.currentTime > siren.next) { siren.hi = !siren.hi; siren.o.frequency.setTargetAtTime(siren.hi ? 960 : 720, c.currentTime, 0.04); siren.next = c.currentTime + 0.55; }
+    if (k <= 0.02 && siren.g.gain.value < 0.002) { siren.o.stop(); siren = null; }
+  };
+  SFX.set = (on) => { SFX.on = on; try { localStorage.setItem('portSolace.sound', on ? '1' : '0'); } catch (e) { /* storage blocked */ } if (!on && ac) { ac.close(); ac = null; siren = null; } };
+  AF.on('ready', () => {   // a Sound row in the pause menu
+    const stack = document.querySelector('#m-menu .stack'); if (!stack) return;
+    const row = document.createElement('div'); row.className = 'row'; row.innerHTML = '<label>Sound</label><div class="seg"><button data-s="1">On</button><button data-s="0">Off</button></div>';
+    const sync = () => row.querySelectorAll('button').forEach((b) => b.classList.toggle('on', (b.dataset.s === '1') === SFX.on));
+    row.addEventListener('click', (e) => { const b = e.target.closest('[data-s]'); if (b) { SFX.set(b.dataset.s === '1'); sync(); } e.stopPropagation(); });
+    stack.parentNode.insertBefore(row, stack); sync();
+  });
+
+  // ---------------------------------------------------------------- build + ticks
+  AF.onBuild('game-fx', 870, () => { FX.glow = new Pool(AF.MOBILE ? 256 : 512, true); FX.smoke = new Pool(AF.MOBILE ? 160 : 320, false); });
+  let hudT = 0, reapT = 0;
+  const focus = () => AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.player;
+  AF.onTick('game', 960, (dt) => {
+    if (saveT > 0 && (saveT -= dt) <= 0) AF.saveNow();
+    // fx + camera shake (after every camera owner)
+    if (FX.glow) {
+      const R = AF.post && AF.post.enabled && AF.post.sceneRT ? AF.post.sceneRT.height : AF.renderer.domElement.height;
+      SCALE.value = R / (2 * Math.tan(AF.camera.fov * PI / 360));
+      FX.glow.update(dt); FX.smoke.update(dt);
+    }
+    if (SHK.a > 0.002) { const c = AF.camera.position, a = SHK.a * 0.35; c.x += (Math.random() - 0.5) * a; c.y += (Math.random() - 0.5) * a; c.z += (Math.random() - 0.5) * a; SHK.a *= Math.exp(-dt * 6); }
+    // health regen (a little, after a while out of trouble)
+    if (!H.dead && H.v < G.regenTo && AF.clock.t - H.last > G.regenDelay) H.v = Math.min(G.regenTo, H.v + G.regenRate * dt);
+    if (hurtT > 0 && (hurtT -= dt) <= 0) hurtEl.style.opacity = '0';
+    if (crossHitT > 0 && (crossHitT -= dt) <= 0) cross.classList.remove('hit');
+    if (gainT > 0 && (gainT -= dt) <= 0) gainEl.className = 'gain';
+    // the carnival meter
+    if (MT.on) {
+      MT.t += dt; MT.v += MT.dir * MT.speed * dt; if (MT.v > 1) { MT.v = 1; MT.dir = -1; } else if (MT.v < 0) { MT.v = 0; MT.dir = 1; }
+      meterEl.querySelector('.n').style.left = (MT.v * 100).toFixed(1) + '%';
+      const I = AF.input; if (I.hit('KeyE') || I.hit('KeyQ') || I.hit('Space') || (document.pointerLockElement && I.mouse.clicked)) meterStop();
+    }
+    // HUD panel at 6 Hz
+    if ((hudT += dt) > 0.16) {
+      hudT = 0;
+      hpFill.style.width = (H.v / H.max * 100).toFixed(0) + '%'; hpBar.classList.toggle('low', H.v < 25);
+      text(mEl, cash(S.money));
+      const CB = AF.combat, n = CB ? CB.stars : 0, sh = '<b>' + '\u2605'.repeat(n) + '</b>' + '\u2605'.repeat(5 - n);
+      if (starEl._h !== sh) { starEl.innerHTML = sh; starEl._h = sh; } starEl.classList.toggle('ev', !!(CB && n && CB.seenT > 1));
+      const wl = CB ? CB.label() : ''; if (wEl._h !== wl) { wEl.innerHTML = wl; wEl._h = wl; }
+      const J = HUD.job, jl = J ? `<b>${esc(J.title)}</b>${esc(J.line)}${J.t != null ? '<span>' + Math.max(0, Math.ceil(J.t)) + 's</span>' : ''}${J.pay ? '<span>' + cash(J.pay) + '</span>' : ''}` : '';
+      if (job._h !== jl) { job.innerHTML = jl; job._h = jl; } show(job, !!J);
+    }
+    // forget policy: runtime cars far from the player return to the pool
+    if ((reapT += dt) >= 1) {
+      reapT = 0;
+      const VV = AF.vehicles, f = focus(), cars = VV.cars;
+      for (let i = cars.length - 1; i >= 0; i--) {
+        const c = cars[i]; if (!c.temp || c.player || c.ai || c.keep) continue;
+        const far = (c.x - f.x) ** 2 + (c.z - f.z) ** 2 > G.forgetD * G.forgetD;
+        c.away = far ? (c.away || 0) + 1 : 0;
+        if (c.away >= G.forgetS || (c.dead && AF.clock.t - c.deadT > G.wreckS && far)) VV.forget(c);
+      }
+    }
+  });
+
+  AF.test('game: money, shop spend and the save round-trip', () => {
+    const m0 = S.money; AF.money.add(50); const up = S.money === m0 + 50;
+    const ok = AF.money.spend(20, 'test') && S.money === m0 + 30; const no = !AF.money.spend(1e9, 'test');
+    AF.saveNow(); const back = JSON.parse(localStorage.getItem(KEY) || '{}').money === S.money;
+    S.money = m0; AF.saveNow();
+    return { ok: up && ok && no && back, info: `add ${up}, spend ${ok}, refuse ${no}, saved ${back}` };
+  });
+  AF.test('game: health hurts, regenerates a little, and fx pools empty out', () => {
+    const was = AF.mode, title = UI.state.title; UI.state.title = false; if (AF.mode !== 'walk') AF.setMode('walk', {});
+    H.v = H.max; H.hurt(30, 'test'); const hurt = H.v === H.max - 30; H.last = -99;
+    H.v = 10; const hook = AF.hooks.tick.find((x) => x.name === 'game'); hook.fn(1); const regen = H.v > 10 && H.v <= G.regenTo;
+    H.v = H.max; FX.burst('smoke', 0, 1, 0, 10); FX.burst('fire', 0, 1, 0, 10); for (let i = 0; i < 40; i++) { FX.glow.update(0.1); FX.smoke.update(0.1); }
+    const empty = FX.glow.n === 0 && FX.smoke.n === 0;
+    if (was && was !== 'walk') AF.setMode(was);
+    UI.state.title = title;
+    return { ok: hurt && regen && empty, info: `hurt ${hurt}, regen ${regen}, fx empty ${empty}` };
+  });
+}
+} catch (e) { AF.partError('76-game.js', e); }
+
+// ================================================================ 77-combat.js
+try {
+// ===== 77-combat: weapons, fighting, the crowd's fight-or-flight, run-overs, police + the wanted level, vehicle damage  (OWNER: game) =====
+// Weapons: slot 0 = the friend's signature melee (keyboard, handbag, dumbbell, microphone, bat, pan, cutlass, guitar), slots 1..4 =
+//   firearms from a gun counter (AF.save.guns / .ammo). Click or Q attack, right mouse (hold) or Z aim, wheel / 1-5 / X switch,
+//   R reload. Touch: HIT / AIM / WPN buttons (72-touch) press the same keys.
+// Peds: a crowd walker only becomes 'engaged' (w.agg, stepped by CB.stepPed from 55-people's crowd tick) when the player hits it,
+//   shoots near it, runs it over or barges into it at a sprint. Kinds flee | brawl | melee | gun (+ the cop pool). Engaged peds calm
+//   down and go back to the bare pool past G.pedForgetD, so the ambient crowd costs what it always did. Kids and wheelchair users
+//   are never targets: they only ever flee.
+// Wanted: crimes add heat -> 1..5 stars (G.stars): foot cops (the cop pool), squad cars (physics-driven 'police' cars that unload
+//   two officers) and from 3 stars an autogyro. Out of every officer's sight for G.evadeS[stars] s clears it; so does dying.
+// Vehicles: car.hp -> car.dmg (0..1, the paint shader's soot), smoke below G.vehSmoke, burning at 0, then an explosion and a wreck.
+{
+  const PI = Math.PI, G = AF.G, S = AF.save, I = AF.input, VV = AF.vehicles, H = AF.health, FX = AF.fx, SFX = AF.sfx, UI = AF.ui;
+  const CR = () => AF.peopleKit && AF.peopleKit.crowd;
+  const lookOf = (w) => CR().V[w.v];
+  const exempt = (w) => { const V = lookOf(w); return V.kid || V.chair; };
+  const V3 = () => new THREE.Vector3(), MZ = V3(), DIR = V3(), TMP = V3();
+
+  // ---------------------------------------------------------------- weapons
+  // melee per friend: [name, damage, reach m, seconds between swings, model]
+  const MELEE = {
+    dhruv: ['Mech Keyboard', 15, 1.9, 0.55, 'keyboard'], hunar: ['Designer Handbag', 12, 1.8, 0.45, 'bag'], tanishk: ['Dumbbell', 19, 1.6, 0.7, 'dumbbell'],
+    diksha: ['Microphone', 11, 1.7, 0.4, 'mic'], kush: ['Boss Bat', 17, 2.1, 0.6, 'bat'], divyangana: ['Frying Pan', 16, 1.9, 0.55, 'pan'],
+    kaybee: ['Pirate Cutlass', 19, 2.2, 0.5, 'cutlass'], niranjan: ['Old Guitar', 17, 2.2, 0.7, 'guitar'],
+  };
+  const FISTS = ['Fists', 8, 1.4, 0.38, null];
+  const GUNS = AF.GUNS = {
+    revolver: { name: '.38 Revolver', dmg: 24, rate: 0.42, mag: 6, reload: 1.6, range: 70, spread: 0.018, pellets: 1, price: 350, pack: 12, packPrice: 15, snd: 'shot', model: [6, 0] },
+    shotgun: { name: 'Pump Shotgun', dmg: 13, rate: 0.95, mag: 6, reload: 2.4, range: 28, spread: 0.075, pellets: 7, price: 900, pack: 8, packPrice: 28, snd: 'shotgun', two: true, model: [13, 6] },
+    tommy: { name: 'Tommy Gun', dmg: 12, rate: 0.085, mag: 50, reload: 2.6, range: 55, spread: 0.04, pellets: 1, auto: true, price: 2600, pack: 50, packPrice: 70, snd: 'shot', two: true, model: [10, 5] },
+    rifle: { name: 'Hunting Rifle', dmg: 75, rate: 1.2, mag: 5, reload: 2.2, range: 140, spread: 0.003, pellets: 1, zoom: 22, price: 1700, pack: 10, packPrice: 35, snd: 'rifle', two: true, model: [16, 7] },
+  };
+  const GUN_IDS = Object.keys(GUNS);
+  // held models: built along -y from the hand (blade / barrel forward when the arm is raised), guns' grips along -z (down)
+  const MODELS = new Map();
+  const heldGeo = (id) => {
+    if (MODELS.has(id)) return MODELS.get(id);
+    const c = (hex, o) => AF.col(hex, Object.assign({ jitter: 0.12, edge: 0.3 }, o)), dark = c(0x24262a, { metal: 0.6, rough: 0.4 }), steel = c(0xc4c8ce, { metal: 0.9, rough: 0.25 }), wood = c(0x7a4a26), gold = c(0xd8b04a, { metal: 0.9, rough: 0.3 });
+    let m, anchor = [0.5, 1, 0.5];
+    const g = GUNS[id];
+    if (g) {   // [barrel length, stock] in 1/16 m voxels
+      const [L, stock] = g.model, hgt = L + 3 + stock; m = new AF.Model(2, hgt, 5);
+      m.box(0, 0, 3, 2, L + 3, 5, dark); m.box(0, L, 2, 2, L + 3, 5, dark); m.box(0, L + 1, 0, 2, L + 3, 2, wood);
+      if (stock) m.box(0, L + 3, 1, 2, hgt, 4, wood);
+      if (id === 'tommy') { m.box(0, 3, 0, 2, 6, 2, wood); m.box(0, L - 2, 0, 2, L, 3, dark); }
+      if (id === 'revolver') m.box(0, L - 1, 2, 2, L + 1, 5, steel);
+      anchor = [0.5, (L + 2) / hgt, 2 / 5];
+    } else if (id === 'keyboard') { m = new AF.Model(5, 16, 2); m.box(0, 0, 0, 5, 13, 2, dark); for (let y = 1; y < 12; y += 2) for (let x = 1; x < 4; x++) m.set(x, y, 1, (x + y) % 5 ? c(0xe8e4dc) : c(0x3aa0ff)); m.box(2, 13, 0, 3, 16, 1, dark); }
+    else if (id === 'bag') { m = new AF.Model(7, 10, 3); m.box(0, 0, 0, 7, 6, 3, c(0xff5fae)); m.box(3, 2, 2, 4, 4, 3, gold); m.box(1, 6, 1, 2, 9, 2, gold); m.box(5, 6, 1, 6, 9, 2, gold); m.box(1, 9, 1, 6, 10, 2, gold); }
+    else if (id === 'dumbbell') { m = new AF.Model(6, 12, 6); m.box(0, 0, 0, 6, 3, 6, dark); m.box(0, 9, 0, 6, 12, 6, dark); m.box(2, 3, 2, 4, 9, 4, steel); }
+    else if (id === 'mic') { m = new AF.Model(3, 10, 3); m.box(0, 0, 0, 3, 3, 3, steel); m.box(1, 3, 1, 2, 10, 2, dark); }
+    else if (id === 'bat') { m = new AF.Model(3, 20, 3); m.box(0, 0, 0, 3, 13, 3, c(0xc8945a)); m.box(1, 13, 1, 2, 20, 2, c(0xc8945a)); m.box(1, 17, 1, 2, 19, 2, dark); }
+    else if (id === 'pan') { m = new AF.Model(9, 15, 2); for (let x = 0; x < 9; x++) for (let y = 0; y < 9; y++) if (Math.hypot(x - 4, y - 4) < 4.6) m.box(x, y, 0, x + 1, y + 1, 2, dark); m.box(4, 9, 0, 5, 15, 1, wood); }
+    else if (id === 'cutlass') { m = new AF.Model(5, 19, 2); for (let y = 0; y < 13; y++) m.box(2 - (y < 4 ? 1 : 0), y, 0, 3, y + 1, 1, steel); m.box(0, 13, 0, 5, 14, 2, gold); m.box(2, 14, 0, 3, 19, 1, wood); m.box(0, 14, 0, 1, 18, 1, gold); }
+    else if (id === 'guitar') { m = new AF.Model(9, 24, 3); for (let x = 0; x < 9; x++) for (let y = 0; y < 11; y++) if (Math.hypot((x - 4) * 1.1, y - (y < 5 ? 3 : 7)) < 4.4) m.box(x, y, 0, x + 1, y + 1, 3, c(0x9a4a22)); m.box(3, 4, 2, 6, 7, 3, dark); m.box(4, 11, 1, 5, 24, 2, c(0x4a2a14)); }
+    if (!m) return null;
+    const geo = AF.meshModel(m, { vs: 1 / 16, anchor }); MODELS.set(id, geo); return geo;
+  };
+
+  // ---------------------------------------------------------------- state
+  const CB = AF.combat = { slot: 0, aimToggle: false, cd: 0, swing: 0, swingDur: 0.3, side: 0, hitAt: -1, reloadT: 0, mag: S.mag || (S.mag = {}), heat: 0, stars: 0, seenT: 0, engaged: 0, recoil: 0, flinch: 0, held: null, heldId: null, gallery: null };
+  const owned = () => { const o = [null]; for (const id of GUN_IDS) if (S.guns[id]) o.push(id); return o; };
+  const cur = () => { const o = owned(); if (CB.slot >= o.length) CB.slot = 0; return o[CB.slot]; };
+  const melee = () => { const f = AF.friends && AF.friends.current; return (f && MELEE[f.id]) || FISTS; };
+  CB.gun = cur; CB.GUNS = GUNS; CB.melee = melee;
+  CB.label = () => {
+    const g = CB.gallery ? 'gallery' : cur();
+    if (g === 'gallery') return `Gallery rifle<span>${CB.gallery.shots}</span>`;
+    if (!g) return melee()[0];
+    return `${GUNS[g].name}<span>${CB.reloadT > 0 ? '\u21bb' : CB.mag[g] || 0}/${S.ammo[g] || 0}</span>`;
+  };
+  CB.give = (id) => { S.guns[id] = true; S.ammo[id] = (S.ammo[id] || 0) + GUNS[id].pack; CB.mag[id] = CB.mag[id] || 0; AF.saveSoon(); };
+  const select = (slot) => { const o = owned(); CB.slot = ((slot % o.length) + o.length) % o.length; CB.reloadT = 0; attachHeld(); SFX.play('click'); };
+  const attachHeld = () => {
+    const P = AF.player && AF.player.parts; if (!P) return;
+    const id = CB.gallery ? 'rifle' : cur() || melee()[4];
+    if (CB.held && CB.heldId === id && CB.held.parent === P.armR) return;
+    if (CB.held) CB.held.removeFromParent();
+    CB.held = null; CB.heldId = id;
+    const geo = id && heldGeo(id); if (!geo) return;
+    const m = AF.modelMesh(geo); m.position.set(0, -0.52, 0.03); m.castShadow = false; m.frustumCulled = false; m.name = 'held'; P.armR.add(m); CB.held = m;
+  };
+  AF.on('look', () => { CB.held = null; attachHeld(); });
+  AF.on('friend', () => { CB.slot = 0; attachHeld(); });
+
+  // ---------------------------------------------------------------- wanted level
+  const starsOf = (h) => { let n = 0; for (const t of G.stars) if (h >= t) n++; return n; };
+  CB.crime = (n) => {
+    if (CB.gallery || H.dead || !(n > 0)) return;
+    CB.heat = Math.min(600, CB.heat + n); CB.seenT = 0;
+    const s = starsOf(CB.heat);
+    if (s > CB.stars) { CB.stars = s; AF.emit('toast', s === 1 ? 'The police are looking for you.' : s >= 4 ? 'Every cop in Port Solace wants a word with you!' : 'Wanted level up!'); }
+  };
+  const clearWanted = (msg) => { if (!CB.stars && !CB.heat) return; CB.heat = 0; CB.stars = 0; CB.seenT = 0; if (msg) AF.emit('toast', msg); };
+  CB.clearWanted = clearWanted;
+  AF.on('died', () => clearWanted());
+
+  // ---------------------------------------------------------------- engaging peds
+  const say = (w, t) => AF.emit('bubble', { who: w, name: '', text: t, dur: 2.2 });
+  const FIGHT_LINES = ['You wanna go, pal?', 'Put \u2019em up!', 'Why, you\u2026!', 'Big mistake, buster!'], FLEE_LINES = ['Help! Police!', 'Somebody call a cop!', 'Leave me alone!', 'Yikes!'];
+  const engage = (w, cause, force) => {
+    if (w.agg) return w.agg;
+    if (!w.act || (CB.engaged >= G.engagedMax && !force)) return null;
+    const V = lookOf(w);
+    let kind = 'flee';
+    if (!V.kid && !V.chair && V.L.plan !== 'elder' && cause === 'hit') { const r = AF.hash2(w.id, (AF.clock.t / 60) | 0); kind = r < 0.48 ? 'flee' : r < 0.7 ? 'brawl' : r < 0.85 ? 'melee' : 'gun'; }
+    if (kind !== 'flee' && !V.im.work) kind = 'flee';
+    CB.engaged++;
+    w.agg = { kind, hp: G.pedHp, st: 'go', t: 0, cd: 0.5 + Math.random(), f: 'p', lie: false, dy: 0, lead: w.lead || null, vx: 0, vz: 0, swing: 0, hitDone: false, aimT: 0, side: w.id & 1 ? 1 : -1, gy: w.y, gyT: 0, reported: false };
+    w.lead = null; w.talk = 0;
+    if (cause === 'hit') say(w, kind === 'flee' ? FLEE_LINES[w.id % 4] : FIGHT_LINES[w.id % 4]);
+    return w.agg;
+  };
+  CB.release = (w) => {
+    const A = w.agg; if (!A) return;
+    if (w.cop) w.act = false; else CB.engaged = Math.max(0, CB.engaged - 1);
+    w.lead = A.lead && A.lead.act && !A.lead.agg ? A.lead : null; w.agg = null; w.moving = false;
+  };
+  const down = (w, ko, fx, fz, v) => {
+    const A = w.agg; if (!A) return;
+    A.st = 'down'; A.t = ko === 'stagger' ? 5 : 0; A.ko = !!ko; A.lie = true; A.f = 'p'; A.vx = fx * v; A.vz = fz * v;
+    w.yaw = Math.atan2(-fx, -fz); w.moving = false;
+    FX.burst('dust', w.x, w.y + 0.2, w.z, 4);
+  };
+  // damage from the player (melee, bullets, cars, explosions): kind 'melee' knocks out, 'gun' / 'car' / 'boom' can kill
+  const hitPed = (w, dmg, kind, fx, fz, innocent) => {
+    if (exempt(w)) { engage(w, 'panic', true); return; }
+    const A = engage(w, 'hit', true); if (!A || A.st === 'down') return;
+    A.hp -= dmg; A.cd = Math.max(A.cd, 0.35); w.x += fx * 0.15; w.z += fz * 0.15;
+    if (A.kind === 'flee' && kind === 'melee' && Math.random() < 0.3 && lookOf(w).im.work) A.kind = 'brawl';
+    FX.burst('hit', w.x, w.y + 1.3, w.z, 1);
+    const fell = A.hp <= 0;
+    if (fell) down(w, kind === 'melee' && A.hp > -15 ? 'ko' : null, fx, fz, kind === 'car' || kind === 'boom' ? 6 : 1.5);
+    if (!innocent && (!A.reported || fell)) { A.reported = true; CB.crime(w.cop ? (fell ? G.heat.copKill : G.heat.copHit) : fell ? (A.ko ? G.heat.ko : G.heat.kill) : G.heat.assault); }
+  };
+  const panic = (x, z, r) => {
+    const C = CR(); if (!C) return;
+    for (const w of C.walkers) if (w.act && !w.agg && !w.cop && (w.x - x) ** 2 + (w.z - z) ** 2 < r * r) { const A = engage(w, 'panic'); if (!A) break; }
+  };
+  CB.panic = panic;
+
+  // ---------------------------------------------------------------- the player's target picture (on foot / in a car / out of reach)
+  const TG = { x: 0, y: 0, z: 0, car: null, away: true, speed: 0 };
+  const target = () => {
+    const p = AF.player, car = AF.mode === 'drive' && VV.player;
+    TG.car = car || null; TG.away = !(AF.mode === 'walk' || car);
+    TG.x = car ? car.x : p.x; TG.y = car ? car.y : p.y; TG.z = car ? car.z : p.z; TG.speed = car ? Math.abs(car.v) : (AF.PL.walk.speed || 0);
+    return TG;
+  };
+  const los = (x0, y0, z0, x1, y1, z1) => { for (let i = 1; i < 6; i++) { const u = i / 6; if (AF.solidAt(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, z0 + (z1 - z0) * u)) return false; } return true; };
+  const pedShoot = (w, d) => {
+    const hx = Math.sin(w.yaw), hz = Math.cos(w.yaw), mx = w.x + hx * 0.5, my = w.y + 1.35, mz = w.z + hz * 0.5;
+    const p = AF.clamp((w.cop ? 0.6 : 0.42) - d * 0.012 - TG.speed * 0.03, 0.06, 0.7), hit = Math.random() < p;
+    const ex = TG.x + (hit ? 0 : (Math.random() - 0.5) * 3), ey = TG.y + (hit ? 1.2 : 0.3 + Math.random()), ez = TG.z + (hit ? 0 : (Math.random() - 0.5) * 3);
+    FX.burst('flash', mx, my, mz, 1, { size: 0.5 }); FX.line(mx, my, mz, ex, ey, ez); SFX.play('shot', w.x, w.z);
+    if (!hit) { FX.burst('dust', ex, ey, ez, 2); return; }
+    if (TG.car) { dmgCar(TG.car, 5); if (Math.random() < 0.3) H.hurt(4, 'shot'); }
+    else { H.hurt(w.cop ? 9 : 7, 'shot'); FX.burst('hit', ex, ey, ez, 1); }
+  };
+  const gunner = (w) => w.agg.kind === 'gun';
+  const WALKF = ['a', 'p', 'b', 'p'];
+  // stepped by 55-people's crowd tick for every walker with an .agg; false = calm down, back to the pool
+  CB.stepPed = (w, dt) => {
+    const A = w.agg; A.t += dt; A.cd -= dt;
+    const T = target(), dx = T.x - w.x, dz = T.z - w.z, d = Math.hypot(dx, dz) || 1e-3;
+    if (A.st === 'down') {
+      if (A.vx || A.vz) { w.x += A.vx * dt; w.z += A.vz * dt; const k = Math.exp(-dt * 4); A.vx *= k; A.vz *= k; if (Math.abs(A.vx) + Math.abs(A.vz) < 0.05) A.vx = A.vz = 0; w.y = AF.surfaceBelow(w.x, w.z, w.y + 0.6, 2); }
+      if (A.ko && A.t > 7) { A.st = 'go'; A.lie = false; A.kind = 'flee'; A.hp = 8; A.t = 0; }
+      return A.t < 30 && d < G.pedForgetD + 20;
+    }
+    if (T.away && A.t > 3) return false;
+    if (!w.cop && d > G.pedForgetD) return false;
+    if (A.kind === 'flee' && A.t > 8 && d > 40) return false;
+    if (w.cop && !CB.stars && (d > 30 || A.t > 25)) return false;
+    let sp = 0, hx = dx / d, hz = dz / d, face = Math.atan2(hx, hz), f = 'p';
+    if (A.kind === 'flee') { sp = 3.3 + (w.id % 3) * 0.3; hx = -hx; hz = -hz; f = 'run'; }
+    else if (gunner(w)) {
+      const want = w.cop ? 12 : 9;
+      if (d > want + 6) { sp = 3.2; f = 'run'; }
+      else if (d < want - 4) { sp = 1.8; hx = -hx; hz = -hz; f = 'walk'; }
+      else { sp = 1.1; const s = A.side; [hx, hz] = [-hz * s, hx * s]; f = 'walk'; if (A.t % 4 < dt) A.side = -A.side; }
+      if (d < 45 && A.cd <= 0 && !T.away && los(w.x, w.y + 1.5, w.z, T.x, T.y + 1.2, T.z)) { pedShoot(w, d); A.cd = (w.cop ? 0.9 : 1.4) + Math.random() * 0.8; A.aimT = 0.45; }
+      if (A.aimT > 0) { A.aimT -= dt; f = 'work'; sp *= 0.25; }
+    } else {   // brawl / melee / an unarmed cop: close in and swing
+      if (d > 1.15 && !(T.car && d < 5)) { sp = d > 4 ? 3.3 : 2.2; f = d > 4 ? 'run' : 'walk'; }
+      if (d < 1.6 && A.cd <= 0 && !T.car && A.swing <= 0) { A.swing = 0.45; A.cd = 1 + Math.random() * 0.6; A.hitDone = false; }
+      if (A.swing > 0) {
+        A.swing -= dt; f = A.swing > 0.22 ? 'hail' : 'work'; sp = 0;
+        if (A.swing <= 0.22 && !A.hitDone) { A.hitDone = true; if (d < 1.8 && AF.mode === 'walk') { H.hurt(A.kind === 'melee' ? 10 : w.cop ? 8 : 6, 'melee'); AF.PL.push(hx * 3, hz * 3); SFX.play('punch', w.x, w.z); CB.flinch = 0.3; } }
+      }
+    }
+    if (sp > 0) {
+      let mx = hx * sp * dt, mz = hz * sp * dt;
+      if (AF.boxBlocked(w.x + mx * 4, w.y + 0.35, w.z + mz * 4, 0.22, 1.2)) { const s = A.side; [mx, mz] = [-mz * s, mx * s]; if (AF.boxBlocked(w.x + mx * 4, w.y + 0.35, w.z + mz * 4, 0.22, 1.2)) { A.side = -s; mx = mz = 0; } }
+      w.x += mx; w.z += mz;
+      if ((A.gyT -= dt) <= 0) { A.gyT = 0.25; A.gy = AF.surfaceBelow(w.x, w.z, w.y + 0.7, 2.5); }
+      w.y += (A.gy - w.y) * Math.min(1, dt * 12); w.ph += dt * sp * 2.3 / w.s;
+      if (mx || mz) { const my = Math.atan2(mx, mz); if (A.kind === 'flee' || f === 'run') face = my; }
+    }
+    if (f === 'run') f = sp > 0 ? (Math.floor(w.ph) & 1 ? 'runA' : 'runB') : 'p'; else if (f === 'walk') f = sp > 0 ? WALKF[Math.floor(w.ph) & 3] : 'p';
+    w.yaw += AF.angDiff(w.yaw, face) * Math.min(1, dt * 10);
+    w.moving = sp > 0; A.f = f;
+    return true;
+  };
+
+  // ---------------------------------------------------------------- the player's attacks
+  const HIT = { t: 0, kind: null, obj: null, x: 0, y: 0, z: 0 };
+  // ray against a vertical capsule (feet y0, height hgt, radius r): distance along the ray, or Infinity
+  const rayCapsule = (ox, oy, oz, dx, dy, dz, x, y0, z, hgt, r) => {
+    const hl = dx * dx + dz * dz; if (hl < 1e-6) return Infinity;
+    const t = ((x - ox) * dx + (z - oz) * dz) / hl; if (t < 0) return Infinity;
+    const px = ox + dx * t - x, pz = oz + dz * t - z, py = oy + dy * t;
+    return px * px + pz * pz < r * r && py > y0 && py < y0 + hgt ? t : Infinity;
+  };
+  const raySphere = (ox, oy, oz, dx, dy, dz, x, y, z, r) => {
+    const lx = x - ox, ly = y - oy, lz = z - oz, t = lx * dx + ly * dy + lz * dz; if (t < 0) return Infinity;
+    const qx = lx - dx * t, qy = ly - dy * t, qz = lz - dz * t; return qx * qx + qy * qy + qz * qz < r * r ? t : Infinity;
+  };
+  const ray = (ox, oy, oz, dx, dy, dz, range, t0) => {
+    HIT.t = range; HIT.kind = null; HIT.obj = null;
+    for (let t = t0 + 0.3; t < range; t += 0.45) if (AF.solidAt(ox + dx * t, oy + dy * t, oz + dz * t)) { HIT.t = t; HIT.kind = 'world'; break; }
+    const C = CR(), R2 = range * range;
+    if (C && !CB.gallery) for (const w of C.walkers) {
+      if (!w.act || (w.agg && w.agg.lie) || (w.x - ox) ** 2 + (w.z - oz) ** 2 > R2 || exempt(w)) continue;
+      const t = rayCapsule(ox, oy, oz, dx, dy, dz, w.x, w.y, w.z, 1.75 * w.s, 0.32); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'ped'; HIT.obj = w; }
+    }
+    if (!CB.gallery) for (const c of VV.cars) {
+      if (c.active === false || c.player || (c.x - ox) ** 2 + (c.z - oz) ** 2 > R2) continue;
+      const t = raySphere(ox, oy, oz, dx, dy, dz, c.x, c.y + 0.8, c.z, Math.min(c.halfL, 2.2)); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'car'; HIT.obj = c; }
+    }
+    if (HELI.on && !CB.gallery) { const t = raySphere(ox, oy, oz, dx, dy, dz, HELI.x, HELI.y + 1, HELI.z, 3); if (t < HIT.t) { HIT.t = t; HIT.kind = 'heli'; } }
+    if (CB.gallery) for (const d of CB.gallery.targets()) { const t = raySphere(ox, oy, oz, dx, dy, dz, d.x, d.y, d.z, 0.24); if (t < HIT.t) { HIT.t = t; HIT.kind = 'duck'; HIT.obj = d; } }
+    HIT.x = ox + dx * HIT.t; HIT.y = oy + dy * HIT.t; HIT.z = oz + dz * HIT.t;
+    return HIT;
+  };
+  CB.ray = ray;
+  // hip fire picks the nearest ped / car inside a 25 degree cone (aim assist, the only aiming on a phone without AIM)
+  const autoTarget = (ox, oz, fx, fz, range) => {
+    const C = CR(); let best = null, bd = range;
+    if (C) for (const w of C.walkers) {
+      if (!w.act || (w.agg && w.agg.lie) || exempt(w)) continue;
+      const dx = w.x - ox, dz = w.z - oz, d = Math.hypot(dx, dz); if (d > bd || d < 0.5) continue;
+      if ((dx * fx + dz * fz) / d < 0.9 || !los(ox, AF.player.y + 1.4, oz, w.x, w.y + 1.3, w.z)) continue;
+      bd = d; best = w;
+    }
+    return best;
+  };
+  const reload = () => {
+    const g = cur(); if (!g || CB.reloadT > 0) return;
+    const W = GUNS[g], need = W.mag - (CB.mag[g] || 0), have = S.ammo[g] || 0;
+    if (need <= 0 || have <= 0) return;
+    CB.reloadT = W.reload; CB.reloadG = g;
+  };
+  let emptyT = 0;
+  const fire = (g) => {
+    const W = GUNS[g], gal = CB.gallery;
+    if (!gal && !(CB.mag[g] > 0)) { if ((S.ammo[g] || 0) > 0) reload(); else { SFX.play('click'); CB.cd = 0.3; if (AF.clock.t - emptyT > 4) { emptyT = AF.clock.t; AF.emit('toast', 'Out of ammo \u2014 a gun counter sells more.'); } } return; }
+    if (gal) { if (gal.shots <= 0) return; gal.shots--; } else { CB.mag[g]--; AF.saveSoon(); }
+    CB.cd = W.rate; CB.recoil = 1;
+    const p = AF.player, cam = AF.camera;
+    p.mesh.updateMatrixWorld(true);
+    if (CB.held) CB.held.getWorldPosition(MZ); else MZ.set(p.x, p.y + 1.4, p.z);
+    let ox, oy, oz, t0 = 0;
+    if (AF.PL.aim) {   // through the crosshair: from the camera, starting level with the player
+      cam.getWorldDirection(DIR); ox = cam.position.x; oy = cam.position.y; oz = cam.position.z;
+      t0 = Math.max(0, (p.x - ox) * DIR.x + (p.y + 1.4 - oy) * DIR.y + (p.z - oz) * DIR.z);
+    } else {
+      const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw), w = autoTarget(p.x, p.z, fx, fz, W.range);
+      ox = MZ.x; oy = MZ.y; oz = MZ.z;
+      if (w) { DIR.set(w.x - ox, w.y + 1.2 * w.s - oy, w.z - oz).normalize(); p.yaw = Math.atan2(DIR.x, DIR.z); } else DIR.set(fx, 0, fz);
+    }
+    let any = false;
+    for (let k = 0; k < (W.pellets || 1); k++) {
+      const s = gal ? 0.004 : W.spread * (AF.PL.aim ? 0.6 : 1.4);
+      TMP.set(DIR.x + (Math.random() - 0.5) * s * 2, DIR.y + (Math.random() - 0.5) * s * 2, DIR.z + (Math.random() - 0.5) * s * 2).normalize();
+      const h = ray(ox, oy, oz, TMP.x, TMP.y, TMP.z, W.range, t0);
+      FX.line(MZ.x, MZ.y, MZ.z, h.x, h.y, h.z);
+      if (h.kind === 'ped') { hitPed(h.obj, W.dmg, 'gun', TMP.x, TMP.z); any = true; }
+      else if (h.kind === 'car') { dmgCar(h.obj, W.dmg * 0.35, true); FX.burst('spark', h.x, h.y, h.z, 3, { spread: 4 }); any = true; }
+      else if (h.kind === 'heli') { heliHit(W.dmg); FX.burst('spark', h.x, h.y, h.z, 3, { spread: 4 }); any = true; }
+      else if (h.kind === 'duck') { gal.hit(h.obj); any = true; }
+      else if (h.kind === 'world') FX.burst('dust', h.x - TMP.x * 0.1, h.y - TMP.y * 0.1, h.z - TMP.z * 0.1, 2);
+    }
+    if (any) AF.hud.hitMark();
+    FX.burst('flash', MZ.x + DIR.x * 0.25, MZ.y + DIR.y * 0.25, MZ.z + DIR.z * 0.25, 1, { size: W.pellets > 1 ? 0.9 : 0.6 });
+    SFX.play(gal ? 'shot' : W.snd, p.x, p.z);
+    if (!gal) { CB.crime(G.heat.shots * (W.auto ? 0.25 : 1)); panic(p.x, p.z, G.panicR); }
+  };
+  const swing = () => {
+    const W = melee(); CB.cd = W[3]; CB.swing = CB.swingDur = W[4] ? 0.34 : 0.24; CB.side ^= 1; CB.hitAt = CB.swingDur * 0.45;
+    SFX.play('swing');
+  };
+  const resolveMelee = () => {
+    const W = melee(), p = AF.player, fx = Math.sin(p.yaw), fz = Math.cos(p.yaw), C = CR();
+    let best = null, bd = W[2];
+    if (C) for (const w of C.walkers) {
+      if (!w.act || (w.agg && w.agg.lie)) continue;
+      const dx = w.x - p.x, dz = w.z - p.z, d = Math.hypot(dx, dz); if (d > bd || Math.abs(w.y - p.y) > 1.4) continue;
+      if (d > 0.4 && (dx * fx + dz * fz) / d < 0.35) continue;
+      bd = d; best = w;
+    }
+    if (best) { hitPed(best, W[1], 'melee', fx, fz); SFX.play('punch', p.x, p.z); AF.hud.hitMark(); return; }
+    for (const c of VV.cars) if (c.active !== false && !c.player && Math.abs(c.x - p.x) < 4 && Math.abs(c.z - p.z) < 4 && VV.bodyDist(c, p.x + fx * 0.8, p.z + fz * 0.8) < 0.3) { dmgCar(c, 2, true); SFX.play('crash', c.x, c.z); return; }
+  };
+
+  // ---------------------------------------------------------------- vehicle damage + wrecks
+  const HURT = new Set();
+  const dmgCar = (car, n, byPlayer) => {
+    if (!car || car.dead || car.static || !(n > 0)) return;
+    car.hp = (car.hp ?? G.vehHp) - n; car.dmg = AF.clamp(1 - car.hp / G.vehHp, 0, 1) * 0.8;
+    if (byPlayer) car.byPlayer = true;
+    if (car.hp < G.vehSmoke) HURT.add(car);
+    if (car.hp <= 0 && !(car.burnT > 0)) {
+      car.burnT = G.vehBurnS; car.temp = true;
+      if (car.ai) { VV.detachTraffic(car); const i = VV.ai.indexOf(car); if (i >= 0) VV.ai.splice(i, 1); car.ai = null; car.parked = true; car.v = car.vx = car.vz = 0; car.driver = -1; }
+      if (car.player) AF.emit('toast', 'The engine\u2019s on fire \u2014 get out!');
+    }
+  };
+  CB.dmgCar = dmgCar;
+  VV.onImpact = (car, dv, other) => {
+    if (dv < G.vehDmgMin || !car || car.static) return;
+    dmgCar(car, (dv - G.vehDmgMin) * G.vehDmgK, !!(car.player || (other && other.player)));
+    if (!car.player) return;
+    SFX.play('crash', car.x, car.z); AF.shake(Math.min(0.8, dv / 16));
+    if (dv > 5) FX.burst('spark', car.x + Math.sin(car.yaw) * car.halfL, car.y + 0.6, car.z + Math.cos(car.yaw) * car.halfL, 6);
+    if (dv > G.crashMin) H.hurt((dv - G.crashMin) * G.crashK, 'crash');
+  };
+  const explode = (car) => {
+    car.dead = true; car.deadT = AF.clock.t; car.dmg = 1; car.hp = 0; car.burnT = 0; car.smokeT = 18; car.temp = true;
+    car.y += 0.15; car.roll = (Math.random() - 0.5) * 0.25; car.pitch = (Math.random() - 0.5) * 0.15; VV.placeMesh(car);
+    FX.boom(car.x, car.y, car.z);
+    if (VV.player === car) { VV.exitCar(); H.hurt(55, 'boom'); }
+    const R = G.boomR, C = CR();
+    if (C) for (const w of C.walkers) { if (!w.act || (w.agg && w.agg.lie)) continue; const dx = w.x - car.x, dz = w.z - car.z, d = Math.hypot(dx, dz); if (d < R) hitPed(w, G.boomDmg * (1 - d / R), 'boom', dx / (d || 1), dz / (d || 1), !car.byPlayer); }
+    if (AF.mode === 'walk') { const p = AF.player, dx = p.x - car.x, dz = p.z - car.z, d = Math.hypot(dx, dz); if (d < R) { H.hurt(G.boomDmg * (1 - d / R), 'boom'); AF.PL.push(dx / (d || 1) * 8, dz / (d || 1) * 8, 6); } }
+    for (const c of VV.cars) if (c !== car && !c.dead && Math.abs(c.x - car.x) < R && Math.abs(c.z - car.z) < R) { const d = Math.hypot(c.x - car.x, c.z - car.z); if (d < R) dmgCar(c, 70 * (1 - d / R), car.byPlayer); }
+    if (car.byPlayer) CB.crime(G.heat.carBoom);
+    panic(car.x, car.z, 35);
+  };
+  let smokeT = 0;
+  const carFx = (dt) => {
+    if (!HURT.size) return;
+    const puff = (smokeT -= dt) <= 0; if (puff) smokeT = 0.12;
+    for (const car of HURT) {
+      if (car.active === false) { HURT.delete(car); continue; }
+      const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), x = car.x + hx * (car.halfL - 0.7), z = car.z + hz * (car.halfL - 0.7), y = car.y + 1.0;
+      if (car.burnT > 0) { car.burnT -= dt; if (puff) { FX.burst('fire', x, y, z, 2); FX.burst('smoke', x, y + 0.6, z, 1, { size: 1.4 }); } if (car.burnT <= 0) explode(car); continue; }
+      if (car.dead) { if ((car.smokeT -= dt) <= 0) { HURT.delete(car); continue; } if (puff) { FX.burst('smoke', car.x, y, car.z, 1, { size: 1.6 }); if (car.smokeT > 10) FX.burst('fire', car.x, y - 0.2, car.z, 1); } continue; }
+      if (puff && Math.random() < AF.clamp((G.vehSmoke - car.hp) / G.vehSmoke + 0.2, 0, 1)) FX.burst(car.hp < 20 ? 'smoke' : 'steam', x, y, z, 1);
+    }
+  };
+
+  // ---------------------------------------------------------------- run-overs + player <-> ped collisions
+  let hitCd = 0;
+  // is (x, z) inside the car's footprint (+0.3 m)? RO holds the car's frame so the 15 Hz loop allocates nothing
+  const RO = { car: null, s: 0, c: 1, R: 0, hx: 0, hl: 0 };
+  const underCar = (x, z) => { const k = RO.car, rx = x - k.x, rz = z - k.z; if (Math.abs(rx) > RO.R || Math.abs(rz) > RO.R) return false; const lx = rx * RO.c - rz * RO.s, lz = rx * RO.s + rz * RO.c; return Math.abs(lx) < RO.hx && Math.abs(lz) < RO.hl; };
+  const runOver = () => {
+    const C = CR(); if (!C) return;
+    const p = AF.player, walk = AF.mode === 'walk';
+    for (const car of VV.cars) {
+      const v = Math.abs(car.v || 0); if (v < 3.5 || car.active === false || car.static || car.dead) continue;
+      if ((car.x - p.x) ** 2 + (car.z - p.z) ** 2 > 3600) continue;
+      RO.car = car; RO.s = Math.sin(car.yaw); RO.c = Math.cos(car.yaw); RO.R = car.halfL + 0.6; RO.hx = car.halfW + 0.3; RO.hl = car.halfL + 0.3;
+      const fx = RO.s, fz = RO.c, rogue = car.player || car.squad;
+      for (const w of C.walkers) {
+        // traffic keeps to its lanes: only a player / squad car, or a ped already running loose, gets hit
+        if (!w.act || (w.agg && w.agg.lie) || (!rogue && !w.agg) || Math.abs(w.y - car.y) > 1.5 || !underCar(w.x, w.z)) continue;
+        if (exempt(w)) { engage(w, 'panic', true); continue; }
+        const A = engage(w, 'car', true); if (!A) continue;
+        A.hp = v > 9 ? -99 : 0; down(w, v > 9 ? null : 'ko', fx, fz, Math.min(9, v * 0.6));
+        FX.burst('hit', w.x, w.y + 0.9, w.z, 1); SFX.play('punch', w.x, w.z);
+        if (car.player) { dmgCar(car, 2, true); if (!A.reported) { A.reported = true; CB.crime(G.heat.runOver); } }
+      }
+      if (walk && !car.player && hitCd <= 0 && Math.abs(p.y - car.y) < 1.5 && underCar(p.x, p.z)) {
+        hitCd = 1; H.hurt(Math.max(0, v - G.carHitMin) * G.carHitK + 5, 'car'); AF.PL.push(fx * v * 0.7, fz * v * 0.7, 5); SFX.play('crash', p.x, p.z);
+      }
+    }
+  };
+  let bumpCd = 0;
+  const bodyPush = (dt) => {
+    const C = CR(), b = AF.player.body; if (!C) return;
+    bumpCd -= dt;
+    for (const w of C.walkers) {
+      if (!w.act || (w.agg && w.agg.lie)) continue;
+      const dx = b.x - w.x, dz = b.z - w.z; if (dx > 0.7 || dx < -0.7 || dz > 0.7 || dz < -0.7 || Math.abs(w.y - b.y) > 1.2) continue;
+      const d = Math.hypot(dx, dz); if (d > 0.62 || d < 1e-3) continue;
+      const k = (0.62 - d) / d, nx = b.x + dx * k, nz = b.z + dz * k;
+      if (!AF.boxBlocked(nx, b.y, nz, 0.3, 1.7)) { b.x = nx; b.z = nz; AF.player.x = nx; AF.player.z = nz; }
+      // barging through at a sprint: the ped staggers and complains (not a crime)
+      if ((AF.PL.walk.speed || 0) > 7 && !w.agg && !w.cop && bumpCd <= 0 && !exempt(w)) {
+        bumpCd = 0.6; const A = engage(w, 'bump'); if (A) { A.kind = 'flee'; down(w, 'stagger', -dx / d, -dz / d, 2); say(w, ['Hey! Watch it!', 'Oof!', 'Mind your step, pal!'][w.id % 3]); SFX.play('punch', w.x, w.z); }
+      }
+    }
+  };
+
+  // ---------------------------------------------------------------- police: foot officers, squad cars, the autogyro
+  const SQUADS = [];
+  let copCd = 0, squadCd = 0;
+  const pl = () => AF.player;
+  const spawnPoint = (rMin, rMax) => {
+    const p = target(), cam = AF.camera; cam.getWorldDirection(DIR);
+    for (let i = 0; i < 12; i++) {
+      const a = Math.random() * PI * 2, r = rMin + Math.random() * (rMax - rMin), x = p.x + Math.sin(a) * r, z = p.z + Math.cos(a) * r;
+      if ((Math.sin(a) * DIR.x + Math.cos(a) * DIR.z) > 0.4 && i < 8) continue;   // prefer behind the camera
+      const y = AF.surfaceBelow(x, z, p.y + 8, 20);
+      if (Number.isFinite(y) && Math.abs(y - p.y) < 6 && !AF.boxBlocked(x, y + 0.05, z, 0.3, 1.7)) return TMP.set(x, y, z);
+    }
+    return null;
+  };
+  const spawnCop = (at) => {
+    const C = CR(); if (!C) return false;
+    const w = C.walkers.find((q) => q.cop && !q.act); if (!w) return false;
+    const P = at || spawnPoint(28, 44); if (!P) return false;
+    w.x = P.x; w.y = P.y; w.z = P.z; w.yaw = Math.atan2(pl().x - P.x, pl().z - P.z); w.act = true; w.ph = 0;
+    w.agg = { kind: CB.stars >= 2 || cur() ? 'gun' : 'brawl', hp: G.copHp, st: 'go', t: 0, cd: 1.5, f: 'p', lie: false, dy: 0, lead: null, vx: 0, vz: 0, swing: 0, hitDone: false, aimT: 0, side: w.id & 1 ? 1 : -1, gy: P.y, gyT: 0, reported: false };
+    return true;
+  };
+  const spawnSquad = () => {
+    const P = target(), VP = AF.PLAN;
+    for (let i = 0; i < 8; i++) {
+      const a = Math.random() * PI * 2, r = 70 + Math.random() * 30, nr = VP.nearestRoad(P.x + Math.sin(a) * r, P.z + Math.cos(a) * r), R = nr.road;
+      if (!R || nr.edge > 25) continue;
+      const x = R.a[0] + (R.b[0] - R.a[0]) * nr.t, z = R.a[1] + (R.b[1] - R.a[1]) * nr.t, yaw = Math.atan2(P.x - x, P.z - z);
+      if (VV.carBlocked({ halfL: 2.6, halfW: 0.95, height: 1.5, y: AF.W.groundY(x, z) }, x, z, yaw)) continue;
+      const car = VV.makeCar('police', 0, x, z, yaw); car.temp = true; car.squad = { stuck: 0, rev: 0 }; car.parked = false; car.vx = car.vz = 0;
+      SQUADS.push(car); return car;
+    }
+    return null;
+  };
+  const SQ_IN = { up: false, down: false, left: 0, right: 0, brake: false, thr: 1 };
+  const driveSquad = (car, dt) => {
+    const Q = car.squad, T = target(), dx = T.x - car.x, dz = T.z - car.z, d = Math.hypot(dx, dz);
+    let diff = AF.angDiff(car.yaw, Math.atan2(dx, dz));
+    if (Q.rev > 0) { Q.rev -= dt; diff = -diff; }
+    SQ_IN.left = diff > 0.05 ? Math.min(1, diff * 2) : 0; SQ_IN.right = diff < -0.05 ? Math.min(1, -diff * 2) : 0;
+    SQ_IN.up = Q.rev <= 0 && d > 9; SQ_IN.down = Q.rev > 0; SQ_IN.brake = d < 9 && Math.abs(car.v) > 1.5;
+    if (SQ_IN.up && Math.abs(car.v) < 0.6) { if ((Q.stuck += dt) > 1.5) { Q.stuck = 0; Q.rev = 1.2; } } else Q.stuck = 0;
+    const n = Math.min(4, Math.ceil(dt * 60 - 0.01)) || 1; for (let i = 0; i < n; i++) VV.physics(car, dt / n, SQ_IN);
+    VV.placeMesh(car); if (car.interact) car.sync();
+    const blink = (AF.clock.t * 4 | 0) & 1; FX.glow.spawn(car.x + Math.cos(car.yaw) * (blink ? 0.35 : -0.35), car.y + 1.75, car.z - Math.sin(car.yaw) * (blink ? 0.35 : -0.35), 0, 0, 0, 0.05, 0.9, 0, 0, blink ? 3 : 0.3, 0.2, blink ? 0.3 : 3);
+    // pulled up: two officers step out; the car stays as a temp car (forgotten later)
+    if (d < 11 && Math.abs(car.v) < 1.5 && !T.away) {
+      for (const s of [1, -1]) spawnCop(TMP.set(car.x + Math.cos(car.yaw) * (car.halfW + 0.8) * s, car.y, car.z - Math.sin(car.yaw) * (car.halfW + 0.8) * s));
+      car.squad = null; car.parked = true; car.v = car.vx = car.vz = 0;
+    }
+  };
+  // the autogyro: circles the player from 3 stars, a searchlight pool at night, shoots from 4; can be shot down
+  const HELI = CB.heli = { on: false, x: 0, y: 0, z: 0, yaw: 0, vx: 0, vz: 0, hp: 0, a: 0, cd: 2, fall: false, vy: 0, grp: null, rotor: null };
+  const heliBuild = () => {
+    const c = (hex, o) => AF.col(hex, Object.assign({ jitter: 0.15, edge: 0.3 }, o)), navy = c(0x1f2a44), cream = c(0xefe6cf), glass = AF.col('glass'), dark = c(0x24262a), gold = c(0xd8b04a, { metal: 0.8 });
+    const m = new AF.Model(10, 14, 34);
+    for (let z = 4; z < 24; z++) for (let y = 2; y < 11; y++) for (let x = 1; x < 9; x++) { const ex = (x + 0.5 - 5) / 4, ey = (y + 0.5 - 6.5) / 4.5, ez = (z + 0.5 - 14) / 10; if (ex * ex + ey * ey + ez * ez * ez * ez < 1) m.set(x, y, z, y > 7 && z > 15 ? glass : y === 6 ? cream : navy); }
+    for (let z = 0; z < 6; z++) m.box(4, 6, z, 6, 8, z + 1, navy); m.box(4, 6, 0, 6, 12, 2, navy); m.box(0, 7, 0, 10, 8, 2, navy);
+    m.box(4, 11, 12, 6, 14, 14, dark); m.box(0, 0, 10, 1, 2, 18, dark); m.box(9, 0, 10, 10, 2, 18, dark); m.box(4, 6, 24, 6, 8, 26, dark);
+    for (const s of [0, 9]) m.box(s, 5, 13, s + 1, 7, 15, gold);
+    const grp = new THREE.Group(); grp.name = 'autogyro'; grp.rotation.order = 'YXZ';
+    const body = AF.modelMesh(AF.meshModel(m, { vs: 1 / 8, anchor: [0.5, 0, 0.5] })); body.castShadow = true; grp.add(body);
+    const rm = new AF.Model(80, 1, 3); rm.box(0, 0, 0, 80, 1, 3, dark); rm.box(39, 0, 0, 41, 1, 3, gold);
+    const rotor = AF.modelMesh(AF.meshModel(rm, { vs: 1 / 8, anchor: [0.5, 0, 0.5] })); rotor.position.y = 1.78; grp.add(rotor);
+    grp.visible = false; AF.scene.add(grp); HELI.grp = grp; HELI.rotor = rotor;
+  };
+  const heliHit = (n) => {
+    if (!HELI.on || HELI.fall) return;
+    HELI.hp -= n; FX.burst('smoke', HELI.x, HELI.y + 1, HELI.z, 1);
+    if (HELI.hp <= 0) { HELI.fall = true; HELI.vy = 0; FX.boom(HELI.x, HELI.y, HELI.z, 0.6); CB.crime(G.heat.copKill); }
+  };
+  const heliStep = (dt) => {
+    const want = CB.stars >= 3 && !HELI.fall;
+    if (!HELI.on) { if (!want) return; const P = target(), a = Math.random() * PI * 2; Object.assign(HELI, { on: true, x: P.x + Math.sin(a) * 160, z: P.z + Math.cos(a) * 160, y: P.y + 60, hp: 250, fall: false, vx: 0, vz: 0, cd: 3 }); HELI.grp.visible = true; }
+    const P = target(), gy = AF.W.groundY(HELI.x, HELI.z);
+    if (HELI.fall) {
+      HELI.vy -= 9.8 * dt; HELI.y += HELI.vy * dt; HELI.yaw += dt * 4; FX.burst('smoke', HELI.x, HELI.y + 1, HELI.z, 1);
+      if (HELI.y <= gy + 0.5) { FX.boom(HELI.x, gy, HELI.z, 1.2); HELI.on = false; HELI.grp.visible = false; HELI.fall = false; }
+    } else {
+      HELI.a += dt * 0.32;
+      const leave = !want, tx = leave ? HELI.x + HELI.vx * 4 : P.x + Math.sin(HELI.a) * 24, tz = leave ? HELI.z + HELI.vz * 4 : P.z + Math.cos(HELI.a) * 24, ty = (leave ? HELI.y + 30 : Math.max(P.y, gy) + 26);
+      const dx = tx - HELI.x, dz = tz - HELI.z, d = Math.hypot(dx, dz) || 1, sp = Math.min(20, d * 0.8);
+      HELI.vx += (dx / d * sp - HELI.vx) * Math.min(1, dt * 1.5); HELI.vz += (dz / d * sp - HELI.vz) * Math.min(1, dt * 1.5);
+      HELI.x += HELI.vx * dt; HELI.z += HELI.vz * dt; HELI.y += (ty - HELI.y) * Math.min(1, dt * 0.8);
+      HELI.yaw += AF.angDiff(HELI.yaw, Math.atan2(P.x - HELI.x, P.z - HELI.z)) * Math.min(1, dt * 1.5);
+      if (leave && (HELI.x - P.x) ** 2 + (HELI.z - P.z) ** 2 > 250 ** 2) { HELI.on = false; HELI.grp.visible = false; return; }
+      if (!leave && AF.time.night > 0.3) FX.glow.spawn(P.x, Math.max(P.y, gy) + 0.3, P.z, 0, 0, 0, 0.05, 6, 0, 0, 0.5, 0.48, 0.38);
+      if (!leave && CB.stars >= 4 && (HELI.cd -= dt) <= 0 && !P.away) {
+        HELI.cd = 1.6; const d3 = Math.hypot(P.x - HELI.x, P.y - HELI.y, P.z - HELI.z), hit = Math.random() < 0.3;
+        FX.burst('flash', HELI.x, HELI.y + 0.4, HELI.z, 1, { size: 0.6 }); FX.line(HELI.x, HELI.y + 0.4, HELI.z, P.x + (hit ? 0 : 2), P.y + 1, P.z + (hit ? 0 : 2)); SFX.play('shot', HELI.x, HELI.z);
+        if (hit && d3 < 80) { if (P.car) dmgCar(P.car, 6); else H.hurt(8, 'shot'); }
+      }
+    }
+    HELI.grp.position.set(HELI.x, HELI.y, HELI.z); HELI.grp.rotation.set(0.12, HELI.yaw, -AF.clamp(HELI.vx * Math.cos(HELI.yaw) - HELI.vz * Math.sin(HELI.yaw), -8, 8) * 0.02);
+    HELI.rotor.rotation.y += dt * 22;
+  };
+  const wanted = (dt) => {
+    const C = CR(); if (!C) return;
+    const T = target();
+    let seen = false, copsUp = 0, sirenK = 0;
+    for (const w of C.walkers) if (w.cop && w.act) { copsUp++; if (!seen && CB.stars && (w.x - T.x) ** 2 + (w.z - T.z) ** 2 < 55 * 55 && los(w.x, w.y + 1.6, w.z, T.x, T.y + 1.2, T.z)) seen = true; }
+    for (let i = SQUADS.length - 1; i >= 0; i--) {
+      const c = SQUADS[i]; if (!c.squad || c.dead || c.player || c.active === false) { SQUADS.splice(i, 1); continue; }
+      const d = Math.hypot(c.x - T.x, c.z - T.z); if (d < 40) seen = true; sirenK = Math.max(sirenK, 1 / (1 + d / 40));
+    }
+    if (HELI.on && !HELI.fall && CB.stars >= 3 && !(AF.buildingAt && AF.buildingAt(T.x, T.y + 1, T.z))) seen = true;
+    SFX.siren(CB.stars ? sirenK : 0);
+    if (!CB.stars) return;
+    if (seen) CB.seenT = 0; else CB.seenT += dt;
+    if (CB.seenT > G.evadeS[CB.stars]) { clearWanted('You gave the police the slip.'); return; }
+    if (T.away) return;
+    if (copsUp < G.cops[CB.stars] && (copCd -= dt) <= 0) { copCd = 2.5; spawnCop(); }
+    if (SQUADS.length < G.squad[CB.stars] && (squadCd -= dt) <= 0) { squadCd = 6; spawnSquad(); }
+  };
+
+  // ---------------------------------------------------------------- the player's animation overlay (after the walk mode animates)
+  const overlay = (dt, g) => {
+    const P = AF.player.parts; if (!P) return;
+    CB.recoil = Math.max(0, CB.recoil - dt * 8); CB.flinch = Math.max(0, CB.flinch - dt);
+    if (CB.flinch > 0) { P.chest.rotation.x -= CB.flinch * 0.8; P.head.rotation.x -= CB.flinch * 0.6; }
+    if (AF.PL.aim && (g || CB.gallery)) {
+      const two = CB.gallery || GUNS[g].two, a = -PI / 2 + AF.PL.walk.camPitch * 0.9 - CB.recoil * 0.22;
+      P.armR.rotation.set(a, 0, 0.05); P.chest.rotation.y = two ? 0.28 : 0.12;
+      if (two) P.armL.rotation.set(a + 0.15, 0, 0.55); else P.armL.rotation.set(-0.2, 0, -0.08);
+    } else if (CB.swing > 0) {
+      const k = 1 - CB.swing / CB.swingDur, e = 1 - (1 - k) * (1 - k);
+      if (melee()[4]) { P.armR.rotation.set(AF.lerp(-2.8, -0.3, e), 0, 0.25 - e * 0.25); P.chest.rotation.y = AF.lerp(-0.4, 0.45, e); }
+      else { const arm = CB.side ? P.armR : P.armL, other = CB.side ? P.armL : P.armR; arm.rotation.set(-1.55 * Math.sin(k * PI), 0, 0); other.rotation.set(-1.0, 0, 0); P.chest.rotation.y = (CB.side ? 0.3 : -0.3) * Math.sin(k * PI); }
+    } else if (g) P.armR.rotation.x = Math.min(P.armR.rotation.x, -0.25);
+  };
+
+  // ---------------------------------------------------------------- ticks
+  let prevFire = false, slowT = 0;
+  AF.onTick('combat', 151, (dt) => {
+    if (!AF.ready || !CR()) return;
+    CB.cd -= dt; hitCd -= dt;
+    const walk = AF.mode === 'walk' && !H.dead, m = I.mouse, locked = !!document.pointerLockElement;
+    const busy = !walk || AF.PL.busy || UI.modalOpen() || (UI.dialogueOpen && UI.dialogueOpen());
+    if (CB.reloadT > 0 && (CB.reloadT -= dt) <= 0) { const g = CB.reloadG, W = GUNS[g], take = Math.min(W.mag - (CB.mag[g] || 0), S.ammo[g] || 0); CB.mag[g] = (CB.mag[g] || 0) + take; S.ammo[g] -= take; AF.saveSoon(); SFX.play('click'); }
+    let g = cur();
+    if (!busy) {
+      if (CB.heldId !== (CB.gallery ? 'rifle' : g || melee()[4]) || (CB.held && CB.held.parent !== AF.player.parts.armR)) attachHeld();
+      if (!CB.gallery) {
+        if (m.wheel && locked) select(CB.slot + Math.sign(m.wheel));
+        for (let k = 1; k <= 5; k++) if (I.hit('Digit' + k)) select(k - 1);
+        if (I.hit('KeyX')) select(CB.slot + 1);
+        if (I.hit('KeyR')) reload();
+        g = cur();
+      }
+      if (I.hit('KeyZ')) CB.aimToggle = !CB.aimToggle;
+      const gunUp = !!(g || CB.gallery);
+      AF.PL.aim = gunUp && (CB.aimToggle || (locked && !!(m.buttons & 2)) || !!CB.gallery);
+      AF.PL.aimFov = CB.gallery ? 34 : g && GUNS[g].zoom ? GUNS[g].zoom : 40;
+      const down = (locked && !!(m.buttons & 1)) || I.key('KeyQ'), edge = down && !prevFire; prevFire = down;
+      if (down && CB.cd <= 0 && CB.reloadT <= 0 && !AF.hud.meterOn()) {
+        if (CB.gallery) { if (edge) fire('revolver'); }
+        else if (g) { if (GUNS[g].auto || edge) fire(g); }
+        else if (edge) swing();
+      }
+    } else { AF.PL.aim = false; prevFire = false; }
+    if (CB.swing > 0) { CB.swing -= dt; if (CB.hitAt > 0 && CB.swingDur - CB.swing >= CB.hitAt) { CB.hitAt = -1; resolveMelee(); } }
+    AF.hud.cross(walk && !!AF.PL.aim);
+    if (walk) { overlay(dt, g); bodyPush(dt); }
+    // 15 Hz: run-overs, wanted level, police
+    if ((slowT += dt) >= 1 / 15) { const t = slowT; slowT = 0; runOver(); wanted(t); }
+    for (const car of SQUADS) if (car.squad && !car.dead && !car.player) driveSquad(car, dt);
+    if (HELI.grp && (HELI.on || CB.stars >= 3)) heliStep(dt);
+    carFx(dt);
+  });
+  AF.on('hurt', () => { CB.flinch = 0.25; });
+  AF.on('mode', (m) => { if (m !== 'walk') { AF.PL.aim = false; CB.swing = 0; } });
+  AF.onBuild('combat', 875, () => { heliBuild(); });
+
+
+  AF.test('combat: a punch engages a ped, fleeing peds calm down, a bullet can down one', () => {
+    const C = CR(); if (!C) return { ok: false, info: 'no crowd' };
+    const w = C.walkers.find((q) => q.act && !q.agg && !q.cop && !exempt(q) && !q.lead); if (!w) return { ok: false, info: 'no walker' };
+    const heat = CB.heat, stars = CB.stars;
+    hitPed(w, 5, 'melee', 1, 0); const engaged = !!w.agg && w.agg.hp === G.pedHp - 5;
+    hitPed(w, 99, 'gun', 1, 0); const isDown = w.agg && w.agg.st === 'down' && w.agg.lie;
+    w.agg.t = 31; const calm = CB.stepPed(w, 0.016) === false; CB.release(w);
+    const crime = CB.heat > heat; CB.heat = heat; CB.stars = stars;
+    return { ok: engaged && isDown && calm && !w.agg && crime, info: `engaged ${engaged}, down ${isDown}, calm ${calm}, crime ${crime}` };
+  });
+  AF.test('combat: car damage smokes, burns, explodes into a wreck', () => {
+    const car = VV.cars.find((c) => c.parked && !c.static && !c.player && !c.owner); if (!car) return { ok: false, info: 'no car' };
+    const save = { hp: car.hp, dmg: car.dmg, temp: car.temp };
+    dmgCar(car, 60); const smoky = HURT.has(car) && car.dmg > 0.4;
+    dmgCar(car, 60); const burning = car.burnT > 0;
+    for (let i = 0; i < 100 && !car.dead; i++) carFx(0.1);
+    const wreck = car.dead && car.dmg === 1 && !car.interact.can();
+    HURT.delete(car); Object.assign(car, { dead: false, burnT: 0, roll: 0, pitch: 0 }, save); VV.placeMesh(car); CB.heat = 0; CB.stars = 0;
+    return { ok: smoky && burning && wreck, info: `smoke ${smoky}, burning ${burning}, wreck ${wreck}` };
+  });
+  AF.test('combat: wanted level rises with crimes and the pool spawns officers', () => {
+    const C = CR(); CB.crime(G.stars[1] + 1); const two = CB.stars === 2;
+    const spawned = spawnCop(TMP.set(AF.player.x + 3, AF.player.y, AF.player.z));
+    const cop = C.walkers.find((q) => q.cop && q.act), armed = !!cop && cop.agg.kind === 'gun';
+    if (cop) CB.release(cop);
+    clearWanted(); return { ok: two && spawned && armed && CB.stars === 0, info: `stars2 ${two}, spawned ${spawned}, armed ${armed}` };
+  });
+}
+} catch (e) { AF.partError('77-combat.js', e); }
+
+// ================================================================ 78-jobs.js
+try {
+// ===== 78-jobs: earning + spending  (OWNER: game) =====
+// Jobs (J / JOB button): the vehicle decides — cab: taxi fares, bus: a stop-to-stop route, van: deliveries, fire engine: fire calls,
+//   on foot or a bike: courier parcels. class Job owns the loop (marker, timer, arrival hold, pay with an early bonus); each job only
+//   plans its next stop. One marker (a glowing post + gem, 2 draws) shows the target; the minimap draws it too.
+// Counters (one AF.shop sheet each): food heals (city grocers / diners / boardwalk kiosks / wayside markets), gun counters (pawn +
+//   hardware), outfitters (tailors / hatters) + the wardrobe at home, Body Works + fuel stations (drive in: repair, respray — a
+//   respray out of police sight clears the wanted level), the Motor Exchange (sells cars, one per G.price.sellCooldown s).
+// Carnival: high striker, Skee-Ball, claw, love tester, fortunes, shooting gallery (the ducks), carousel ride, photo booth.
+// Westgate: a boarding pass from check-in is needed to pass security and to take a plane up.
+{
+  const PI = Math.PI, G = AF.G, S = AF.save, VV = AF.vehicles, I = AF.input, FX = AF.fx, SFX = AF.sfx, HUD = AF.hud, L = AF.land;
+  const cash = AF.cash, toast = (t) => AF.emit('toast', t);
+  const J = AF.jobs = { cur: null, ticket: false, shops: [], zones: [] };
+  const focus = () => AF.mode === 'drive' && VV.player ? VV.player : AF.player;
+  const speedNow = () => AF.mode === 'drive' && VV.player ? Math.abs(VV.player.v) : (AF.PL.walk.speed || 0);
+
+  // ---------------------------------------------------------------- the target marker (glowing post + spinning gem; parked far below when unused)
+  const MK = { post: null, gem: null, x: 0, y: -999, z: 0 };
+  J.mark = (x, y, z) => { MK.x = x; MK.y = y; MK.z = z; MK.post.position.set(x, y, z); MK.post.visible = y > -900; if (AF.ui.map) AF.ui.map.revision++; };
+  J.unmark = () => J.mark(0, -999, 0);
+  AF.onBuild('jobs-marker', 880, () => {
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 2.3, 0.5), fog: false });
+    const pg = new THREE.BoxGeometry(0.16, 22, 0.16); pg.translate(0, 11, 0);
+    MK.post = new THREE.Mesh(pg, mat); MK.gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.6, 0), mat);
+    MK.post.add(MK.gem); MK.gem.position.y = 3; MK.post.name = 'job-marker';
+    for (const m of [MK.post, MK.gem]) { m.castShadow = false; m.frustumCulled = false; }
+    AF.scene.add(MK.post); J.unmark();
+  });
+  AF.on('preloaded', () => { MK.post.visible = true; AF.stream.compileAhead(MK.post).then(() => { MK.post.visible = MK.y > -900; }); });
+
+  // ---------------------------------------------------------------- places: city doors near a road, kerb points beside them
+  let DOORS = null;
+  const doors = () => DOORS || (DOORS = AF.buildings.flatMap((b) => (b.name && b.label !== false && b.doors && b.doors.length && b.doors[0].y < 2 && b.box[0] > -660 && b.box[3] < 300) ? [{ x: b.doors[0].x, z: b.doors[0].z, name: b.name }] : []));
+  const kerb = (x, z) => {
+    const nr = AF.PLAN.nearestRoad(x, z), r = nr.road; if (!r || nr.edge > 14) return null;
+    const cx = r.a[0] + (r.b[0] - r.a[0]) * nr.t, cz = r.a[1] + (r.b[1] - r.a[1]) * nr.t; let nx = x - cx, nz = z - cz; const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
+    const o = r.w / 2 - 1.8; return { x: cx + nx * o, z: cz + nz * o, y: AF.W.groundY(cx + nx * o, cz + nz * o) };
+  };
+  const pickDoor = (x, z, dMin, dMax, road) => {
+    const D = doors();
+    for (let i = 0; i < 40; i++) {
+      const d = D[(Math.random() * D.length) | 0], dist = Math.hypot(d.x - x, d.z - z); if (dist < dMin || dist > dMax) continue;
+      const k = road ? kerb(d.x, d.z) : { x: d.x, z: d.z, y: AF.surfaceBelow(d.x, d.z, 3, 6) }; if (!k) continue;
+      return Object.assign(k, { name: d.name, door: d, dist });
+    }
+    return null;
+  };
+  const WK = () => AF.rail && AF.rail.walkers;
+  const walkTo = (x, z, tx, tz, keep) => { const W = WK(); if (!W || !W.spawn) return null; return W.spawn(x, z, Math.atan2(tx - x, tz - z), { path: [tx, tz], onEnd: keep ? null : W.off, v: 1.5 }); };
+
+  // ---------------------------------------------------------------- jobs
+  class Job {
+    constructor(title, need) { this.title = title; this.need = need; this.earned = 0; this.legs = 0; this.stop = null; }
+    valid() { return true; }
+    start() { this.stop = this.plan(); if (!this.stop) return false; this.begin(); return true; }
+    begin() { const s = this.stop; s.hold = 0; s.t0 = s.t; J.mark(s.x, s.y ?? AF.W.groundY(s.x, s.z), s.z); toast(s.label); }
+    update(dt) {
+      const s = this.stop, f = focus();
+      if (!this.valid()) return this.end(`Job over \u2014 you left the ${this.need}.`);
+      if (s.t != null && (s.t -= dt) <= 0) return this.end(s.late || 'Too slow \u2014 they gave up on you.');
+      const d = Math.hypot(s.x - f.x, s.z - f.z);
+      if (d < (s.r || 5) && speedNow() < 2.5) { if ((s.hold += dt) >= (s.wait || 0)) this.arrive(s); } else s.hold = 0;
+      if (this.tick) this.tick(dt, s);
+      HUD.job = { title: this.title, line: (s.short || s.label) + ' \u00b7 ' + Math.round(d) + ' m', t: s.t, pay: this.earned || null };
+    }
+    arrive(s) {
+      if (s.pay) { const p = Math.round(s.pay * (s.t0 ? 1 + G.pay.early * AF.clamp(s.t / s.t0, 0, 1) : 1)); AF.money.add(p); this.earned += p; }
+      if (s.done) s.done(); SFX.play('ding'); this.legs++;
+      this.stop = this.plan(); if (this.stop) this.begin(); else this.end(this.finish || 'Shift complete!');
+    }
+    end(msg) { if (J.cur !== this) return; J.cur = null; J.unmark(); HUD.job = null; if (this.cleanup) this.cleanup(); toast(msg + (this.earned ? ' You earned ' + cash(this.earned) + '.' : '')); }
+  }
+  class Taxi extends Job {
+    constructor() { super('Taxi', 'cab'); this.leg = 0; }
+    valid() { const c = VV.player; return AF.mode === 'drive' && !!c && !!c.type.cab; }
+    plan() {
+      const c = VV.player, pick = !this.leg;
+      const D = pickDoor(c.x, c.z, pick ? 50 : 160, pick ? 260 : 650, true); if (!D) return null;
+      this.leg ^= 1;
+      if (pick) {
+        const W = WK(); this.fare = W && W.spawn ? W.spawn(D.door.x, D.door.z, Math.atan2(D.x - D.door.x, D.z - D.door.z), {}) : null;
+        if (this.fare) W.go(this.fare, [D.x + (D.door.x - D.x) * 0.25, D.z + (D.door.z - D.z) * 0.25], 1.3, null);
+        return { x: D.x, z: D.z, r: 5.5, wait: 1.2, short: 'Pick up \u00b7 ' + D.name, label: 'A fare is waiting outside ' + D.name + '.', t: 50 + D.dist / 6,
+          done: () => { const f = this.fare, W = WK(); if (f && W) W.go(f, [c.x, c.z], 1.6, W.off); this.fare = null; this.from = { x: D.x, z: D.z }; } };
+      }
+      const dist = Math.hypot(D.x - this.from.x, D.z - this.from.z);
+      return { x: D.x, z: D.z, r: 5.5, wait: 1.2, short: 'Drop off \u00b7 ' + D.name, label: '\u201c' + D.name + ', and step on it!\u201d', t: 25 + dist / 6.5, pay: G.pay.taxiBase + dist * G.pay.taxiPerM,
+        late: 'The fare stormed out without paying.', done: () => walkTo(c.x, c.z, D.door.x, D.door.z) };
+    }
+    cleanup() { const W = WK(); if (this.fare && W) W.off(this.fare); }
+  }
+  class Bus extends Job {
+    constructor() { super('Bus route', 'bus'); this.seen = new Set(); }
+    valid() { const c = VV.player; return AF.mode === 'drive' && !!c && c.type.id === 'bus'; }
+    plan() {
+      if (this.legs >= 6) return null;
+      const c = VV.player, hx = Math.sin(c.yaw), hz = Math.cos(c.yaw); let best = null, bs = 1e9;
+      for (const b of AF.busStops || []) {
+        if (this.seen.has(b)) continue; const dx = b.x - c.x, dz = b.z - c.z, d = Math.hypot(dx, dz); if (d < 40) continue;
+        const score = d - (dx * hx + dz * hz) * 0.5; if (score < bs) { bs = score; best = b; }
+      }
+      if (!best) return null; this.seen.add(best); const d = Math.hypot(best.x - c.x, best.z - c.z);
+      return { x: best.x, z: best.z, r: 7, wait: 2.5, short: 'Bus stop \u00b7 ' + (best.road || ''), label: 'Next stop: ' + (best.road || 'the next shelter') + '.', t: 25 + d / 6, pay: G.pay.busStop,
+        done: () => { for (let i = 0; i < 2; i++) walkTo(best.x + (Math.random() - 0.5) * 3, best.z + (Math.random() - 0.5) * 3, c.x, c.z); } };
+    }
+  }
+  class Delivery extends Job {
+    constructor() { super('Deliveries', 'van'); }
+    valid() { const c = VV.player; return AF.mode === 'drive' && !!c && c.type.kind === 'van'; }
+    plan() {
+      if (this.legs >= 3) return null;
+      const c = VV.player, D = pickDoor(c.x, c.z, 120, 450, true); if (!D) return null;
+      return { x: D.x, z: D.z, r: 5.5, wait: 1.5, short: 'Deliver \u00b7 ' + D.name, label: 'Crates for ' + D.name + ' (' + (3 - this.legs) + ' to go).', t: 25 + D.dist / 6.5, pay: G.pay.deliver + D.dist * G.pay.deliverPerM,
+        done: () => walkTo(c.x, c.z, D.door.x, D.door.z) };
+    }
+  }
+  class Fire extends Job {
+    constructor() { super('Fire call', 'fire engine'); }
+    valid() { const c = VV.player; return AF.mode === 'drive' && !!c && c.type.id === 'firetruck'; }
+    plan() {
+      if (this.legs >= 2) return null;
+      const c = VV.player, D = pickDoor(c.x, c.z, 150, 500, true); if (!D) return null;
+      this.blaze = { x: D.door.x, z: D.door.z, y: AF.W.groundY(D.door.x, D.door.z) + 3, t: 0 };
+      return { x: D.x, z: D.z, r: 9, wait: 5, short: 'Fire \u00b7 ' + D.name, label: 'Fire reported at ' + D.name + '! Get there and hold position to hose it down.', t: 30 + D.dist / 8, pay: G.pay.fire, late: 'The fire brigade from Eastport got there first.',
+        done: () => { this.blaze = null; } };
+    }
+    tick(dt, s) {
+      const B = this.blaze; if (!B || (B.t -= dt) > 0) return; B.t = 0.12;
+      FX.burst('fire', B.x, B.y, B.z, s.hold > 0 ? 1 : 2, { spread: 2 }); FX.burst(s.hold > 0 ? 'steam' : 'smoke', B.x, B.y + 1.5, B.z, 1, { size: 1.5 });
+    }
+    cleanup() { this.blaze = null; }
+  }
+  class Courier extends Job {
+    constructor() { super('Courier', 'bike'); }
+    valid() { return AF.mode === 'walk' || (AF.mode === 'drive' && !!VV.player && VV.player.type.kind === 'bike'); }
+    plan() {
+      if (this.legs >= 3) return null;
+      const f = focus(), D = pickDoor(f.x, f.z, 70, 230, false); if (!D) return null;
+      return { x: D.x, z: D.z, y: D.y, r: 2.6, wait: 0.4, short: 'Parcel \u00b7 ' + D.name, label: 'Parcel for ' + D.name + ' \u2014 run!', t: 18 + D.dist / 4.5, pay: G.pay.courier + D.dist * G.pay.courierPerM };
+    }
+  }
+  J.toggle = () => {
+    if (J.cur) { J.cur.end('You clock off.'); return; }
+    const c = AF.mode === 'drive' && VV.player, T = c && c.type;
+    const job = !c ? (AF.mode === 'walk' ? new Courier() : null) : T.cab ? new Taxi() : T.id === 'bus' ? new Bus() : T.kind === 'van' ? new Delivery() : T.id === 'firetruck' ? new Fire() : T.kind === 'bike' ? new Courier() : null;
+    if (!job) { toast('No work in this one. Try a taxi, a bus, a delivery van, the fire engine \u2014 or J on foot for courier runs.'); return; }
+    J.cur = job; if (!job.start()) { J.cur = null; toast('No work around here right now.'); }
+  };
+
+  // ---------------------------------------------------------------- counters
+  const sheet = (title, sub, items, tabs) => AF.shop.open({ title, sub, tabs, items });
+  const counter = (x, y, z, label, open, o = {}) => { const it = AF.addInteract({ x, y: y + 1, z, r: o.r || 2.6, label, prio: o.prio ?? 0.4, can: () => AF.mode === 'walk' && (!o.can || o.can()), act: open }); J.shops.push({ x, z, kind: o.kind || 'shop', it }); return it; };
+  // food: heals; the kiosks + wayside markets sell a few things, a grocer or diner the whole menu
+  const FOOD = [['Apple', 2, 8], ['Coffee & doughnut', 4, 15], ['Sandwich', 6, 28], ['Blue-plate dinner', 12, 60], ['First-aid tin', 30, 100]];
+  const eat = (name, price, heal) => ({ name, desc: '+' + heal + ' health', price, off: AF.health.v >= AF.health.max, act: () => AF.shop.buy(price, name, () => { AF.health.heal(heal); toast('Mm \u2014 ' + name.toLowerCase() + '. +' + heal + ' health.'); }) });
+  const foodShop = (title, menu) => () => sheet(title, 'Food & first aid', () => menu.map((f) => eat(...f)));
+  // guns
+  const gunShop = (title) => () => sheet(title, 'Firearms & ammunition \u2014 keep it legal, friend', (tab) => {
+    const GN = AF.GUNS; return Object.keys(GN).map((id) => {
+      const g = GN[id];
+      if (!tab) return { name: g.name, desc: S.guns[id] ? 'Owned' : g.mag + '-round, ' + (g.auto ? 'automatic' : g.pellets > 1 ? 'buckshot' : 'single shot') + ' \u00b7 includes ' + g.pack + ' rounds', price: g.price, tag: S.guns[id] ? 'Owned' : null, off: !!S.guns[id], act: () => AF.shop.buy(g.price, g.name, () => { AF.combat.give(id); toast('The ' + g.name + ' is yours. Wheel or 1\u20135 to draw it.'); }) };
+      return { name: g.name + ' ammo \u00d7' + g.pack, desc: S.guns[id] ? (S.ammo[id] || 0) + ' spare' : 'Buy the gun first', price: g.packPrice, off: !S.guns[id], act: () => AF.shop.buy(g.packPrice, 'ammo', () => { S.ammo[id] = (S.ammo[id] || 0) + g.pack; }) };
+    });
+  }, ['Firearms', 'Ammunition']);
+  // clothes: styles are bought at an outfitter (AF.save.wear) and worn free at the home wardrobe; colours are always free
+  const WEAR = {
+    top: [['tee', 'Tee', 25], ['hoodie', 'Hoodie', 60], ['shirt', 'Shirt', 45], ['cardigan', 'Cardigan', 55], ['vest', 'Vest', 35], ['dress', 'Dress', 80]],
+    bottom: [['jeans', 'Jeans', 40], ['joggers', 'Joggers', 35], ['shorts', 'Shorts', 25], ['skirt', 'Skirt', 40]],
+    hat: [['none', 'No hat', 0], ['cap', 'Ball cap', 20], ['straw', 'Straw hat', 30]],
+    extra: [['none', 'No extras', 0], ['chain', 'Gold chain', 250], ['headphones', 'Headphones', 120], ['bow', 'Hair bow', 15]],
+    glasses: [['none', 'No glasses', 0], ['on', 'Spectacles', 45]],
+  };
+  const COLS = [0x1d1d20, 0xf2f2f2, 0xc8322a, 0x2f5a9a, 0x2f7a4a, 0xf2c24a, 0xff5fae, 0xb68ae0, 0x8a5a36, 0x4a4e56, 0x3aa0ff, 0xf7931a];
+  const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+  const base = () => AF.friends.current.look;
+  const myLook = () => S.looks[AF.friends.current.id] || base();
+  const cur = (slot, L) => slot === 'top' ? L.top.style : slot === 'bottom' ? L.bottom.style : slot === 'glasses' ? (L.glasses != null ? 'on' : 'none') : L[slot] || 'none';
+  const owns = (slot, id) => id === 'none' || S.wear.includes(slot + ':' + id) || cur(slot, base()) === id;
+  const wear = (fn) => { const L = JSON.parse(JSON.stringify(myLook())); fn(L); S.looks[AF.friends.current.id] = L; AF.player.setLook(L); AF.saveSoon(); };
+  const putOn = (slot, id) => wear((L) => {
+    if (slot === 'top') L.top.style = id; else if (slot === 'bottom') L.bottom.style = id;
+    else if (slot === 'glasses') { if (id === 'on') L.glasses = base().glasses ?? 0x2a2a2e; else delete L.glasses; }
+    else if (id === 'none') delete L[slot]; else { L[slot] = id; if (slot === 'hat' && L.hatCol == null) L.hatCol = 0x2d4270; }
+  });
+  const TABS = [['top', 'Tops'], ['bottom', 'Bottoms'], ['hat', 'Hats'], ['extra', 'Extras'], ['glasses', 'Glasses']];
+  const outfitter = (title) => () => sheet(title, 'New styles \u2014 wear them any time at your wardrobe', (tab) => {
+    const slot = TABS[tab][0], L = myLook();
+    return WEAR[slot].filter(([id]) => id !== 'none').map(([id, name, price]) => {
+      const have = owns(slot, id), on = cur(slot, L) === id;
+      return { name, desc: on ? 'Wearing' : have ? 'Owned \u2014 tap to wear' : 'Buy and wear', price, tag: on ? 'Wearing' : have ? 'Owned' : null,
+        act: () => { if (have) putOn(slot, id); else AF.shop.buy(price, name, () => { S.wear.push(slot + ':' + id); putOn(slot, id); }); } };
+    });
+  }, TABS.map((t) => t[1]));
+  const PAINT = [['top', 'Top'], ['top2', 'Top trim'], ['bottom', 'Bottoms'], ['hatCol', 'Hat'], ['shoe', 'Shoes']];
+  const wardrobe = () => sheet('Wardrobe', 'Your clothes \u2014 colours are free', (tab) => {
+    const L = myLook();
+    if (tab === TABS.length) return PAINT.flatMap(([k, name]) => COLS.map((col, i) => ({ name: i ? '' : name, sw: hex(col), tag: ' ', act: () => wear((Q) => { if (k === 'top') Q.top.col = col; else if (k === 'top2') { Q.top.col2 = col; if (Q.top.print != null) Q.top.print = col; } else if (k === 'bottom') Q.bottom.col = col; else Q[k] = col; }) })));
+    const slot = TABS[tab][0];
+    return WEAR[slot].map(([id, name]) => { const on = cur(slot, L) === id, have = owns(slot, id); return { name, desc: have ? '' : 'Buy it at an outfitter', tag: on ? 'Wearing' : have ? 'Wear' : 'Locked', off: !have || on, act: () => putOn(slot, id) }; })
+      .concat(tab === 0 ? [{ name: 'Original outfit', desc: 'Back to your usual look', tag: 'Reset', act: () => { delete S.looks[AF.friends.current.id]; AF.player.setLook(base()); AF.saveSoon(); } }] : []);
+  }, TABS.map((t) => t[1]).concat('Colours'));
+  AF.on('friend', (c) => { const L = S.looks[c.id]; if (L) AF.player.setLook(L); });
+
+  // ---------------------------------------------------------------- garages: Body Works (+ fuel stations) and the Motor Exchange
+  const VALUE = (T) => T.lux ? 4200 : T.cab ? 1100 : T.kind === 'van' ? 1600 : T.kind === 'bike' ? 800 : T.kind === 'car' && T.id !== 'police' ? 1400 : 0;
+  let soldT = -1e9;
+  const bodyWorks = (name) => (car) => sheet(name, car.name + ' \u00b7 condition ' + Math.round(Math.max(0, car.hp ?? G.vehHp)) + '%', () => {
+    const hp = car.hp ?? G.vehHp, fix = Math.round(G.price.repairBase + (G.vehHp - hp) * G.price.repairK), paints = car.type.paints.length;
+    return [
+      { name: 'Repair', desc: hp >= G.vehHp ? 'Running like new' : 'Panels, glass and engine', price: fix, off: hp >= G.vehHp, act: () => AF.shop.buy(fix, 'the repair', () => { car.hp = G.vehHp; car.dmg = 0; AF.emit('toast', 'Good as new.'); }) },
+      { name: paints > 1 ? 'Respray' : 'Respray (factory colour)', desc: AF.combat.stars ? 'A new look loses the police \u2014 if none of them is watching' : 'Fresh paint', price: G.price.repaint, act: () => AF.shop.buy(G.price.repaint, 'a respray', () => {
+        const T = car.type, pi = ((+String(car.key).split(':')[1] || 0) + 1) % T.paints.length; car.key = VV.getGeo(T, pi).key; car.hp = Math.max(car.hp ?? G.vehHp, G.vehHp * 0.6); car.dmg = AF.clamp(1 - car.hp / G.vehHp, 0, 1) * 0.8;
+        if (AF.combat.stars && AF.combat.seenT > 0.5) AF.combat.clearWanted('Fresh paint \u2014 the police are looking for a different car now.'); else if (AF.combat.stars) toast('The police watched you drive in. That won\u2019t fool them.');
+      }) },
+    ];
+  });
+  const exchange = (car) => sheet('Solace Motor Exchange', 'Cash for cars \u2014 one deal every few minutes', () => {
+    const v = VALUE(car.type), hp = Math.max(0, car.hp ?? G.vehHp), offer = Math.round(v * G.price.sellK * (0.35 + 0.65 * hp / G.vehHp) / 10) * 10, wait = soldT + G.price.sellCooldown - AF.clock.t;
+    const why = car.owner ? 'That\u2019s ' + (AF.friends.byId[car.owner] || {}).name + '\u2019s car!' : !v ? 'We don\u2019t touch those.' : wait > 0 ? 'Lot\u2019s full \u2014 come back in ' + Math.ceil(wait / 60) + ' min' : 'Cash on the spot';
+    return [{ name: 'Sell the ' + car.name, desc: why, tag: car.owner || !v || wait > 0 ? 'No deal' : '+' + cash(offer), off: !!car.owner || !v || wait > 0,
+      act: () => { soldT = AF.clock.t; AF.shop.close(); VV.exitCar(); VV.removeCar(car); AF.money.add(offer); toast('Sold! The ' + car.name + ' went for ' + cash(offer) + '.'); } }];
+  });
+  // a drive-in zone: open the sheet when the player car stops inside, once per visit
+  const zone = (x, z, y, name, open, kind) => { const Z = { x, z, y, name, open, kind, inside: false }; J.zones.push(Z); return Z; };
+  const sign = (x, y, z, yaw, txt, col) => {
+    const tm = AF.textModel(txt, col, { font: 'deco', depth: 1, pad: 1, bg: AF.col(0x1d2b3e, { jitter: 0.1 }) });
+    const g = AF.meshModel(tm, { vs: Math.min(1 / 12, 3.2 / Math.max(1, tm.w)), anchor: [0.5, 0, 0.5] });
+    AF.placeStatic(g, x, y, z, Math.round(((yaw / (PI / 2)) % 4 + 4) % 4), { collide: false });
+  };
+  AF.onBuild('jobs-garages', 485, () => {
+    const W = AF.W, iron = AF.col(0x2a2c30, { metal: 0.6 }), bulb = AF.col(0xfff2c0, { emit: 0xffd070, emitK: 2.4, mode: 'night' });
+    // a kerb space (freed from a parked car) near each anchor: Body Works x2, the Motor Exchange
+    for (const [ax, az, name, kind, col] of [[96, -60, 'BODY WORKS', 'paint', 0xf2c24a], [-210, -96, 'BODY WORKS', 'paint', 0xf2c24a], [-60, 60, 'MOTOR EXCHANGE', 'sell', 0x7cd6a8]]) {
+      let best = null, bd = 1e9;
+      for (const s of VV.parkedStatic) { if (s.outland || s.noDrive) continue; const d = (s.x - ax) ** 2 + (s.z - az) ** 2; if (d < bd) { bd = d; best = s; } }
+      if (!best) continue;
+      AF.removeStatic(best.pr); VV.parkedStatic.splice(VV.parkedStatic.indexOf(best), 1);
+      const s = Math.sin(best.yaw), c = Math.cos(best.yaw), nr = AF.PLAN.nearestRoad(best.x, best.z), R = nr.road;
+      const rx = R ? R.a[0] + (R.b[0] - R.a[0]) * nr.t : best.x, rz = R ? R.a[1] + (R.b[1] - R.a[1]) * nr.t : best.z, ox = best.x - rx, oz = best.z - rz, ol = Math.hypot(ox, oz) || 1;
+      const px = best.x + ox / ol * 2.6, pz = best.z + oz / ol * 2.6, gy = W.groundY(px, pz);   // a post on the sidewalk side
+      W.fill(px - 0.125, gy, pz - 0.125, px + 0.125, gy + 3.2, pz + 0.125, iron); W.setM(px, gy + 3.2, pz, bulb);
+      sign(px, gy + 3.35, pz, Math.atan2(-ox, -oz), name, AF.col(col, { emit: col, emitK: 1.6, mode: 'night' }));
+      for (const k of [-1, 1]) W.setM(best.x + s * 2.6 * k + ox / ol * 1.2, gy, best.z + c * 2.6 * k + oz / ol * 1.2, bulb);
+      zone(best.x, best.z, best.y, name, kind === 'sell' ? exchange : bodyWorks('Solace Body Works'), kind);
+    }
+  });
+
+  // ---------------------------------------------------------------- carnival games (one class: pay, play, prize)
+  class Game {
+    constructor(o) { Object.assign(this, o); counter(o.x, o.y ?? 0.25, o.z, o.name + ' \u00b7 ' + cash(o.price), () => this.pay(), { kind: 'game', prio: 1.5 }); }
+    pay() { if (AF.hud.meterOn() || !AF.money.spend(this.price, 'a go')) return; SFX.play('click'); this.play(); }
+    win(n, msg) { if (n) AF.money.add(n); SFX.play(n ? 'ding' : 'deny'); toast(msg); }
+  }
+  const FORTUNES = ['A stranger will hand you a nickel. Spend it on taffy.', 'Fortune favours the bold \u2014 and the well-dressed.', 'Beware of seagulls bearing grudges.', 'Your lucky number is 13. Diksha already knew that.', 'A long journey by air is in your future. Buy the ticket.', 'You will find a star where you least expect it.', 'Romance blooms on the Big Wheel. Or nausea. Hard to say.'];
+  const LOVE = ['Clammy', 'Harmless', 'Mild', 'Warm', 'Sweet', 'Hot stuff', 'Passionate', 'UNCONTROLLABLE!'];
+  AF.onBuild('jobs-carnival', 890, () => {
+    if (L.striker) new Game({ name: 'High striker', x: L.striker.x, z: L.striker.z + 1.8, price: G.price.game,
+      play() { AF.hud.meter({ label: 'Swing the mallet!', speed: 1.7, zone: [0.88, 1] }, (v, ok) => { SFX.play('punch'); this.win(ok ? 4 : 0, ok ? 'DING! You rang the bell \u2014 a $4 prize.' : v > 0.6 ? 'So close! The puck kisses the top.' : 'Puny! The puck barely moves.'); }); } });
+    new Game({ name: 'Skee-Ball', x: -280, y: 0.5, z: 190.6, price: G.price.game, play() {
+      let n = 0, score = 0;
+      const roll = () => { const a = 0.25 + Math.random() * 0.55; AF.hud.meter({ label: 'Ball ' + (n + 1) + ' of 3 \u00b7 ' + score + ' pts', speed: 1.5, zone: [a, a + 0.12] }, (v, ok) => {
+        score += ok ? 50 : Math.abs(v - a - 0.06) < 0.14 ? 20 : 10; n++; SFX.play('click');
+        if (n < 3) roll(); else this.win(score >= 120 ? 5 : score >= 90 ? 2 : 0, score + ' points' + (score >= 90 ? ' \u2014 the attendant swaps your tickets for ' + cash(score >= 120 ? 5 : 2) + '.' : '. Better luck next time.'));
+      }); };
+      roll(); } });
+    new Game({ name: 'Claw machine', x: -283.2, y: 0.5, z: 193.3, price: G.price.game, play() { const a = 0.15 + Math.random() * 0.7; AF.hud.meter({ label: 'Drop the claw!', speed: 2.1, zone: [a, a + 0.07] }, (v, ok) => this.win(ok ? 6 : 0, ok ? 'You snagged a plush gull! The attendant swaps it for $6.' : 'The claw slips. Of course it does.')); } });
+    new Game({ name: 'Love tester', x: -284.2, y: 0.5, z: 189.5, price: G.price.game, play() { const r = LOVE[(Math.random() * LOVE.length) | 0]; SFX.play('ding'); toast('The bulbs climb\u2026 \u201c' + r + '\u201d'); } });
+    new Game({ name: 'Madame Zenobia', x: -268.5, y: 0.5, z: 180.4, price: G.price.game, play() { toast('Madame Zenobia whirrs: \u201c' + FORTUNES[(Math.random() * FORTUNES.length) | 0] + '\u201d'); } });
+    new Game({ name: 'Fortune teller', x: -245, z: 202.6, price: G.price.game * 2, play() { AF.emit('dialogue', { name: 'Madame Esmeralda', role: 'Fortune teller', lines: ['Cross my palm with silver\u2026 ah.', FORTUNES[(Math.random() * FORTUNES.length) | 0]] }); } });
+    new Game({ name: 'Photo booth', x: -151.2, z: 186, price: G.price.game, play() { const f = document.createElement('div'); f.style.cssText = 'position:absolute;inset:0;background:#fff;opacity:.9;transition:opacity .6s;pointer-events:none'; document.getElementById('ui').appendChild(f); requestAnimationFrame(() => { f.style.opacity = '0'; }); setTimeout(() => f.remove(), 700); if (AF.photo && AF.photo.capture) AF.photo.capture(); } });
+    // shooting gallery: 10 shots at the tin ducks, 25 s, aim with the mouse; the counter barker pays out
+    if (L.gallery && L.ducks) {
+      const T = L.ducks.map((m) => ({ m, x: 0, y: 0, z: 0, down: 0 }));
+      new Game({ name: 'Shooting gallery', x: L.gallery.x, z: L.gallery.z, price: G.price.game * 2, play() {
+        const g = L.gallery; AF.player.teleport(g.x, 0.25, g.z, -PI / 2); AF.PL.walk.camYaw = PI / 2; AF.PL.walk.camPitch = 0.05; AF.PL.still = true;
+        const GAL = AF.combat.gallery = { shots: 10, hits: 0, t: 25,
+          targets: () => { for (const d of T) { d.x = d.m.position.x; d.y = d.m.position.y + 0.15; d.z = d.m.position.z; } return T.filter((d) => d.down <= 0); },
+          hit: (d) => { d.down = 1.2; d.m.rotation.x = -PI / 2; GAL.hits++; SFX.play('ding'); } };
+        toast(AF.touch ? 'Drag to aim, HIT to shoot \u2014 10 shots, 25 seconds!' : 'Aim with the mouse, click to shoot \u2014 10 shots, 25 seconds!');
+        J.gallery = T;
+      } });
+    }
+    // boardwalk kiosks: something to eat
+    for (const [x, z, name, price, heal] of L.foodKiosks || []) counter(x, 0.25, z - 1.8, name + ' \u00b7 ' + cash(price), () => sheet(name, 'Boardwalk kiosk', () => [eat(name, price, heal), eat('Lemonade', 2, 6)]), { kind: 'food' });
+    // the carousel: ride a horse for a minute
+    if (L.carousel) counter(-195, 0.5, 190 + 8 + 1.8, 'Ride the carousel \u00b7 ' + cash(G.price.ride), () => { if (AF.money.spend(G.price.ride, 'a ticket')) AF.setMode('carousel'); }, { kind: 'game', prio: 1.5 });
+  });
+  const galleryTick = (dt) => {
+    const GAL = AF.combat.gallery; if (!GAL) return;
+    for (const d of J.gallery) if (d.down > 0 && (d.down -= dt) <= 0) d.m.rotation.x = 0;
+    GAL.t -= dt; HUD.job = { title: 'Shooting gallery', line: GAL.hits + ' hits \u00b7 ' + GAL.shots + ' shots left', t: GAL.t };
+    if ((GAL.shots <= 0 && AF.combat.cd <= 0) || GAL.t <= 0 || AF.mode !== 'walk') {
+      AF.combat.gallery = null; AF.PL.still = false; HUD.job = J.cur ? HUD.job : null;
+      const p = GAL.hits >= 8 ? 15 : GAL.hits >= 5 ? 6 : GAL.hits >= 3 ? 2 : 0;
+      if (p) AF.money.add(p); toast(GAL.hits + ' ducks down. ' + (p ? 'The barker pays out ' + cash(p) + '!' : 'Step right up and try again!'));
+    }
+  };
+  // carousel ride: the avatar rides a horse (PL.seat follows it round), an orbiting camera; 40 s or E to get off
+  const CAR = { t: 0, h: null, p: new THREE.Vector3(), q: new THREE.Quaternion(), e: new THREE.Euler(), look: new THREE.Vector3() };
+  AF.modes.carousel = {
+    enter() { const H = L.carousel.horses; CAR.h = H[(Math.random() * 12) | 0]; CAR.t = 0; AF.player.setVisible(true); toast('Round and round! ' + (AF.touch ? 'EXIT' : 'E') + ' to hop off.'); },
+    exit() { AF.PL.seat = null; },
+    update(dt) {
+      CAR.t += dt; const m = CAR.h.m; m.updateMatrixWorld(); m.getWorldPosition(CAR.p); m.getWorldQuaternion(CAR.q); CAR.e.setFromQuaternion(CAR.q, 'YXZ');
+      // horses face their local +x; the saddle sits ~0.94 m above the horse's origin
+      AF.Vehicle.seat({ x: CAR.p.x, y: CAR.p.y + 0.22, z: CAR.p.z, yaw: CAR.e.y + PI / 2, bob: 0, roll: 0, pitch: 0 }, [0, 0, 0], { seatH: 0.6, lean: 0.1 });
+      const a = CAR.e.y + PI / 2 + 0.6, cam = AF.camera; CAR.look.set(CAR.p.x, CAR.p.y + 1.2, CAR.p.z);
+      cam.position.set(CAR.p.x + Math.sin(a) * 4, CAR.p.y + 2.2, CAR.p.z + Math.cos(a) * 4); cam.up.set(0, 1, 0); cam.lookAt(CAR.look); AF.camTarget.copy(CAR.look); AF.shadowFocus.set(CAR.p.x, 0, CAR.p.z);
+      if (CAR.t > 40 || I.hit('KeyE') || I.hit('KeyF')) AF.setMode('walk', { x: -195, y: 0.5, z: 190 + 8 + 2.4, yaw: PI });
+    },
+  };
+
+  // ---------------------------------------------------------------- city counters (found by name once the world is built) + Westgate
+  const FOOD_RE = /grocer|market|deli|automat|diner|bakery|lunch|caf[e\u00e9]|food|candy|soda|fountain|butcher/i, GUN_RE = /pawn|hardware|sporting|gun|loan/i, WEAR_RE = /tailor|hat|dry goods|shoe|glove|outfit|haberdash|cloth|boutique|notions|department/i;
+  const inside = (b) => { const d = b.doors[0], yaw = d.yaw || 0; return { x: d.x + Math.sin(yaw) * 1.6, y: d.y ?? 0.25, z: d.z + Math.cos(yaw) * 1.6 }; };
+  AF.on('ready', () => {
+    for (const b of AF.buildings) {
+      if (!b.name || !b.doors || !b.doors.length || b.doors[0].y > 2) continue;
+      const kind = GUN_RE.test(b.name) ? 'guns' : WEAR_RE.test(b.name) ? 'wear' : FOOD_RE.test(b.name) ? 'food' : null; if (!kind) continue;
+      const p = inside(b), title = b.name;
+      if (kind === 'food') counter(p.x, p.y, p.z, 'Buy food \u00b7 ' + title, foodShop(title, FOOD), { kind });
+      else if (kind === 'guns') counter(p.x, p.y, p.z, 'Gun counter \u00b7 ' + title, gunShop(title), { kind });
+      else counter(p.x, p.y, p.z, 'Outfitter \u00b7 ' + title, outfitter(title), { kind });
+    }
+    for (const poi of (AF.outland && AF.outland.wayside) || []) {
+      const name = poi.name || 'Wayside ' + poi.kind, y = poi.y ?? AF.surfaceBelow(poi.x, poi.z, 50, 80);
+      if (['supermarket', 'mall', 'diner', 'kiosk'].includes(poi.kind)) counter(poi.x, y, poi.z, 'Buy food \u00b7 ' + name, foodShop(name, poi.kind === 'kiosk' ? FOOD.slice(0, 3) : FOOD), { kind: 'food', r: 5 });
+      if (poi.kind === 'fuel') zone(poi.x, poi.z, y, name, bodyWorks(name + ' garage'), 'paint');
+    }
+    // the wardrobe in every friend's front room
+    for (const c of AF.friends.cast) { const h = AF.friends.homeOf(c.id); if (h) counter(h.spawn.x + Math.cos(h.spawn.yaw) * 1.4, h.spawn.y, h.spawn.z - Math.sin(h.spawn.yaw) * 1.4, 'Wardrobe', wardrobe, { kind: 'home', can: () => AF.friends.current === c, prio: 0.6 }); }
+    // Westgate: boarding passes at check-in; security turns back anyone without one (or armed); planes need one to take off
+    counter(-534, 0.5, 47.6, 'Buy a boarding pass \u00b7 ' + cash(G.price.ticket), () => sheet('Westgate Check-in', 'One pass covers one flight', () => [{ name: 'Boarding pass', desc: J.ticket ? 'You have one \u2014 go through security' : 'Any departure, any plane on the apron', price: G.price.ticket, off: J.ticket, tag: J.ticket ? 'Got it' : null, act: () => AF.shop.buy(G.price.ticket, 'a pass', () => { J.ticket = true; toast('Boarding pass in hand. Security is straight ahead.'); }) }]), { kind: 'ticket' });
+    for (const pl of (AF.planes && AF.planes.list) || []) {
+      const it = pl.interact; if (!it || pl.x > -300 || pl.x < -700 || pl.z > 150) continue;
+      const act = it.act; it.act = () => { if (!J.ticket) { toast('Ground crew: \u201cBoarding pass, please.\u201d Buy one at check-in in the terminal.'); return; } J.ticket = false; act(); };
+    }
+    if (AF.ui.map) {
+      const map = AF.ui.map, ICON = { food: '#e9a35a', guns: '#e05a4a', wear: '#b68ae0', game: '#f3c84b', ticket: '#7ab8e8', paint: '#f2c24a', sell: '#7cd6a8' };
+      const draw = (g, to, mini) => {
+        g.save();
+        for (const s of J.shops) { if (!ICON[s.kind] || (mini && s.kind === 'game')) continue; const p = to(s.x, s.z); g.fillStyle = ICON[s.kind]; g.beginPath(); g.arc(p.x, p.y, mini ? 4 : 3.5, 0, PI * 2); g.fill(); }
+        for (const Z of J.zones) { const p = to(Z.x, Z.z); g.fillStyle = ICON[Z.kind]; g.fillRect(p.x - 4, p.y - 4, 8, 8); }
+        if (MK.y > -900) { const p = to(MK.x, MK.z); g.strokeStyle = '#1d1d20'; g.lineWidth = 2; g.fillStyle = '#ffd24a'; g.beginPath(); g.arc(p.x, p.y, mini ? 7 : 6, 0, PI * 2); g.fill(); g.stroke(); }
+        g.restore();
+      };
+      (map.overlays || (map.overlays = [])).push((g) => draw(g, map.worldToScreen, false));
+      (map.miniOverlays || (map.miniOverlays = [])).push((g, to) => draw(g, to, true));
+    }
+  });
+  let secT = 0, trespass = false;
+  const airport = (dt) => {
+    const p = AF.player; if (AF.mode !== 'walk' || p.x > -350 || p.x < -620 || p.z < 20 || p.z > 140) { trespass = false; return; }
+    if (p.x > -494 && p.x < -479 && p.z > 56.5 && p.z < 61.5 && (!J.ticket || AF.combat.gun())) {
+      p.teleport(p.x, p.y, 55.2, PI); if ((secT -= dt) <= 0) { secT = 3; toast(J.ticket ? 'Security: \u201cNo firearms past this point. Holster it.\u201d' : 'Security: \u201cBoarding pass, please.\u201d Check-in is behind you.'); }
+    } else secT -= dt;
+    if (p.z > 64 && !J.ticket && !trespass) { trespass = true; AF.combat.crime(G.heat.trespass); toast('Security! You\u2019re airside without a pass.'); }
+  };
+
+  // ---------------------------------------------------------------- tick
+  AF.onTick('jobs', 420, (dt, t) => {
+    if (!AF.ready) return;
+    if (I.hit('KeyJ') && !(AF.ui.modalOpen() || AF.health.dead)) J.toggle();
+    if (J.cur) J.cur.update(dt);
+    if (MK.post && MK.y > -900) { MK.gem.position.y = 3 + Math.sin(t * 2.4) * 0.3; MK.gem.rotation.y += dt * 2; }
+    galleryTick(dt); airport(dt);
+    // drive-in zones
+    const car = AF.mode === 'drive' && VV.player;
+    for (const Z of J.zones) {
+      const inZ = !!car && Math.abs(car.x - Z.x) < 3.4 && Math.abs(car.z - Z.z) < 3.4;
+      if (inZ && !Z.inside && Math.abs(car.v) < 1.2) { Z.inside = true; car.v = car.vx = car.vz = 0; Z.open(car); }
+      else if (!inZ) Z.inside = false;
+    }
+  });
+  AF.on('died', () => { if (J.cur) J.cur.end('Job lost.'); });
+
+  AF.test('jobs: courier job runs a stop and pays', () => {
+    if (AF.mode !== 'walk') AF.setMode('walk', {});
+    const m0 = S.money; J.toggle(); const job = J.cur; if (!job) return { ok: false, info: 'no job started' };
+    const s = job.stop, p = AF.player; p.x = p.body.x = s.x; p.z = p.body.z = s.z; AF.PL.walk.speed = 0;
+    job.update(0.5); job.update(0.5); const paid = S.money > m0 && job.legs === 1;
+    J.cur.end('test'); S.money = m0; AF.saveNow();
+    return { ok: paid && !J.cur && MK.y < -900, info: `paid ${paid}, legs ${job.legs}` };
+  });
+  AF.test('jobs: counters + drive-in zones exist (food, guns, outfits, garages, boarding pass)', () => {
+    const k = new Set(J.shops.map((s) => s.kind)), z = new Set(J.zones.map((s) => s.kind));
+    return { ok: k.has('food') && k.has('ticket') && k.has('game') && k.has('home') && z.has('paint') && z.has('sell'), info: [...k].join(',') + ' | zones ' + [...z].join(',') + ' | ' + J.shops.length + ' counters' };
+  });
+}
+} catch (e) { AF.partError('78-jobs.js', e); }
 
 // ================================================================ 98-tests.js
 try {

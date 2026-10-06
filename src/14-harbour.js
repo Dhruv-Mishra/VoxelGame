@@ -235,9 +235,10 @@ try {
       return geo(m, 1 / 8);
     };
     put(kiosk(24, 14, C.white, C.pink, C.white, 'TAFFY', C.red, C.white), -176, 0.25, 182, 0, true);
-    AF.addSpot({ building: null, x: -176, y: 0.25, z: 181.4, yaw: 0, kind: 'counter' });
+    AF.addSpot({ building: null, x: -176, y: 0.25, z: 181.6, yaw: Math.PI, kind: 'counter', vendor: true });
     put(kiosk(20, 12, C.red, C.gold, C.red, 'HOT DOGS', C.gold, C.red), -162, 0.25, 182, 0, true);
-    AF.addSpot({ building: null, x: -162, y: 0.25, z: 181.6, yaw: 0, kind: 'counter' });
+    AF.addSpot({ building: null, x: -162, y: 0.25, z: 181.8, yaw: Math.PI, kind: 'counter', vendor: true });
+    L.foodKiosks = [[-176, 182, 'Saltwater taffy', 4, 12], [-162, 182, 'Hot dog', 3, 22], [-214, 181, 'Ice cream cone', 3, 14], [-238, 181, 'Corn dog', 3, 20]];
     for (const qx of [-176, -162, -214, -238]) for (let i = 0; i < 4; i++) AF.addSpot({ building: null, x: qx + (i % 2) * 0.3 - 0.15, y: 0.25, z: 179.9 - i * 0.85, yaw: 0, kind: 'stand' });
     { // photo booth
       const m = new AF.Model(12, 20, 10);
@@ -249,12 +250,15 @@ try {
 
     // ---- more stalls along the promenade: ice cream, corn dogs, fortune teller, a high striker, bunting between the lamps
     put(kiosk(18, 12, C.mint, C.white, C.mint, 'ICE CREAM', C.navy, C.white), -214, 0.25, 181, 0, true);
-    AF.addSpot({ building: null, x: -214, y: 0.25, z: 180.6, yaw: 0, kind: 'counter' });
+    AF.addSpot({ building: null, x: -214, y: 0.25, z: 180.8, yaw: Math.PI, kind: 'counter', vendor: true });
     put(kiosk(18, 12, C.gold, C.red, C.gold, 'CORN DOGS', C.red, C.cream), -238, 0.25, 181, 0, true);
-    AF.addSpot({ building: null, x: -238, y: 0.25, z: 180.6, yaw: 0, kind: 'counter' });
+    AF.addSpot({ building: null, x: -238, y: 0.25, z: 180.8, yaw: Math.PI, kind: 'counter', vendor: true });
     put(kiosk(16, 12, c(0x5a2a6a), c(0x8a4aa0), C.gold, 'FORTUNES', C.gold, c(0x3a1a4a)), -245, 0.25, 201, 2, true);
+    AF.addSpot({ building: null, x: -245, y: 0.25, z: 201.2, yaw: 0, kind: 'counter', vendor: true });
     { // high striker: tall post with a bell, a puck that slides up and down, the mallet stand
       const hx = -226, hz = 199;
+      L.striker = { x: hx, z: hz };
+      AF.addSpot({ building: null, x: hx + 1.3, y: 0.25, z: hz + 1.2, yaw: -Math.PI / 2, kind: 'stand', vendor: true });
       F(hx - 0.25, 0.25, hz - 0.75, hx + 0.25, 7.0, hz - 0.25, C.red); F(hx - 0.5, 0.25, hz - 1.0, hx + 0.5, 0.75, hz, C.woodD);
       for (let y = 1; y < 7; y += 0.5) F(hx - 0.375, y, hz - 0.25, hx + 0.375, y + 0.125, hz - 0.125, C.white);
       F(hx - 0.5, 7.0, hz - 0.875, hx + 0.5, 7.5, hz - 0.125, C.gold); F(hx - 0.75, 0.25, hz + 0.25, hx + 0.75, 0.75, hz + 1.25, C.woodD);
@@ -391,7 +395,7 @@ try {
         put(LIB.sign('PLAY  WIN  PRIZES', neonT, null, 1 / 24), -285.2, 5.3, 186, 1, false);
         F(-279.5, 0.5, 194.2, -277.5, 1.5, 195.2, C.wood); F(-279.75, 1.5, 194, -277.25, 1.75, 195.4, C.brass); F(-279.5, 1.75, 194.9, -277.5, 2.9, 195.0, AF.col('glass')); F(-279.75, 2.9, 194, -277.25, 3.1, 195.4, C.red);
         put(LIB.sign('CHANGE', C.gold, C.red, 1 / 32), -278.5, 3.12, 194.0, 2, false);
-        AF.addSpot({ building: 'penny-arcade', x: -278.5, y: 0.5, z: 195.8, yaw: Math.PI, kind: 'counter' });
+        AF.addSpot({ building: 'penny-arcade', x: -278.5, y: 0.5, z: 195.8, yaw: Math.PI, kind: 'counter', vendor: true });
         const ap = [], as = [];
         for (let row = 0; row < 3; row++) { const z = 180.5 + row * 6; for (let x = X0 + 1, k = 0; x < X1 - 1; x += 0.6, k++) { ap.push(x, YT - 0.45 - Math.abs(Math.sin((x - X0) / (X1 - X0) * Math.PI * 4)) * 0.5, z); as.push(k); } }
         L.arcadeBulbs = { pts: ap, seq: as };
@@ -426,6 +430,9 @@ try {
           L.ducks = ducks;
         }
         AF.addSpot({ building: null, x: PP.x0 + 5.5, y: 0.25, z: COAST + 16, yaw: -Math.PI / 2, kind: 'play' });
+        // the gallery barker stands inside, beside the counter; L.gallery = where the player shoots from (78-jobs)
+        AF.addSpot({ building: null, x: PP.x0 + 3.9, y: 0.25, z: COAST + 13.4, yaw: Math.PI / 2, kind: 'counter', vendor: true });
+        L.gallery = { x: PP.x0 + 5.6, z: COAST + 16, gx: PP.x0 + 3.7, gz: COAST + 16 };
       }
       // THE BIG WHEEL (v2): 44 m tall, facing the pier approach (axle along z), on a widened pier-head platform.
       // Two white A-frames straddle the pier, 24 spokes lined with bulbs, 24 swinging gondolas in red / teal / cream.

@@ -71,6 +71,10 @@ compare draws and GPU ms.
 - Air traffic (`53`): 7 instanced batches with per-instance livery; busy timetable only within 900 m.
 - Park actors, zoo far LOD (merged per species, dithered), island jet skis: shared instanced/merged meshes.
 - All ticks together cost 1.7–3.2 ms anywhere (`tools/tick-survey.js`). Keep new simulations distance/view gated.
+- Crowd (`55`): 70 / 140 / 170 ambient walkers (low / Balanced / High). Fights, cops, run-overs only step peds the player engaged
+  (`w.agg`, ≤ `G.engagedMax` + 8 cops), drawn through the same instanced frames (lying = a rotated instance, no new geometry).
+- Gameplay (`76–78`): FX = 2 Points draws (glow additive, smoke dithered opaque) with an empty draw range when idle; job marker
+  (2 draws), autogyro (2) and squad cars exist only while in use; police / run-over checks at 15 Hz within 60 m.
 
 ## 8. Content rules (locked)
 1. Static → voxels (`W.fill`) or `AF.placeStatic`; outland → `AF.outland.addProp`.
@@ -79,7 +83,7 @@ compare draws and GPU ms.
 4. Lights only via `AF.addLight` (pooled, tier-capped); lamps are emissive voxels.
 5. No new transparent materials except glass/water. 6. `castShadow` only for > 1 m objects near the player.
 7. No sphere/cylinder > 12 segments for things < 2 m. 8. Map images are baked (`tools/map-bake.mjs`); re-bake after world edits.
-9. Memory: iOS dies near 1.5 GB — check `AF.memStats()`.
+9. Memory: iOS dies near 1.5 GB — check `AF.memStats()`. Runtime objects must have a forget path (76 forget policy, `AF.avatar.release`).
 
 ## 9. Measuring
 - `node tools/serve.mjs 8765`; `node tools/build.mjs --check`. Baseline: `git show HEAD:output.html > tools/output-base.html`.

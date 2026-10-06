@@ -1206,25 +1206,33 @@ try {
     sp('teenF', wom({ age: 'teen', set: { top: { style: 'cardigan', col: 0xe79aa8, col2: 0xf3f0e6, col3: 0xf3f0e6 }, skirt: { col: 0x86b3d6, len: 5, flare: 3, poodle: true }, bottom: { style: 'skirt', col: 0x86b3d6, sock: 0xf6f2ea }, hat: null, propR: null } }));
     sp('teenM', man({ age: 'teen', set: { top: { style: 'letterman', col: 0x7a2630, col2: 0xf3e7c8, col3: 0xf3e7c8, sleeve: 0xf3e7c8 }, bottom: { style: 'pants', col: 0x3e5f8a, cuff: true }, hat: null, skirt: null, apron: null, propR: null } }));
     sp('teenM2', man({ age: 'teen', set: { top: { style: 'shirt', col: 0xf3f0e6, short: true }, bottom: { style: 'pants', col: 0x45464b, cuff: true }, hat: 'newsboy', hatCol: 0x6a6258, hatCol2: 0x4a4238, skirt: null, apron: null, propR: null } }));
+    // the beat cop (77-combat's police pool): navy tunic, peaked cap, a revolver in the right hand
+    sp('cop', man({ set: { top: { style: 'suit', col: 0x1f2a44, tie: 0x141418, cuffs: true }, bottom: { style: 'pants', col: 0x1f2a44 }, hat: 'conductor', hatCol: 0x1f2a44, hatCol2: 0x141418, skirt: null, apron: null, propR: null, moustache: true } }), { cop: true });
     for (const L of out) { if (L.skirt === null) delete L.skirt; if (!L.bottom) L.bottom = { style: 'pants', col: 0x45464b }; if (L.skirt && L.bottom.style !== 'skirt' && !L.skirt.open) L.bottom = { style: 'skirt', col: L.skirt.col }; }
     return out;
   }
   const FRAMES = ['a', 'p', 'b', 'sit', 'work', 'phone', 'chat', 'look', 'hail', 'runA', 'runB'];
-  const WALK_FRAMES = ['a', 'p', 'b', 'p'];
+  const WALK_FRAMES = ['a', 'p', 'b', 'p'], COP_FRAMES = new Set(['a', 'p', 'b', 'work', 'hail', 'runA', 'runB']);
+  // which baked frames a look gets (draw calls = populated look x frame pairs, so rare frames go to a few looks only)
+  const wantFrame = (vi, V, L, f) => {
+    if (L.cop) return COP_FRAMES.has(f);
+    if ((f === 'runA' || f === 'runB') && (vi % 6 !== 0 || vi >= CR.nEve || V.kid || L.plan === 'elder')) return false;
+    if ((f === 'phone' || f === 'hail') && (vi % 6 !== 0 || vi >= CR.nEve || V.kid)) return false;
+    if ((f === 'chat' || f === 'look') && (V.chair || (vi < CR.nEve && vi % 4 !== 0))) return false;
+    if ((V.kid || vi >= CR.nEve) && (f === 'sit' || f === 'work')) return false;
+    if (V.chair && f !== 'p') return false;
+    return !(vi >= CR.nEve && f === 'b');   // group looks walk on two frames (a / pass) to keep draw calls down
+  };
   function buildCrowdMeshes() {
     const looks = crowdLooks(), tier = AF.GFX && AF.GFX.tier;
-    const NW = tier === 'low' ? 100 : tier === 'high' ? 195 : 247, NE = tier === 'low' ? 100 : 260;
+    // fewer ambient walkers than v2 (the game layer adds fights, cops and jobs on top): 70 / 140 / 170
+    const NW = tier === 'low' ? 70 : tier === 'high' ? 140 : 170, NE = tier === 'low' ? 90 : 220;
     CR.NW = NW; CR.NE = NE;
     for (let vi = 0; vi < looks.length; vi++) {
-      const L = looks[vi], kid = L.plan === 'kid', V = { L, im: {}, hipY: PLANS[L.plan].lh * VS, kid, chair: !!L.chair };
+      const L = looks[vi], kid = L.plan === 'kid', V = { L, im: {}, hipY: PLANS[L.plan].lh * VS, kid, chair: !!L.chair, cop: !!L.cop };
       for (const f of FRAMES) {
-        if ((f === 'runA' || f === 'runB') && (vi % 6 !== 0 || vi >= CR.nEve || kid || L.plan === 'elder')) continue;
-        if ((f === 'phone' || f === 'hail') && (vi % 6 !== 0 || vi >= CR.nEve || kid)) continue;
-        if ((f === 'chat' || f === 'look') && (V.chair || (vi < CR.nEve && vi % 4 !== 0))) continue;
-        if ((kid || vi >= CR.nEve) && (f === 'sit' || f === 'work')) continue;
-        if (V.chair && f !== 'p') continue;
-        if (vi >= CR.nEve && f === 'b') continue;   // group looks walk on two frames (a / pass) to keep draw calls down
-        const g = bakePose(L, V.chair ? 'sit' : f), cap = f === 'sit' || f === 'work' ? NE : vi >= CR.nEve ? 48 : (f === 'p' ? NW + NE : NW);
+        if (!wantFrame(vi, V, L, f)) continue;
+        const g = bakePose(L, V.chair ? 'sit' : f), cap = V.cop ? 12 : f === 'sit' || f === 'work' ? NE : vi >= CR.nEve ? 48 : (f === 'p' ? NW + NE : NW);
         const im = new THREE.InstancedMesh(g, AF.mat.voxel, cap);
         im.count = 0; im.frustumCulled = false; im.castShadow = f !== 'sit' && f !== 'work'; im.receiveShadow = true; im.visible = false; im.name = 'crowd-' + vi + f;
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -1358,6 +1366,8 @@ try {
     }
     if (SP.chairM !== undefined) for (let i = 44, k = 0; i < W.length; i += 45, k++) { const w = W[i]; if (w.lead || w.grp) continue; w.v = w.vd = w.vn = SP[k & 1 ? 'chairF' : 'chairM']; w.grp = 'chair'; w.s = 1; }
     for (const w of W) if (!w.lead) spawnWalker(w, C, false);
+    // the police pool (77-combat): 8 inactive walkers in the cop look, woken with an .agg when the wanted level calls for them
+    if (SP.cop !== undefined) for (let i = 0; i < 8; i++) W.push({ id: CR.NW + i, v: SP.cop, vd: SP.cop, vn: SP.cop, cop: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk' });
     CR.benches = AF.spots.filter((spot) => spot.kind === 'bench' && !spotsTaken.has(spot));
     CR.benchTaken = new Set();
   }
@@ -1366,6 +1376,12 @@ try {
     const c = Math.cos(yaw) * s, sn = Math.sin(yaw) * s, a = im.instanceMatrix.array, o = i * 16;
     a[o] = c * width; a[o + 1] = 0; a[o + 2] = -sn * width; a[o + 3] = 0; a[o + 4] = 0; a[o + 5] = s; a[o + 6] = 0; a[o + 7] = 0;
     a[o + 8] = sn; a[o + 9] = 0; a[o + 10] = c; a[o + 11] = 0; a[o + 12] = x; a[o + 13] = y; a[o + 14] = z; a[o + 15] = 1;
+  }
+  // flat on the back, head away from yaw: Ry(yaw) * Rx(-90deg) (knocked down / KO'd / run over)
+  function putLie(im, i, x, y, z, yaw, s) {
+    const c = Math.cos(yaw) * s, sn = Math.sin(yaw) * s, a = im.instanceMatrix.array, o = i * 16;
+    a[o] = c; a[o + 1] = 0; a[o + 2] = -sn; a[o + 3] = 0; a[o + 4] = -sn; a[o + 5] = 0; a[o + 6] = -c; a[o + 7] = 0;
+    a[o + 8] = 0; a[o + 9] = s; a[o + 10] = 0; a[o + 11] = 0; a[o + 12] = x; a[o + 13] = y + 0.14 * s; a[o + 14] = z; a[o + 15] = 1;
   }
   const crossingAxis = [0, 0];
   function crowdGreen(A, B) {
@@ -1490,6 +1506,7 @@ try {
   }
   const hash = (s) => { const h = Math.sin((s.x * 12.9898 + s.z * 78.233 + (s.y || 0) * 37.719)) * 43758.5453; return h - Math.floor(h); };
   function occupied(s, h) {
+    if (s.vendor) return true;   // kiosk + carnival staff never leave their counter
     const id = (s.building || '') + ' ' + (s.kind || ''), q = hash(s);
     if (spotsTaken.has(s) || (CR.benchTaken && CR.benchTaken.has(s))) return false;
     if (/school/.test(id)) return h >= 8 && h < 15.2 && q < 0.85;
@@ -1536,7 +1553,7 @@ try {
       refreshCand(C);
       if (jump > 45) {
         dens.clear(); flows.clear();
-        for (const w of CR.walkers) if (!w.lead) spawnWalker(w, C, false);
+        for (const w of CR.walkers) if (!w.lead && !w.cop && !w.agg) spawnWalker(w, C, false);
       }
     }
     dt = Math.min(dt, 0.1);
@@ -1552,7 +1569,22 @@ try {
     }
     const fr = AF.clock ? AF.clock.frame | 0 : 0, FAR2 = 65 * 65, LOOK2 = 38 * 38;
     const fc = CR.farCnt; for (const c of fc) c.a = c.p = c.b = 0;
+    const CB = AF.combat;
     for (const w of CR.walkers) {
+      // engaged (77-combat owns them: fleeing, fighting, down) or a cop: stepped there, always drawn at full detail
+      if (w.agg) {
+        if (CB && CB.stepPed(w, dt)) {
+          const V = CR.V[w.v], A = w.agg; let f = A.f;
+          if (!V.im[f]) f = f === 'runA' || f === 'runB' ? WALK_FRAMES[Math.floor(w.ph) & 3] : 'p';
+          const im = V.im[f] || V.im.p, c = cnt[w.v];
+          if (c[f] < im.instanceMatrix.count) { if (!c[f]) draws++; if (A.lie) putLie(im, c[f]++, w.x, w.y, w.z, w.yaw, w.s); else putInst(im, c[f]++, w.x, w.y + (A.dy || 0), w.z, w.yaw, w.s, w.width); }
+          act++; continue;
+        }
+        if (CB) CB.release(w);
+        if (w.cop) continue;
+        if (!w.lead) spawnWalker(w, C, true);
+      }
+      if (w.cop) continue;
       if ((w.lead ? w.lead.id : w.id) >= population) {
         w.act = false;
         if (w.bench) { CR.benchTaken.delete(w.bench); w.bench = null; }
@@ -1613,7 +1645,7 @@ try {
     // talkable passer-by: the nearest walker within 2 m of the player
     if (CR.it && pp.walk) {
       let best = null, bd = 2.2;
-      for (const w of CR.walkers) { if (!w.act || w.lead) continue; const d = Math.abs(w.x - pp.x) + Math.abs(w.z - pp.z); if (d < bd) { bd = d; best = w; } }
+      for (const w of CR.walkers) { if (!w.act || w.lead || w.agg) continue; const d = Math.abs(w.x - pp.x) + Math.abs(w.z - pp.z); if (d < bd) { bd = d; best = w; } }
       for (const e of CR.extras) { if (e.pose !== 'sit' && e.pose !== 'stand') continue; const d = Math.abs(e.x - pp.x) + Math.abs(e.z - pp.z) + Math.abs(e.y - (AF.player.y || 0)) * 0.5; if (d < bd) { bd = d; best = e; } }
       CR.near = best;
       if (best) { if (best.id == null) best.id = Math.floor(hash(best.s) * 1e6); if (!best.name) nameWalker(best); CR.it.x = best.x; CR.it.y = best.y + 1; CR.it.z = best.z; CR.it.label = (best.pose === 'sit' ? 'Chat with ' : 'Talk to ') + best.first; }

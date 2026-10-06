@@ -29,18 +29,22 @@ try {
       jump: ic('<path d="M12 19V5M5 12l7-7 7 7"/>'), run: ic('<path d="M5 6l6 6-6 6M13 6l6 6-6 6"/>'), brake: ic('<rect x="6" y="6" width="12" height="12" rx="2"/>'),
       exit: ic('<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>'), up: ic('<path d="M12 5v14M5 12h14"/>', 'THR'), down: ic('<path d="M5 12h14"/>', 'THR'),
       walk: ic('<circle cx="12" cy="4.5" r="2"/><path d="M12 7v7M12 14l-3 6M12 14l3 6M8 10h8"/>'), chute: ic('<path d="M3 11a9 7 0 0 1 18 0zM4 11l8 8 8-8M12 11v8"/>'),
+      hit: ic('<path d="M7 11V7a2 2 0 0 1 4 0v3M11 10V6a2 2 0 0 1 4 0v4M15 10V8a2 2 0 0 1 4 0v5a7 7 0 0 1-7 7h-1a6 6 0 0 1-6-6v-2a2 2 0 0 1 2-2z"/>', 'HIT'),
+      aim: ic('<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>', 'AIM'), wpn: ic('<path d="M4 12h11l3-3h2v6h-2l-3-3M7 12v4h3"/>', 'WPN'),
+      cam: ic('<rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13.5" r="3.5"/><path d="M9 7l1.5-3h3L15 7"/>', 'CAM'), job: ic('<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V5h6v3M3 13h18"/>', 'JOB'),
     };
     // buttons: [icon, key, hold?, modes, cls]
     const DEF = [
       [IC.run, 'run', 'toggle', ['walk']], [IC.jump, 'Space', 'tap', ['walk'], 'big'],
+      [IC.aim, 'KeyZ', 'tap', ['walk']], [IC.hit, 'KeyQ', 'hold', ['walk'], 'big'], [IC.wpn, 'KeyX', 'tap', ['walk']], [IC.job, 'KeyJ', 'tap', ['walk', 'drive']], [IC.cam, 'KeyC', 'tap', ['walk', 'drive', 'fly', 'jetski']],
       [IC.exit, 'KeyE', 'tap', ['drive']], [IC.brake, 'Space', 'hold', ['drive'], 'big'],
       [IC.down, 'thr-', 'hold', ['fly']], [IC.up, 'thr+', 'hold', ['fly'], 'big'], [IC.exit, 'KeyF', 'tap', ['fly']], [IC.brake, 'KeyB', 'hold', ['fly']],
-      [IC.walk, 'Tab', 'tap', ['aerial']], [IC.chute, 'Space', 'tap', ['skydive'], 'big'], [IC.exit, 'KeyE', 'tap', ['row', 'ride', 'funride', 'jetski'], 'big'],
+      [IC.walk, 'Tab', 'tap', ['aerial']], [IC.chute, 'Space', 'tap', ['skydive'], 'big'], [IC.exit, 'KeyE', 'tap', ['row', 'ride', 'funride', 'jetski', 'carousel'], 'big'],
     ];
     const rows = [document.createElement('div'), document.createElement('div')]; rows.forEach((r) => { r.className = 'tc-row'; pad.appendChild(r); });
     const btns = DEF.map(([label, key, kind, modes, cls], i) => {
       const b = document.createElement('button'); b.className = 'tc pe' + (cls ? ' ' + cls : ''); b.innerHTML = label; b.dataset.key = key;
-      b.setAttribute('aria-label', { run: 'Run', Space: modes[0] === 'walk' ? 'Jump' : 'Brake', KeyE: 'Exit', KeyF: 'Exit plane', KeyB: 'Wheel brake', 'thr+': 'Increase throttle', 'thr-': 'Decrease throttle', Tab: 'Walk' }[key] || 'Deploy parachute');
+      b.setAttribute('aria-label', { run: 'Run', Space: modes[0] === 'walk' ? 'Jump' : 'Brake', KeyE: 'Exit', KeyF: 'Exit plane', KeyB: 'Wheel brake', 'thr+': 'Increase throttle', 'thr-': 'Decrease throttle', Tab: 'Walk', KeyQ: 'Attack', KeyZ: 'Aim', KeyX: 'Switch weapon', KeyC: 'Camera view', KeyJ: 'Job' }[key] || 'Deploy parachute');
       (i % 2 ? rows[1] : rows[0]).appendChild(b);
       const down = (e) => {
         e.preventDefault(); e.stopPropagation();

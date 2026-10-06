@@ -31,10 +31,10 @@ try {
   #ui #t-title .logo{position:absolute;z-index:1;top:max(4vh,18px);left:max(28px,5vw);text-align:left}
   #ui #t-title h1{margin:0;font:400 46px/1.1 Limelight,Georgia,serif;color:var(--ink)}
   #ui #t-title .sub{margin-top:8px;color:var(--dim);font-size:13px}
-  #ui #t-title .modal{pointer-events:auto;width:min(380px,92vw);max-height:100%;padding:14px 16px 20px;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;z-index:0;overflow:hidden;background:none;border:0;backdrop-filter:none;-webkit-backdrop-filter:none;animation:uiIn .18s ease}
+  #ui #t-title .modal{pointer-events:auto;width:min(380px,92vw);max-height:100%;padding:16px 16px 20px;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;z-index:0;overflow:hidden;background:none;border:1px solid rgba(255,255,255,.12);border-radius:22px;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 18px 50px rgba(0,0,0,.3);animation:uiIn .18s ease}
   #ui #t-title .q{font-size:12px;color:var(--dim);text-align:center}
-  #ui #t-title .stage{position:relative;z-index:-1;width:100%;height:min(42vh,340px);min-height:190px;margin:6px 0 4px;border-radius:14px;overflow:hidden;background:none;cursor:grab;touch-action:none}
-  #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:10px;background:var(--bg);font-size:26px;line-height:1;display:grid;place-items:center;color:var(--ink);transition:background .18s}
+  #ui #t-title .stage{position:relative;z-index:-1;width:100%;height:min(42vh,340px);min-height:190px;margin:6px 0 4px;border-radius:16px;overflow:visible;background:none;cursor:grab;touch-action:none;box-shadow:0 0 0 900px rgba(10,16,24,.5)}
+  #ui #t-title .arr{position:absolute;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:50%;background:var(--bg);font-size:26px;line-height:1;display:grid;place-items:center;color:var(--ink);transition:background .18s}
   #ui #t-title .arr:hover{background:rgba(255,255,255,.16)}
   #ui #t-title .arr.l{left:10px} #ui #t-title .arr.r{right:10px}
   #ui #t-title .cnt{position:absolute;right:12px;top:10px;font-size:11px;color:var(--dim)}
@@ -44,7 +44,7 @@ try {
   #ui #t-title .dots{display:flex;gap:7px;margin:6px 0 10px}
   #ui #t-title .dots button{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.22);padding:0}
   #ui #t-title .dots button.on{background:var(--accent)}
-  #ui #t-title .go{padding:11px 24px;font-size:14px;display:inline-flex;align-items:center;gap:10px}
+  #ui #t-title .go{padding:11px 24px;font-size:14px;display:inline-flex;align-items:center;gap:10px;border-radius:999px}
   #ui #t-title .go .ic{font-size:11px}
   @media (orientation:portrait) and (max-width:760px){#ui #t-title{align-items:center;justify-content:flex-end;padding-top:max(88px,12vh)} #ui #t-title .logo{left:0;right:0;text-align:center} #ui #t-title:before{background:linear-gradient(0deg,rgba(5,10,16,.7),rgba(5,10,16,0) 60%),linear-gradient(180deg,rgba(5,10,16,.5),rgba(5,10,16,0) 25%)}}
   @media (orientation:landscape) and (max-height:560px){
@@ -190,18 +190,18 @@ try {
     <div class="stack"><button class="btn primary" data-k="resume">Resume</button><button class="btn" data-k="map">Map</button><button class="btn" data-k="help">Controls</button><button class="btn" data-k="switch">Switch friend</button></div></div>`); menu.id = 'm-menu';
   const help = h('div', 'sheet pe', ''); help.id = 'm-help';
   const K = (k, d) => `<div class="k"><span>${d}</span><span>${k.split('+').map((x) => '<kbd>' + x + '</kbd>').join(' ')}</span></div>`;
-  help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>RUN button</span></div></div>
-    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Jump \u00b7 brake</span><span>round button</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
-    : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('V', 'First person')}${K('Tab', 'Aerial view')}</div>
-    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('S', 'Reverse (ground, throttle closed)')}${K('Mouse', 'Free look')}${K('Wheel', 'Camera zoom')}${K('F', 'Get out (on the ground)')}</div>
-    <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}</div>
-    <div><h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}</div></div>`}
+  help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>RUN button</span></div><div class="k"><span>Camera</span><span>CAM button</span></div></div>
+    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Attack \u00b7 aim \u00b7 weapon</span><span>HIT \u00b7 AIM \u00b7 WPN</span></div><div class="k"><span>Jump \u00b7 brake</span><span>round button</span></div><div class="k"><span>Jobs</span><span>JOB button</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
+    : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('C', 'Camera: first person / near / far')}${K('Tab', 'Aerial view')}</div>
+    <div><h3>Fighting</h3>${K('Click+Q', 'Attack / shoot')}${K('Right-drag+Z', 'Aim (hold / toggle)')}${K('Wheel+1+2+3+4+5', 'Switch weapon')}${K('R', 'Reload')}<h3>Work</h3>${K('J', 'Start / quit a job (taxi, bus, van, fire engine, on foot: courier)')}</div>
+    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('F', 'Get out (on the ground)')}</div>
+    <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}<h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}</div></div>`}
     <div class="stack"><button class="btn primary" data-k="closehelp">Got it</button></div></div>`;
 
   // ------------------------------------------------------------------ state + public api
   const S = UI.state = { title: true, map: false, help: false, menu: false, dlg: null, bannerB: null, bannerT: 0, hudT: -9, hud: null, toasts: [], pick: null };
   UI.titleOpen = () => S.title;
-  UI.modalOpen = () => S.map || S.help || S.menu || S.title;
+  UI.modalOpen = () => S.map || S.help || S.menu || S.title || !!S.shop;
   UI.dialogueOpen = () => !!S.dlg;
   const show = (el, on, disp = 'block') => { const v = on ? disp : 'none'; if (el.style.display !== v) el.style.display = v; };
   const text = (el, value) => { value = String(value); if (el.textContent !== value) el.textContent = value; };
@@ -310,7 +310,7 @@ try {
     PV.look = look;
     if (!AF.avatar) return;
     pvInit();
-    if (PV.P) PV.scene.remove(PV.P.root);
+    if (PV.P) { PV.scene.remove(PV.P.root); AF.avatar.release(PV.P); }
     PV.P = AF.avatar.build(look); PV.scene.add(PV.P.root); PV.pop = 0;
   };
   AF.onTick('ui-preview', 946, (dt) => {
@@ -330,9 +330,10 @@ try {
     geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 1, 1, 1, 0, 0, 1, 0]), 2));
     geo.setIndex([0, 2, 1, 2, 3, 1]);
     const mat = new THREE.ShaderMaterial({
-      uniforms: { tMap: { value: null } }, depthTest: false, depthWrite: false, toneMapped: true,
+      uniforms: { tMap: { value: null }, uSize: { value: new THREE.Vector2(1, 1) }, uR: { value: 16 } }, depthTest: false, depthWrite: false, toneMapped: true,
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-      fragmentShader: 'uniform sampler2D tMap; varying vec2 vUv; void main(){ gl_FragColor = vec4(texture2D(tMap, vUv).rgb, 1.0);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}',
+      // rounded corners: the card's CSS radius, in drawing-buffer pixels
+      fragmentShader: 'uniform sampler2D tMap; uniform vec2 uSize; uniform float uR; varying vec2 vUv; void main(){ vec2 q = abs(vUv * uSize - 0.5 * uSize) - (0.5 * uSize - uR); if (length(max(q, 0.0)) > uR) discard; gl_FragColor = vec4(texture2D(tMap, vUv).rgb, 1.0);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}',
     });
     const quad = new THREE.Mesh(geo, mat); quad.frustumCulled = false;
     const sc = new THREE.Scene(); sc.add(quad);
@@ -361,7 +362,7 @@ try {
     const B = PV.blit || (PV.blit = pvBlit());
     const X0 = x / PV.size.x * 2 - 1, X1 = (x + w) / PV.size.x * 2 - 1, Y0 = 1 - y / PV.size.y * 2, Y1 = 1 - (y + hh) / PV.size.y * 2, p = B.pos.array;
     if (p[0] !== X0 || p[1] !== Y0 || p[3] !== X1 || p[7] !== Y1) { p[0] = p[6] = X0; p[3] = p[9] = X1; p[1] = p[4] = Y0; p[7] = p[10] = Y1; B.pos.needsUpdate = true; }
-    B.mat.uniforms.tMap.value = rt.texture;
+    B.mat.uniforms.tMap.value = rt.texture; B.mat.uniforms.uSize.value.set(w, hh); B.mat.uniforms.uR.value = 16 * k;
     const prev = R.getRenderTarget(), sct = R.getScissorTest(), ac = R.autoClear, tm = R.toneMapping, ex = R.toneMappingExposure;
     try {
       R.setScissorTest(false); R.autoClear = false;
@@ -473,7 +474,8 @@ try {
   AF.on('pointerunlock', (intentional) => { if (!intentional && !S.title && !UI.modalOpen() && !S.dlg) toggleMenu(true); });
   AF.on('escape', () => {
     if (S.title) return;
-    if (S.map || S.help) { toggleMap(false); toggleHelp(false); }
+    if (S.shop) AF.shop.close();
+    else if (S.map || S.help) { toggleMap(false); toggleHelp(false); }
     else if (S.dlg) closeDlg();
     else toggleMenu(true);
   });

@@ -562,6 +562,16 @@ const WHEELS = {
 // distance from (px,pz) to a car's footprint (0 inside): you are "at" a car when you are next to its body, not its middle
 const bodyDist = (car, px, pz) => { const s = Math.sin(car.yaw), c = Math.cos(car.yaw), rx = px - car.x, rz = pz - car.z; const lx = rx * c - rz * s, lz = rx * s + rz * c; return Math.hypot(Math.max(0, Math.abs(lx) - car.halfW), Math.max(0, Math.abs(lz) - car.halfL)); };
 VV.bodyDist = bodyDist;
+// the driver's seat in car-local [right, up, forward] (instanced AI drivers and the seated player share it)
+const SEAT_L = [0, 0, 0];
+const seatLocal = (car) => {
+  const T = car.type, k = T.kind;
+  SEAT_L[0] = k === 'bike' ? 0 : car.halfW - 0.62;
+  SEAT_L[1] = k === 'cart' ? 1.3 : k === 'car' ? 0.4 : k === 'bike' ? 0.02 : T.big ? 0.45 : 0.42;
+  SEAT_L[2] = k === 'bike' ? -0.3 : k === 'cart' ? -0.45 : k === 'car' ? (T.id === 'convertible' ? 0.2 : 0.35) : car.halfL - (T.big ? T.id === 'bus' ? 2.1 : 2.6 : 1.3);
+  return SEAT_L;
+};
+VV.seatLocal = seatLocal;
 function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   const T = TYPES.find((t) => t.id === typeId);
   const G = getGeo(T, paintIdx);
@@ -583,7 +593,7 @@ function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   VV.cars.push(car);
   if (WHEEL_IM) { let count = 4; for (const existing of VV.cars) if (existing.type.id === typeId) count++; ensureIM(typeId, count); }
   if (!o.noDrive && !T.horse) car.attach({ r: 1.6, lift: 0.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => bodyDist(car, px, pz), prio: 0.1,
-    can: () => AF.mode === 'walk' && car.active !== false && !car.player && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
+    can: () => AF.mode === 'walk' && car.active !== false && !car.player && !car.dead && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
   placeMesh(car);
   return car;
 }
@@ -595,7 +605,7 @@ function placeMesh(car) {
 }
 
 // ---------------------------------------------------------------- drive mode
-const DR = { car: null, chase: new AF.Vehicle.Chase(), seat: { x: 0, y: 0, z: 0, yaw: 0, roll: 0, pitch: 0, seatH: 0.7, lean: 0.35 } };
+const DR = { car: null, chase: new AF.Vehicle.Chase(), seat: { seatH: 0.7, lean: 0.35 } }, CAR_SEAT = { seatH: 0.45, lean: 0.1 };
 const DRIVE_INPUT = { up: false, down: false, left: 0, right: 0, brake: false };
 const POINTS = new Float64Array(24), LOCAL_POINTS = new Float64Array([1, 1, -1, 1, 0, 1, 1, -1, -1, -1, 0, -1, 1, 0, -1, 0, 1, 0.5, -1, 0.5, 1, -0.5, -1, -0.5]);
 const CONTACT = new Float64Array(3), AXES = new Float64Array(8);
@@ -687,6 +697,7 @@ function carContacts(car, dt) {
         if (!worldHits(other, ox, oz, other.yaw)) {
           other.x = ox; other.z = oz;
           const impulse = Math.min(12, approach) * share;
+          if (VV.onImpact) VV.onImpact(other, approach * share, car);
           other.pushX = AF.clamp((other.pushX || 0) - normalX * impulse, -12, 12);
           other.pushZ = AF.clamp((other.pushZ || 0) - normalZ * impulse, -12, 12);
           other.pushSpin = AF.clamp((other.pushSpin || 0) + ((car.x - other.x) * normalZ - (car.z - other.z) * normalX) * impulse * 0.12, -1, 1);
@@ -714,6 +725,21 @@ function carContacts(car, dt) {
 VV.carBlocked = carBlocked;
 VV.makeCar = (...a) => makeCar(...a);
 VV.placeMesh = (c) => placeMesh(c);
+VV.getGeo = getGeo;
+// drop a runtime car from every registry (the forget policy in 76-game, wrecks, police cars)
+VV.removeCar = (car) => {
+  if (car.player) return false;
+  if (car.ai) { VV.detachTraffic(car); const i = VV.ai.indexOf(car); if (i >= 0) VV.ai.splice(i, 1); car.ai = null; }
+  for (const list of [VV.cars, VV.parked, AF.Vehicle.all]) { const i = list.indexOf(car); if (i >= 0) list.splice(i, 1); }
+  if (car.interact) { AF.removeInteract(car.interact); car.interact = null; }
+  car.active = false; return true;
+};
+// a kerb car taken for a drive goes back to its kerb (merged static) once forgotten, if the spot is still free
+VV.forget = (car) => {
+  const h = car.home;
+  if (!VV.removeCar(car)) return;
+  if (h && !car.dead && !VV.cars.some((c) => Math.abs(c.x - h.x) < 4 && Math.abs(c.z - h.z) < 4)) { try { VV.placeParked(h.type, h.x, h.z, h.yaw, { paint: h.pi, y: h.y }); } catch (e) { /* spot unusable */ } }
+};
 const GROUND = { front: 0, rear: 0, left: 0, right: 0 }, GROUND_HEIGHTS = new Float64Array(4);
 const groundUnder = (car) => {
   const s = Math.sin(car.yaw), c = Math.cos(car.yaw), hb = car.wheelbase / 2, hw = car.halfW - 0.2, top = car.y + 0.6;
@@ -728,6 +754,7 @@ const groundUnder = (car) => {
 VV.SPEED_K = 0.82;
 function physics(car, dt, inp) {
   car.crunchCd = Math.max(0, (car.crunchCd || 0) - dt);
+  const sp0 = Math.hypot(car.vx, car.vz);
   carContacts(car, dt);
   const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), rx = -hz, rz = hx;   // right-hand (screen) vector = -local x
   let f = car.vx * hx + car.vz * hz, lat = car.vx * rx + car.vz * rz;
@@ -776,6 +803,9 @@ function physics(car, dt, inp) {
     }
   }
   car.v = car.vx * nhx + car.vz * nhz;
+  // a sudden loss of speed (wall, car) is an impact: 77-combat turns it into damage
+  const lost = sp0 - Math.hypot(car.vx, car.vz) - Math.abs(acc) * dt;
+  if (lost > 2.5 && VV.onImpact) VV.onImpact(car, lost, car.lastHit);
   // ground follow: pitch / roll / height
   const g = groundUnder(car);
   const gy = (g.front + g.rear) / 2;
@@ -816,8 +846,9 @@ AF.modes.drive = {
     car.pushLife = car.pushX = car.pushZ = car.pushSpin = 0;
     car.vx = Math.sin(car.yaw) * car.v; car.vz = Math.cos(car.yaw) * car.v;
     DR.bike = car.type.kind === 'bike' && !!car.type.solo;
-    if (AF.player && AF.player.setVisible) AF.player.setVisible(DR.bike);
-    DR.chase.set({ dist: car.type.big ? 13 : DR.bike ? 5.5 : 8.5, height: (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0) });
+    if (AF.player && AF.player.setVisible) AF.player.setVisible(true);
+    const L = seatLocal(car);
+    DR.chase.set({ dist: car.type.big ? 13 : DR.bike ? 5.5 : 8.5, height: (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), eye: [L[0], L[1] + (DR.bike ? 1.4 : 1.0), L[2] + 0.1] });
     AF.emit('toast', (DR.bike ? 'You swing onto the ' : 'You slide behind the wheel of the ') + car.name + '.');
     AF.emit('hint', AF.touch ? '' : 'W/S throttle · A/D steer · Space brake · E to get out');
   },
@@ -841,13 +872,13 @@ AF.modes.drive = {
     if (DR.bike) {
       const lean = -car.steer * AF.clamp(Math.abs(car.v) / 9, 0, 1) * 1.1;
       car.roll += (lean - car.roll) * Math.min(1, dt * 6);
-      const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), seat = DR.seat;
-      seat.x = car.x - hx * 0.3; seat.y = car.y + car.bob + 0.02; seat.z = car.z - hz * 0.3; seat.yaw = car.yaw; seat.roll = car.roll; seat.pitch = car.pitch;
-      AF.PL.seat = seat;
     }
+    // the player rides in every vehicle (open cars and bikes show them): the avatar root sits seatH + 0.12 below a car's seat surface
+    const L = seatLocal(car); if (!DR.bike) L[1] -= 0.57;
+    AF.Vehicle.seat(car, L, DR.bike ? DR.seat : CAR_SEAT);
     placeMesh(car);
     if (car.interact) car.sync();
-    DR.chase.update(dt, car.x, car.y, car.z, car.yaw);
+    DR.chase.update(dt, car.x, car.y, car.z, car.yaw, car.pitch, car.roll);
     AF.Vehicle.hud(car.v, car.name);
     if (V.exit) VV.exitCar();
   },
@@ -874,7 +905,9 @@ function paintMaterial() {
   PAINT_MAT = AF.mat.patchVoxel(AF.mat.voxelInst.clone(), 'car-paint'); const compile = PAINT_MAT.onBeforeCompile;
   PAINT_MAT.onBeforeCompile = (shader, renderer) => {
     compile(shader, renderer);
-    shader.vertexShader = shader.vertexShader.replace('attribute float aPal;', 'attribute float aPal; attribute vec3 carPaint;').replace('vec2 pUV =', 'float carPal = aPal < -2.5 ? carPaint.z : aPal < -1.5 ? carPaint.y : aPal < -0.5 ? carPaint.x : aPal;\nvec2 pUV =').replace('mod(aPal,', 'mod(carPal,').replace('floor(aPal /', 'floor(carPal /');
+    shader.vertexShader = shader.vertexShader.replace('attribute float aPal;', 'attribute float aPal; attribute vec3 carPaint; attribute float carDmg; varying float vCarDmg;').replace('vec2 pUV =', 'vCarDmg = carDmg; float carPal = aPal < -2.5 ? carPaint.z : aPal < -1.5 ? carPaint.y : aPal < -0.5 ? carPaint.x : aPal;\nvec2 pUV =').replace('mod(aPal,', 'mod(carPal,').replace('floor(aPal /', 'floor(carPal /');
+    // damage (0..1): soot and dents in blotches keyed to the model position, so a wreck reads charred, not just dark
+    shader.fragmentShader = shader.fragmentShader.replace('varying vec3 vAlb;', 'varying float vCarDmg; varying vec3 vAlb;').replace('diffuseColor.rgb *= vAlb * ao * shade * patMul;', 'diffuseColor.rgb *= vAlb * ao * shade * patMul;\n      diffuseColor.rgb *= 1.0 - vCarDmg * (0.3 + 0.62 * step(1.0 - vCarDmg, afHash(floor(vAfOP * 6.0))));');
   }; return PAINT_MAT;
 }
 function ensureIM(key, cap) {
@@ -887,9 +920,9 @@ function ensureIM(key, cap) {
   const full = mk(G.geo, paintMaterial(), true);
   const glass = G.geo.userData.glass ? mk(G.geo.userData.glass, AF.mat.glass, false) : null; if (glass) glass.renderOrder = 2;
   const lod = G.lod ? mk(G.lod, paintMaterial(), false) : null;
-  const paint = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3), farPaint = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
-  full.geometry.setAttribute('carPaint', paint); if (lod) lod.geometry.setAttribute('carPaint', farPaint);
-  r = { full, glass, lod, paint, farPaint, paintRange: { start: 0, count: 0 }, farRange: { start: 0, count: 0 }, cap, n: 0, nl: 0 }; IMS.set(key, r);
+  const paint = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3), farPaint = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3), dmg = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1);
+  full.geometry.setAttribute('carPaint', paint); full.geometry.setAttribute('carDmg', dmg); if (lod) lod.geometry.setAttribute('carPaint', farPaint);
+  r = { full, glass, lod, paint, farPaint, dmg, dmgRange: { start: 0, count: 0 }, paintRange: { start: 0, count: 0 }, farRange: { start: 0, count: 0 }, cap, n: 0, nl: 0 }; IMS.set(key, r);
   return r;
 }
 // night lamps: one additive Points cloud (2 head + 2 tail per car) + instanced headlight pools on the road
@@ -940,7 +973,7 @@ function syncInstances(dt) {
     if (!r) continue;
     if (far) { /* lamps only */ }
     else if (d < LOD_D || !r.lod) {
-      if (r.n < r.cap) { r.full.setMatrixAt(r.n, tmpM); r.paint.setXYZ(r.n, pal.a, pal.b, pal.f); if (r.glass) r.glass.setMatrixAt(r.n, tmpM); r.n++; }
+      if (r.n < r.cap) { r.full.setMatrixAt(r.n, tmpM); r.paint.setXYZ(r.n, pal.a, pal.b, pal.f); r.dmg.array[r.n] = car.dmg || 0; if (r.glass) r.glass.setMatrixAt(r.n, tmpM); r.n++; }
     } else if (r.nl < r.cap) { r.lod.setMatrixAt(r.nl, tmpM); r.farPaint.setXYZ(r.nl++, pal.a, pal.b, pal.f); }
     if (!far && d < DETAIL_D) {
       tmpE.set(car.spin, 0, 0, 'YXZ'); REAR_Q.setFromEuler(tmpE); tmpE.set(car.spin, car.steer, 0, 'YXZ'); FRONT_Q.setFromEuler(tmpE);
@@ -962,9 +995,8 @@ function syncInstances(dt) {
       if (car.driver >= 0 && DRV_IM) {
         const im = DRV_IM[car.driver], i = dc[car.driver];
         if (i < im.userData.max) {
-          const seatY = car.type.kind === 'cart' ? 1.3 : car.type.kind === 'car' ? 0.4 : car.type.big ? 0.45 : 0.42;
-          const lz = car.type.kind === 'cart' ? -0.45 : car.type.kind === 'car' ? (car.type.id === 'convertible' ? 0.2 : 0.35) : car.halfL - (car.type.big ? car.type.id === 'bus' ? 2.1 : 2.6 : 1.3);
-          tmpM2.makeTranslation(car.halfW - 0.62, seatY, lz).premultiply(tmpM); im.setMatrixAt(i, tmpM2); dc[car.driver]++;
+          const L = seatLocal(car);
+          tmpM2.makeTranslation(L[0], L[1], L[2]).premultiply(tmpM); im.setMatrixAt(i, tmpM2); dc[car.driver]++;
         }
       }
     }
@@ -983,7 +1015,7 @@ function syncInstances(dt) {
     }
   }
   for (const r of IMS.values()) {
-    if (r.n) { r.paint.clearUpdateRanges(); r.paintRange.count = r.n * 3; r.paint.updateRanges.push(r.paintRange); r.paint.needsUpdate = true; }
+    if (r.n) { r.paint.clearUpdateRanges(); r.paintRange.count = r.n * 3; r.paint.updateRanges.push(r.paintRange); r.paint.needsUpdate = true; r.dmg.clearUpdateRanges(); r.dmgRange.count = r.n; r.dmg.updateRanges.push(r.dmgRange); r.dmg.needsUpdate = true; }
     if (r.nl) { r.farPaint.clearUpdateRanges(); r.farRange.count = r.nl * 3; r.farPaint.updateRanges.push(r.farRange); r.farPaint.needsUpdate = true; }
     r.full.count = r.n; if (r.n) r.full.instanceMatrix.needsUpdate = true;
     if (r.glass) { r.glass.count = r.n; if (r.n) r.glass.instanceMatrix.needsUpdate = true; }
@@ -1163,6 +1195,7 @@ AF.onBuild('vehicles-parking', 480, () => {
       const j = VV.parked.indexOf(s); if (j >= 0) VV.parked.splice(j, 1);
       proxy.target = null; proxy.y = -999;
       const car = makeCar(s.type.id, s.pi, s.x, s.z, s.yaw, { y: s.y }); VV.parked.push(car);
+      car.temp = true; car.home = { type: s.type.id, pi: s.pi, x: s.x, z: s.z, y: s.y, yaw: s.yaw };
       AF.setMode('drive', { car });
     } });
   let pf = 0;

@@ -180,6 +180,8 @@ try {
   cv.addEventListener('pointerup', pointerUp); cv.addEventListener('pointercancel', pointerUp);
   cv.addEventListener('keydown', event => { if (event.code === 'Equal' || event.code === 'NumpadAdd') zoom(1.6); else if (event.code === 'Minus' || event.code === 'NumpadSubtract') zoom(1 / 1.6); else if (event.code === 'ArrowLeft') map.pan(-60 / map.scale, 0); else if (event.code === 'ArrowRight') map.pan(60 / map.scale, 0); else if (event.code === 'ArrowUp') map.pan(0, -60 / map.scale); else if (event.code === 'ArrowDown') map.pan(0, 60 / map.scale); else return; event.preventDefault(); });
   let lastRevision = -1, lastX = NaN, lastZ = NaN, lastYaw = NaN;
+  // map.miniOverlays: draw(ctx, to(x, z) -> {x, y}) on the minimap (one shared point, no allocation)
+  const MP = { cx: 0, cz: 0, s: 1, x: 0, y: 0 }, miniTo = (x, z) => { MP.x = (x - MP.cx) * MP.s + mini.width / 2; MP.y = (z - MP.cz) * MP.s + mini.height / 2; return MP; };
   AF.onTick('map', 951, dt => {
     if (S.title) return;
     miniTimer += dt; mapTimer += dt;
@@ -198,7 +200,9 @@ try {
     const span = AF.mode === 'aerial' ? AF.clamp(AF.PL.aerial.d * 1.4, 160, 700) : AF.mode === 'fly' ? 480 : AF.mode === 'drive' ? 220 : 140;
     if (src.x === miniX && src.z === miniZ && yaw === miniYaw && span === miniSpan && map.revision === miniRevision) return;
     miniX = src.x; miniZ = src.z; miniYaw = yaw; miniSpan = span; miniRevision = map.revision;
-    drawLayers(mg, src.x, src.z, mini.width / span, mini.width, mini.height); playerMarker(mg, mini.width / 2, mini.height / 2, yaw);
+    drawLayers(mg, src.x, src.z, mini.width / span, mini.width, mini.height);
+    if (map.miniOverlays) { MP.cx = src.x; MP.cz = src.z; MP.s = mini.width / span; for (const draw of map.miniOverlays) draw(mg, miniTo); }
+    playerMarker(mg, mini.width / 2, mini.height / 2, yaw);
   });
   AF.test('map: baked world and city images load', async () => {
     await map.finish();

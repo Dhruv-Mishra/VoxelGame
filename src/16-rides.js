@@ -13,7 +13,9 @@ try {
     const W = AF.W, red = col(0xc0342e), cream = col(0xf2ead0), gold = col(0xd8b84a, { metal: 0.6, rough: 0.35 }), glass = col(0xa9c9d6, { glass: true });
     const bulb = AF.col(0xfff2c0, { emit: 0xffd070, emitK: 2.6, mode: 'night' });
     W.fill(x - 1.25, 0.25, z - 1, x + 1.25, 2.5, z + 1, cream);
-    W.fill(x - 0.75, 1.1, z - 1.05, x + 0.75, 2.1, z - 1, glass);
+    W.fill(x - 1.0, 0.5, z - 0.75, x + 1.0, 2.25, z + 0.75, 0);                 // hollow booth: the attendant stands inside
+    W.fill(x - 0.75, 1.1, z - 1.05, x + 0.75, 2.1, z - 0.75, glass);
+    AF.addSpot({ building: null, x, y: 0.5, z: z - 0.25, yaw: PI, kind: 'counter', vendor: true });
     W.fill(x - 1.0, 1.0, z - 1.35, x + 1.0, 1.1, z - 1, col(0x8a5a36));
     for (let i = 0; i < 12; i++) W.fill(x - 1.5 + i * 0.25, 2.5, z - 1.4, x - 1.25 + i * 0.25, 2.75, z + 1.25, i % 2 ? red : cream);
     W.fill(x - 1.5, 2.75, z - 1.4, x + 1.5, 3.0, z + 1.25, gold);
@@ -29,11 +31,12 @@ try {
     const st = new THREE.Vector3(); CO.curve.getPointAt(0.015, st);
     RD.wheelK = { x: FW.WX - 6.5, z: FW.WZ - 8 };
     RD.coastK = { x: st.x + 6.5, z: 206.5 };
-    kiosk(RD.wheelK.x, RD.wheelK.z, 'BIG WHEEL 10\u00a2');
-    kiosk(RD.coastK.x, RD.coastK.z, 'SEA SERPENT 10\u00a2');
+    kiosk(RD.wheelK.x, RD.wheelK.z, 'BIG WHEEL $' + AF.G.price.ride);
+    kiosk(RD.coastK.x, RD.coastK.z, 'SEA SERPENT $' + AF.G.price.ride);
     RD.coastExit = { x: st.x + 3, z: 207.5 };
-    AF.addInteract({ x: RD.wheelK.x, y: 1.3, z: RD.wheelK.z - 1.7, r: 2.6, label: 'Ride the Big Wheel \u00b7 10\u00a2', prio: 2, can: () => AF.mode === 'walk', act: () => AF.setMode('funride', { ride: 'wheel' }) });
-    AF.addInteract({ x: RD.coastK.x, y: 1.3, z: RD.coastK.z - 1.7, r: 2.6, label: 'Ride the Sea Serpent \u00b7 10\u00a2', prio: 2, can: () => AF.mode === 'walk', act: () => AF.setMode('funride', { ride: 'coaster' }) });
+    const ride = (kind) => () => { if (AF.money.spend(AF.G.price.ride, 'a ticket')) AF.setMode('funride', { ride: kind }); };
+    AF.addInteract({ x: RD.wheelK.x, y: 1.3, z: RD.wheelK.z - 1.7, r: 2.6, label: 'Ride the Big Wheel \u00b7 $' + AF.G.price.ride, prio: 2, can: () => AF.mode === 'walk', act: ride('wheel') });
+    AF.addInteract({ x: RD.coastK.x, y: 1.3, z: RD.coastK.z - 1.7, r: 2.6, label: 'Ride the Sea Serpent \u00b7 $' + AF.G.price.ride, prio: 2, can: () => AF.mode === 'walk', act: ride('coaster') });
   });
 
   const wheelSeat = (R, out) => {

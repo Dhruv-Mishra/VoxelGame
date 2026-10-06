@@ -13,9 +13,11 @@ try {
   //          top: { col, col2, style: 'tee'|'hoodie'|'cardigan'|'shirt'|'dress'|'vest', print: hex }, bottom: { col, style: 'jeans'|'joggers'|'shorts'|'skirt' },
   //          shoe, hat: null|'cap'|'straw', hatCol, female, height (1 = 1.75 m), extra: 'headphones'|'chain'|'bow'|null }
   const AV = AF.avatar = {};
-  const geoCache = new Map();
+  const geoCache = new Map();   // key -> { g, n } (n live avatars use it; AV.release disposes at 0 so outfit changes don't leak)
   // every avatar part is authored at 1/16 m, then doubled to 1/32 m and given a fine detail pass (see FINE below)
-  const cget = (key, fn, anchor, det) => { let g = geoCache.get(key); if (!g) { const m = up2(fn()); if (det) det(m); g = AF.meshModel(m, { vs: 1 / 32, anchor }); geoCache.set(key, g); } return g; };
+  const cget = (key, fn, anchor, det, keys) => { let e = geoCache.get(key); if (!e) { const m = up2(fn()); if (det) det(m); e = { g: AF.meshModel(m, { vs: 1 / 32, anchor }), n: 0 }; geoCache.set(key, e); } e.n++; keys.push(key); return e.g; };
+  AV.release = (P) => { if (!P || !P.keys) return; for (const k of P.keys) { const e = geoCache.get(k); if (e && --e.n <= 0) { e.g.dispose(); geoCache.delete(k); } } P.keys = null; };
+  AV.cached = () => geoCache.size;
   const up2 = (m) => { const o = new AF.Model(m.w * 2, m.h * 2, m.d * 2); for (let x = 0; x < m.w; x++) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) { const c = m.get(x, y, z); if (c) o.box(x * 2, y * 2, z * 2, x * 2 + 2, y * 2 + 2, z * 2 + 2, c); } return o; };
   const hsh = (x, y, z) => ((Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) >>> 0);
   const shade = (hex, k) => { const f = (s) => Math.max(0, Math.min(255, Math.round(((hex >> s) & 255) * k))); return (f(16) << 16) | (f(8) << 8) | f(0); };
@@ -166,12 +168,12 @@ try {
     skirt(m, L, C) { for (let x = 0; x < m.w; x += 3) for (let y = 0; y < m.h; y++) for (let z = 0; z < m.d; z++) if (m.get(x, y, z) === C.bot) m.set(x, y, z, C.botD); },
   };
   AV.build = (L) => {
-    const C = pal(L), key = JSON.stringify(L);
-    const gLegL = cget('lL' + key, () => legModel(L, C, -1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C)), gLegR = cget('lR' + key, () => legModel(L, C, 1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C));
-    const gBent = cget('lB' + key, () => legModel(L, C, 1, true), [0.5, 1, 2 / 11]);
-    const gTorso = cget('t' + key, () => torsoModel(L, C), [0.5, 0, 0.5], (m) => FINE.torso(m, L, C));
-    const gArm = cget('a' + key, () => armModel(L, C), [0.5, 1, 0.5], (m) => FINE.arm(m, L, C));
-    const gHead = cget('h' + key, () => headModel(L, C), [0.5, 4 / 15, 0.5], (m) => FINE.head(m, L, C));
+    const C = pal(L), key = JSON.stringify(L), keys = [];
+    const gLegL = cget('lL' + key, () => legModel(L, C, -1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C), keys), gLegR = cget('lR' + key, () => legModel(L, C, 1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C), keys);
+    const gBent = cget('lB' + key, () => legModel(L, C, 1, true), [0.5, 1, 2 / 11], null, keys);
+    const gTorso = cget('t' + key, () => torsoModel(L, C), [0.5, 0, 0.5], (m) => FINE.torso(m, L, C), keys);
+    const gArm = cget('a' + key, () => armModel(L, C), [0.5, 1, 0.5], (m) => FINE.arm(m, L, C), keys);
+    const gHead = cget('h' + key, () => headModel(L, C), [0.5, 4 / 15, 0.5], (m) => FINE.head(m, L, C), keys);
     const root = new THREE.Group(); root.name = 'avatar';
     const hips = new THREE.Group(); hips.position.y = 0.75; root.add(hips);
     const hw = L.female ? 0.11 : 0.125;
@@ -185,9 +187,9 @@ try {
     const head = new THREE.Group(); head.position.set(0, 0.52, 0); chest.add(head);
     const headM = AF.modelMesh(gHead); headM.position.z = -0.03; head.add(headM);
     let skirt = null;
-    if (L.bottom && L.bottom.style === 'skirt') { skirt = AF.modelMesh(cget('s' + key, () => skirtModel(L, C), [0.5, 1, 0.5], (m) => FINE.skirt(m, L, C))); skirt.position.y = 0.02; hips.add(skirt); }
+    if (L.bottom && L.bottom.style === 'skirt') { skirt = AF.modelMesh(cget('s' + key, () => skirtModel(L, C), [0.5, 1, 0.5], (m) => FINE.skirt(m, L, C), keys)); skirt.position.y = 0.02; hips.add(skirt); }
     root.scale.setScalar(L.height || 1);
-    const parts = { root, hips, legL, legR, chest, torso, armL, armR, head, skirt, gLeg: [gLegL, gLegR], gBent, sitting: false };
+    const parts = { root, hips, legL, legR, chest, torso, armL, armR, head, skirt, gLeg: [gLegL, gLegR], gBent, sitting: false, keys };
     for (const m of [legL, legR, torso, armL, armR, headM, skirt]) if (m) { m.castShadow = true; m.receiveShadow = true; }
     return parts;
   };
@@ -246,12 +248,14 @@ try {
       player.look = look || AV.DEFAULT;
       const vis = player.mesh ? player.mesh.visible : true;
       if (player.mesh) AF.scene.remove(player.mesh);
+      AV.release(player.parts);
       const P = AV.build(player.look);
       // the player is always near the camera: keep it out of the distance cull
       P.root.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
       player.parts = P; player.mesh = P.root; P.root.name = 'player';
       P.root.position.set(body.x, body.y, body.z); P.root.rotation.y = player.yaw; P.root.visible = vis;
       AF.scene.add(P.root);
+      AF.emit('look', P);
     },
   };
 
@@ -438,6 +442,8 @@ try {
   const TMP = V3(), LOOK = V3(), QT = new THREE.Quaternion();
   const WALK = 5.8, RUN = 9.5;
   const vel = { x: 0, z: 0 };
+  // knockback (hits, explosions, cars): adds to the walk velocity; vy > 0 throws the body up
+  PL.push = (vx, vz, vy) => { vel.x += vx; vel.z += vz; if (vy) { body.vy = vy; body.onGround = false; } };
   // nearest usable interaction; entries may supply dist(px,pz) (e.g. distance to a car's body, not its centre)
   const findInteract = () => {
     let best = null, bd = 1e9;
@@ -499,8 +505,10 @@ try {
         if (!WK.inside) WK.inside = !!(AF.buildingAt && AF.buildingAt(hx, body.y + 1, hz));
       }
       WK.indoor = AF.lerp(WK.indoor, WK.inside ? 1 : 0, 1 - Math.exp(-dt * 4));
-      const maxBoom = AF.lerp(5.4 * (WK.zoom || 1), 2.8 * Math.min(1.2, WK.zoom || 1), WK.indoor);
-      let shoulder = AF.lerp(0.62, 0.34, WK.indoor);
+      // AF.view near / far; aiming (PL.aim, 77-combat) pulls in over the shoulder
+      const zoom = PL.aim ? 0.42 : AF.view.dist[AF.view.i];
+      const maxBoom = AF.lerp(5.4 * zoom, 2.8 * Math.min(1.2, zoom), WK.indoor);
+      let shoulder = AF.lerp(PL.aim ? 0.75 : 0.62, 0.34, WK.indoor);
       for (let s = 0.1; s <= shoulder; s += 0.1) if (solid(hx + rx * (s + 0.12), hy, hz + rz * (s + 0.12))) { shoulder = Math.max(0, s - 0.2); break; }
       const px = hx + rx * shoulder, py = hy, pz = hz + rz * shoulder;
       BR.px = px; BR.py = py; BR.pz = pz; BR.dx = dx; BR.dy = dy; BR.dz = dz; BR.rx = rx; BR.rz = rz; BR.max = maxBoom;
@@ -531,8 +539,8 @@ try {
       PL.hideMesh = WK.boom < 0.7;
       if (player.mesh) player.mesh.visible = player.visible && !PL.hideMesh;
     }
-    // a running stride widens the view a touch (eased, outdoors only)
-    const fov = 50 + (WK.running && !WK.fp ? 4 * (1 - WK.indoor) : 0);
+    // a running stride widens the view a touch (eased, outdoors only); aiming narrows it (a rifle scope further)
+    const fov = PL.aim ? PL.aimFov || 40 : 50 + (WK.running && !WK.fp ? 4 * (1 - WK.indoor) : 0);
     WK.fov = AF.lerp(WK.fov || 50, fov, 1 - Math.exp(-dt * 4));
     if (Math.abs(c.fov - WK.fov) > 0.02) { c.fov = WK.fov; c.updateProjectionMatrix(); }
     AF.camTarget.set(hx, hy, hz);
@@ -555,26 +563,21 @@ try {
     },
     exit() { AF.interactTarget = null; PL.hideMesh = false; if (player.mesh) player.mesh.visible = player.visible; const c = cam(); WK.fov = 50; if (c.fov !== 50) { c.fov = 50; c.updateProjectionMatrix(); } },
     update(dt) {
-      const I = AF.input, m = I.mouse, modal = inModal();
+      const I = AF.input, m = I.mouse, modal = inModal() || !!PL.busy;
       const locked = !!document.pointerLockElement;
       const talking = !!(AF.ui && AF.ui.dialogueOpen && AF.ui.dialogueOpen());
+      WK.fp = AF.view.fp();
       if (!modal) {
         // mouse / touch look: pointer lock (click the view) or drag
         if ((locked || ((m.buttons & 3) && !onPanel())) && (m.dx || m.dy)) {
-          const ks = AF.lookSens(); WK.camYaw -= m.dx * 0.0045 * ks; WK.camPitch = AF.clamp(WK.camPitch + m.dy * 0.0035 * ks, -0.75, 1.25); WK.lastMouse = AF.clock.t;
+          const ks = AF.lookSens() * (PL.aim ? 0.6 : 1); WK.camYaw -= m.dx * 0.0045 * ks; WK.camPitch = AF.clamp(WK.camPitch + m.dy * 0.0035 * ks, -0.75, 1.25); WK.lastMouse = AF.clock.t;
         }
         if (!locked && m.clicked && !onPanel()) I.requestLock();
-        if (m.wheel) {
-          if (WK.fp) { if (m.wheel > 0) { WK.fp = false; PL.hideMesh = false; WK.boom = 0.5; } }
-          else if (m.wheel > 0 && (WK.zoom || 1) >= 2.19) { WK.zout = (WK.zout || 0) + m.wheel; if (WK.zout > 120) { WK.zout = 0; AF.setMode('aerial', { focusPlayer: true }); return; } }
-          else { WK.zout = 0; WK.zoom = AF.clamp((WK.zoom || 1) * Math.exp(m.wheel * 0.0012), 0.45, 2.2); }
-        }
-        if (I.hit('KeyV')) { WK.fp = !WK.fp; if (!WK.fp) { PL.hideMesh = false; WK.boom = 0.5; } AF.emit('toast', WK.fp ? 'First-person view' : 'Over-the-shoulder view'); }
         if (I.hit('Tab')) { AF.setMode('aerial', { focusPlayer: true }); return; }
       }
       // movement (keys, or the analog stick on touch screens: AF.input.stick = {x, y} in -1..1)
       let ix = 0, iz = 0;
-      if (!modal) {
+      if (!modal && !PL.still) {
         if (I.key('KeyW') || I.key('ArrowUp')) iz += 1;
         if (I.key('KeyS') || I.key('ArrowDown')) iz -= 1;
         if (I.key('KeyA') || I.key('ArrowLeft')) ix -= 1;
@@ -592,16 +595,17 @@ try {
       const acc = 1 - Math.exp(-dt * (body.onGround ? 18 : 3));
       vel.x = AF.lerp(vel.x, wx, acc); vel.z = AF.lerp(vel.z, wz, acc);
       if (!modal && I.hit('Space') && body.onGround) { body.vy = 7.2; body.onGround = false; }
-      const wasAir = !body.onGround;
+      const wasAir = !body.onGround, vy0 = body.vy;
       const ox = body.x, oz = body.z;
       AF.moveBody(body, vel.x * dt, vel.z * dt, dt, { step: 0.55 });
       const bounds = AF.PLAN.world.play, margin = AF.PLAN.world.margin;
       body.x = AF.clamp(body.x, bounds.x0 - margin, bounds.x1 + margin);
       body.z = AF.clamp(body.z, bounds.z0 - margin, AF.PLAN.world.bounds.z1 - margin);
-      if (wasAir && body.onGround) AN.land = 0.6;
+      if (wasAir && body.onGround) { AN.land = 0.6; AF.emit('land', -vy0); }
       const hs = Math.hypot(body.x - ox, body.z - oz) / Math.max(dt, 1e-4);
+      WK.speed = hs;
       if (body.hitWall) { vel.x *= 0.6; vel.z *= 0.6; }
-      if (WK.fp) player.yaw = WK.camYaw + PI;
+      if (WK.fp || PL.aim) player.yaw = WK.camYaw + PI;
       else if (wl > 0) player.yaw += AF.angDiff(player.yaw, Math.atan2(wx, wz)) * (1 - Math.exp(-dt * 12));
       if (!WK.fp && !locked && wl > 0 && iz > 0 && AF.clock.t - WK.lastMouse > 4) WK.camYaw += AF.angDiff(WK.camYaw, player.yaw + PI) * (1 - Math.exp(-dt * 0.9));
       if (body.y < -14 || !isFinite(body.y)) { const s = AF.PLAN.spawn; player.teleport(s.x, s.y, s.z, s.yaw); AF.emit('toast', 'Whoops \u2014 back to safe ground.'); }
@@ -653,7 +657,7 @@ try {
   });
   // outside walk/aerial (driving, flying, riding): the vehicle owner may seat the avatar via PL.seat = {x,y,z,yaw,roll,pitch,bike}
   AF.onTick('player-idle', 160, (dt) => {
-    if (!player.mesh || AF.mode === 'walk' || AF.mode === 'aerial' || AF.mode === 'skydive' || AF.mode === 'row') return;
+    if (!player.mesh || AF.mode === 'walk' || AF.mode === 'aerial' || AF.mode === 'skydive' || AF.mode === 'row' || AF.mode === 'dead') return;
     const S = PL.seat;
     if (S && player.parts) {
       AV.sit(player.parts, true, S.seatH ?? 0.62);
