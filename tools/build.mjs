@@ -1,6 +1,7 @@
 // Assemble shell.html + src/*.js into output.html (one self-contained page). `node tools/build.mjs [--check] [--min] [--out=name.html]`
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/(\w:)/, '$1')), '..');
 const dir = path.join(root, 'src');
@@ -16,6 +17,8 @@ if (process.argv.includes('--check')) {
 }
 const toc = '// Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.\n// Parts: ' + parts.map((f) => f.replace(/\.js$/, '')).join(', ') + '\n';
 let code = toc + parts.map((f) => fs.readFileSync(path.join(dir, f), 'utf8').replace(/\r\n/g, '\n').trimEnd()).join('\n\n');
+// co-op peers must run the same world: 79-net compares this content hash (identical for the plain and minified builds)
+code = code.replace("'%%BUILD_HASH%%'", JSON.stringify(crypto.createHash('sha1').update(code).digest('hex').slice(0, 12)));
 // --min (deploys): esbuild strips comments/whitespace and simplifies syntax; identifiers keep their names because worker sources are
 // rebuilt from Function.toString() and must still match the constants they name
 if (process.argv.includes('--min')) code = execFileSync('npx', ['--yes', 'esbuild', '--minify-whitespace', '--minify-syntax', '--format=esm', '--target=es2022', '--loader=js', '--log-level=warning'], { input: code, maxBuffer: 64 << 20, shell: true }).toString();

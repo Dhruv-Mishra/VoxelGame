@@ -1,0 +1,21 @@
+# Port Solace co-op signaling: `npx wrangler deploy` from this folder (free Workers plan: SQLite-backed Durable Objects).
+# Optional TURN relay for strict NATs: `npx wrangler secret put TURN_KEY_ID` and `npx wrangler secret put TURN_KEY_API_TOKEN`
+# (Cloudflare dashboard -> Realtime -> TURN). ALLOWED_ORIGINS lists exact game origins (a vercel.app wildcard would admit anyone's
+# project): add your own domain here if the game is served from it.
+name = "port-solace-signal"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[vars]
+ALLOWED_ORIGINS = '^(https://port-solace\.vercel\.app|http://(localhost|127\.0\.0\.1)(:\d+)?)$'
+
+[[durable_objects.bindings]]
+name = "LOBBY"
+class_name = "Lobby"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Lobby"]
+
+# a custom domain on a zone in this Cloudflare account, e.g.
+# routes = [{ pattern = "signal.example.com", custom_domain = true }]

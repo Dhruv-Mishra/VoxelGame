@@ -35,7 +35,7 @@
 </script>
 <script type="module">
 // Port Solace — generated from src/ by tools/build.mjs; edit the parts, not this file.
-// Parts: 00-prologue, 01-core, 01-stream, 02-voxel, 03-render, 04-vehicle, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-farms, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 75-extras, 76-game, 77-combat, 78-jobs, 98-tests, 99-boot
+// Parts: 00-prologue, 01-core, 01-stream, 02-voxel, 03-render, 04-vehicle, 05-plan, 07-outland, 10-terrain, 11-streets, 12-nature, 13-park, 14-harbour, 15-harbour-2, 16-rides, 20-downtown, 21-downtown-2, 22-theatre, 23-shops, 30-civic, 31-civic-2, 35-rail, 36-train, 40-homes, 41-homes-2, 42-fill, 43-east, 44-farms, 44-flora, 44-island, 44-sites, 44-wayside, 45-west, 46-zoo, 47-airfield, 48-sea, 49-outland, 49-roads, 50-vehicles, 51-traffic, 52-planes, 53-airtraffic, 54-walkers, 55-people, 56-animals, 56-wild, 57-friends, 60-atmos, 61-post, 62-water, 63-sky, 70-player, 71-ui, 72-touch, 74-map, 75-extras, 76-game, 77-combat, 78-jobs, 79-net, 80-coop, 98-tests, 99-boot
 // ===== prologue: module scope shared by every part (only THREE + ADDONS live here) =====
 window.AF = window.AF || {};
 {
@@ -3826,7 +3826,7 @@ try {
         uniforms: { uK: { value: C.k }, uM: { value: C.margin } },
         vertexShader: 'attribute vec4 aLoc; varying vec4 vLoc; void main() { vLoc = aLoc; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
         fragmentShader: 'uniform float uK; uniform float uM; varying vec4 vLoc; void main() { vec2 q = abs(vLoc.xy) - vLoc.zw; float o = length(max(q, 0.0)); float a = uK * (1.0 - smoothstep(0.0, uM, o)); if (a < 0.004) discard; gl_FragColor = vec4(0.0, 0.0, 0.0, a); }',
-        transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide, fog: false,
+        transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide, forceSinglePass: true, fog: false,
         polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
         blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
         blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
@@ -3867,6 +3867,8 @@ try {
     constructor(o = {}) {
       this.name = o.name || 'vehicle'; this.x = o.x ?? 0; this.y = o.y ?? 0; this.z = o.z ?? 0; this.yaw = o.yaw ?? 0;
       this.pitch = 0; this.roll = 0; this.v = 0; this.interact = null; this.lift = 0.6;
+      // the same on every client for vehicles built at boot or unparked from the same kerb spot (80-coop matches on it)
+      this.netKey = this.name + '@' + Math.round(this.x * 4) + ',' + Math.round(this.z * 4);
       Vehicle.all.push(this);
     }
     // the boarding prompt; dist(px, pz) may measure to the body instead of the centre; reach(vehicle) may widen r (e.g. left off its berth)
@@ -10411,7 +10413,7 @@ try {
       AF.addLabel(LH.name, X, Z, 'building');
       AF.addLabel('Breakwater', 282, 232, 'place');
       // rotating beam: two long additive cones from the lantern
-      const beamMat = new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+      const beamMat = new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
       const cg = new THREE.ConeGeometry(4.5, 120, 16, 1, true); cg.translate(0, -60, 0); cg.rotateZ(Math.PI / 2);
       const beam = new THREE.Group(); beam.position.set(X, TOP + 1.5, Z); AF.scene.add(beam);
       const b1 = new THREE.Mesh(cg, beamMat), b2 = new THREE.Mesh(cg, beamMat); b2.rotation.y = Math.PI; b1.renderOrder = b2.renderOrder = 6; b1.frustumCulled = b2.frustumCulled = false;
@@ -13503,7 +13505,7 @@ try {
     }
     if (TS.spotAt) {
       const [x, y, z] = TS.spotAt, L = 4.6, geo = new THREE.CylinderGeometry(0.12, 0.85, L, 12, 1, true);
-      const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
       const cone = new THREE.Mesh(geo, mat); cone.position.set(x, y + L / 2, z); cone.renderOrder = 7; cone.castShadow = false; cone.name = 'heron-spot'; AF.scene.add(cone); TS.spotCone = cone;
     }
   });
@@ -13582,7 +13584,7 @@ try {
     if (TS.beamFrom && typeof THREE !== 'undefined' && AF.scene) {
       const a = new THREE.Vector3(TS.beamFrom[0], TS.beamFrom[2], TS.beamFrom[1]), b = new THREE.Vector3(TS.beamTo[0], TS.beamTo[2], TS.beamTo[1]), L = a.distanceTo(b);
       const g = new THREE.CylinderGeometry(0.12, 8.5, L, 4, 1, true); g.rotateY(Math.PI / 4); g.scale(1, 1, 0.55);
-      const mat = new THREE.MeshBasicMaterial({ color: 0xc8d6ff, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      const mat = new THREE.MeshBasicMaterial({ color: 0xc8d6ff, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
       const beam = new THREE.Mesh(g, mat); beam.position.copy(a).add(b).multiplyScalar(0.5); beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a.clone().sub(b).normalize());
       beam.renderOrder = 7; beam.castShadow = false; beam.name = 'paragon-projector-beam'; AF.scene.add(beam); TS.beam = beam;
     }
@@ -14543,7 +14545,7 @@ try {
     for (const d of S.dynamic) {
       const mesh = AF.modelMesh(d.geo); mesh.position.set(d.x, d.y, d.z); AF.scene.add(mesh); d.mesh = mesh;
       if (d.flecks) {
-        const N = 64, g = new THREE.PlaneGeometry(0.22, 0.22), mat = new THREE.MeshBasicMaterial({ color: 0xfff0ff, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false });
+        const N = 64, g = new THREE.PlaneGeometry(0.22, 0.22), mat = new THREE.MeshBasicMaterial({ color: 0xfff0ff, transparent: true, opacity: 0.85, side: THREE.DoubleSide, forceSinglePass: true, depthWrite: false });
         const im = new THREE.InstancedMesh(g, mat, N); im.frustumCulled = false; AF.scene.add(im);
         const r = AF.rng(99), dirs = []; for (let i = 0; i < N; i++) { const y = r() * 1.4 - 0.9, a = r() * Math.PI * 2, s = Math.sqrt(1 - Math.min(0.99, y * y)); dirs.push([Math.cos(a) * s, y, Math.sin(a) * s]); }
         d.fl = { im, dirs, obj: new THREE.Object3D() };
@@ -16006,7 +16008,7 @@ try {
     CIV.light(192.5, 8, cz, 2.0, 30); CIV.light(185, 5, 24, 1.0, 14); CIV.light(185, 5, 58, 1.0, 14);
     // --- light shafts from the great window (day only, additive, cheap)
     if (AF.scene) {
-      const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.03, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+      const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.03, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
       const shafts = [];
       for (const [dz, w] of [[-10, 2.2], [-4, 2.6], [3, 2.4], [9, 2.0], [0, 3.2]]) { const g = new THREE.BoxGeometry(22, 1.2, w * 0.7); const ms = new THREE.Mesh(g, mat); ms.position.set(189, 7.5, cz + dz); ms.rotation.order = 'YZX'; ms.rotation.set(0, dz * 0.012, -0.52); ms.renderOrder = 3; ms.castShadow = false; ms.frustumCulled = false; AF.scene.add(ms); shafts.push(ms); }
       AF.onTick('civic-shafts', 710, () => { const n = AF.time.night || 0, cam = AF.camera; const near = cam && Math.hypot(cam.position.x - 192, cam.position.z - cz) < 140; mat.opacity = 0.028 * (1 - n); for (const s of shafts) s.visible = near && n < 0.9; });
@@ -16247,7 +16249,7 @@ try {
   def('lampB', () => { const m = M(8, 44, 8); m.box(1, 0, 1, 7, 3, 7, K.bronzeD); m.box(3, 3, 3, 5, 32, 5, K.bronze); m.box(2, 14, 2, 6, 15, 6, K.gold); m.box(2, 32, 2, 6, 40, 6, K.lampA); m.box(1, 40, 1, 7, 41, 7, K.bronze); m.box(3, 41, 3, 5, 44, 5, K.gold); return m; });
   CIV.shafts = (list, cx, cz, R = 150) => {
     if (!AF.scene) return;
-    const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.025, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.025, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
     const ms = list.map(([x, y, z, len, w, rx, rz]) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, len, w), mat); m.position.set(x, y, z); m.rotation.set(rx, 0, rz); m.renderOrder = 3; m.castShadow = false; m.frustumCulled = false; AF.scene.add(m); return m; });
     AF.onTick('civic-shafts-' + cx, 711, () => { const n = AF.time.night || 0, cam = AF.camera, near = cam && Math.hypot(cam.position.x - cx, cam.position.z - cz) < R; mat.opacity = 0.025 * (1 - n); for (const m of ms) m.visible = near && n < 0.9; });
   };
@@ -16826,7 +16828,7 @@ AF.onBuild('train', 600, () => {
   glow.scale.setScalar(2.4); glow.visible = false; glow.renderOrder = 8; AF.scene.add(glow);
   T.sparks = { pts: SP, pos: spos, col: scol, flash, glow, parts: Array.from({ length: NSP }, () => ({ life: 0, max: 1, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 })) };
   // headlamp beam
-  { const bm = new THREE.MeshBasicMaterial({ color: 0xffe3a8, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: true });
+  { const bm = new THREE.MeshBasicMaterial({ color: 0xffe3a8, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, fog: true });
     const cg = new THREE.ConeGeometry(2.6, 16, 16, 1, true); cg.translate(0, -8, 0); cg.rotateX(-Math.PI / 2);
     const beam = new THREE.Mesh(cg, bm); beam.position.set(0, 1.5, HALF); beam.rotation.x = -0.05; beam.renderOrder = 4; beam.visible = false; beam.castShadow = false; car.add(beam); T.beams = [beam];
     if (AF.addLight) { T.headLight = AF.addLight({ x: 0, y: 2, z: 0, color: 0xffe0a8, intensity: 1.1, range: 14, kind: 'street' }) || (AF.lights && AF.lights[AF.lights.length - 1]); T.coachLight = AF.addLight({ x: 0, y: 3, z: 0, color: 0xffd69a, intensity: 0.4, range: 8, kind: 'interior' }) || (AF.lights && AF.lights[AF.lights.length - 1]); }
@@ -20738,14 +20740,14 @@ AF.onTick('island-jetskis',307,(dt,t)=>{
  const M=JS.mesh;if(!M)return;const cp=AF.camera.position;
  if(!JS.cur&&((cp.x-I.cx)/520)**2+((cp.z-I.cz)/430)**2>1){if(M.count){M.count=0;M.layers.set(31);}return;}
  let n=0;
- for(const k of JS.skis){if(JS.cur!==k)k.drift(dt);skiAt(n++,k.x,skiY(k,t),k.z,k.yaw,k.pitch,k.roll);}
+ for(const k of JS.skis){if(JS.cur!==k&&k.net==null)k.drift(dt);skiAt(n++,k.x,k.net!=null?k.y:skiY(k,t),k.z,k.yaw,k.pitch,k.roll);}
  const R=JS.riders;if(R&&R.active)for(const a of R.actors)skiAt(n++,a.x,SEA-0.1+Math.sin(t*2.6+a.ph)*0.06,a.z,a.yaw,0.08,Math.sin(t*0.9+a.ph)*0.12);
  M.count=n;M.layers.set(n?0:31);M.instanceMatrix.needsUpdate=true;
 });
 // a rideable jet ski (AF.Vehicle): boarded from its dock, or wherever it was left (the prompt follows it, reaching up the beach)
 class JetSki extends AF.Vehicle{
  constructor(d,i){super({name:'Serena jet ski',x:d.x,z:d.z,yaw:d.yaw});this.y=SEA;this.w=0;this.ph=i*1.7;this.home=d;
-  this.attach({label:'Ride a jet ski',r:5,prio:0.3,can:()=>AF.mode==='walk'&&JS.cur!==this,act:()=>AF.setMode('jetski',{ski:this})});this.sync();}
+  this.attach({label:'Ride a jet ski',r:5,prio:0.3,can:()=>AF.mode==='walk'&&JS.cur!==this&&this.net==null,act:()=>AF.setMode('jetski',{ski:this})});this.sync();}
  sync(){const it=this.interact,d=this.home;if(Math.hypot(this.x-d.x,this.z-d.z)<4){it.x=d.land[0];it.z=d.land[1];it.y=d.y+1;it.r=5;}else{it.x=this.x;it.z=this.z;it.y=undefined;it.r=11;}}
  // coasting with nobody aboard
  drift(dt){if(Math.abs(this.v)<=0.05)return;this.v*=Math.exp(-dt*0.9);const nx=this.x+Math.sin(this.yaw)*this.v*dt,nz=this.z+Math.cos(this.yaw)*this.v*dt;if(wet(nx,nz)){this.x=nx;this.z=nz;}else this.v=0;this.roll*=Math.exp(-dt*2);this.pitch*=Math.exp(-dt*2);this.sync();}
@@ -23610,7 +23612,7 @@ try {
     { const p = beamGeo.attributes.position, cA = new Float32Array(p.count * 3);
       for (let i = 0; i < p.count; i++) { const k = Math.pow(Math.max(0, 1 - p.getX(i) / 80), 1.4); cA[i * 3] = k; cA[i * 3 + 1] = k * 0.95; cA[i * 3 + 2] = k * 0.8; }
       beamGeo.setAttribute('color', new THREE.BufferAttribute(cA, 3)); }
-    beamMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+    beamMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
     lampGeo = new THREE.SphereGeometry(0.9, 10, 8); lampMat = new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.9, fog: false });
     for (const lh of SEA.lighthouses) {
       const b = new THREE.Group(); b.position.set(lh.x, lh.y, lh.z);
@@ -25044,7 +25046,7 @@ function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   const wheels = [];
   for (const [ai, az] of Wl.axles.entries()) for (const s of [1, -1]) wheels.push({ lx: s * (halfW - 0.17), ly: wr, lz: (az + 0.5) * CVS - halfL, front: ai === 1, side: s });
   const car = Object.assign(new AF.Vehicle({ name: T.name, x, z, yaw }), {
-    id: VV.cars.length, type: T, name: T.name, mesh, x, z, y: 0, yaw, pitch: 0, roll: 0, v: 0, vx: 0, vz: 0, steer: 0, spin: 0,
+    id: VV.cars.length, type: T, name: T.name, mesh, x, z, y: 0, yaw, pitch: 0, roll: 0, v: 0, vx: 0, vz: 0, steer: 0, spin: 0, pi: paintIdx,
     halfL, halfW, wr, ws, wheels, wheelbase: Wl.wb || (Wl.axles.length > 1 ? (Wl.axles[1] - Wl.axles[0]) * CVS : 2.4), gait: Math.random() * 6, height: G.spec.H,
     ai: null, parked: true, player: false, driver: -1, bob: 0, bobV: 0, sway: 0, key: G.key, vPrev: 0, brake: 0,
   });
@@ -25052,7 +25054,7 @@ function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   VV.cars.push(car);
   if (WHEEL_IM) { let count = 4; for (const existing of VV.cars) if (existing.type.id === typeId) count++; ensureIM(typeId, count); }
   if (!o.noDrive && !T.horse) car.attach({ r: 1.6, lift: 0.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => bodyDist(car, px, pz), prio: 0.1,
-    can: () => AF.mode === 'walk' && car.active !== false && !car.player && !car.dead && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
+    can: () => AF.mode === 'walk' && car.active !== false && !car.player && !car.dead && car.net == null && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
   placeMesh(car);
   return car;
 }
@@ -25149,7 +25151,7 @@ function carContacts(car, dt) {
       if (!depth) continue;
       const normalX = CONTACT[0], normalZ = CONTACT[1];
       const approach = Math.max(0, -(car.vx * normalX + car.vz * normalZ));
-      if (car.player && !other.static && approach > 0.05) {
+      if (car.player && !other.static && other.net == null && approach > 0.05) {
         const share = other.type.big ? 0.035 : other.type.kind === 'bike' ? 0.8 : other.type.kind === 'van' ? 0.3 : 0.5;
         const nudge = Math.min(depth + 0.03, 0.2 + approach * dt) * share;
         const ox = other.x - normalX * nudge, oz = other.z - normalZ * nudge;
@@ -25377,6 +25379,8 @@ function ensureIM(key, cap) {
   key = key.split(':')[0];
   let r = IMS.get(key);
   if (r && r.cap >= cap) return r;
+  // runtime cars (squads, kerb cars taken) grow the batch by half again, not one slot per car
+  if (r) cap = Math.max(cap, Math.ceil(r.cap * 1.5), r.cap + 8);
   const G = batchGeo(key);
   if (r) for (const o of [r.full, r.glass, r.lod]) if (o) { AF.scene.remove(o); o.dispose && o.dispose(); }
   const mk = (geo, mat, shadow) => { const im = new THREE.InstancedMesh(geo, mat, cap); im.castShadow = shadow; im.customDepthMaterial = AF.mat.depthInst; im.receiveShadow = true; im.frustumCulled = false; im.count = 0; im.name = 'cars:' + key; AF.scene.add(im); return im; };
@@ -25464,7 +25468,7 @@ function syncInstances(dt) {
       }
     }
     // night: head + tail lamps for every moving (or driven) car, pools under the near ones
-    if (lampsOn && (car.ai || car.player) && !car.type.horse && li + 4 <= LAMP.max * 4) {
+    if (lampsOn && (car.ai || car.player || car.net != null) && !car.type.horse && li + 4 <= LAMP.max * 4) {
       const hy = car.type.big ? 0.95 : 0.78, hw = car.halfW - 0.22;
       const far2 = d > 220 ? 1.6 : 1;   // far lamps a touch brighter so the avenues read as rivers of light
       for (let lamp = 0; lamp < 4; lamp++) {
@@ -25646,20 +25650,23 @@ AF.onBuild('vehicles-parking', 480, () => {
   VV.parkMs = Math.round(performance.now() - t0);
   console.log('[af] parked (static):', out.length, 'models', Object.keys(staticGeos).length, 'in', VV.parkMs, 'ms', JSON.stringify(perRoad), JSON.stringify(rej));
   // every kerb car is drivable: one prompt follows the nearest parked car; using it swaps the merged prop for a real car
+  VV.unpark = (s) => {
+    if (!s.outland) AF.removeStatic(s.pr);
+    else if (AF.outland.removeProp) AF.outland.removeProp(s.pr);
+    else { const props = AF.outland.props; props.splice(props.indexOf(s.pr), 1); if (s.pr.col) AF.removeCollider(s.pr.col); AF.outland.addProp(s.pr.geo, s.x, s.y, s.z, s.pr.rot, { collide: false }); props.pop(); }
+    const i = VV.parkedStatic.indexOf(s); if (i >= 0) VV.parkedStatic.splice(i, 1);
+    const j = VV.parked.indexOf(s); if (j >= 0) VV.parked.splice(j, 1);
+    if (proxy.target === s) { proxy.target = null; proxy.y = -999; }
+    const car = makeCar(s.type.id, s.pi, s.x, s.z, s.yaw, { y: s.y }); VV.parked.push(car);
+    car.temp = true; car.home = { type: s.type.id, pi: s.pi, x: s.x, z: s.z, y: s.y, yaw: s.yaw };
+    return car;
+  };
   const proxy = VV.parkProxy = AF.addInteract({ x: 0, y: -999, z: 0, r: 1.6, label: 'Drive', prio: 0.1, target: null,
     dist: (px, pz) => proxy.target ? bodyDist(proxy.target, px, pz) : 99,
     can: () => AF.mode === 'walk' && !!proxy.target,
     act: () => {
       const s = proxy.target; if (!s) return;
-      if (!s.outland) AF.removeStatic(s.pr);
-      else if (AF.outland.removeProp) AF.outland.removeProp(s.pr);
-      else { const props = AF.outland.props; props.splice(props.indexOf(s.pr), 1); if (s.pr.col) AF.removeCollider(s.pr.col); AF.outland.addProp(s.pr.geo, s.x, s.y, s.z, s.pr.rot, { collide: false }); props.pop(); }
-      const i = VV.parkedStatic.indexOf(s); if (i >= 0) VV.parkedStatic.splice(i, 1);
-      const j = VV.parked.indexOf(s); if (j >= 0) VV.parked.splice(j, 1);
-      proxy.target = null; proxy.y = -999;
-      const car = makeCar(s.type.id, s.pi, s.x, s.z, s.yaw, { y: s.y }); VV.parked.push(car);
-      car.temp = true; car.home = { type: s.type.id, pi: s.pi, x: s.x, z: s.z, y: s.y, yaw: s.yaw };
-      AF.setMode('drive', { car });
+      AF.setMode('drive', { car: VV.unpark(s) });
     } });
   let pf = 0;
   AF.onTick('park-proxy', 170, () => {
@@ -26144,12 +26151,12 @@ try {
     const pl = Object.assign(new AF.Vehicle({ name: T.name, x, z, yaw }), { id, T, G, root, props, x, y: AF.W.groundY(x, z), z, yaw, pitch: 0, roll: 0, gam: 0, pr: 0, rr: 0, v: 0, throttle: 0, engine: false, home: { x, z, yaw }, onGround: true, spin: 0, name: T.name });
     pl.attach({ r: 2.2, lift: 1, label: 'Fly the ' + T.name, prio: 0.1,
       dist: (px, pz) => { const s = Math.sin(pl.yaw), c = Math.cos(pl.yaw), rx = px - pl.x, rz = pz - pl.z, lx = rx * c - rz * s, lz = rx * s + rz * c; return Math.hypot(Math.max(0, Math.abs(lx) - Math.min(1.5, G.halfW)), Math.max(0, Math.abs(lz) - G.halfL)); },
-      can: () => AF.mode === 'walk' && PL.cur !== pl, act: () => AF.setMode('fly', { plane: pl }) });
+      can: () => AF.mode === 'walk' && PL.cur !== pl && pl.net == null, act: () => AF.setMode('fly', { plane: pl }) });
     PL.list.push(pl); place(pl);
     return pl;
   };
   const place = (pl) => { pl.root.position.set(pl.x, pl.y, pl.z); pl.root.rotation.set(-pl.pitch, pl.yaw, pl.roll, 'YXZ'); if (pl.interact) pl.sync(); };
-  PL.make = make;
+  PL.make = make; PL.place = (pl) => place(pl);
   // the model kit for 53-airtraffic's airframes (palette helper, fuselage / wing rasterisers, the airliner propeller)
   PL.kit = { C, fuselage, wing, propGeo: () => planeGeo('airliner').pgeo };
   // approach guidance picks the nearest of these east-west strips { x0, x1, z } (the island adds its own)
@@ -28358,6 +28365,8 @@ try {
     for (const w of W) if (!w.lead) spawnWalker(w, C, false);
     // the police pool (77-combat): 8 inactive walkers in the cop look, woken with an .agg when the wanted level calls for them
     if (SP.cop !== undefined) for (let i = 0; i < 8; i++) W.push({ id: CR.NW + i, v: SP.cop, vd: SP.cop, vn: SP.cop, cop: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk' });
+    // co-op proxy pool (80-coop): ids are their index, so a remote owner's ped id never collides with these
+    for (let i = 0; i < 16; i++) W.push({ id: W.length, v: 0, vd: 0, vn: 0, net: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk', nf: 'p', lie: false });
     CR.benches = AF.spots.filter((spot) => spot.kind === 'bench' && !spotsTaken.has(spot));
     CR.benchTaken = new Set();
   }
@@ -28543,7 +28552,7 @@ try {
       refreshCand(C);
       if (jump > 45) {
         dens.clear(); flows.clear();
-        for (const w of CR.walkers) if (!w.lead && !w.cop && !w.agg) spawnWalker(w, C, false);
+        for (const w of CR.walkers) if (!w.lead && !w.cop && !w.agg && !w.net) spawnWalker(w, C, false);
       }
     }
     dt = Math.min(dt, 0.1);
@@ -28553,7 +28562,7 @@ try {
     const eveningDistrict = Math.abs(C.x) < 35 && C.z > 4 && C.z < 165;
     const population = Math.floor(CR.NW * 0.85 * (hN < 5 || hN >= 23 ? 0.45 : nightW ? eveningDistrict ? 0.8 : 0.6 : hN < 8 ? 0.75 : 1));
     dens.clear(); flows.clear();
-    for (const w of CR.walkers) if (w.act && !w.lead && w.id < population) {
+    for (const w of CR.walkers) if (w.act && !w.lead && !w.agg && w.A && w.id < population) {
       const cell = cellK(w.x, w.z); dens.set(cell, (dens.get(cell) || 0) + 1 + (w.nf || 0));
       const key = flowKey(w.A, w.B); flows.set(key, (flows.get(key) || 0) + flowSign(w.A, w.B));
     }
@@ -28561,6 +28570,15 @@ try {
     const fc = CR.farCnt; for (const c of fc) c.a = c.p = c.b = 0;
     const CB = AF.combat;
     for (const w of CR.walkers) {
+      // co-op proxies (80-coop): another player's engaged ped or cop, posed from the network, drawn like the crowd
+      if (w.net) {
+        if (w.act && CR.V[w.v]) {
+          const V = CR.V[w.v]; let f = w.nf; if (!V.im[f]) f = 'p';
+          const im = V.im[f], c = cnt[w.v];
+          if (c[f] < im.instanceMatrix.count) { if (!c[f]) draws++; if (w.lie) putLie(im, c[f]++, w.x, w.y, w.z, w.yaw, w.s); else putInst(im, c[f]++, w.x, w.y, w.z, w.yaw, w.s, 1); }
+        }
+        continue;
+      }
       // engaged (77-combat owns them: fleeing, fighting, down) or a cop: stepped there, always drawn at full detail
       if (w.agg) {
         if (CB && CB.stepPed(w, dt)) {
@@ -28635,7 +28653,7 @@ try {
     // talkable passer-by: the nearest walker within 2 m of the player
     if (CR.it && pp.walk) {
       let best = null, bd = 2.2;
-      for (const w of CR.walkers) { if (!w.act || w.lead || w.agg) continue; const d = Math.abs(w.x - pp.x) + Math.abs(w.z - pp.z); if (d < bd) { bd = d; best = w; } }
+      for (const w of CR.walkers) { if (!w.act || w.lead || w.agg || w.net) continue; const d = Math.abs(w.x - pp.x) + Math.abs(w.z - pp.z); if (d < bd) { bd = d; best = w; } }
       for (const e of CR.extras) { if (e.pose !== 'sit' && e.pose !== 'stand') continue; const d = Math.abs(e.x - pp.x) + Math.abs(e.z - pp.z) + Math.abs(e.y - (AF.player.y || 0)) * 0.5; if (d < bd) { bd = d; best = e; } }
       CR.near = best;
       if (best) { if (best.id == null) best.id = Math.floor(hash(best.s) * 1e6); if (!best.name) nameWalker(best); CR.it.x = best.x; CR.it.y = best.y + 1; CR.it.z = best.z; CR.it.label = (best.pose === 'sit' ? 'Chat with ' : 'Talk to ') + best.first; }
@@ -30894,7 +30912,7 @@ try {
       const cg = new THREE.CylinderGeometry(3.6, 0.35, 320, 16, 1, true); cg.translate(0, 160, 0);
       spots.forEach((sp, i) => {
         // fades with the camera's distance to each fragment (a nearby beam never reads as a pale blob) and toward the far end
-        const mat = new THREE.ShaderMaterial({ uniforms: { opacity: { value: 0 }, uCol: { value: new THREE.Color(0xd8e6ff) } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        const mat = new THREE.ShaderMaterial({ uniforms: { opacity: { value: 0 }, uCol: { value: new THREE.Color(0xd8e6ff) } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true,
           vertexShader: 'varying vec3 vW; varying float vH; varying vec3 vN; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vH = position.y / 320.0; vN = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * viewMatrix * w; }',
           fragmentShader: 'uniform float opacity; uniform vec3 uCol; uniform float uT; varying vec3 vW; varying float vH; varying vec3 vN; float hh(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); } void main(){ vec3 V = normalize(cameraPosition - vW); float edge = abs(dot(normalize(vN), V)); float soft = pow(edge, 1.6); float d = distance(cameraPosition, vW); float core = 1.0 + 2.5 * exp(-vH * 18.0); float n = 0.85 + 0.15 * sin(vH * 40.0 - uT * 0.7 + hh(floor(vW.xz * 0.2)) * 6.0); float a = opacity * soft * core * n * smoothstep(12.0, 70.0, d) * (1.0 - smoothstep(0.45, 1.0, vH)) * (0.55 + 0.45 * (1.0 - vH)); gl_FragColor = vec4(uCol * a, a); }' });
         mat.uniforms.uT = { value: 0 };
@@ -33602,6 +33620,7 @@ try {
   title.querySelector('.arr.l').addEventListener('click', () => step(-1));
   title.querySelector('.arr.r').addEventListener('click', () => step(1));
   tGo.addEventListener('click', start);
+  UI.start = start; UI.pick = () => S.pick;
   addEventListener('keydown', (event) => { if (S.title && (event.code === 'Enter' || event.code === 'Space') && !event.repeat && !(event.target && /INPUT|TEXTAREA/.test(event.target.tagName))) start(); });
   UI.showTitle = () => { S.title = true; root.classList.add('titling'); title.style.display = ''; title.classList.remove('out'); exitLock(); toggleMenu(false); closeDlg(); AF.setMode('cine'); };
   // ---- title cinematic: slow dolly shots across the city behind the character card, cut through a short fade
@@ -33831,7 +33850,7 @@ try {
     }
 
     // ---------------------------------------------------------------- context: which buttons the current action needs (5 Hz, DOM only on change)
-    const RIDES = new Set(['row', 'ride', 'funride', 'jetski', 'carousel']), CAM_MODES = new Set(['walk', 'drive', 'fly', 'jetski']);
+    const RIDES = new Set(['row', 'ride', 'funride', 'jetski', 'carousel', 'passenger']), CAM_MODES = new Set(['walk', 'drive', 'fly', 'jetski', 'passenger']);
     const JOB_CAR = (T) => !!(T && (T.cab || T.id === 'bus' || T.kind === 'van' || T.id === 'firetruck' || T.kind === 'bike'));
     const hasGuns = () => { const g = AF.save && AF.save.guns; if (g) for (const k in g) if (g[k]) return true; return false; };
     const act = [], use = [];
@@ -34466,7 +34485,7 @@ try {
 
   // ---------------------------------------------------------------- health, death, respawn
   const H = AF.health = { v: G.hp, max: G.hp, last: -99, dead: false };
-  const HURT_MODES = new Set(['walk', 'drive', 'jetski']);
+  const HURT_MODES = new Set(['walk', 'drive', 'jetski', 'passenger']);
   H.hurt = (n, src) => {
     if (H.dead || !(n > 0) || !AF.ready || !HURT_MODES.has(AF.mode) || (UI.state && UI.state.title)) return;
     H.v = Math.max(0, H.v - n); H.last = AF.clock.t; HUD.hurt(n); SFX.play('hurt');
@@ -34787,10 +34806,11 @@ try {
 
   // ---------------------------------------------------------------- state
   const CB = AF.combat = { slot: 0, aimToggle: false, cd: 0, swing: 0, swingDur: 0.3, side: 0, hitAt: -1, reloadT: 0, mag: S.mag || (S.mag = {}), heat: 0, stars: 0, seenT: 0, engaged: 0, recoil: 0, flinch: 0, held: null, heldId: null, gallery: null };
-  const owned = () => { const o = [null]; for (const id of GUN_IDS) if (S.guns[id]) o.push(id); return o; };
+  const OWNED = [null];
+  const owned = () => { OWNED.length = 1; for (const id of GUN_IDS) if (S.guns[id]) OWNED.push(id); return OWNED; };
   const cur = () => { const o = owned(); if (CB.slot >= o.length) CB.slot = 0; return o[CB.slot]; };
   const melee = () => { const f = AF.friends && AF.friends.current; return (f && MELEE[f.id]) || FISTS; };
-  CB.gun = cur; CB.GUNS = GUNS; CB.melee = melee;
+  CB.gun = cur; CB.GUNS = GUNS; CB.melee = melee; CB.heldGeo = heldGeo; CB.pvp = false;
   CB.label = () => {
     const g = CB.gallery ? 'gallery' : cur();
     if (g === 'gallery') return `<i>Gallery rifle</i><span>${CB.gallery.shots}</span>`;
@@ -34827,6 +34847,7 @@ try {
   const say = (w, t) => AF.emit('bubble', { who: w, name: '', text: t, dur: 2.2 });
   const FIGHT_LINES = ['You wanna go, pal?', 'Put \u2019em up!', 'Why, you\u2026!', 'Big mistake, buster!'], FLEE_LINES = ['Help! Police!', 'Somebody call a cop!', 'Leave me alone!', 'Yikes!'];
   const engage = (w, cause, force) => {
+    if (w.net) return null;
     if (w.agg) return w.agg;
     if (!w.act || (CB.engaged >= G.engagedMax && !force)) return null;
     const V = lookOf(w);
@@ -34852,6 +34873,8 @@ try {
   };
   // damage from the player (melee, bullets, cars, explosions): kind 'melee' knocks out, 'gun' / 'car' / 'boom' can kill
   const hitPed = (w, dmg, kind, fx, fz, innocent) => {
+    // another player's ped (80-coop proxy): its owner applies the hit
+    if (w.net) { FX.burst('hit', w.x, w.y + 1.3, w.z, 1); if (CB.onNetPed) CB.onNetPed(w, dmg, kind, fx, fz, innocent); return; }
     if (exempt(w)) { engage(w, 'panic', true); return; }
     const A = engage(w, 'hit', true); if (!A || A.st === 'down') return;
     A.hp -= dmg; A.cd = Math.max(A.cd, 0.35); w.x += fx * 0.15; w.z += fz * 0.15;
@@ -34861,9 +34884,12 @@ try {
     if (fell) down(w, kind === 'melee' && A.hp > -15 ? 'ko' : null, fx, fz, kind === 'car' || kind === 'boom' ? 6 : 1.5);
     if (!innocent && (!A.reported || fell)) { A.reported = true; CB.crime(w.cop ? (fell ? G.heat.copKill : G.heat.copHit) : fell ? (A.ko ? G.heat.ko : G.heat.kill) : G.heat.assault); }
   };
+  // a hit sent by the player who shot one of this client's peds: no crime here, and the ped turns on that player
+  CB.netHitPed = (w, dmg, kind, fx, fz, from) => { if (!w || !w.act || w.net) return; hitPed(w, dmg, kind, fx, fz, true); if (w.agg) w.agg.tgt = from; };
+  const flat = (w) => w.lie || (w.agg && w.agg.lie);
   const panic = (x, z, r) => {
     const C = CR();
-    if (C) for (const w of C.walkers) if (w.act && !w.agg && !w.cop && (w.x - x) ** 2 + (w.z - z) ** 2 < r * r) { const A = engage(w, 'panic'); if (!A) break; }
+    if (C) for (const w of C.walkers) if (w.act && !w.agg && !w.cop && !w.net && (w.x - x) ** 2 + (w.z - z) ** 2 < r * r) { const A = engage(w, 'panic'); if (!A) break; }
     scareWalkers(x, z, r);
   };
   CB.panic = panic;
@@ -34881,21 +34907,26 @@ try {
   };
 
   // ---------------------------------------------------------------- the player's target picture (on foot / in a car / out of reach)
-  const TG = { x: 0, y: 0, z: 0, car: null, away: true, speed: 0 };
-  const target = () => {
+  const TG = { x: 0, y: 0, z: 0, car: null, away: true, speed: 0, peer: null };
+  // A.tgt: a remote player who provoked this ped (CB.peerTarget gives their picture), else the local player
+  const target = (A) => {
+    const r = A && A.tgt != null && CB.peerTarget ? CB.peerTarget(A.tgt) : null;
+    if (r) return r;
     const p = AF.player, car = AF.mode === 'drive' && VV.player;
-    TG.car = car || null; TG.away = !(AF.mode === 'walk' || car);
+    TG.car = car || null; TG.away = !(AF.mode === 'walk' || car || AF.mode === 'passenger');
     TG.x = car ? car.x : p.x; TG.y = car ? car.y : p.y; TG.z = car ? car.z : p.z; TG.speed = car ? Math.abs(car.v) : (AF.PL.walk.speed || 0);
     return TG;
   };
   const los = (x0, y0, z0, x1, y1, z1) => { for (let i = 1; i < 6; i++) { const u = i / 6; if (AF.solidAt(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, z0 + (z1 - z0) * u)) return false; } return true; };
-  const pedShoot = (w, d) => {
+  const pedShoot = (w, d, T) => {
     const hx = Math.sin(w.yaw), hz = Math.cos(w.yaw), mx = w.x + hx * 0.5, my = w.y + 1.35, mz = w.z + hz * 0.5;
-    const p = AF.clamp((w.cop ? 0.6 : 0.42) - d * 0.012 - TG.speed * 0.03, 0.06, 0.7), hit = Math.random() < p;
-    const ex = TG.x + (hit ? 0 : (Math.random() - 0.5) * 3), ey = TG.y + (hit ? 1.2 : 0.3 + Math.random()), ez = TG.z + (hit ? 0 : (Math.random() - 0.5) * 3);
+    const p = AF.clamp((w.cop ? 0.6 : 0.42) - d * 0.012 - T.speed * 0.03, 0.06, 0.7), hit = Math.random() < p;
+    const ex = T.x + (hit ? 0 : (Math.random() - 0.5) * 3), ey = T.y + (hit ? 1.2 : 0.3 + Math.random()), ez = T.z + (hit ? 0 : (Math.random() - 0.5) * 3);
     FX.burst('flash', mx, my, mz, 1, { size: 0.5 }); FX.line(mx, my, mz, ex, ey, ez); SFX.play('shot', w.x, w.z);
+    if (CB.onShot) CB.onShot(1, mx, my, mz, ex, ey, ez, hit ? 2 : 1);
     if (!hit) { FX.burst('dust', ex, ey, ez, 2); return; }
-    if (TG.car) { dmgCar(TG.car, 5); if (Math.random() < 0.3) H.hurt(4, 'shot'); }
+    if (T.peer != null) { if (CB.hurtPeer) CB.hurtPeer(T.peer, w.cop ? 9 : 7, 'shot', 0, 0); FX.burst('hit', ex, ey, ez, 1); return; }
+    if (T.car) { dmgCar(T.car, 5); if (Math.random() < 0.3) H.hurt(4, 'shot'); }
     else { H.hurt(w.cop ? 9 : 7, 'shot'); FX.burst('hit', ex, ey, ez, 1); }
   };
   const gunner = (w) => w.agg.kind === 'gun';
@@ -34903,7 +34934,7 @@ try {
   // stepped by 55-people's crowd tick for every walker with an .agg; false = calm down, back to the pool
   CB.stepPed = (w, dt) => {
     const A = w.agg; A.t += dt; A.cd -= dt;
-    const T = target(), dx = T.x - w.x, dz = T.z - w.z, d = Math.hypot(dx, dz) || 1e-3;
+    const T = target(A), dx = T.x - w.x, dz = T.z - w.z, d = Math.hypot(dx, dz) || 1e-3;
     if (A.st === 'down') {
       if (A.vx || A.vz) { w.x += A.vx * dt; w.z += A.vz * dt; const k = Math.exp(-dt * 4); A.vx *= k; A.vz *= k; if (Math.abs(A.vx) + Math.abs(A.vz) < 0.05) A.vx = A.vz = 0; w.y = AF.surfaceBelow(w.x, w.z, w.y + 0.6, 2); }
       if (A.ko && A.t > 7) { A.st = 'go'; A.lie = false; A.kind = 'flee'; A.hp = 8; A.t = 0; }
@@ -34920,14 +34951,18 @@ try {
       if (d > want + 6) { sp = 3.2; f = 'run'; }
       else if (d < want - 4) { sp = 1.8; hx = -hx; hz = -hz; f = 'walk'; }
       else { sp = 1.1; const s = A.side; [hx, hz] = [-hz * s, hx * s]; f = 'walk'; if (A.t % 4 < dt) A.side = -A.side; }
-      if (d < 45 && A.cd <= 0 && !T.away && los(w.x, w.y + 1.5, w.z, T.x, T.y + 1.2, T.z)) { pedShoot(w, d); A.cd = (w.cop ? 0.9 : 1.4) + Math.random() * 0.8; A.aimT = 0.45; }
+      if (d < 45 && A.cd <= 0 && !T.away && los(w.x, w.y + 1.5, w.z, T.x, T.y + 1.2, T.z)) { pedShoot(w, d, T); A.cd = (w.cop ? 0.9 : 1.4) + Math.random() * 0.8; A.aimT = 0.45; }
       if (A.aimT > 0) { A.aimT -= dt; f = 'work'; sp *= 0.25; }
     } else {   // brawl / melee / an unarmed cop: close in and swing
       if (d > 1.15 && !(T.car && d < 5)) { sp = d > 4 ? 3.3 : 2.2; f = d > 4 ? 'run' : 'walk'; }
       if (d < 1.6 && A.cd <= 0 && !T.car && A.swing <= 0) { A.swing = 0.45; A.cd = 1 + Math.random() * 0.6; A.hitDone = false; }
       if (A.swing > 0) {
         A.swing -= dt; f = A.swing > 0.22 ? 'hail' : 'work'; sp = 0;
-        if (A.swing <= 0.22 && !A.hitDone) { A.hitDone = true; if (d < 1.8 && AF.mode === 'walk') { H.hurt(A.kind === 'melee' ? 10 : w.cop ? 8 : 6, 'melee'); AF.PL.push(hx * 3, hz * 3); SFX.play('punch', w.x, w.z); CB.flinch = 0.3; } }
+        if (A.swing <= 0.22 && !A.hitDone) {
+          A.hitDone = true; const dmg = A.kind === 'melee' ? 10 : w.cop ? 8 : 6;
+          if (d < 1.8 && T.peer != null) { if (CB.hurtPeer) CB.hurtPeer(T.peer, dmg, 'melee', hx * 3, hz * 3); SFX.play('punch', w.x, w.z); }
+          else if (d < 1.8 && AF.mode === 'walk') { H.hurt(dmg, 'melee'); AF.PL.push(hx * 3, hz * 3); SFX.play('punch', w.x, w.z); CB.flinch = 0.3; }
+        }
       }
     }
     if (sp > 0) {
@@ -34962,7 +34997,7 @@ try {
     for (let t = t0 + 0.3; t < range; t += 0.45) if (AF.solidAt(ox + dx * t, oy + dy * t, oz + dz * t)) { HIT.t = t; HIT.kind = 'world'; break; }
     const C = CR(), R2 = range * range;
     if (C && !CB.gallery) for (const w of C.walkers) {
-      if (!w.act || (w.agg && w.agg.lie) || (w.x - ox) ** 2 + (w.z - oz) ** 2 > R2 || exempt(w)) continue;
+      if (!w.act || flat(w) || (w.x - ox) ** 2 + (w.z - oz) ** 2 > R2 || exempt(w)) continue;
       const t = rayCapsule(ox, oy, oz, dx, dy, dz, w.x, w.y, w.z, 1.75 * w.s, 0.32); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'ped'; HIT.obj = w; }
     }
     const WK = AF.walkers;
@@ -34976,6 +35011,7 @@ try {
     }
     if (HELI.on && !CB.gallery) { const t = raySphere(ox, oy, oz, dx, dy, dz, HELI.x, HELI.y + 1, HELI.z, 3); if (t < HIT.t) { HIT.t = t; HIT.kind = 'heli'; } }
     if (CB.gallery) for (const d of CB.gallery.targets()) { const t = raySphere(ox, oy, oz, dx, dy, dz, d.x, d.y, d.z, 0.24); if (t < HIT.t) { HIT.t = t; HIT.kind = 'duck'; HIT.obj = d; } }
+    if (CB.rayPeers && !CB.gallery) CB.rayPeers(ox, oy, oz, dx, dy, dz, t0, HIT, rayCapsule, raySphere);
     HIT.x = ox + dx * HIT.t; HIT.y = oy + dy * HIT.t; HIT.z = oz + dz * HIT.t;
     return HIT;
   };
@@ -34984,7 +35020,7 @@ try {
   const autoTarget = (ox, oz, fx, fz, range) => {
     const C = CR(); let best = null, bd = range;
     if (C) for (const w of C.walkers) {
-      if (!w.act || (w.agg && w.agg.lie) || exempt(w)) continue;
+      if (!w.act || flat(w) || exempt(w)) continue;
       const dx = w.x - ox, dz = w.z - oz, d = Math.hypot(dx, dz); if (d > bd || d < 0.5) continue;
       if ((dx * fx + dz * fz) / d < 0.9 || !los(ox, AF.player.y + 1.4, oz, w.x, w.y + 1.3, w.z)) continue;
       bd = d; best = w;
@@ -35028,10 +35064,12 @@ try {
       TMP.set(DIR.x + (Math.random() - 0.5) * s * 2, DIR.y + (Math.random() - 0.5) * s * 2, DIR.z + (Math.random() - 0.5) * s * 2).normalize();
       const h = ray(ox, oy, oz, TMP.x, TMP.y, TMP.z, W.range, t0);
       FX.line(MZ.x, MZ.y, MZ.z, h.x, h.y, h.z);
+      if (!gal && CB.onShot) CB.onShot(GUN_IDS.indexOf(g) + 1, MZ.x, MZ.y, MZ.z, h.x, h.y, h.z, h.kind === 'world' ? 1 : h.kind === 'car' || h.kind === 'heli' || (h.kind === 'peer' && h.obj.heli) ? 3 : h.kind ? 2 : 0);
       if (h.kind === 'ped') { hitPed(h.obj, W.dmg, 'gun', TMP.x, TMP.z); any = true; }
       else if (h.kind === 'walker') { hitWalker(h.obj, W.dmg, 'gun', TMP.x, TMP.z); any = true; }
       else if (h.kind === 'car') { dmgCar(h.obj, W.dmg * 0.35, true); FX.burst('spark', h.x, h.y, h.z, 3, { spread: 4 }); any = true; }
       else if (h.kind === 'heli') { heliHit(W.dmg); FX.burst('spark', h.x, h.y, h.z, 3, { spread: 4 }); any = true; }
+      else if (h.kind === 'peer') { if (CB.hitPeer) CB.hitPeer(h.obj, W.dmg, 'gun', TMP.x, TMP.z); if (h.obj.heli) FX.burst('spark', h.x, h.y, h.z, 3, { spread: 4 }); else FX.burst('hit', h.x, h.y, h.z, 1); any = true; }
       else if (h.kind === 'duck') { gal.hit(h.obj); any = true; }
       else if (h.kind === 'world') FX.burst('dust', h.x - TMP.x * 0.1, h.y - TMP.y * 0.1, h.z - TMP.z * 0.1, 2);
     }
@@ -35048,7 +35086,7 @@ try {
     const W = melee(), p = AF.player, fx = Math.sin(p.yaw), fz = Math.cos(p.yaw), C = CR();
     let best = null, bd = W[2];
     if (C) for (const w of C.walkers) {
-      if (!w.act || (w.agg && w.agg.lie)) continue;
+      if (!w.act || flat(w)) continue;
       const dx = w.x - p.x, dz = w.z - p.z, d = Math.hypot(dx, dz); if (d > bd || Math.abs(w.y - p.y) > 1.4) continue;
       if (d > 0.4 && (dx * fx + dz * fz) / d < 0.35) continue;
       bd = d; best = w;
@@ -35061,6 +35099,7 @@ try {
       bd = d; walker = a;
     }
     if (walker) { hitWalker(walker, W[1], 'melee', fx, fz); SFX.play('punch', p.x, p.z); AF.hud.hitMark(); scareWalkers(p.x, p.z, 12); return; }
+    if (CB.meleePeer && CB.meleePeer(p.x, p.y, p.z, fx, fz, best ? bd : W[2], W[1])) { SFX.play('punch', p.x, p.z); AF.hud.hitMark(); return; }
     if (best) { hitPed(best, W[1], 'melee', fx, fz); SFX.play('punch', p.x, p.z); AF.hud.hitMark(); return; }
     for (const c of VV.cars) if (c.active !== false && !c.player && Math.abs(c.x - p.x) < 4 && Math.abs(c.z - p.z) < 4 && VV.bodyDist(c, p.x + fx * 0.8, p.z + fz * 0.8) < 0.3) { dmgCar(c, 2, true); SFX.play('crash', c.x, c.z); return; }
   };
@@ -35069,6 +35108,7 @@ try {
   const HURT = new Set();
   const dmgCar = (car, n, byPlayer) => {
     if (!car || car.dead || car.static || !(n > 0)) return;
+    if (car.net != null) { if (CB.onNetCar) CB.onNetCar(car, n, byPlayer); return; }
     car.hp = (car.hp ?? G.vehHp) - n; car.dmg = AF.clamp(1 - car.hp / G.vehHp, 0, 1) * 0.8;
     if (byPlayer) car.byPlayer = true;
     if (car.hp < G.vehSmoke) HURT.add(car);
@@ -35087,19 +35127,26 @@ try {
     if (dv > 5) FX.burst('spark', car.x + Math.sin(car.yaw) * car.halfL, car.y + 0.6, car.z + Math.cos(car.yaw) * car.halfL, 6);
     if (dv > G.crashMin) H.hurt((dv - G.crashMin) * G.crashK, 'crash');
   };
+  // blast damage around (x, y, z): remote = another player's explosion (no crimes here; it only hurts this player and their car with
+  // friendly fire on)
+  const blast = (x, y, z, R, byPlayer, remote) => {
+    const C = CR(), innocent = !byPlayer || remote, meToo = !remote || CB.pvp;
+    if (C) for (const w of C.walkers) { if (!w.act || flat(w) || w.net) continue; const dx = w.x - x, dz = w.z - z, d = Math.hypot(dx, dz); if (d < R) hitPed(w, G.boomDmg * (1 - d / R), 'boom', dx / (d || 1), dz / (d || 1), innocent); }
+    const WK = AF.walkers;
+    if (WK && WK.near) for (const a of WK.near(x, z, R)) { const dx = a.x - x, dz = a.z - z, d = Math.hypot(dx, dz) || 1; hitWalker(a, G.boomDmg, 'boom', dx / d, dz / d, innocent); }
+    if (AF.mode === 'walk' && meToo) { const p = AF.player, dx = p.x - x, dz = p.z - z, d = Math.hypot(dx, dz); if (d < R) { H.hurt(G.boomDmg * (1 - d / R), 'boom'); AF.PL.push(dx / (d || 1) * 8, dz / (d || 1) * 8, 6); } }
+    for (const c of VV.cars) if (!c.dead && c.net == null && (!remote || (c.player && meToo)) && Math.abs(c.x - x) < R && Math.abs(c.z - z) < R) { const d = Math.hypot(c.x - x, c.z - z); if (d < R) dmgCar(c, 70 * (1 - d / R), byPlayer && !remote); }
+    if (byPlayer && !remote) CB.crime(G.heat.carBoom);
+    panic(x, z, 35);
+  };
+  CB.blast = blast;
   const explode = (car) => {
     car.dead = true; car.deadT = AF.clock.t; car.dmg = 1; car.hp = 0; car.burnT = 0; car.smokeT = 18; car.temp = true;
     car.y += 0.15; car.roll = (Math.random() - 0.5) * 0.25; car.pitch = (Math.random() - 0.5) * 0.15; VV.placeMesh(car);
     FX.boom(car.x, car.y, car.z);
     if (VV.player === car) { VV.exitCar(); H.hurt(55, 'boom'); }
-    const R = G.boomR, C = CR();
-    if (C) for (const w of C.walkers) { if (!w.act || (w.agg && w.agg.lie)) continue; const dx = w.x - car.x, dz = w.z - car.z, d = Math.hypot(dx, dz); if (d < R) hitPed(w, G.boomDmg * (1 - d / R), 'boom', dx / (d || 1), dz / (d || 1), !car.byPlayer); }
-    const WK = AF.walkers;
-    if (WK && WK.near) for (const a of WK.near(car.x, car.z, R)) { const dx = a.x - car.x, dz = a.z - car.z, d = Math.hypot(dx, dz) || 1; hitWalker(a, G.boomDmg, 'boom', dx / d, dz / d, !car.byPlayer); }
-    if (AF.mode === 'walk') { const p = AF.player, dx = p.x - car.x, dz = p.z - car.z, d = Math.hypot(dx, dz); if (d < R) { H.hurt(G.boomDmg * (1 - d / R), 'boom'); AF.PL.push(dx / (d || 1) * 8, dz / (d || 1) * 8, 6); } }
-    for (const c of VV.cars) if (c !== car && !c.dead && Math.abs(c.x - car.x) < R && Math.abs(c.z - car.z) < R) { const d = Math.hypot(c.x - car.x, c.z - car.z); if (d < R) dmgCar(c, 70 * (1 - d / R), car.byPlayer); }
-    if (car.byPlayer) CB.crime(G.heat.carBoom);
-    panic(car.x, car.z, 35);
+    if (CB.onBoom) CB.onBoom(car);
+    blast(car.x, car.y, car.z, G.boomR, !!car.byPlayer, false);
   };
   let smokeT = 0;
   const carFx = (dt) => {
@@ -35126,10 +35173,10 @@ try {
       const v = Math.abs(car.v || 0); if (v < 3.5 || car.active === false || car.static || car.dead) continue;
       if ((car.x - p.x) ** 2 + (car.z - p.z) ** 2 > 3600) continue;
       RO.car = car; RO.s = Math.sin(car.yaw); RO.c = Math.cos(car.yaw); RO.R = car.halfL + 0.6; RO.hx = car.halfW + 0.3; RO.hl = car.halfL + 0.3;
-      const fx = RO.s, fz = RO.c, rogue = car.player || car.squad;
+      const fx = RO.s, fz = RO.c, rogue = car.player || car.squad || car.net != null;
       for (const w of C.walkers) {
         // traffic keeps to its lanes: only a player / squad car, or a ped already running loose, gets hit
-        if (!w.act || (w.agg && w.agg.lie) || (!rogue && !w.agg) || Math.abs(w.y - car.y) > 1.5 || !underCar(w.x, w.z)) continue;
+        if (!w.act || flat(w) || (!rogue && !w.agg) || Math.abs(w.y - car.y) > 1.5 || !underCar(w.x, w.z)) continue;
         if (exempt(w)) { engage(w, 'panic', true); continue; }
         const A = engage(w, 'car', true); if (!A) continue;
         A.hp = v > 9 ? -99 : 0; down(w, v > 9 ? null : 'ko', fx, fz, Math.min(9, v * 0.6));
@@ -35143,7 +35190,7 @@ try {
         if (car.player) { dmgCar(car, 2, true); CB.crime(G.heat.runOver); }
       }
       if (walk && !car.player && hitCd <= 0 && Math.abs(p.y - car.y) < 1.5 && underCar(p.x, p.z)) {
-        hitCd = 1; H.hurt(Math.max(0, v - G.carHitMin) * G.carHitK + 5, 'car'); AF.PL.push(fx * v * 0.7, fz * v * 0.7, 5); SFX.play('crash', p.x, p.z);
+        hitCd = 1; if (car.net == null || CB.pvp) H.hurt(Math.max(0, v - G.carHitMin) * G.carHitK + 5, 'car'); AF.PL.push(fx * v * 0.7, fz * v * 0.7, 5); SFX.play('crash', p.x, p.z);
       }
     }
   };
@@ -35162,7 +35209,7 @@ try {
     const C = CR(), b = AF.player.body, sprint = (AF.PL.walk.speed || 0) > 7; if (!C) return;
     bumpCd -= dt;
     for (const w of C.walkers) {
-      if (!w.act || (w.agg && w.agg.lie) || !shove(b, w.x, w.y, w.z)) continue;
+      if (!w.act || flat(w) || !shove(b, w.x, w.y, w.z)) continue;
       // barging through at a sprint: the ped staggers and complains (not a crime)
       if (sprint && !w.agg && !w.cop && bumpCd <= 0 && !exempt(w)) {
         bumpCd = 0.6; const A = engage(w, 'bump'); if (A) { A.kind = 'flee'; down(w, 'stagger', -BP.nx, -BP.nz, 2); say(w, BUMP_LINES[w.id % 3]); SFX.play('punch', w.x, w.z); }
@@ -35204,7 +35251,7 @@ try {
       if (!R || nr.edge > 25) continue;
       const x = R.a[0] + (R.b[0] - R.a[0]) * nr.t, z = R.a[1] + (R.b[1] - R.a[1]) * nr.t, yaw = Math.atan2(P.x - x, P.z - z);
       if (VV.carBlocked({ halfL: 2.6, halfW: 0.95, height: 1.5, y: AF.W.groundY(x, z) }, x, z, yaw)) continue;
-      const car = VV.makeCar('police', 0, x, z, yaw); car.temp = true; car.squad = { stuck: 0, rev: 0 }; car.parked = false; car.vx = car.vz = 0;
+      const car = VV.makeCar('police', 0, x, z, yaw); car.temp = true; car.netOwned = true; car.squad = { stuck: 0, rev: 0 }; car.parked = false; car.vx = car.vz = 0;
       SQUADS.push(car); return car;
     }
     return null;
@@ -35241,11 +35288,12 @@ try {
     const rotor = AF.modelMesh(AF.meshModel(rm, { vs: 1 / 8, anchor: [0.5, 0, 0.5] })); rotor.position.y = 1.78; grp.add(rotor);
     grp.visible = false; AF.scene.add(grp); HELI.grp = grp; HELI.rotor = rotor;
   };
-  const heliHit = (n) => {
+  const heliHit = (n, remote) => {
     if (!HELI.on || HELI.fall) return;
     HELI.hp -= n; FX.burst('smoke', HELI.x, HELI.y + 1, HELI.z, 1);
-    if (HELI.hp <= 0) { HELI.fall = true; HELI.vy = 0; FX.boom(HELI.x, HELI.y, HELI.z, 0.6); CB.crime(G.heat.copKill); }
+    if (HELI.hp <= 0) { HELI.fall = true; HELI.vy = 0; FX.boom(HELI.x, HELI.y, HELI.z, 0.6); if (!remote) CB.crime(G.heat.copKill); }
   };
+  CB.heliHit = heliHit;
   const heliStep = (dt) => {
     const want = CB.stars >= 3 && !HELI.fall;
     if (!HELI.on) { if (!want) return; const P = target(), a = Math.random() * PI * 2; Object.assign(HELI, { on: true, x: P.x + Math.sin(a) * 160, z: P.z + Math.cos(a) * 160, y: P.y + 60, hp: 250, fall: false, vx: 0, vz: 0, cd: 3 }); HELI.grp.visible = true; }
@@ -35265,6 +35313,7 @@ try {
       if (!leave && CB.stars >= 4 && (HELI.cd -= dt) <= 0 && !P.away) {
         HELI.cd = 1.6; const d3 = Math.hypot(P.x - HELI.x, P.y - HELI.y, P.z - HELI.z), hit = Math.random() < 0.3;
         FX.burst('flash', HELI.x, HELI.y + 0.4, HELI.z, 1, { size: 0.6 }); FX.line(HELI.x, HELI.y + 0.4, HELI.z, P.x + (hit ? 0 : 2), P.y + 1, P.z + (hit ? 0 : 2)); SFX.play('shot', HELI.x, HELI.z);
+        if (CB.onShot) CB.onShot(1, HELI.x, HELI.y + 0.4, HELI.z, P.x + (hit ? 0 : 2), P.y + 1, P.z + (hit ? 0 : 2), hit ? 2 : 1);
         if (hit && d3 < 80) { if (P.car) dmgCar(P.car, 6); else H.hurt(8, 'shot'); }
       }
     }
@@ -35699,6 +35748,7 @@ try {
   };
   // carousel ride: the avatar rides a horse (PL.seat follows it round), an orbiting camera; 40 s or E to get off
   const CAR = { t: 0, h: null, p: new THREE.Vector3(), q: new THREE.Quaternion(), e: new THREE.Euler(), look: new THREE.Vector3() };
+  J.carousel = CAR;
   AF.modes.carousel = {
     enter() { const H = L.carousel.horses; CAR.h = H[(Math.random() * 12) | 0]; CAR.t = 0; AF.player.setVisible(true); toast('Round and round! ' + (AF.touch ? 'EXIT' : 'E') + ' to hop off.'); },
     exit() { AF.PL.seat = null; },
@@ -35790,6 +35840,1186 @@ try {
   });
 }
 } catch (e) { AF.partError('78-jobs.js', e); }
+
+// ================================================================ 79-net.js
+try {
+// ===== 79-net: co-op transport  (OWNER: net) =====
+// A lobby code goes through the signaling Worker (signal/ on Cloudflare; tools/serve.mjs on localhost) only while players join
+// (the Worker hands each joiner a random signaling id; the host gives them a player slot once they say hello).
+// The game itself runs peer to peer over WebRTC DataChannels in a star around the host: 'rel' (reliable, ordered JSON events) and
+// 'fast' (unordered, no retransmits: binary snapshots where the newest wins). The host relays guest traffic and stamps the true
+// origin on everything it forwards, so a guest can never speak for someone else.
+// AF.net: host() / join(code) / leave(why); send(type, msg, to?) reliable; on(type, fn(msg, from)); fast(u8, len, seq) / onFast(fn(u8, from))
+//         me (host 0, guests 1..3), role 'off' | 'host' | 'guest', peers: slot -> { slot, name, friend, look, rtt, x, z }, live()
+// Rate tiers: snapshots between players more than 250 m apart go at 1/2 rate, beyond 500 m at 1/4 (only the map dot needs them).
+{
+  const N = AF.net = { role: 'off', me: 0, code: '', status: '', peers: new Map(), build: "daec4e316de5", rate: AF.MOBILE ? 15 : 20, ice: null,
+    stats: { up: 0, down: 0, upK: 0, downK: 0 }, hello: null, welcomeExtra: null, mine: { x: 0, z: 0 } };
+  const ALPH = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
+  // the deployed signaling Worker; ?signal=wss://... or localStorage 'portSolace.signal' override it, localhost uses tools/serve.mjs
+  const SIGNAL = 'wss://port-solace-signal.whoisdhruv.workers.dev';
+  const STUN = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
+  N.signalBase = () => {
+    const q = AF.Q.get('signal'); if (q && /^wss?:\/\//.test(q)) return q.replace(/\/$/, '');
+    try { const s = localStorage.getItem('portSolace.signal'); if (s && /^wss?:\/\//.test(s)) return s.replace(/\/$/, ''); } catch (e) { /* storage blocked */ }
+    if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/signal';
+    return SIGNAL;
+  };
+  N.newCode = () => { const r = new Uint32Array(6); crypto.getRandomValues(r); let s = ''; for (const v of r) s += ALPH[v % ALPH.length]; return s; };
+  N.cleanCode = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  N.validCode = (s) => s.length === 6 && [...s].every((c) => ALPH.includes(c));
+  N.live = () => { for (const l of links.values()) if (l.ok) return true; return false; };
+  N.inviteUrl = () => location.origin + location.pathname + '?join=' + N.code;
+
+  // ---------------------------------------------------------------- events (reliable message types must be registered to be accepted)
+  const L = new Map();
+  N.on = (t, fn) => { if (!L.has(t)) L.set(t, []); L.get(t).push(fn); };
+  const fire = (t, m, from) => { const a = L.get(t); if (a) for (const f of a) { try { f(m, from); } catch (e) { console.error('[net] ' + t, e); } } };
+  const status = (s) => { N.status = s; fire('status', s); };
+  let fastFn = null;
+  N.onFast = (fn) => { fastFn = fn; };
+
+  // ---------------------------------------------------------------- binary packets (little endian, clamped writes, bounds-checked reads)
+  class Wr {
+    constructor(n) { this.u8 = new Uint8Array(n); this.d = new DataView(this.u8.buffer); this.o = 0; }
+    reset() { this.o = 0; return this; }
+    room(k) { return this.o + k <= this.u8.length; }
+    u8v(v) { this.d.setUint8(this.o, v < 0 ? 0 : v > 255 ? 255 : v | 0); this.o += 1; }
+    i8(v) { v = Math.round(v); this.d.setInt8(this.o, v < -128 ? -128 : v > 127 ? 127 : v || 0); this.o += 1; }
+    u16(v) { this.d.setUint16(this.o, v < 0 ? 0 : v > 65535 ? 65535 : v | 0, true); this.o += 2; }
+    i16(v) { v = Math.round(v); this.d.setInt16(this.o, v < -32768 ? -32768 : v > 32767 ? 32767 : v || 0, true); this.o += 2; }
+    u32(v) { this.d.setUint32(this.o, v >>> 0, true); this.o += 4; }
+    f32(v) { this.d.setFloat32(this.o, Number.isFinite(v) ? v : 0, true); this.o += 4; }
+  }
+  class Rd {
+    set(u8) { this.d = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); this.o = 0; this.n = u8.byteLength; return this; }
+    need(k) { if (this.o + k > this.n) throw new RangeError('short packet'); }
+    u8v() { this.need(1); return this.d.getUint8(this.o++); }
+    i8() { this.need(1); return this.d.getInt8(this.o++); }
+    u16() { this.need(2); const v = this.d.getUint16(this.o, true); this.o += 2; return v; }
+    i16() { this.need(2); const v = this.d.getInt16(this.o, true); this.o += 2; return v; }
+    u32() { this.need(4); const v = this.d.getUint32(this.o, true); this.o += 4; return v; }
+    f32() { this.need(4); const v = this.d.getFloat32(this.o, true); this.o += 4; if (!Number.isFinite(v)) throw new RangeError('bad float'); return v; }
+  }
+  N.Wr = Wr; N.Rd = Rd;
+
+  // ---------------------------------------------------------------- avatar looks from the network: known keys and types only
+  const STYLES = { hairStyle: ['short', 'fade', 'spiky', 'messy', 'long', 'wavy', 'bun', 'pony'], hat: ['cap', 'straw'], extra: ['headphones', 'chain', 'bow', 'guitar'] };
+  const hex = (v) => Number.isInteger(v) && v >= 0 && v <= 0xffffff;
+  N.cleanLook = (L, fallback) => {
+    if (!L || typeof L !== 'object') return fallback;
+    try { if (JSON.stringify(L).length > 1500) return fallback; } catch (e) { return fallback; }
+    const o = {};
+    for (const k of ['skin', 'hair', 'shoe', 'hatCol', 'lips']) if (hex(L[k])) o[k] = L[k];
+    for (const k of ['glasses', 'beard']) o[k] = hex(L[k]) ? L[k] : null;
+    for (const k in STYLES) if (STYLES[k].includes(L[k])) o[k] = L[k];
+    if (L.female === true) o.female = true;
+    if (L.bangs === true) o.bangs = true;
+    if (typeof L.height === 'number' && L.height >= 0.85 && L.height <= 1.15) o.height = L.height;
+    const piece = (p, styles) => { if (!p || typeof p !== 'object') return null; const q = {}; for (const k of ['col', 'col2', 'print']) if (hex(p[k])) q[k] = p[k]; if (styles.includes(p.style)) q.style = p.style; if (p.sleeves === true) q.sleeves = true; return hex(q.col) ? q : null; };
+    o.top = piece(L.top, ['tee', 'hoodie', 'cardigan', 'shirt', 'dress', 'vest']) || (fallback && fallback.top);
+    o.bottom = piece(L.bottom, ['jeans', 'joggers', 'shorts', 'skirt']) || (fallback && fallback.bottom);
+    if (!hex(o.skin) || !hex(o.hair) || !o.top || !o.bottom) return fallback;
+    return o;
+  };
+
+  // ---------------------------------------------------------------- signaling (WebSocket, only while someone is joining)
+  // gen: bumped by every host / join / leave so a stale await or timer can never touch a newer session
+  let ws = null, wsPing = 0, wsFail = null, joinWait = null, gen = 0;
+  const sig = (m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
+  const closeSignal = () => {
+    const f = wsFail; wsFail = null;
+    if (ws) { ws.onclose = ws.onmessage = null; try { ws.close(); } catch (e) { /* closed */ } ws = null; }
+    clearInterval(wsPing); if (f) f(new Error('closed'));
+  };
+  const openSignal = (code, role) => new Promise((res, rej) => {
+    closeSignal();
+    let done = false, s = null;
+    const end = (fn, v) => { if (done) return; done = true; clearTimeout(to); if (wsFail === fail) wsFail = null; fn(v); };
+    const fail = (e) => end(rej, e);
+    const to = setTimeout(() => { fail(new Error('timeout')); if (ws === s) closeSignal(); }, 9000);
+    wsFail = fail;
+    try { s = ws = new WebSocket(N.signalBase() + '/lobby/' + code + '?role=' + role); } catch (e) { ws = null; fail(e); return; }
+    s.onmessage = (e) => {
+      if (ws !== s || typeof e.data !== 'string' || e.data === 'pong' || e.data.length > 20000) return;
+      let m; try { m = JSON.parse(e.data); } catch (er) { return; }
+      if (!m) return;
+      if (m.t === 'hello' && Number.isInteger(m.id)) { end(res, m.id); return; }
+      if (m.t === 'error') { fail(new Error(String(m.why || 'error'))); return; }
+      onSignal(m);
+    };
+    s.onclose = () => {
+      fail(new Error('closed')); if (ws !== s) return;
+      ws = null; clearInterval(wsPing); if (N.role === 'host') status('Lobby offline \u2014 players already in stay connected');
+    };
+    s.onerror = () => { /* onclose follows */ };
+    clearInterval(wsPing); wsPing = setInterval(() => { if (ws && ws.readyState === 1) ws.send('ping'); }, 25000);
+  });
+  const okIceServer = (s) => s && (typeof s.urls === 'string' || Array.isArray(s.urls)) && [].concat(s.urls).every((u) => typeof u === 'string' && /^(stun|turns?):/.test(u));
+  const fetchIce = async () => {
+    if (N.ice) return N.ice;
+    try {
+      const c = new AbortController(), t = setTimeout(() => c.abort(), 2500);
+      const r = await fetch(N.signalBase().replace(/^ws/, 'http') + '/ice', { signal: c.signal }); clearTimeout(t);
+      const j = await r.json(); if (Array.isArray(j.iceServers) && j.iceServers.every(okIceServer)) N.ice = j.iceServers;
+    } catch (e) { /* public STUN below */ }
+    return N.ice || (N.ice = STUN);
+  };
+  const okSig = (d, want) => d && ((d.sdp && d.sdp.type === want && typeof d.sdp.sdp === 'string' && d.sdp.sdp.length < 12000) || (d.ice && typeof d.ice.candidate === 'string' && d.ice.candidate.length < 800));
+  const onSignal = (m) => {
+    if (N.role === 'host') {
+      if (m.t === 'peer' && Number.isInteger(m.id) && m.id >= 1 && !sids.has(m.id) && sids.size < 8) sids.set(m.id, new Link(m.id, -1, true));
+      else if (m.t === 'leave') { const l = sids.get(m.id); if (l && !l.ok) drop(l, 'left'); }
+      else if (m.t === 'signal') { const l = sids.get(m.from); if (l && okSig(m.data, 'answer')) l.signal(m.data); }
+    } else if (N.role === 'guest') {
+      if (m.t === 'signal' && m.from === 0 && okSig(m.data, 'offer')) { let l = links.get(0); if (!l) links.set(0, l = new Link(0, 0, false)); l.signal(m.data); }
+      else if (m.t === 'host-left' && joinWait) failJoin('host left');
+    }
+  };
+
+  // ---------------------------------------------------------------- links: one RTCPeerConnection per guest (host) / to the host (guest)
+  // links: player slot -> link that said hello (the guest's link to the host is slot 0); sids (host): signaling id -> every guest link
+  const links = new Map(), sids = new Map();
+  class Link {
+    constructor(sid, slot, initiator) {
+      this.sid = sid; this.slot = slot; this.ok = false; this.open = false; this.rel = null; this.fast = null; this.pend = []; this.last = performance.now(); this.born = this.last; this.rtt = 0;
+      this.pc = new RTCPeerConnection({ iceServers: N.ice || STUN });
+      this.pc.onicecandidate = (e) => { if (e.candidate) sig({ t: 'signal', to: sid, data: { ice: e.candidate.toJSON() } }); };
+      this.pc.onconnectionstatechange = () => { const s = this.pc.connectionState; if (s === 'failed' || s === 'closed') drop(this, 'connection ' + s); };
+      if (initiator) {
+        this.bind(this.pc.createDataChannel('rel', { ordered: true }));
+        this.bind(this.pc.createDataChannel('fast', { ordered: false, maxRetransmits: 0 }));
+        this.pc.createOffer().then((o) => this.pc.setLocalDescription(o)).then(() => sig({ t: 'signal', to: sid, data: { sdp: this.pc.localDescription.toJSON() } })).catch((e) => drop(this, 'offer ' + e));
+      } else this.pc.ondatachannel = (e) => this.bind(e.channel);
+    }
+    bind(ch) {
+      if (ch.label === 'rel' && !this.rel) this.rel = ch; else if (ch.label === 'fast' && !this.fast) this.fast = ch; else { ch.close(); return; }
+      ch.binaryType = 'arraybuffer';
+      ch.onopen = () => this.check();
+      ch.onclose = () => drop(this, 'closed');
+      ch.onmessage = (e) => { this.last = performance.now(); N.stats.down += e.data.byteLength || e.data.length || 0; if (ch === this.rel) onRel(this, e.data); else onFastData(this, e.data); };
+    }
+    check() { if (!this.open && this.rel && this.fast && this.rel.readyState === 'open' && this.fast.readyState === 'open') { this.open = true; onOpen(this); } }
+    async signal(d) {
+      try {
+        if (d.sdp) {
+          await this.pc.setRemoteDescription(d.sdp);
+          if (d.sdp.type === 'offer') { await this.pc.setLocalDescription(await this.pc.createAnswer()); sig({ t: 'signal', to: this.sid, data: { sdp: this.pc.localDescription.toJSON() } }); }
+          for (const c of this.pend) await this.pc.addIceCandidate(c).catch(() => {});
+          this.pend.length = 0;
+        } else if (d.ice) { if (this.pc.remoteDescription) await this.pc.addIceCandidate(d.ice).catch(() => {}); else if (this.pend.length < 64) this.pend.push(d.ice); }
+      } catch (e) { drop(this, 'signal ' + e); }
+    }
+    sendRel(text) { if (this.rel && this.rel.readyState === 'open') { this.rel.send(text); N.stats.up += text.length; } }
+    // newest wins: a congested link skips snapshots instead of queueing them (latency over completeness)
+    sendFast(u8) { if (this.fast && this.fast.readyState === 'open' && this.fast.bufferedAmount < 32768) { this.fast.send(u8); N.stats.up += u8.byteLength; } }
+    close() { this.ok = false; try { this.pc.close(); } catch (e) { /* closed */ } }
+  }
+  const onOpen = (l) => {
+    if (N.role === 'guest') { const h = N.hello ? N.hello() : {}; l.sendRel(JSON.stringify(Object.assign({ t: 'hello', build: N.build }, h))); }
+    else setTimeout(() => { if (sids.get(l.sid) === l && !l.ok) drop(l, 'no hello'); }, 10000);
+  };
+  const drop = (l, why) => {
+    const live = links.get(l.slot) === l;
+    if (!live && sids.get(l.sid) !== l) return;
+    if (live) links.delete(l.slot);
+    if (sids.get(l.sid) === l) sids.delete(l.sid);
+    l.close();
+    if (!live) return;
+    if (N.role === 'host') {
+      const p = N.peers.get(l.slot);
+      if (p) { N.peers.delete(l.slot); relay({ t: 'left', slot: l.slot }, l.slot, null); fire('left', p); status(peerCount()); }
+    } else if (N.role === 'guest' && l.slot === 0) {
+      if (joinWait) failJoin('could not connect (' + why + ')'); else N.leave('The host left the session.');
+    }
+  };
+  const peerCount = () => 'Hosting ' + N.code + ' \u00b7 ' + (N.peers.size + 1) + ' player' + (N.peers.size ? 's' : '');
+  const guestStatus = () => status('Connected \u00b7 ' + (N.peers.size + 1) + ' players');
+
+  // ---------------------------------------------------------------- reliable messages
+  const relay = (m, from, to) => { const text = JSON.stringify(m); for (const [s, l] of links) if (l.ok && s !== from && (to == null || s === to)) l.sendRel(text); };
+  N.send = (t, m = {}, to) => {
+    m.t = t;
+    if (N.role === 'host') { m.from = 0; relay(m, -1, to == null ? null : to); }
+    else if (N.role === 'guest') { const l = links.get(0); if (to != null) m.to = to; if (l && l.ok) l.sendRel(JSON.stringify(m)); }
+  };
+  const deliver = (m, from) => { if (L.has(m.t) && !INTERNAL.has(m.t)) fire(m.t, m, from); };
+  const INTERNAL = new Set(['hello', 'welcome', 'reject', 'join', 'left', 'ping', 'pong', 'status', 'hosting', 'end']);
+  const rateOk = (l) => { const now = performance.now(); if (now - (l.rt || 0) > 1000) { l.rt = now; l.rn = 0; } return ++l.rn <= 120; };
+  const onRel = (l, text) => {
+    if (typeof text !== 'string' || text.length > 8192 || !rateOk(l)) return;
+    let m; try { m = JSON.parse(text); } catch (e) { return; }
+    if (!m || typeof m.t !== 'string') return;
+    if (m.t === 'ping') { l.sendRel(JSON.stringify({ t: 'pong', s: m.s })); return; }
+    if (m.t === 'pong') { if (typeof m.s === 'number') { l.rtt = Math.max(0, performance.now() - m.s); const p = N.peers.get(l.slot); if (p) p.rtt = l.rtt; } return; }
+    if (N.role === 'host') {
+      if (m.t === 'hello') { onHello(l, m); return; }
+      if (!l.ok || INTERNAL.has(m.t)) return;
+      const to = m.to; m.from = l.slot; delete m.to;
+      if (to == null) { deliver(m, l.slot); relay(m, l.slot, null); }
+      else if (to === 0) deliver(m, l.slot);
+      else if (Number.isInteger(to) && links.has(to)) relay(m, l.slot, to);
+      return;
+    }
+    if (m.t === 'welcome') { onWelcome(m); return; }
+    if (m.t === 'reject') { failJoin(String(m.why || 'rejected')); return; }
+    if (m.t === 'join' && m.peer && Number.isInteger(m.peer.slot) && m.peer.slot !== N.me) { const p = peerOf(m.peer); if (p) { N.peers.set(p.slot, p); guestStatus(); fire('join', p); } return; }
+    if (m.t === 'left') { const p = N.peers.get(m.slot); if (p && m.slot !== 0) { N.peers.delete(m.slot); guestStatus(); fire('left', p); } return; }
+    deliver(m, Number.isInteger(m.from) ? m.from : 0);
+  };
+  const peerOf = (q) => {
+    if (!q || typeof q !== 'object' || !Number.isInteger(q.slot) || q.slot < 0 || q.slot > 3) return null;
+    const B = AF.friends && AF.friends.byId, F = B && typeof q.friend === 'string' && Object.hasOwn(B, q.friend) ? B[q.friend] : null; if (!F) return null;
+    return { slot: q.slot, name: String(q.name || F.name).slice(0, 24), friend: q.friend, look: N.cleanLook(q.look, F.look), rtt: 0, x: +q.x || 0, z: +q.z || 0 };
+  };
+  const onHello = (l, m) => {
+    if (l.ok) return;
+    const reject = (why) => { l.sendRel(JSON.stringify({ t: 'reject', why })); setTimeout(() => drop(l, 'rejected'), 500); };
+    if (m.build !== N.build) return reject('version');
+    let slot = 0; for (let s = 1; s <= 3 && !slot; s++) if (!links.has(s)) slot = s;
+    if (!slot) return reject('full');
+    const me = N.hello ? N.hello() : {}, p = peerOf(Object.assign({}, m, { slot }));
+    if (!p) return reject('friend');
+    if (me.friend === p.friend || [...N.peers.values()].some((q) => q.friend === p.friend)) return reject('taken');
+    l.slot = slot; l.ok = true; links.set(slot, l); N.peers.set(slot, p);
+    const roster = [Object.assign({ slot: 0 }, me)].concat([...N.peers.values()].filter((q) => q.slot !== l.slot));
+    l.sendRel(JSON.stringify({ t: 'welcome', slot: l.slot, roster, extra: N.welcomeExtra ? N.welcomeExtra(l.slot) : null }));
+    relay({ t: 'join', peer: p }, l.slot, null);
+    fire('join', p); status(peerCount());
+  };
+  const onWelcome = (m) => {
+    if (!joinWait || !Number.isInteger(m.slot)) return;
+    N.me = m.slot;
+    for (const q of Array.isArray(m.roster) ? m.roster : []) { const p = peerOf(q); if (p && p.slot !== N.me) N.peers.set(p.slot, p); }
+    links.get(0).ok = true; closeSignal();
+    const w = joinWait; joinWait = null; clearTimeout(w.t);
+    guestStatus();
+    fire('welcome', m); w.res(m);
+  };
+  const failJoin = (why) => { const w = joinWait; joinWait = null; if (w) clearTimeout(w.t); N.leave(); if (w) w.rej(new Error(why)); };
+
+  // ---------------------------------------------------------------- fast snapshots (byte 0 type, byte 1 origin, bytes 2-3 seq)
+  const tier = (a, b) => {
+    const pa = a === N.me ? N.mine : N.peers.get(a), pb = b === N.me ? N.mine : N.peers.get(b);
+    if (!pa || !pb) return 1;
+    const d = Math.hypot(pa.x - pb.x, pa.z - pb.z);
+    return d > 500 ? 4 : d > 250 ? 2 : 1;
+  };
+  N.tier = tier;
+  N.fast = (u8, len, seq) => {
+    u8[1] = N.me;
+    const view = u8.subarray(0, len);
+    if (N.role === 'host') { for (const [s, l] of links) if (l.ok && seq % tier(0, s) === 0) l.sendFast(view); }
+    else { const l = links.get(0); if (l && l.ok) l.sendFast(view); }
+  };
+  // per origin packet budget (senders run 15-20 Hz): a flood is dropped before it is parsed or relayed
+  const FB = new Float64Array(4).fill(20), FT = new Float64Array(4);
+  const fastOk = (o) => { const now = performance.now(); FB[o] = Math.min(20, FB[o] + (now - FT[o]) * 0.04); FT[o] = now; if (FB[o] < 1) return false; FB[o] -= 1; return true; };
+  const onFastData = (l, buf) => {
+    if (!(buf instanceof ArrayBuffer) || buf.byteLength < 8 || buf.byteLength > 4096 || !l.ok) return;
+    const u8 = new Uint8Array(buf);
+    let origin;
+    if (N.role === 'host') {
+      origin = l.slot; if (!fastOk(origin)) return;
+      u8[1] = origin;
+      const seq = u8[2] | (u8[3] << 8);
+      for (const [s, k] of links) if (k.ok && s !== origin && seq % tier(origin, s) === 0) k.sendFast(u8);
+    } else { origin = u8[1]; if (origin === N.me || !N.peers.has(origin) || !fastOk(origin)) return; }
+    if (fastFn) { try { fastFn(u8, origin); } catch (e) { AF.warnOnce('net fast', e); } }
+  };
+
+  // ---------------------------------------------------------------- sessions
+  N.host = async () => {
+    if (N.role !== 'off') return N.code;
+    const g = ++gen;
+    N.role = 'host'; N.me = 0; status('Opening a lobby\u2026');
+    await fetchIce();
+    for (let i = 0; i < 3; i++) {
+      if (g !== gen) throw new Error('left');
+      N.code = N.newCode();
+      try { await openSignal(N.code, 'host'); status(peerCount()); fire('hosting', N.code); return N.code; }
+      catch (e) { if (g !== gen) throw new Error('left'); closeSignal(); if (e.message !== 'taken') { N.role = 'off'; N.code = ''; status('Could not open a lobby (' + e.message + ').'); throw e; } }
+    }
+    N.role = 'off'; N.code = ''; throw new Error('taken');
+  };
+  N.join = async (code) => {
+    if (N.role !== 'off') N.leave();
+    code = N.cleanCode(code);
+    if (!N.validCode(code)) throw new Error('code');
+    const g = ++gen;
+    N.role = 'guest'; N.code = code; N.me = -1; status('Connecting\u2026');
+    await fetchIce();
+    if (g !== gen) throw new Error('left');
+    const wait = new Promise((res, rej) => { const w = joinWait = { res, rej, t: setTimeout(() => { if (joinWait === w) failJoin('timed out'); }, 30000) }; });
+    wait.catch(() => { /* the caller gets the rejection; this only marks it handled when the join is abandoned early */ });
+    try { await openSignal(code, 'guest'); }
+    catch (e) {
+      if (g !== gen) throw new Error('left');
+      const w = joinWait; joinWait = null; if (w) clearTimeout(w.t); N.leave();
+      throw new Error(e.message === 'nolobby' ? 'no such lobby' : e.message === 'full' ? 'lobby full' : e.message);
+    }
+    return wait;
+  };
+  N.leave = (why) => {
+    if (N.role === 'off') return;
+    gen++;
+    const w = joinWait; joinWait = null; if (w) { clearTimeout(w.t); w.rej(new Error(why || 'left')); }
+    closeSignal();
+    for (const l of links.values()) l.close();
+    for (const l of sids.values()) l.close();
+    links.clear(); sids.clear(); N.peers.clear();
+    N.role = 'off'; N.code = ''; N.me = 0;
+    status(why || ''); fire('end', why || '');
+  };
+  N.kick = (slot) => { const l = links.get(slot); if (N.role === 'host' && l) drop(l, 'kicked'); };
+  N.debug = () => [...links.values()].map((l) => ({ slot: l.slot, ok: l.ok, open: l.open, pc: l.pc.connectionState, ice: l.pc.iceConnectionState, sig: l.pc.signalingState, rel: l.rel && l.rel.readyState, fast: l.fast && l.fast.readyState, rtt: Math.round(l.rtt) }));
+  addEventListener('pagehide', () => N.leave());
+
+  // ---------------------------------------------------------------- heartbeat (independent of the frame loop: the travel veil and menus pause that)
+  let lastStat = performance.now(), upLast = 0, downLast = 0;
+  setInterval(() => {
+    const now = performance.now();
+    for (const l of new Set([...links.values(), ...sids.values()])) {
+      if (l.ok || l.open) l.sendRel(JSON.stringify({ t: 'ping', s: now }));
+      if (now - l.last > (l.ok ? 10000 : 25000)) drop(l, 'timed out');
+    }
+    const S = N.stats, dt = (now - lastStat) / 1000; lastStat = now;
+    S.upK = (S.up - upLast) / 1024 / dt; S.downK = (S.down - downLast) / 1024 / dt; upLast = S.up; downLast = S.down;
+  }, 2000);
+}
+} catch (e) { AF.partError('79-net.js', e); }
+
+// ================================================================ 80-coop.js
+try {
+// ===== 80-coop: co-op play over AF.net  (OWNER: net) =====
+// Everyone simulates what they own and sends it 20x a second (15 on phones) in one binary snapshot of ~60-700 bytes: their avatar
+// (root pose + 11 joint angles, so every mode, ride, fight and fall looks right), the vehicle they drive (cars, bikes, planes, jet
+// skis), their engaged peds and police (cops, squad cars, the autogyro) and the shots they fired since the last snapshot.
+// Receivers keep a short time-ordered buffer per thing and draw it ~100 ms in the past (adapts 70-320 ms to rate and jitter): late
+// or reordered packets slot into place, stale ones are dropped, a gap is bridged by extrapolating the last motion for up to 250 ms,
+// then the pose holds. Seated players are placed from the receiver's own copy of the vehicle (or ride), never from their world
+// position, so a passenger can't trail behind a car. Hits on something another player owns are sent to that owner (peds, cars, the
+// autogyro, the player himself); friendly fire is off by default. Ambient life (crowd, traffic, animals) stays local to each player.
+{
+  const N = AF.net, PI = Math.PI, TAU = PI * 2, VV = AF.vehicles;
+  const C = AF.coop = { pvp: false, players: new Map(), ride: null, stats: { rx: 0, stale: 0, extrap: 0 } };
+  const MODES = ['walk', 'drive', 'fly', 'jetski', 'carousel', 'funride', 'ride', 'ferry-ride', 'row', 'skydive', 'dead', 'passenger', 'photo', 'aerial', 'cine', 'other'];
+  const MODE_I = new Map(MODES.map((m, i) => [m, i])), M = Object.fromEntries(MODES.map((m, i) => [m, i]));
+  const JP = ['legL', 'legR', 'armL', 'armL', 'armR', 'armR', 'armR', 'chest', 'chest', 'head', 'head'], JA = ['x', 'x', 'x', 'z', 'x', 'y', 'z', 'x', 'y', 'x', 'y'], NJ = JP.length;
+  const HELD = [null, 'keyboard', 'bag', 'dumbbell', 'mic', 'bat', 'pan', 'cutlass', 'guitar', 'revolver', 'shotgun', 'tommy', 'rifle'];
+  const FRAMES = ['a', 'p', 'b', 'sit', 'work', 'phone', 'chat', 'look', 'hail', 'runA', 'runB'], WF = ['a', 'p', 'b', 'p'];
+  const SND = [null, 'shot', 'shotgun', 'shot', 'rifle'];
+  const VK_CAR = 1, VK_PLANE = 2, VK_SKI = 3;
+  const AK = { carousel: 1, wheel: 2, coaster: 3, train: 4, ferry: 5 };
+  const COLORS = ['#ffd24a', '#5ad1ff', '#ff7ab8', '#9dff7a'];
+  const F_VIS = 1, F_SIT = 2, F_TP = 4, F_GROUND = 8, F_AIM = 16, F_DEAD = 32;
+  const V_ENGINE = 1, V_DEAD = 2, V_BURN = 4, V_SQUAD = 8, V_GROUND = 16;
+  const HIT_KINDS = new Set(['gun', 'melee', 'car', 'boom']);
+  const num = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+  const toast = (t) => AF.emit('toast', t);
+  const wrap = (a) => AF.angDiff(0, a);
+  const crowd = () => AF.peopleKit && AF.peopleKit.crowd;
+
+  // ---------------------------------------------------------------- vehicle identity (AF.Vehicle.netKey: name @ spawn spot, same on every client)
+  const fnv = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
+  const hashOf = (v) => v.netHash ?? (v.netHash = fnv(v.netKey || ''));
+  const kindOf = (v) => v.type && v.wheels ? VK_CAR : AF.planes && AF.planes.list.includes(v) ? VK_PLANE : AF.island && AF.island.jetski && AF.island.jetski.skis.includes(v) ? VK_SKI : 0;
+  const findVeh = (h) => {
+    for (const v of AF.Vehicle.all) if (v.active !== false && hashOf(v) === h) return v;
+    // a kerb car still merged into the street here: take it out exactly as walking up to it would
+    for (const s of VV.parkedStatic) if (!s.noDrive && fnv(s.name + '@' + Math.round(s.x * 4) + ',' + Math.round(s.z * 4)) === h) return VV.unpark(s);
+    return null;
+  };
+  const myVeh = () => {
+    if (AF.mode === 'drive' && VV.player) return VV.player;
+    if (AF.mode === 'fly' && AF.planes && AF.planes.cur) return AF.planes.cur;
+    if (AF.mode === 'jetski' && AF.island && AF.island.jetski && AF.island.jetski.cur) return AF.island.jetski.cur;
+    return null;
+  };
+
+  // ---------------------------------------------------------------- Track: time-ordered samples of k floats, interpolated at a render time
+  // field kinds: 0 linear, 1 linear + extrapolated, 2 angle, 3 angle + extrapolated, 4 step (held until the next sample)
+  class Track {
+    constructor(kinds, n = 10) { this.kinds = kinds; this.k = kinds.length; this.n = n; this.t = new Float64Array(n); this.v = new Float32Array(n * this.k); this.len = 0; }
+    clear() { this.len = 0; }
+    // out-of-order safe: inserted by time; a duplicate, or anything older than a full buffer's oldest sample, is dropped
+    push(t, src) {
+      const k = this.k; let i = this.len;
+      while (i > 0 && this.t[i - 1] > t) i--;
+      if (i > 0 && this.t[i - 1] === t) return false;
+      if (this.len === this.n) { if (i === 0) return false; this.t.copyWithin(0, 1, this.len); this.v.copyWithin(0, k, this.len * k); this.len--; i--; }
+      this.t.copyWithin(i + 1, i, this.len); this.v.copyWithin((i + 1) * k, i * k, this.len * k);
+      this.t[i] = t; for (let j = 0; j < k; j++) this.v[i * k + j] = src[j];
+      this.len++; return true;
+    }
+    // -1 empty, 0 interpolated, 1 extrapolated (<= maxEx ms past the newest), 2 held
+    sample(rt, out, maxEx) {
+      const n = this.len, k = this.k, T = this.t, V = this.v, K = this.kinds; if (!n) return -1;
+      if (rt <= T[0] || n === 1) { const b = rt <= T[0] ? 0 : n - 1; for (let j = 0; j < k; j++) out[j] = V[b * k + j]; return rt <= T[0] ? 0 : 2; }
+      if (rt >= T[n - 1]) {
+        const a = n - 2, b = n - 1, span = Math.max(40, T[b] - T[a]), over = rt - T[b], u = Math.min(over, maxEx) / span;
+        for (let j = 0; j < k; j++) {
+          const va = V[a * k + j], vb = V[b * k + j], kd = K[j];
+          out[j] = kd === 1 ? vb + (vb - va) * u : kd === 3 ? vb + AF.angDiff(va, vb) * u : vb;
+        }
+        return over <= maxEx ? 1 : 2;
+      }
+      let b = 1; while (T[b] < rt) b++;
+      const a = b - 1, u = (rt - T[a]) / (T[b] - T[a]);
+      for (let j = 0; j < k; j++) {
+        const va = V[a * k + j], vb = V[b * k + j], kd = K[j];
+        out[j] = kd === 4 ? va : kd >= 2 ? va + AF.angDiff(va, vb) * u : va + (vb - va) * u;
+      }
+      return 0;
+    }
+  }
+  C.Track = Track;
+  // player: x y z yaw pitch roll | 11 joints | hips mode flags weapon vehLo vehHi seat anchorKind anchorIdx stat speed
+  const P_HIPS = 17, P_MODE = 18, P_FLAGS = 19, P_WPN = 20, P_VLO = 21, P_VHI = 22, P_SEAT = 23, P_AK = 24, P_AI = 25, P_STAT = 26, P_SPD = 27;
+  const PT = [1, 1, 1, 3, 2, 2].concat(new Array(NJ).fill(0), [0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 0]);
+  const VT = [1, 1, 1, 3, 2, 2, 0, 0, 4, 4];   // x y z yaw pitch roll v steer dmg flags
+  const NT = [1, 1, 1, 3, 4, 4];               // x y z yaw look frame
+  const HT = [1, 1, 1, 3, 4];                  // x y z yaw falling
+
+  // per origin: offset = receive time - sender stamp, kept as a slowly rising minimum (the least delayed packet), plus jitter and
+  // the sender's interval; render time = now - offset - delay
+  const clockIn = (k, stamp, now) => {
+    const off = now - stamp;
+    if (k.off == null || off < k.off) k.off = off; else k.off += Math.min(0.5, (off - k.off) * 0.002);
+    k.jit += (Math.abs(off - k.off) - k.jit) * 0.08;
+    if (k.last) { const iv = stamp - k.last; if (iv > 0 && iv < 1000) k.iv += (iv - k.iv) * 0.15; }
+    if (stamp > k.last) k.last = stamp;
+    k.delay = AF.clamp(k.iv * 1.3 + k.jit * 2 + 8, 60, 320);
+  };
+  const renderT = (k, now) => now - k.off - k.delay;
+
+  // ---------------------------------------------------------------- remote players
+  const RP = C.players, RV = new Map(), RN = new Map();
+  const tagLayer = document.getElementById('ui');
+  const npcOf = (id) => AF.friends && AF.friends.npcs && AF.friends.npcs[id];
+  const hideNpc = (id, h) => { const n = npcOf(id); if (n && AF.npc) AF.npc.setHidden(n, h || (AF.friends.current && AF.friends.current.id === id)); };
+  const addRemote = (p) => {
+    if (RP.has(p.slot)) return RP.get(p.slot);
+    const tag = document.createElement('div'); tag.className = 'coop-tag hud'; tagLayer.appendChild(tag);
+    const r = { slot: p.slot, peer: p, P: null, lookKey: '', heldId: null, held: null, tr: new Track(PT, 12), out: new Float32Array(PT.length), clk: { off: null, jit: 0, iv: 50, last: 0, delay: 100 },
+      x: p.x || 0, y: 0, z: p.z || 0, seen: false, last: 0, mode: 0, stars: 0, hp: 1, dead: false, veh: 0, seat: 0, ak: 0, ai: 0, tag, tagKey: '', tagX: -1, tagY: -1,
+      hit: { slot: p.slot, heli: false }, heliHit: { slot: p.slot, heli: true }, heli: null, tg: { x: 0, y: 0, z: 0, car: null, away: true, speed: 0, peer: p.slot } };
+    RP.set(p.slot, r); hideNpc(p.friend, true);
+    return r;
+  };
+  const removeRemote = (slot) => {
+    const r = RP.get(slot); if (!r) return;
+    RP.delete(slot);
+    for (const e of [...RV.values()]) if (e.owner === slot) releaseVeh(e, null);
+    for (const e of [...RN.values()]) if (e.owner === slot) freeNpc(e);
+    if (r.P) { AF.scene.remove(r.P.root); AF.avatar.release(r.P); }
+    if (r.heli && r.heli.grp) AF.scene.remove(r.heli.grp);
+    r.tag.remove(); hideNpc(r.peer.friend, false);
+    if (C.ride.veh && C.ride.veh.net === slot) C.ride.veh.net = null;
+  };
+  const ensureAvatar = (r) => {
+    if (r.P && r.lookRef === r.peer.look) return;
+    const key = JSON.stringify(r.peer.look); r.lookRef = r.peer.look;
+    if (r.P && r.lookKey === key) return;
+    if (r.P) { AF.scene.remove(r.P.root); AF.avatar.release(r.P); r.held = null; r.heldId = null; }
+    r.P = AF.avatar.build(r.peer.look); r.lookKey = key; r.P.root.name = 'coop-player'; r.P.root.rotation.order = 'YXZ'; r.P.root.visible = false;
+    AF.scene.add(r.P.root);
+  };
+  const setHeld = (r, id) => {
+    if (r.heldId === id) return;
+    if (r.held) { r.held.removeFromParent(); r.held = null; }
+    r.heldId = id; const CB = AF.combat; if (!id || !CB || !CB.heldGeo) return;
+    const geo = CB.heldGeo(id); if (!geo) return;
+    const m = AF.modelMesh(geo); m.position.set(0, -0.52, 0.03); m.castShadow = false; m.name = 'held'; r.P.armR.add(m); r.held = m;
+  };
+
+  // ---------------------------------------------------------------- seats: the driver's seat (VV.seatLocal), the passenger mirrored / a pillion
+  const SL = [0, 0, 0], POSE = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0 };
+  const isBike = (v) => v.type && v.type.kind === 'bike' && !!v.type.solo;
+  const seatOf = (v, k, seat) => {
+    if (k === VK_CAR) {
+      const L = VV.seatLocal(v), bike = isBike(v); SL[0] = L[0]; SL[1] = L[1] - (bike ? 0 : 0.57); SL[2] = L[2];
+      if (seat) { if (bike) { SL[1] += 0.06; SL[2] -= 0.55; } else SL[0] = -SL[0]; }
+    } else if (k === VK_SKI) { SL[0] = 0; SL[1] = -0.05; SL[2] = seat ? -0.75 : -0.15; }
+    else { SL[0] = 0; SL[1] = 1; SL[2] = 0; }
+    return SL;
+  };
+  const seatPose = (v, k, l, out) => {
+    const s = Math.sin(v.yaw), c = Math.cos(v.yaw);
+    out.x = v.x + c * l[0] + s * l[2]; out.y = v.y + (k === VK_CAR ? v.bob || 0 : 0) + l[1]; out.z = v.z - s * l[0] + c * l[2];
+    out.yaw = v.yaw; out.pitch = k === VK_SKI ? -(v.pitch || 0) : v.pitch || 0; out.roll = v.roll || 0;
+    return out;
+  };
+  const vehByHash = (h) => {
+    const e = RV.get(h); if (e) return e.obj;
+    const mine = myVeh(); if (mine && hashOf(mine) === h) return mine;
+    if (C.ride && C.ride.veh && hashOf(C.ride.veh) === h) return C.ride.veh;
+    return null;
+  };
+
+  // ---------------------------------------------------------------- rides: a remote rider sits on this client's copy of the horse / gondola / car
+  const V1 = new THREE.Vector3(), Q1 = new THREE.Quaternion(), E1 = new THREE.Euler(0, 0, 0, 'YXZ');
+  const anchorOf = () => {
+    const L = AF.land || {};
+    if (AF.mode === 'carousel') { const J = AF.jobs && AF.jobs.carousel, H = L.carousel; const i = J && J.h && H ? H.horses.indexOf(J.h) : -1; return i >= 0 ? AK.carousel * 256 + i : 0; }
+    if (AF.mode === 'funride') { const R = AF.rides && AF.rides.cur; return R ? (R.kind === 'wheel' ? AK.wheel * 256 + (R.gi & 255) : AK.coaster * 256) : 0; }
+    if (AF.mode === 'ride') return AK.train * 256;
+    if (AF.mode === 'ferry-ride') return AK.ferry * 256;
+    return 0;
+  };
+  const objPose = (o, lx, ly, lz, out, yawAdd) => {
+    o.updateMatrixWorld(); V1.set(lx, ly, lz).applyMatrix4(o.matrixWorld); o.getWorldQuaternion(Q1); E1.setFromQuaternion(Q1, 'YXZ');
+    out.x = V1.x; out.y = V1.y; out.z = V1.z; out.yaw = E1.y + yawAdd; out.pitch = E1.x; out.roll = E1.z; return true;
+  };
+  // false when this client has no such ride (the rider then shows at their own world position)
+  const anchorPose = (k, i, out) => {
+    const L = AF.land || {};
+    if (k === AK.carousel && L.carousel && L.carousel.horses[i]) { const ok = objPose(L.carousel.horses[i].m, 0, 0, 0, out, PI / 2); out.y += 0.22; out.pitch = out.roll = 0; return ok; }
+    if (k === AK.wheel && L.ferris) {
+      const FW = L.ferris, a = FW.wheel.rotation.x + i / FW.gonds.length * TAU;
+      out.x = FW.WX - Math.cos(a) * (FW.WR - 0.4); out.y = FW.WY + Math.sin(a) * (FW.WR - 0.4) + 0.1 - 0.62 - 1.15; out.z = FW.WZ; out.yaw = PI; out.pitch = out.roll = 0; return true;
+    }
+    if (k === AK.coaster && L.coaster && L.coaster.cars[0]) return objPose(L.coaster.cars[0], 0, 0.6, -0.1, out, 0);
+    if (k === AK.train && AF.train && AF.train.cars && AF.train.cars[0]) { const ok = objPose(AF.train.cars[0], -0.35, 1.15, -1.4, out, 0); out.pitch = out.roll = 0; return ok; }
+    if (k === AK.ferry && AF.harbour && AF.harbour.ferry && AF.harbour.ferry.mesh) { const m = AF.harbour.ferry.mesh.position; out.x = m.x; out.y = m.y + 7; out.z = m.z; out.yaw = AF.harbour.ferry.mesh.rotation.y; out.pitch = out.roll = 0; return true; }
+    return false;
+  };
+
+  // ---------------------------------------------------------------- sending
+  const W = new N.Wr(1400), SHOTS = new Float32Array(24 * 7);
+  let nShots = 0, seq = 0, sendAt = 0, lastX = 0, lastY = 0, lastZ = 0, sentVeh = null;
+  const writeVeh = (w, v) => {
+    const k = kindOf(v); w.u32(hashOf(v)); w.u8v(k);
+    if (k === VK_CAR) { w.u8v(VV.TYPES.indexOf(v.type)); w.u8v(v.pi | 0); } else { w.u8v(0); w.u8v(0); }
+    let f = 0;
+    if (k !== VK_PLANE || v.engine) f |= V_ENGINE; if (v.dead) f |= V_DEAD; if (v.burnT > 0) f |= V_BURN; if (v.netOwned) f |= V_SQUAD; if (k !== VK_PLANE || v.onGround) f |= V_GROUND;
+    w.u8v(f); w.f32(v.x); w.f32(v.y + (k === VK_CAR ? v.bob || 0 : 0)); w.f32(v.z);
+    w.i16(wrap(v.yaw) * 10430); w.i8((v.pitch || 0) * 40); w.i8((v.roll || 0) * 40); w.i16((v.v || 0) * 100); w.i8((v.steer || 0) * 100); w.u8v((v.dmg || 0) * 255);
+  };
+  const peerNear = (x, z, R) => { for (const p of N.peers.values()) if ((p.x - x) ** 2 + (p.z - z) ** 2 < R * R) return true; return false; };
+  // one snapshot of everything this client owns into W; returns its length
+  C.build = (now) => {
+    const P = AF.player, parts = P.parts, root = P.mesh;
+    const w = W.reset();
+    seq = (seq + 1) & 0xffff;
+    w.u8v(1); w.u8v(N.me); w.u16(seq); w.u32(now);
+    const x = root.position.x, y = root.position.y, z = root.position.z, veh = myVeh(), ride = AF.mode === 'passenger' && C.ride.veh, a = anchorOf();
+    let fl = 0;
+    if (P.visible) fl |= F_VIS; if (parts.sitting) fl |= F_SIT; if ((x - lastX) ** 2 + (y - lastY) ** 2 + (z - lastZ) ** 2 > 900) fl |= F_TP;
+    if (P.body && P.body.onGround) fl |= F_GROUND; if (AF.PL.aim) fl |= F_AIM; if (AF.health && AF.health.dead) fl |= F_DEAD;
+    lastX = x; lastY = y; lastZ = z;
+    w.u8v(MODE_I.get(AF.mode) ?? M.other); w.u8v(fl); w.f32(x); w.f32(y); w.f32(z);
+    w.i16(wrap(root.rotation.y) * 10430); w.i8(root.rotation.x * 40); w.i8(root.rotation.z * 40);
+    for (let j = 0; j < NJ; j++) w.i8(parts[JP[j]].rotation[JA[j]] * 40);
+    w.u8v(parts.hips.position.y * 100); w.u8v((AF.PL.walk && AF.PL.walk.speed || 0) * 10);
+    const CB = AF.combat; w.u8v(CB ? Math.max(0, HELD.indexOf(CB.heldId)) : 0);
+    w.u8v(((CB ? Math.min(7, CB.stars) : 0) << 5) | Math.round(AF.clamp(AF.health ? AF.health.v / AF.health.max : 1, 0, 1) * 31));
+    const inV = veh || ride; w.u32(inV ? hashOf(inV) : 0); w.u8v(ride ? C.ride.seat : 0); w.u8v(a >> 8); w.u8v(a & 255);
+    // vehicles: the one I drive and my police (squad cars)
+    const vAt = w.o; w.u8v(0); let nv = 0;
+    if (veh) { writeVeh(w, veh); nv++; }
+    for (const c of VV.cars) if (c.netOwned && c.active !== false && c.net == null && nv < 5 && (c.x - x) ** 2 + (c.z - z) ** 2 < 160000) { writeVeh(w, c); nv++; }
+    W.u8[vAt] = nv;
+    // fights and police only matter to players nearby
+    const near = peerNear(x, z, 320), CR = crowd();
+    const nAt = w.o; w.u8v(0); let nn = 0;
+    if (near && CR) for (const p of CR.walkers) {
+      if (!p.act || !p.agg || nn >= 20) continue;
+      const dx = p.x - x, dy = p.y - y, dz = p.z - z; if (dx * dx + dz * dz > 22500) continue;
+      const V = CR.V[p.v], A = p.agg; let f = A.f; if (!V || !V.im[f]) f = f === 'runA' || f === 'runB' ? WF[Math.floor(p.ph) & 3] : 'p';
+      w.u16(p.id); w.u8v(p.v); w.u8v(Math.max(0, FRAMES.indexOf(f)) | (A.lie ? 128 : 0)); w.i16(dx * 100); w.i16((dy + (A.dy || 0)) * 100); w.i16(dz * 100); w.u8v(((p.yaw % TAU + TAU) % TAU) / TAU * 256);
+      nn++;
+    }
+    W.u8[nAt] = nn;
+    const H = CB && CB.heli;
+    if (near && H && H.on) { w.u8v(1); w.f32(H.x); w.f32(H.y); w.f32(H.z); w.i16(wrap(H.yaw) * 10430); w.u8v(H.fall ? 1 : 0); } else w.u8v(0);
+    const sAt = w.o; w.u8v(0); let ns = 0;
+    if (near) for (let i = 0; i < nShots; i++) { const o = i * 7; w.u8v(SHOTS[o]); w.i16((SHOTS[o + 1] - x) * 100); w.i16((SHOTS[o + 2] - y) * 100); w.i16((SHOTS[o + 3] - z) * 100); w.i16((SHOTS[o + 4] - x) * 10); w.i16((SHOTS[o + 5] - y) * 10); w.i16((SHOTS[o + 6] - z) * 10); ns++; }
+    W.u8[sAt] = ns; nShots = 0;
+    return w.o;
+  };
+  const sendTick = () => {
+    const P = AF.player; if (!P.parts || !P.mesh) return;
+    N.mine.x = P.mesh.position.x; N.mine.z = P.mesh.position.z;
+    if (!N.live()) { nShots = 0; return; }
+    const veh = myVeh();
+    if (sentVeh && sentVeh !== veh) { const v = sentVeh; N.send('vleave', { h: hashOf(v), x: v.x, y: v.y, z: v.z, yaw: v.yaw, v: v.v || 0, g: kindOf(v) !== VK_PLANE || !!v.onGround }); }
+    sentVeh = veh;
+    const now = performance.now(); if (now - sendAt < 1000 / N.rate - 4) return;
+    sendAt = now;
+    N.fast(W.u8, C.build(now), seq);
+  };
+  const onShot = (wid, mx, my, mz, ex, ey, ez, hit) => {
+    if (!N.live() || nShots >= 24) return;
+    const o = nShots++ * 7; SHOTS[o] = (wid & 15) | ((hit & 3) << 4); SHOTS[o + 1] = mx; SHOTS[o + 2] = my; SHOTS[o + 3] = mz; SHOTS[o + 4] = ex; SHOTS[o + 5] = ey; SHOTS[o + 6] = ez;
+  };
+
+  // ---------------------------------------------------------------- receiving
+  const RD = new N.Rd(), PV = new Float32Array(PT.length), VVb = new Float32Array(VT.length), NV = new Float32Array(NT.length), HV = new Float32Array(HT.length);
+  C.ingest = (u8, from) => {
+    if (u8[0] !== 1) return;
+    const r = RP.get(from); if (!r) return;
+    const R = RD.set(u8); R.u8v(); R.u8v(); R.u16(); const stamp = R.u32(), now = performance.now();
+    if (r.tr.len && stamp < r.tr.t[0]) { C.stats.stale++; return; }
+    clockIn(r.clk, stamp, now); C.stats.rx++;
+    const mode = R.u8v(), fl = R.u8v(), x = R.f32(), y = R.f32(), z = R.f32();
+    if (Math.abs(x) > 6000 || Math.abs(z) > 6000 || Math.abs(y) > 3000) return;
+    PV[0] = x; PV[1] = y; PV[2] = z; PV[3] = R.i16() / 10430; PV[4] = R.i8() / 40; PV[5] = R.i8() / 40;
+    for (let j = 0; j < NJ; j++) PV[6 + j] = R.i8() / 40;
+    PV[P_HIPS] = R.u8v() / 100; PV[P_SPD] = R.u8v() / 10; PV[P_WPN] = R.u8v(); PV[P_STAT] = R.u8v();
+    const vh = R.u32(); PV[P_VLO] = vh & 0xffff; PV[P_VHI] = vh >>> 16; PV[P_SEAT] = R.u8v(); PV[P_AK] = R.u8v(); PV[P_AI] = R.u8v();
+    PV[P_MODE] = mode < MODES.length ? mode : M.other; PV[P_FLAGS] = fl;
+    if (fl & F_TP) r.tr.clear();
+    r.tr.push(stamp, PV); r.last = now;
+    const peer = N.peers.get(from); if (peer) { peer.x = x; peer.z = z; }
+    const nv = R.u8v();
+    for (let i = 0; i < nv && i < 8; i++) {
+      const h = R.u32(), kind = R.u8v(), type = R.u8v(), paint = R.u8v(), vf = R.u8v();
+      VVb[0] = R.f32(); VVb[1] = R.f32(); VVb[2] = R.f32(); VVb[3] = R.i16() / 10430; VVb[4] = R.i8() / 40; VVb[5] = R.i8() / 40; VVb[6] = R.i16() / 100; VVb[7] = R.i8() / 100; VVb[8] = R.u8v(); VVb[9] = vf;
+      if (Math.abs(VVb[0]) > 6000 || Math.abs(VVb[2]) > 6000 || VVb[1] < -500 || VVb[1] > 3000) continue;
+      const e = vehicleFor(h, kind, type, paint, from); if (!e) continue;
+      if ((VVb[0] - e.obj.x) ** 2 + (VVb[2] - e.obj.z) ** 2 > 2500 && e.tr.len && stamp > e.tr.t[e.tr.len - 1]) e.tr.clear();
+      e.tr.push(stamp, VVb); e.last = now; e.squad = !!(vf & V_SQUAD);
+    }
+    const nn = R.u8v();
+    for (let i = 0; i < nn && i < 24; i++) {
+      const id = R.u16(), look = R.u8v(), fr = R.u8v();
+      NV[0] = x + R.i16() / 100; NV[1] = y + R.i16() / 100; NV[2] = z + R.i16() / 100; NV[3] = R.u8v() / 256 * TAU; NV[4] = look; NV[5] = fr;
+      if (id < 4096) npcIn(from, id, stamp, now);
+    }
+    if (R.u8v()) {
+      HV[0] = R.f32(); HV[1] = R.f32(); HV[2] = R.f32(); HV[3] = R.i16() / 10430; HV[4] = R.u8v();
+      if (Math.abs(HV[0] - x) < 1500 && Math.abs(HV[2] - z) < 1500 && HV[1] > -500 && HV[1] < 3000) {
+        if (!r.heli) r.heli = { tr: new Track(HT, 8), out: new Float32Array(HT.length), grp: null, last: 0, x: 0, y: -1e4, z: 0 };
+        r.heli.tr.push(stamp, HV); r.heli.last = now;
+      }
+    }
+    const ns = R.u8v();
+    for (let i = 0; i < ns && i < 32; i++) {
+      const k = R.u8v(), mx = x + R.i16() / 100, my = y + R.i16() / 100, mz = z + R.i16() / 100, ex = x + R.i16() / 10, ey = y + R.i16() / 10, ez = z + R.i16() / 10;
+      playShot(k & 15, k >> 4, mx, my, mz, ex, ey, ez, now);
+    }
+  };
+  N.onFast(C.ingest);
+  let sndAt = 0;
+  const playShot = (wid, hit, mx, my, mz, ex, ey, ez, now) => {
+    const FX = AF.fx; if (!FX || !FX.glow) return;
+    const cp = AF.camera.position; if ((mx - cp.x) ** 2 + (mz - cp.z) ** 2 > 250000) return;
+    FX.burst('flash', mx, my, mz, 1, { size: wid === 2 ? 0.9 : 0.6 }); FX.line(mx, my, mz, ex, ey, ez);
+    if (hit === 1) FX.burst('dust', ex, ey, ez, 2); else if (hit === 2) FX.burst('hit', ex, ey, ez, 1); else if (hit === 3) FX.burst('spark', ex, ey, ez, 3, { spread: 4 });
+    if (now - sndAt > 40) { sndAt = now; AF.sfx.play(SND[wid] || 'shot', mx, mz); }
+  };
+
+  // ---------------------------------------------------------------- remote vehicles: this client's copy of the car / plane / ski, driven by snapshots
+  const takeOver = (v, owner, kind) => {
+    v.net = owner; v.keep = true;
+    if (kind === VK_CAR) {
+      if (v.ai) { VV.detachTraffic(v); const i = VV.ai.indexOf(v); if (i >= 0) VV.ai.splice(i, 1); v.ai = null; }
+      v.driver = -1; v.parked = false; v.pushLife = 0; v.burnT = 0;
+    } else if (kind === VK_PLANE) v.ghost = false;
+  };
+  const vehicleFor = (h, kind, type, paint, owner) => {
+    let e = RV.get(h);
+    if (e && e.obj.active === false) { RV.delete(h); e = null; }
+    // one owner per vehicle: another sender's claim waits until the current driver's entry is released
+    if (e) return e.owner === owner ? e : null;
+    if (kind < VK_CAR || kind > VK_SKI) return null;
+    let n = 0; for (const q of RV.values()) if (q.owner === owner) n++;
+    if (n >= 6) return null;   // the driven vehicle + 5 squad cars
+    let v = findVeh(h), created = false;
+    // I'm driving my own copy of it: theirs is shown as a second car
+    if (v && (v === myVeh() || (v.net != null && v.net !== owner))) v = null;
+    if (v && kindOf(v) !== kind) v = null;
+    if (!v && kind === VK_CAR && VV.TYPES[type]) { v = VV.makeCar(VV.TYPES[type].id, paint & 15, VVb[0], VVb[2], VVb[3], { y: VVb[1] }); v.temp = true; v.netHash = h; created = true; }
+    if (!v) return null;
+    takeOver(v, owner, kind);
+    e = { h, owner, kind, obj: v, tr: new Track(VT, 10), out: new Float32Array(VT.length), created, last: 0, squad: false, puff: 0 };
+    RV.set(h, e);
+    return e;
+  };
+  // cars made for a remote driver that they parked (vleave): kept like any runtime car, at most 6 at a time
+  const KEPT = [];
+  const releaseVeh = (e, m) => {
+    if (RV.get(e.h) === e) RV.delete(e.h);
+    const v = e.obj; v.net = null; v.keep = false;
+    if (m) { v.x = m.x; v.y = m.y; v.z = m.z; v.yaw = m.yaw; }
+    if (e.kind === VK_CAR) {
+      // squad cars, and cars made for a driver who simply went quiet, leave with their owner
+      if (e.created && (e.squad || (!m && C.ride.veh !== v))) { VV.removeCar(v); return; }
+      v.v = v.vx = v.vz = 0; v.parked = true; VV.placeMesh(v); if (v.interact) v.sync();
+      if (e.created) {
+        v.temp = true; KEPT.push(v);
+        while (KEPT.length > 6) { const o = KEPT.shift(); if (o.active !== false && o.net == null && o !== myVeh() && o !== C.ride.veh) VV.removeCar(o); }
+      }
+    } else if (e.kind === VK_PLANE) {
+      if (m && !m.g) { v.ghost = true; v.v = Math.max(18, num(m.v, 0, 200) ? m.v : 25); } else { v.v = 0; v.engine = false; v.throttle = 0; }
+      if (AF.planes.place) AF.planes.place(v);
+    } else { v.v = 0; v.sync(); }
+    if (C.ride.veh === v) toast('The driver got out \u2014 ' + (AF.touch ? 'EXIT to get out too.' : 'F to take the wheel, E to get out.'));
+  };
+  const applyVeh = (e, now, dt) => {
+    const r = RP.get(e.owner);
+    if (!r || now - e.last > 2500 || e.obj.active === false) { releaseVeh(e, null); return; }
+    const o = e.out; if (e.tr.sample(renderT(r.clk, now), o, 250) < 0) return;
+    const v = e.obj, f = o[9] | 0;
+    v.x = o[0]; v.y = o[1]; v.z = o[2]; v.yaw = o[3]; v.pitch = o[4]; v.roll = o[5]; v.v = o[6];
+    if (e.kind === VK_CAR) {
+      v.steer = o[7]; v.dmg = o[8] / 255; v.bob = 0; v.vx = Math.sin(v.yaw) * v.v; v.vz = Math.cos(v.yaw) * v.v; v.pushLife = 0; v.parked = false;
+      if ((f & V_DEAD) && !v.dead) { v.dead = true; v.deadT = AF.clock.t; v.dmg = 1; }
+      if ((f & V_BURN || v.dmg > 0.5) && (e.puff -= dt) <= 0) { e.puff = 0.15; AF.fx.burst(f & V_BURN ? 'fire' : 'smoke', v.x + Math.sin(v.yaw) * (v.halfL - 0.7), v.y + 1, v.z + Math.cos(v.yaw) * (v.halfL - 0.7), 1); }
+      if (v.interact) v.sync();
+    } else if (e.kind === VK_PLANE) {
+      v.engine = !!(f & V_ENGINE); v.onGround = !!(f & V_GROUND); v.ghost = false;
+      if (AF.planes.place) AF.planes.place(v);
+      if (v.engine) { v.spin += dt * (8 + Math.min(60, Math.abs(v.v))); for (const p of v.props) p.rotation.z = v.spin; }
+    } else v.sync();
+  };
+
+  // ---------------------------------------------------------------- remote peds (engaged / police): proxies from 55-people's net pool
+  const npcIn = (owner, id, stamp, now) => {
+    const key = owner * 4096 + id; let e = RN.get(key);
+    const CR = crowd(); if (!CR || NV[4] >= CR.V.length) return;
+    if (!e) {
+      let w = null; for (const q of CR.walkers) if (q.net && !q.netEntry) { w = q; break; }
+      if (!w) return;
+      e = { key, owner, id, w, tr: new Track(NT, 8), out: new Float32Array(NT.length), last: 0 }; w.netEntry = e; RN.set(key, e);
+    }
+    e.tr.push(stamp, NV); e.last = now;
+  };
+  const freeNpc = (e) => { RN.delete(e.key); e.w.act = false; e.w.netEntry = null; };
+  const applyNpcs = (now) => {
+    for (const e of RN.values()) {
+      const r = RP.get(e.owner);
+      if (!r || now - e.last > 1200) { freeNpc(e); continue; }
+      const o = e.out; if (e.tr.sample(renderT(r.clk, now), o, 250) < 0) continue;
+      const w = e.w, fr = o[5] | 0;
+      w.x = o[0]; w.y = o[1]; w.z = o[2]; w.yaw = o[3]; w.v = w.vd = w.vn = o[4] | 0; w.nf = FRAMES[fr & 15] || 'p'; w.lie = !!(fr & 128); w.s = 1; w.act = true;
+    }
+  };
+
+  // ---------------------------------------------------------------- remote players: pose, seat, ride, held item, the autogyro
+  const applyPlayer = (r, now, dt) => {
+    const o = r.out, st = r.tr.sample(renderT(r.clk, now), o, 250);
+    if (st < 0) return;
+    if (st === 1) C.stats.extrap++;
+    ensureAvatar(r);
+    const P = r.P, root = P.root, fl = o[P_FLAGS] | 0, mode = o[P_MODE] | 0;
+    r.mode = mode; r.stars = (o[P_STAT] | 0) >> 5; r.hp = ((o[P_STAT] | 0) & 31) / 31; r.dead = !!(fl & F_DEAD);
+    r.veh = (((o[P_VHI] | 0) << 16) | (o[P_VLO] | 0)) >>> 0; r.seat = o[P_SEAT] | 0; r.ak = o[P_AK] | 0; r.ai = o[P_AI] | 0;
+    AF.avatar.sit(P, !!(fl & F_SIT), 0.6);
+    for (let j = 0; j < NJ; j++) P[JP[j]].rotation[JA[j]] = o[6 + j];
+    P.hips.position.y = o[P_HIPS];
+    let vis = !!(fl & F_VIS);
+    const v = r.veh ? vehByHash(r.veh) : null;
+    if (v) {
+      const k = kindOf(v);
+      if (k === VK_PLANE) { vis = false; root.position.set(v.x, v.y + 1, v.z); }
+      else { seatPose(v, k, seatOf(v, k, r.seat), POSE); root.position.set(POSE.x, POSE.y, POSE.z); root.rotation.set(POSE.pitch, POSE.yaw, POSE.roll, 'YXZ'); }
+    } else { root.position.set(o[0], o[1], o[2]); root.rotation.set(o[4], o[3], o[5], 'YXZ'); }
+    if (r.ak && !v) vis = true;   // ride anchors: placed after the rides move (coop-late)
+    const cp = AF.camera.position, d2 = (root.position.x - cp.x) ** 2 + (root.position.z - cp.z) ** 2;
+    root.visible = vis && d2 < 250000;
+    setHeld(r, HELD[o[P_WPN] | 0] || null);
+    r.x = root.position.x; r.y = root.position.y; r.z = root.position.z; r.seen = true;
+    const T = r.tg; T.x = r.x; T.y = r.y; T.z = r.z; T.speed = o[P_SPD]; T.away = r.dead || !(mode === M.walk || mode === M.drive || mode === M.passenger || mode === M.jetski);
+    // the remote autogyro (their 3+ star wanted level)
+    const H = r.heli;
+    if (H) {
+      if (now - H.last > 2000) { if (H.grp) H.grp.visible = false; H.y = -1e4; }
+      else {
+        if (!H.grp) { const src = AF.combat && AF.combat.heli && AF.combat.heli.grp; if (src) { H.grp = src.clone(); H.grp.name = 'coop-autogyro'; AF.scene.add(H.grp); } }
+        const ho = H.out; if (H.grp && H.tr.sample(renderT(r.clk, now), ho, 250) >= 0) {
+          H.x = ho[0]; H.y = ho[1]; H.z = ho[2];
+          H.grp.position.set(ho[0], ho[1], ho[2]); H.grp.rotation.set(0.12, ho[3], 0, 'YXZ'); H.grp.visible = true;
+          if (H.grp.children[1]) H.grp.children[1].rotation.y += dt * 22;
+        }
+      }
+    }
+  };
+  const lateAnchors = () => {
+    for (const r of RP.values()) {
+      if (!r.ak || !r.P || r.veh) continue;
+      if (anchorPose(r.ak, r.ai, POSE)) { const root = r.P.root; root.position.set(POSE.x, POSE.y, POSE.z); root.rotation.set(POSE.pitch, POSE.yaw, POSE.roll, 'YXZ'); r.x = POSE.x; r.y = POSE.y; r.z = POSE.z; }
+    }
+  };
+
+  // ---------------------------------------------------------------- riding along (passenger seat of another player's car, bike, plane or jet ski)
+  const PR = C.ride = { veh: null, kind: 0, seat: 1, chase: new AF.Vehicle.Chase(), carO: { seatH: 0.45, lean: 0.1 }, bikeO: { seatH: 0.7, lean: 0.35 }, skiO: { seatH: 0.55, lean: 0.35 } };
+  const seatTaken = (h) => { for (const r of RP.values()) if (r.veh === h && r.seat === 1) return true; return false; };
+  AF.modes.passenger = {
+    enter(o = {}) {
+      const v = o.veh; if (!v) { AF.setMode('walk'); return; }
+      PR.veh = v; PR.kind = kindOf(v); PR.seat = 1;
+      const plane = PR.kind === VK_PLANE, big = v.type && v.type.big, L = PR.kind === VK_CAR ? VV.seatLocal(v) : null;
+      const eye = PR.kind === VK_CAR ? (isBike(v) ? [0, L[1] + 1.45, L[2] - 0.55] : [-L[0], L[1] + 1.0, L[2] + 0.1]) : PR.kind === VK_SKI ? [0, 1.5, -0.7] : [0, v.G ? v.G.h * 0.62 : 2, 0];
+      PR.chase.set({ dist: plane ? 9 + (v.G ? v.G.halfL * 1.3 : 6) : big ? 13 : PR.kind === VK_SKI ? 6.4 : 8.5, height: plane ? 2.5 : 1.3 + (big ? 1.2 : 0), shadow: plane ? 90 : 60, eye });
+      AF.player.setVisible(!plane);
+      const d = RP.get(v.net); N.send('seat', { h: hashOf(v), s: 1 });
+      toast('You hop in' + (d ? ' with ' + d.peer.name : '') + '. ' + (AF.touch ? 'EXIT to get out.' : 'E to get out.'));
+      AF.emit('hint', AF.touch ? '' : 'Mouse look \u00b7 C camera \u00b7 E get out');
+    },
+    exit() { PR.veh = null; AF.PL.seat = null; AF.player.setVisible(true); AF.emit('hud', { speed: null }); AF.emit('hint', ''); },
+    update() {
+      const v = PR.veh, I = AF.input; if (!v || (AF.ui.modalOpen && AF.ui.modalOpen())) return;
+      if (I.hit('KeyF') && v.net == null) { takeWheel(); return; }
+      if (I.hit('KeyE') || I.hit('KeyF')) getOut(false);
+    },
+  };
+  const ridePlace = (dt) => {
+    const v = PR.veh; if (!v) return;
+    if (v.active === false) { getOut(true); return; }
+    const P = AF.player;
+    if (PR.kind !== VK_PLANE) {
+      const S = AF.Vehicle.seat(v, seatOf(v, PR.kind, 1), PR.kind === VK_SKI ? PR.skiO : isBike(v) ? PR.bikeO : PR.carO);
+      if (PR.kind === VK_SKI) S.pitch = -(v.pitch || 0);
+      P.x = P.body.x = S.x; P.y = P.body.y = S.y; P.z = P.body.z = S.z;
+    } else { AF.PL.seat = null; P.x = P.body.x = v.x; P.y = P.body.y = v.y; P.z = P.body.z = v.z; }
+    P.body.vy = 0;
+    PR.chase.update(dt, v.x, v.y, v.z, v.yaw, PR.kind === VK_PLANE ? 0 : v.pitch || 0, v.roll || 0);
+    AF.Vehicle.hud(v.v || 0, v.name, ' \u00b7 passenger');
+  };
+  const getOut = (force) => {
+    const v = PR.veh; if (!v) { AF.setMode('walk'); return; }
+    const sp = Math.abs(v.v || 0), s = Math.sin(v.yaw), c = Math.cos(v.yaw);
+    if (PR.kind === VK_PLANE && !(v.onGround && sp < 4)) {
+      const h = v.y - AF.W.groundY(v.x, v.z), d = (v.G ? v.G.halfW : 3) + 1.5;
+      if (h > 35) { AF.setMode('skydive', { x: v.x - c * d, y: v.y - 1, z: v.z + s * d, yaw: v.yaw, vx: s * sp * 0.6, vz: c * sp * 0.6, vy: 0 }); return; }
+      if (!force) { toast('Too low to jump \u2014 climb above 35 m or wait for the landing.'); return; }
+    }
+    if (sp > 4 && !force) { toast('Wait until you slow down!'); return; }
+    let spot = null;
+    if (PR.kind === VK_CAR) {
+      const lx = -(v.halfW + 0.7), x = v.x + lx * c + 0.4 * s, z = v.z - lx * s + 0.4 * c, y = AF.surfaceBelow(x, z, v.y + 1.5, 4);
+      if (Number.isFinite(y) && !AF.boxBlocked(x, y + 0.05, z, 0.3, 1.7)) spot = { x, y, z };
+    } else if (PR.kind === VK_PLANE) { const d = Math.min(v.G ? v.G.halfW : 3, 3) + 1.2; spot = { x: v.x - c * d, y: undefined, z: v.z + s * d }; }
+    if (!spot) spot = AF.Vehicle.landing(v.x, v.z, PR.kind === VK_SKI ? AF.PLAN.harbour.waterY + 0.35 : -60, v.y + 4, 10);
+    if (!spot) { if (!force) { toast('Pull up beside dry land to get out.'); return; } spot = { x: v.x + 2, y: v.y + 1, z: v.z }; }
+    AF.setMode('walk', { x: spot.x, y: spot.y, z: spot.z, yaw: v.yaw });
+  };
+  const takeWheel = () => {
+    const v = PR.veh, k = PR.kind;
+    if (k === VK_CAR) AF.setMode('drive', { car: v }); else if (k === VK_PLANE) AF.setMode('fly', { plane: v }); else if (k === VK_SKI) AF.setMode('jetski', { ski: v });
+  };
+  C.getOut = getOut;
+  // 'Ride with ...' follows the nearest vehicle another player is driving (slow, with a free seat)
+  const rideIt = AF.addInteract({ x: 0, y: -999, z: 0, r: 2.4, prio: 0.05, label: 'Ride along', target: null,
+    dist: (px, pz) => { const v = rideIt.target; if (!v) return 99; return kindOf(v) === VK_CAR ? VV.bodyDist(v, px, pz) : Math.max(0, Math.hypot(v.x - px, v.z - pz) - (v.G ? Math.min(3, v.G.halfW) : 1.5)); },
+    can: () => AF.mode === 'walk' && !!rideIt.target && rideIt.target.net != null,
+    act: () => { const v = rideIt.target; if (v) AF.setMode('passenger', { veh: v }); } });
+  let rideT = 0;
+  const rideScan = (dt) => {
+    if ((rideT -= dt) > 0) return; rideT = 0.2;
+    let best = null, bd = 100; const p = AF.player;
+    if (AF.mode === 'walk') for (const e of RV.values()) {
+      const v = e.obj; if (e.squad || Math.abs(v.v || 0) > 3 || seatTaken(e.h)) continue;
+      const d = (v.x - p.x) ** 2 + (v.z - p.z) ** 2; if (d < bd) { bd = d; best = e; }
+    }
+    rideIt.target = best ? best.obj : null;
+    if (best) { const r = RP.get(best.owner); rideIt.x = best.obj.x; rideIt.z = best.obj.z; rideIt.y = best.obj.y + 1; rideIt.label = 'Ride with ' + (r ? r.peer.name : 'your friend'); }
+    else rideIt.y = -999;
+  };
+
+  // ---------------------------------------------------------------- combat hooks (77-combat): hits on things another player owns go to the owner
+  const CB = AF.combat;
+  if (CB) {
+    CB.onShot = onShot;
+    CB.peerTarget = (slot) => { const r = RP.get(slot); return r && r.seen ? r.tg : null; };
+    CB.hurtPeer = (slot, dmg, src, px, pz) => { if (RP.has(slot)) N.send('hurt', { dmg: Math.round(dmg), src, px, pz }, slot); };
+    CB.onNetPed = (w, dmg, kind, fx, fz, innocent) => {
+      const e = w.netEntry; if (!e) return;
+      N.send('hit', { id: e.id, dmg: Math.round(dmg), k: kind, fx, fz }, e.owner);
+      if (!innocent) CB.crime(AF.G.heat.assault);
+    };
+    CB.onNetCar = (car, n) => { if (RP.has(car.net)) N.send('vhit', { h: hashOf(car), dmg: Math.round(n) }, car.net); };
+    CB.onBoom = (car) => { if (N.live()) N.send('boom', { x: car.x, y: car.y, z: car.z, h: hashOf(car) }); };
+    CB.hitPeer = (obj, dmg, kind, fx, fz) => {
+      if (obj.heli) N.send('heli', { dmg: Math.round(dmg) }, obj.slot);
+      else if (C.pvp) N.send('hurt', { dmg: Math.round(dmg), src: 'pvp', px: fx * 2, pz: fz * 2 }, obj.slot);
+    };
+    CB.rayPeers = (ox, oy, oz, dx, dy, dz, t0, HIT, rayCapsule, raySphere) => {
+      for (const r of RP.values()) {
+        if (C.pvp && r.P && r.P.root.visible && !r.dead) { const t = rayCapsule(ox, oy, oz, dx, dy, dz, r.x, r.y, r.z, 1.75, 0.35); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'peer'; HIT.obj = r.hit; } }
+        const H = r.heli; if (H && H.grp && H.grp.visible) { const t = raySphere(ox, oy, oz, dx, dy, dz, H.x, H.y + 1, H.z, 3); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'peer'; HIT.obj = r.heliHit; } }
+      }
+    };
+    CB.meleePeer = (px, py, pz, fx, fz, maxD, dmg) => {
+      if (!C.pvp) return false;
+      for (const r of RP.values()) {
+        if (!r.P || !r.P.root.visible || r.dead || Math.abs(r.y - py) > 1.4) continue;
+        const dx = r.x - px, dz = r.z - pz, d = Math.hypot(dx, dz);
+        if (d > maxD || (d > 0.4 && (dx * fx + dz * fz) / d < 0.35)) continue;
+        N.send('hurt', { dmg, src: 'pvp', px: fx * 3, pz: fz * 3 }, r.slot); FX_hit(r.x, r.y + 1.3, r.z); return true;
+      }
+      return false;
+    };
+  }
+  const FX_hit = (x, y, z) => { if (AF.fx && AF.fx.glow) AF.fx.burst('hit', x, y, z, 1); };
+
+  // ---------------------------------------------------------------- reliable events
+  const timeMsg = () => ({ h: AF.time.hours, sp: AF.time.speed, p: !!AF.time.paused });
+  const applyTime = (t) => {
+    if (!t || !num(t.h, 0, 24)) return;
+    const d = ((t.h - AF.time.hours + 36) % 24) - 12;
+    AF.time.hours = Math.abs(d) > 0.25 ? t.h : (AF.time.hours + d * 0.5 + 24) % 24;
+    if (num(t.sp, 0, 1)) AF.time.speed = t.sp; AF.time.paused = !!t.p;
+  };
+  const myOwned = (h) => { const v = myVeh(); if (v && hashOf(v) === h) return v; for (const c of VV.cars) if (c.netOwned && c.active !== false && hashOf(c) === h) return c; return null; };
+  const npcNear = (owner, R) => {
+    const p = AF.player.mesh ? AF.player.mesh.position : AF.player;
+    for (const e of RN.values()) if (e.owner === owner && (e.w.x - p.x) ** 2 + (e.w.z - p.z) ** 2 < R * R) return true;
+    return false;
+  };
+  N.on('hit', (m, from) => {
+    const CR = crowd(), r = RP.get(from);
+    if (!CR || !r || !CB || !num(m.id, 0, 4095) || !num(m.dmg, 0, 200) || !HIT_KINDS.has(m.k)) return;
+    const w = CR.walkers[m.id]; if (!w || w.net || !w.act || (w.x - r.x) ** 2 + (w.z - r.z) ** 2 > 40000) return;
+    CB.netHitPed(w, m.dmg, m.k, num(m.fx, -1, 1) ? m.fx : 0, num(m.fz, -1, 1) ? m.fz : 0, from);
+  });
+  N.on('hurt', (m, from) => {
+    const r = RP.get(from); if (!r || !num(m.dmg, 0, 120) || !AF.health) return;
+    const src = m.src === 'pvp' || m.src === 'melee' ? m.src : 'shot';
+    // without friendly fire only the sender's peds / police can hurt me, and only when one of them is near me
+    if (src === 'pvp' ? !C.pvp : !npcNear(from, 90)) return;
+    const now = performance.now(); r.hb = Math.min(160, (r.hb ?? 160) + (now - (r.hbT || now)) * 0.12); r.hbT = now;
+    if (m.dmg > r.hb) return; r.hb -= m.dmg;
+    AF.health.hurt(m.dmg, src);
+    if (AF.mode === 'walk' && num(m.px, -30, 30) && num(m.pz, -30, 30)) AF.PL.push(m.px, m.pz);
+  });
+  N.on('vhit', (m, from) => {
+    const v = RP.has(from) && num(m.dmg, 0, 150) && myOwned(m.h >>> 0);
+    if (v && CB && (v.netOwned || C.pvp)) CB.dmgCar(v, m.dmg, false);
+  });
+  N.on('heli', (m, from) => { if (RP.has(from) && num(m.dmg, 0, 200) && CB && CB.heliHit) CB.heliHit(m.dmg, true); });
+  N.on('boom', (m, from) => {
+    const r = RP.get(from);
+    if (!r || !num(m.x, -6000, 6000) || !num(m.y, -500, 3000) || !num(m.z, -6000, 6000)) return;
+    const now = performance.now(); if (now - (r.boomT || 0) < 400 || (m.x - r.x) ** 2 + (m.z - r.z) ** 2 > 90000) return;
+    r.boomT = now;
+    const cp = AF.camera.position; if ((m.x - cp.x) ** 2 + (m.z - cp.z) ** 2 > 640000) return;
+    AF.fx.boom(m.x, m.y, m.z);
+    if (CB) CB.blast(m.x, m.y, m.z, AF.G.boomR, false, true);
+    // my copy of the same car becomes the same wreck
+    for (const c of VV.cars) if (!c.player && c.net == null && !c.dead && hashOf(c) === m.h >>> 0 && (c.x - m.x) ** 2 + (c.z - m.z) ** 2 < 900) { c.dead = true; c.deadT = AF.clock.t; c.dmg = 1; c.temp = true; c.x = m.x; c.z = m.z; VV.placeMesh(c); break; }
+  });
+  N.on('vleave', (m, from) => {
+    const e = RV.get(m.h >>> 0); if (!e || e.owner !== from) return;
+    const ok = num(m.x, -6000, 6000) && num(m.y, -500, 3000) && num(m.z, -6000, 6000) && num(m.yaw, -10, 10);
+    releaseVeh(e, ok ? m : null);
+  });
+  N.on('seat', (m, from) => {
+    const r = RP.get(from), mine = myVeh(); if (!r || !mine || hashOf(mine) !== m.h >>> 0 || m.s !== 1) return;
+    for (const q of RP.values()) if (q !== r && q.veh === m.h >>> 0 && q.seat === 1) { N.send('seatno', { h: m.h }, from); return; }
+    toast(r.peer.name + ' hopped in.');
+  });
+  N.on('seatno', (m) => { if (AF.mode === 'passenger' && PR.veh && hashOf(PR.veh) === m.h >>> 0) { getOut(true); toast('Someone beat you to that seat.'); } });
+  N.on('look', (m, from) => {
+    const r = RP.get(from); if (!r) return;
+    const B = AF.friends.byId;
+    if (typeof m.friend === 'string' && Object.hasOwn(B, m.friend) && m.friend !== r.peer.friend) { hideNpc(r.peer.friend, false); r.peer.friend = m.friend; r.peer.name = B[m.friend].name; hideNpc(m.friend, true); }
+    r.peer.look = N.cleanLook(m.look, B[r.peer.friend].look);
+  });
+  N.on('pvp', (m, from) => { if (from === 0 && N.role === 'guest') { C.pvp = !!m.on; if (CB) CB.pvp = C.pvp; toast(C.pvp ? 'Friendly fire is ON.' : 'Friendly fire is off.'); } });
+  N.on('time', (m, from) => { if (from === 0 && N.role === 'guest') applyTime(m); });
+  N.on('join', (p) => { addRemote(p); toast(p.name + ' joined.'); });
+  N.on('left', (p) => { removeRemote(p.slot); toast(p.name + ' left.'); });
+  N.on('end', (why) => { for (const slot of [...RP.keys()]) removeRemote(slot); if (AF.mode === 'passenger') getOut(true); C.pvp = false; if (CB) CB.pvp = false; if (why) toast(why); });
+  N.on('hosting', (code) => toast('Hosting co-op \u2014 code ' + code + '. Esc \u2192 Co-op to share the invite link.'));
+  N.on('welcome', (m) => {
+    const x = m.extra || {};
+    C.pvp = !!x.pvp; if (CB) CB.pvp = C.pvp; applyTime(x.time);
+    for (const p of N.peers.values()) addRemote(p);
+    const host = N.peers.get(0), name = host ? host.name : 'your friend';
+    if (AF.ui.titleOpen && AF.ui.titleOpen()) AF.ui.start();
+    const H = x.pos;
+    if (H && num(H.x, -6000, 6000) && num(H.y, -500, 3000) && num(H.z, -6000, 6000)) {
+      const a = Math.random() * TAU, px = H.x + Math.sin(a) * 2.5, pz = H.z + Math.cos(a) * 2.5;
+      const go = () => { const y = AF.surfaceBelow(px, pz, H.y + 3, 40); AF.setMode('walk', { x: px, y: Number.isFinite(y) ? y : H.y, z: pz, yaw: a + PI, snap: true }); };
+      if (AF.stream && AF.stream.travel) AF.stream.travel({ label: name, go }); else go();
+    }
+    toast('You joined ' + name + '\u2019s Port Solace.');
+  });
+  const myLook = (id) => (AF.save && AF.save.looks && AF.save.looks[id]) || (AF.friends.byId[id] && AF.friends.byId[id].look);
+  N.hello = () => {
+    const id = AF.friends.current ? AF.friends.current.id : AF.ui.pick && AF.ui.pick(), F = AF.friends.byId[id];
+    return { name: F ? F.name : 'Friend', friend: id, look: AF.friends.current ? AF.player.look : myLook(id), x: N.mine.x, z: N.mine.z };
+  };
+  N.welcomeExtra = () => { const m = AF.player.mesh ? AF.player.mesh.position : AF.player; return { pvp: C.pvp, time: timeMsg(), pos: { x: m.x, y: m.y, z: m.z } }; };
+  let lookT = 0;
+  const sendLook = () => { if (N.live() && AF.friends.current) N.send('look', { friend: AF.friends.current.id, look: AF.player.look }); };
+  AF.on('look', () => { lookT = 0.5; });
+  AF.on('friend', () => { lookT = 0.5; for (const r of RP.values()) hideNpc(r.peer.friend, true); });
+  C.setPvp = (on) => { if (N.role !== 'host') return; C.pvp = !!on; if (CB) CB.pvp = C.pvp; N.send('pvp', { on: C.pvp }); };
+  C.goTo = (slot) => {
+    const r = RP.get(slot); if (!r || !r.seen) return;
+    const a = Math.random() * TAU, px = r.x + Math.sin(a) * 2.5, pz = r.z + Math.cos(a) * 2.5;
+    const go = () => { const y = AF.surfaceBelow(px, pz, r.y + 3, 40); AF.setMode('walk', { x: px, y: Number.isFinite(y) ? y : r.y, z: pz, yaw: a + PI, snap: true }); };
+    if (AF.stream && AF.stream.travel) AF.stream.travel({ label: r.peer.name, go }); else go();
+  };
+
+  // ---------------------------------------------------------------- ticks: apply after the local mode (150) and combat (151), before traffic draws cars (200)
+  let timeT = 0;
+  AF.onTick('coop', 155, (dt) => {
+    if (!RP.size && !RV.size && !RN.size) { if (PR.veh) ridePlace(dt); return; }
+    const now = performance.now();
+    for (const e of RV.values()) applyVeh(e, now, dt);
+    for (const r of RP.values()) applyPlayer(r, now, dt);
+    applyNpcs(now);
+    if (PR.veh) ridePlace(dt);
+    rideScan(dt);
+    if (N.role === 'host' && (timeT -= dt) <= 0) { timeT = 2; N.send('time', timeMsg()); }
+    if (lookT > 0 && (lookT -= dt) <= 0) sendLook();
+  });
+  AF.onTick('coop-late', 341, () => { if (RP.size) lateAnchors(); });
+  AF.onTick('coop-send', 990, () => { if (N.role !== 'off') sendTick(); });
+
+  // ---------------------------------------------------------------- name tags + map dots
+  const TAG = new THREE.Vector3();
+  AF.onTick('coop-tags', 952, () => {
+    if (!RP.size) return;
+    const cam = AF.camera, W2 = innerWidth, H2 = innerHeight;
+    for (const r of RP.values()) {
+      const d2 = r.seen ? (r.x - cam.position.x) ** 2 + (r.y - cam.position.y) ** 2 + (r.z - cam.position.z) ** 2 : 1e12;
+      let on = d2 < 22500 && !(AF.ui.modalOpen && AF.ui.modalOpen());
+      if (on) { TAG.set(r.x, r.y + (r.P && r.P.sitting ? 1.75 : 2.15), r.z).project(cam); on = TAG.z < 1 && Math.abs(TAG.x) < 1.05 && Math.abs(TAG.y) < 1.05; }
+      if (!on) { if (r.tag.style.display !== 'none') r.tag.style.display = 'none'; continue; }
+      const key = r.peer.name + r.stars + (r.dead ? 'd' : '');
+      if (key !== r.tagKey) { r.tagKey = key; r.tag.innerHTML = '<i style="background:' + COLORS[r.slot & 3] + '"></i>' + r.peer.name.replace(/[&<>"]/g, '') + (r.stars ? '<b>' + '\u2605'.repeat(r.stars) + '</b>' : '') + (r.dead ? ' \u00b7 down' : ''); }
+      const x = Math.round((TAG.x + 1) / 2 * W2), y = Math.round((1 - TAG.y) / 2 * H2);
+      if (x !== r.tagX || y !== r.tagY) { r.tagX = x; r.tagY = y; r.tag.style.transform = 'translate(' + x + 'px,' + y + 'px) translate(-50%,-100%)'; }
+      if (r.tag.style.display !== 'block') r.tag.style.display = 'block';
+    }
+  });
+  AF.on('ready', () => {
+    const map = AF.ui && AF.ui.map; if (!map) return;
+    const dot = (g, p, rad, slot, label) => {
+      g.fillStyle = COLORS[slot & 3]; g.strokeStyle = '#111'; g.lineWidth = 2; g.beginPath(); g.arc(p.x, p.y, rad, 0, TAU); g.fill(); g.stroke();
+      if (label) { g.font = '600 12px sans-serif'; g.fillStyle = '#fff'; g.strokeStyle = 'rgba(0,0,0,.7)'; g.lineWidth = 3; g.strokeText(label, p.x + rad + 4, p.y + 4); g.fillText(label, p.x + rad + 4, p.y + 4); }
+    };
+    (map.overlays || (map.overlays = [])).push((g) => { for (const r of RP.values()) if (r.seen) dot(g, map.worldToScreen(r.x, r.z), 7, r.slot, r.peer.name); });
+    (map.miniOverlays || (map.miniOverlays = [])).push((g, to) => { for (const r of RP.values()) if (r.seen) dot(g, to(r.x, r.z), 5, r.slot, null); });
+  });
+
+  // ---------------------------------------------------------------- UI: Host / Join on the title card, a Co-op section in the menu
+  const css = document.createElement('style');
+  css.textContent = `
+  #ui .coop-tag{position:absolute;left:0;top:0;padding:2px 8px;border-radius:9px;background:rgba(10,16,24,.6);color:#fff;font:600 11px var(--font);white-space:nowrap;pointer-events:none;display:none;will-change:transform}
+  #ui .coop-tag i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px} #ui .coop-tag b{color:#ffd24a;font-weight:400;margin-left:4px}
+  #ui.photo .coop-tag{display:none!important}
+  #ui .coop-t{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:4px;width:100%}
+  #ui .coop-t .two{display:flex;gap:8px} #ui .coop-t .btn,#ui .coop-m .btn{font-size:12px;padding:6px 12px}
+  #ui .coop-t .jn{display:flex;gap:6px} #ui .coop-t .jn.hide{display:none}
+  #ui .coop-t input,#ui .coop-m input{width:96px;text-align:center;font:600 15px var(--font);letter-spacing:3px;text-transform:uppercase;background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:5px}
+  #ui .coop-t .st,#ui .coop-m .st{font-size:11px;color:var(--dim);min-height:14px;text-align:center;max-width:300px}
+  #ui .coop-m{border-top:1px solid var(--line);margin-top:6px;padding-top:4px}
+  #ui .coop-m .code{font:600 16px var(--font);letter-spacing:3px;color:var(--accent)} #ui .coop-m .pl{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px}
+  #ui .coop-m .pl i{width:8px;height:8px;border-radius:50%} #ui .coop-m .pl span{flex:1} #ui .coop-m .pl small{color:var(--dim)}
+  #ui .coop-m .acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  @media (orientation:landscape) and (max-height:560px){#ui #t-title .coop-t{grid-column:2}}`;
+  document.head.appendChild(css);
+  const title = document.querySelector('#t-title .modal');
+  const T = document.createElement('div'); T.className = 'coop-t';
+  T.innerHTML = '<div class="two"><button class="btn" data-c="host">Host co-op</button><button class="btn" data-c="join">Join co-op</button></div><div class="jn hide"><input class="code" maxlength="6" placeholder="CODE" autocomplete="off" spellcheck="false" aria-label="Lobby code"><button class="btn primary" data-c="go">Join</button></div><div class="st"></div>';
+  if (title) title.appendChild(T);
+  const tSt = T.querySelector('.st'), tJn = T.querySelector('.jn'), tIn = T.querySelector('input');
+  const WHY = { version: 'Your friend is on a different version \u2014 both reload the page.', taken: 'That friend is already being played \u2014 pick someone else.', friend: 'Pick a friend first.', 'no such lobby': 'No game with that code (check it, or ask for a new one).', 'lobby full': 'That game is full (4 players).', full: 'That game is full (4 players).', code: 'Codes are 6 letters / digits.', timeout: 'Could not reach the lobby server.', closed: 'Could not reach the lobby server.' };
+  const why = (e) => e && e.message === 'left' ? '' : WHY[e && e.message] || 'Could not connect (' + (e && e.message || 'error') + ').';
+  const doHost = () => { if (!AF.ready) return; if (AF.ui.titleOpen && AF.ui.titleOpen()) AF.ui.start(); N.host().catch((e) => toast(why(e))); };
+  const doJoin = (code, st) => {
+    if (!AF.ready) return;
+    st.textContent = 'Connecting\u2026';
+    N.join(code).then(() => { st.textContent = ''; }).catch((e) => { st.textContent = why(e); });
+  };
+  T.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-c]'); if (!b) return;
+    if (b.dataset.c === 'host') doHost();
+    else if (b.dataset.c === 'join') { tJn.classList.toggle('hide'); if (!tJn.classList.contains('hide')) tIn.focus(); }
+    else if (b.dataset.c === 'go') doJoin(tIn.value, tSt);
+  });
+  tIn.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') doJoin(tIn.value, tSt); });
+  { const j = N.cleanCode(AF.Q.get('join')); if (N.validCode(j)) { tIn.value = j; tJn.classList.remove('hide'); tSt.textContent = 'Pick your friend, then Join.'; } }
+  // menu section
+  const menu = document.querySelector('#m-menu .panel'), stack = menu && menu.querySelector('.stack');
+  const MN = document.createElement('div'); MN.className = 'coop-m';
+  MN.innerHTML = '<div class="row"><label>Co-op</label><div class="acts"></div></div><div class="body"></div><div class="st"></div>';
+  if (stack) menu.insertBefore(MN, stack);
+  const mActs = MN.querySelector('.acts'), mBody = MN.querySelector('.body'), mSt = MN.querySelector('.st');
+  let menuKey = '';
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const renderMenu = () => {
+    const rows = [...RP.values()].map((r) => r.slot + r.peer.name + (N.peers.get(r.slot) ? Math.round(N.peers.get(r.slot).rtt / 10) : 0) + r.stars).join('|');
+    const key = N.role + N.code + C.pvp + rows + N.status;
+    if (key === menuKey) return; menuKey = key;
+    if (N.role === 'off') {
+      mActs.innerHTML = '<button class="btn" data-c="host">Host</button><input class="code" maxlength="6" placeholder="CODE" aria-label="Lobby code"><button class="btn" data-c="go">Join</button>';
+      mBody.innerHTML = '';
+    } else {
+      mActs.innerHTML = (N.role === 'host' ? '<span class="code">' + esc(N.code) + '</span><button class="btn" data-c="copy">Copy invite link</button>' : '') + '<button class="btn" data-c="leave">Leave</button>';
+      const me = '<div class="pl"><i style="background:' + COLORS[N.me & 3] + '"></i><span>' + esc(AF.friends.current ? AF.friends.current.name : 'You') + ' (you)</span></div>';
+      const list = [...RP.values()].map((r) => { const p = N.peers.get(r.slot); return '<div class="pl"><i style="background:' + COLORS[r.slot & 3] + '"></i><span>' + esc(r.peer.name) + (r.stars ? ' <b style="color:#ffd24a">' + '\u2605'.repeat(r.stars) + '</b>' : '') + '</span><small>' + (p && p.rtt ? Math.round(p.rtt) + ' ms' : r.slot === 0 ? 'host' : 'via host') + '</small><button class="btn" data-go="' + r.slot + '">Go to</button>' + (N.role === 'host' ? '<button class="btn" data-kick="' + r.slot + '">Kick</button>' : '') + '</div>'; }).join('');
+      mBody.innerHTML = me + list + (N.role === 'host' ? '<div class="row"><label>Friendly fire</label><div class="seg"><button data-c="pvp1" class="' + (C.pvp ? 'on' : '') + '">On</button><button data-c="pvp0" class="' + (C.pvp ? '' : 'on') + '">Off</button></div></div>' : '');
+    }
+    mSt.textContent = N.status;
+  };
+  MN.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const b = e.target.closest('button'); if (!b) return;
+    const c = b.dataset.c;
+    if (c === 'host') N.host().catch((er) => { mSt.textContent = why(er); });
+    else if (c === 'go') { const inp = MN.querySelector('input.code'); if (inp) doJoin(inp.value, mSt); }
+    else if (c === 'leave') N.leave('You left the co-op session.');
+    else if (c === 'copy') { const url = N.inviteUrl(); try { navigator.clipboard.writeText(url).then(() => { mSt.textContent = 'Invite link copied.'; }, () => { mSt.textContent = url; }); } catch (er) { mSt.textContent = url; } }
+    else if (c === 'pvp1' || c === 'pvp0') C.setPvp(c === 'pvp1');
+    else if (b.dataset.go != null) { AF.ui.resume && AF.ui.resume(); C.goTo(+b.dataset.go); }
+    else if (b.dataset.kick != null) N.kick(+b.dataset.kick);
+    menuKey = '';
+  });
+  MN.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter' && e.target.matches('input')) doJoin(e.target.value, mSt); });
+  N.on('status', (s) => { tSt.textContent = N.role === 'guest' || N.role === 'off' ? s : ''; menuKey = ''; });
+  let menuT = 0;
+  AF.onTick('coop-menu', 953, (dt) => { if ((menuT -= dt) > 0) return; menuT = 0.5; if (AF.ui.state && AF.ui.state.menu) renderMenu(); });
+
+  // ---------------------------------------------------------------- tests (no network: packets go straight into the receive path)
+  AF.test('coop: Track keeps time order, interpolates, extrapolates up to 250 ms, then holds', () => {
+    const t = new Track([1, 3, 4], 4), o = new Float32Array(3);
+    t.push(100, [0, 0, 1]); t.push(300, [20, 0.4, 3]); t.push(200, [10, 0.2, 2]);   // late packet slots in
+    const stale = !t.push(200, [99, 9, 9]);
+    t.push(400, [30, 0.6, 4]); t.push(500, [40, 0.8, 5]); const dropped = !t.push(50, [0, 0, 0]);
+    const a = t.sample(350, o, 250), mid = Math.abs(o[0] - 25) < 1e-3 && o[2] === 3;
+    const b = t.sample(600, o, 250), ex = Math.abs(o[0] - 50) < 1e-3;
+    const c = t.sample(1000, o, 250), held = Math.abs(o[0] - 65) < 1e-3;
+    return { ok: stale && dropped && a === 0 && mid && b === 1 && ex && c === 2 && held, info: `stale ${stale} dropped ${dropped} interp ${mid} extrap ${ex} held ${held} x ${o[0].toFixed(2)}` };
+  });
+  AF.test('coop: a snapshot round-trips into a remote avatar that follows reordered packets', () => {
+    const fid = AF.friends.cast.find((c) => !AF.friends.current || c.id !== AF.friends.current.id).id;
+    const peer = { slot: 3, name: 'Test', friend: fid, look: AF.friends.byId[fid].look, rtt: 0, x: 0, z: 0 };
+    const savedMe = N.me, savedPeer = N.peers.get(3);
+    try {
+      N.me = 3; N.peers.set(3, peer); addRemote(peer);
+      const P = AF.player, base = performance.now() - 1000, x0 = P.mesh.position.x;
+      const pk = (dx, ms) => { P.mesh.position.x = x0 + dx; const n = C.build(base + ms); return W.u8.slice(0, n); };
+      const a = pk(0, 0), b = pk(1, 50), c2 = pk(2, 100); P.mesh.position.x = x0;
+      C.ingest(a, 3); C.ingest(c2, 3); C.ingest(b, 3);
+      const r = RP.get(3); r.clk.off = performance.now() - (base + 75); r.clk.delay = 0;
+      applyPlayer(r, performance.now(), 1 / 30);
+      const got = r.P.root.position.x - x0;
+      return { ok: Math.abs(got - 1.5) < 0.05 && r.tr.len === 3, info: 'x at t=75 ms: ' + got.toFixed(3) + ' (want 1.5), samples ' + r.tr.len };
+    } finally { removeRemote(3); N.me = savedMe; if (savedPeer) N.peers.set(3, savedPeer); else N.peers.delete(3); }
+  });
+  AF.test('coop: riding along seats you in another player\u2019s car and lets you out', () => {
+    const car = VV.cars.find((c) => !c.static && !c.player && !c.ai && c.active !== false && c.type.kind === 'car' && c.net == null); if (!car) return { ok: false, info: 'no car' };
+    const was = AF.mode, peer = { slot: 2, name: 'Driver', friend: AF.friends.cast[0].id, look: AF.friends.cast[0].look, rtt: 0, x: car.x, z: car.z };
+    try {
+      N.peers.set(2, peer); addRemote(peer);
+      const e = { h: hashOf(car), owner: 2, kind: VK_CAR, obj: car, tr: new Track(VT, 10), out: new Float32Array(VT.length), created: false, last: performance.now(), squad: false, puff: 0 };
+      takeOver(car, 2, VK_CAR); RV.set(e.h, e);
+      AF.setMode('passenger', { veh: car }); ridePlace(1 / 30);
+      const S = AF.PL.seat, inside = AF.mode === 'passenger' && !!S && Math.hypot(S.x - car.x, S.z - car.z) < car.halfL && VV.bodyDist(car, S.x, S.z) === 0;
+      releaseVeh(e, null); getOut(true);
+      return { ok: inside && AF.mode === 'walk' && car.net == null, info: `seated ${inside}, out ${AF.mode}` };
+    } finally { removeRemote(2); N.peers.delete(2); if (AF.mode !== was && was && AF.modes[was]) AF.setMode(was); }
+  });
+}
+} catch (e) { AF.partError('80-coop.js', e); }
 
 // ================================================================ 98-tests.js
 try {

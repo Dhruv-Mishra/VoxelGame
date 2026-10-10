@@ -300,6 +300,7 @@ try {
   };
   // carousel ride: the avatar rides a horse (PL.seat follows it round), an orbiting camera; 40 s or E to get off
   const CAR = { t: 0, h: null, p: new THREE.Vector3(), q: new THREE.Quaternion(), e: new THREE.Euler(), look: new THREE.Vector3() };
+  J.carousel = CAR;
   AF.modes.carousel = {
     enter() { const H = L.carousel.horses; CAR.h = H[(Math.random() * 12) | 0]; CAR.t = 0; AF.player.setVisible(true); toast('Round and round! ' + (AF.touch ? 'EXIT' : 'E') + ' to hop off.'); },
     exit() { AF.PL.seat = null; },

@@ -411,6 +411,7 @@ try {
   title.querySelector('.arr.l').addEventListener('click', () => step(-1));
   title.querySelector('.arr.r').addEventListener('click', () => step(1));
   tGo.addEventListener('click', start);
+  UI.start = start; UI.pick = () => S.pick;
   addEventListener('keydown', (event) => { if (S.title && (event.code === 'Enter' || event.code === 'Space') && !event.repeat && !(event.target && /INPUT|TEXTAREA/.test(event.target.tagName))) start(); });
   UI.showTitle = () => { S.title = true; root.classList.add('titling'); title.style.display = ''; title.classList.remove('out'); exitLock(); toggleMenu(false); closeDlg(); AF.setMode('cine'); };
   // ---- title cinematic: slow dolly shots across the city behind the character card, cut through a short fade

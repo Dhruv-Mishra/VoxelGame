@@ -427,7 +427,7 @@ try {
     CIV.light(192.5, 8, cz, 2.0, 30); CIV.light(185, 5, 24, 1.0, 14); CIV.light(185, 5, 58, 1.0, 14);
     // --- light shafts from the great window (day only, additive, cheap)
     if (AF.scene) {
-      const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.03, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+      const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.03, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
       const shafts = [];
       for (const [dz, w] of [[-10, 2.2], [-4, 2.6], [3, 2.4], [9, 2.0], [0, 3.2]]) { const g = new THREE.BoxGeometry(22, 1.2, w * 0.7); const ms = new THREE.Mesh(g, mat); ms.position.set(189, 7.5, cz + dz); ms.rotation.order = 'YZX'; ms.rotation.set(0, dz * 0.012, -0.52); ms.renderOrder = 3; ms.castShadow = false; ms.frustumCulled = false; AF.scene.add(ms); shafts.push(ms); }
       AF.onTick('civic-shafts', 710, () => { const n = AF.time.night || 0, cam = AF.camera; const near = cam && Math.hypot(cam.position.x - 192, cam.position.z - cz) < 140; mat.opacity = 0.028 * (1 - n); for (const s of shafts) s.visible = near && n < 0.9; });
@@ -668,7 +668,7 @@ try {
   def('lampB', () => { const m = M(8, 44, 8); m.box(1, 0, 1, 7, 3, 7, K.bronzeD); m.box(3, 3, 3, 5, 32, 5, K.bronze); m.box(2, 14, 2, 6, 15, 6, K.gold); m.box(2, 32, 2, 6, 40, 6, K.lampA); m.box(1, 40, 1, 7, 41, 7, K.bronze); m.box(3, 41, 3, 5, 44, 5, K.gold); return m; });
   CIV.shafts = (list, cx, cz, R = 150) => {
     if (!AF.scene) return;
-    const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.025, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.025, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
     const ms = list.map(([x, y, z, len, w, rx, rz]) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, len, w), mat); m.position.set(x, y, z); m.rotation.set(rx, 0, rz); m.renderOrder = 3; m.castShadow = false; m.frustumCulled = false; AF.scene.add(m); return m; });
     AF.onTick('civic-shafts-' + cx, 711, () => { const n = AF.time.night || 0, cam = AF.camera, near = cam && Math.hypot(cam.position.x - cx, cam.position.z - cz) < R; mat.opacity = 0.025 * (1 - n); for (const m of ms) m.visible = near && n < 0.9; });
   };

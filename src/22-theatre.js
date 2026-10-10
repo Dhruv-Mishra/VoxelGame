@@ -1011,7 +1011,7 @@ try {
     }
     if (TS.spotAt) {
       const [x, y, z] = TS.spotAt, L = 4.6, geo = new THREE.CylinderGeometry(0.12, 0.85, L, 12, 1, true);
-      const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      const mat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
       const cone = new THREE.Mesh(geo, mat); cone.position.set(x, y + L / 2, z); cone.renderOrder = 7; cone.castShadow = false; cone.name = 'heron-spot'; AF.scene.add(cone); TS.spotCone = cone;
     }
   });
@@ -1090,7 +1090,7 @@ try {
     if (TS.beamFrom && typeof THREE !== 'undefined' && AF.scene) {
       const a = new THREE.Vector3(TS.beamFrom[0], TS.beamFrom[2], TS.beamFrom[1]), b = new THREE.Vector3(TS.beamTo[0], TS.beamTo[2], TS.beamTo[1]), L = a.distanceTo(b);
       const g = new THREE.CylinderGeometry(0.12, 8.5, L, 4, 1, true); g.rotateY(Math.PI / 4); g.scale(1, 1, 0.55);
-      const mat = new THREE.MeshBasicMaterial({ color: 0xc8d6ff, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      const mat = new THREE.MeshBasicMaterial({ color: 0xc8d6ff, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
       const beam = new THREE.Mesh(g, mat); beam.position.copy(a).add(b).multiplyScalar(0.5); beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a.clone().sub(b).normalize());
       beam.renderOrder = 7; beam.castShadow = false; beam.name = 'paragon-projector-beam'; AF.scene.add(beam); TS.beam = beam;
     }

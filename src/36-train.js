@@ -192,7 +192,7 @@ AF.onBuild('train', 600, () => {
   glow.scale.setScalar(2.4); glow.visible = false; glow.renderOrder = 8; AF.scene.add(glow);
   T.sparks = { pts: SP, pos: spos, col: scol, flash, glow, parts: Array.from({ length: NSP }, () => ({ life: 0, max: 1, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 })) };
   // headlamp beam
-  { const bm = new THREE.MeshBasicMaterial({ color: 0xffe3a8, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: true });
+  { const bm = new THREE.MeshBasicMaterial({ color: 0xffe3a8, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, fog: true });
     const cg = new THREE.ConeGeometry(2.6, 16, 16, 1, true); cg.translate(0, -8, 0); cg.rotateX(-Math.PI / 2);
     const beam = new THREE.Mesh(cg, bm); beam.position.set(0, 1.5, HALF); beam.rotation.x = -0.05; beam.renderOrder = 4; beam.visible = false; beam.castShadow = false; car.add(beam); T.beams = [beam];
     if (AF.addLight) { T.headLight = AF.addLight({ x: 0, y: 2, z: 0, color: 0xffe0a8, intensity: 1.1, range: 14, kind: 'street' }) || (AF.lights && AF.lights[AF.lights.length - 1]); T.coachLight = AF.addLight({ x: 0, y: 3, z: 0, color: 0xffd69a, intensity: 0.4, range: 8, kind: 'interior' }) || (AF.lights && AF.lights[AF.lights.length - 1]); }

@@ -65,7 +65,7 @@ try {
     }
 
     // ---------------------------------------------------------------- context: which buttons the current action needs (5 Hz, DOM only on change)
-    const RIDES = new Set(['row', 'ride', 'funride', 'jetski', 'carousel']), CAM_MODES = new Set(['walk', 'drive', 'fly', 'jetski']);
+    const RIDES = new Set(['row', 'ride', 'funride', 'jetski', 'carousel', 'passenger']), CAM_MODES = new Set(['walk', 'drive', 'fly', 'jetski', 'passenger']);
     const JOB_CAR = (T) => !!(T && (T.cab || T.id === 'bus' || T.kind === 'van' || T.id === 'firetruck' || T.kind === 'bike'));
     const hasGuns = () => { const g = AF.save && AF.save.guns; if (g) for (const k in g) if (g[k]) return true; return false; };
     const act = [], use = [];

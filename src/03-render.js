@@ -839,7 +839,7 @@ try {
         uniforms: { uK: { value: C.k }, uM: { value: C.margin } },
         vertexShader: 'attribute vec4 aLoc; varying vec4 vLoc; void main() { vLoc = aLoc; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
         fragmentShader: 'uniform float uK; uniform float uM; varying vec4 vLoc; void main() { vec2 q = abs(vLoc.xy) - vLoc.zw; float o = length(max(q, 0.0)); float a = uK * (1.0 - smoothstep(0.0, uM, o)); if (a < 0.004) discard; gl_FragColor = vec4(0.0, 0.0, 0.0, a); }',
-        transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide, fog: false,
+        transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide, forceSinglePass: true, fog: false,
         polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
         blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
         blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,

@@ -21,6 +21,8 @@ try {
     constructor(o = {}) {
       this.name = o.name || 'vehicle'; this.x = o.x ?? 0; this.y = o.y ?? 0; this.z = o.z ?? 0; this.yaw = o.yaw ?? 0;
       this.pitch = 0; this.roll = 0; this.v = 0; this.interact = null; this.lift = 0.6;
+      // the same on every client for vehicles built at boot or unparked from the same kerb spot (80-coop matches on it)
+      this.netKey = this.name + '@' + Math.round(this.x * 4) + ',' + Math.round(this.z * 4);
       Vehicle.all.push(this);
     }
     // the boarding prompt; dist(px, pz) may measure to the body instead of the centre; reach(vehicle) may widen r (e.g. left off its berth)

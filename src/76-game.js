@@ -129,7 +129,7 @@ try {
 
   // ---------------------------------------------------------------- health, death, respawn
   const H = AF.health = { v: G.hp, max: G.hp, last: -99, dead: false };
-  const HURT_MODES = new Set(['walk', 'drive', 'jetski']);
+  const HURT_MODES = new Set(['walk', 'drive', 'jetski', 'passenger']);
   H.hurt = (n, src) => {
     if (H.dead || !(n > 0) || !AF.ready || !HURT_MODES.has(AF.mode) || (UI.state && UI.state.title)) return;
     H.v = Math.max(0, H.v - n); H.last = AF.clock.t; HUD.hurt(n); SFX.play('hurt');

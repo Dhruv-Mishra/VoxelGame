@@ -83,9 +83,20 @@ compare draws and GPU ms.
 2. Movers → shared InstancedMeshes, never one mesh per body part.
 3. No `new THREE.*`, array literals or closures in per-frame code.
 4. Lights only via `AF.addLight` (pooled, tier-capped); lamps are emissive voxels.
-5. No new transparent materials except glass/water. 6. `castShadow` only for > 1 m objects near the player.
+5. No new transparent materials except glass/water; a double-sided transparent material needs `forceSinglePass: true` (three r160
+   otherwise draws it twice and re-derives its program every frame). 6. `castShadow` only for > 1 m objects near the player.
 7. No sphere/cylinder > 12 segments for things < 2 m. 8. Map images are baked (`tools/map-bake.mjs`); re-bake after world edits.
 9. Memory: iOS dies near 1.5 GB — check `AF.memStats()`. Runtime objects must have a forget path (76 forget policy, `AF.avatar.release`).
+
+## 8b. Co-op network (locked) — `79-net`, `80-coop`
+- One binary snapshot per client at 20 Hz (15 on phones) on the unordered, no-retransmit `fast` channel: header 8 B, player 40 B,
+  28 B per vehicle (driven + squad cars within 400 m), 12 B per engaged ped within 150 m (only while a peer is within 320 m), shots.
+  Walking ≈ 1.2 KB/s per direction per peer. Players > 250 m apart get 1/2 rate, > 500 m 1/4. A link skips `fast` sends while
+  `bufferedAmount` > 32 KB. Reliable JSON (`rel`) is for rare events only (hits, seats, looks); 120 msgs/s per link cap.
+- Receivers: time-ordered buffer per thing, render delay = clamp(1.3·interval + 2·jitter + 8, 60, 320) ms, extrapolate ≤ 250 ms
+  then hold; stale / duplicate samples are dropped. `C.build` / `C.ingest` reuse one writer and scratch arrays (no per-frame garbage).
+- Remote players: ≤ 3 avatars (`AF.avatar.build`), hidden beyond 500 m; remote peds reuse 55's 16 `net` walkers (same instanced draws);
+  remote cars are the local copies (or one runtime car each). Co-op adds no draws and no tick work while offline.
 
 ## 9. Measuring
 - `node tools/serve.mjs 8765`; `node tools/build.mjs --check`. Baseline: `git show HEAD:output.html > tools/output-base.html`.

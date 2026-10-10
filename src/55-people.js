@@ -1368,6 +1368,8 @@ try {
     for (const w of W) if (!w.lead) spawnWalker(w, C, false);
     // the police pool (77-combat): 8 inactive walkers in the cop look, woken with an .agg when the wanted level calls for them
     if (SP.cop !== undefined) for (let i = 0; i < 8; i++) W.push({ id: CR.NW + i, v: SP.cop, vd: SP.cop, vn: SP.cop, cop: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk' });
+    // co-op proxy pool (80-coop): ids are their index, so a remote owner's ped id never collides with these
+    for (let i = 0; i < 16; i++) W.push({ id: W.length, v: 0, vd: 0, vn: 0, net: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk', nf: 'p', lie: false });
     CR.benches = AF.spots.filter((spot) => spot.kind === 'bench' && !spotsTaken.has(spot));
     CR.benchTaken = new Set();
   }
@@ -1553,7 +1555,7 @@ try {
       refreshCand(C);
       if (jump > 45) {
         dens.clear(); flows.clear();
-        for (const w of CR.walkers) if (!w.lead && !w.cop && !w.agg) spawnWalker(w, C, false);
+        for (const w of CR.walkers) if (!w.lead && !w.cop && !w.agg && !w.net) spawnWalker(w, C, false);
       }
     }
     dt = Math.min(dt, 0.1);
@@ -1563,7 +1565,7 @@ try {
     const eveningDistrict = Math.abs(C.x) < 35 && C.z > 4 && C.z < 165;
     const population = Math.floor(CR.NW * 0.85 * (hN < 5 || hN >= 23 ? 0.45 : nightW ? eveningDistrict ? 0.8 : 0.6 : hN < 8 ? 0.75 : 1));
     dens.clear(); flows.clear();
-    for (const w of CR.walkers) if (w.act && !w.lead && w.id < population) {
+    for (const w of CR.walkers) if (w.act && !w.lead && !w.agg && w.A && w.id < population) {
       const cell = cellK(w.x, w.z); dens.set(cell, (dens.get(cell) || 0) + 1 + (w.nf || 0));
       const key = flowKey(w.A, w.B); flows.set(key, (flows.get(key) || 0) + flowSign(w.A, w.B));
     }
@@ -1571,6 +1573,15 @@ try {
     const fc = CR.farCnt; for (const c of fc) c.a = c.p = c.b = 0;
     const CB = AF.combat;
     for (const w of CR.walkers) {
+      // co-op proxies (80-coop): another player's engaged ped or cop, posed from the network, drawn like the crowd
+      if (w.net) {
+        if (w.act && CR.V[w.v]) {
+          const V = CR.V[w.v]; let f = w.nf; if (!V.im[f]) f = 'p';
+          const im = V.im[f], c = cnt[w.v];
+          if (c[f] < im.instanceMatrix.count) { if (!c[f]) draws++; if (w.lie) putLie(im, c[f]++, w.x, w.y, w.z, w.yaw, w.s); else putInst(im, c[f]++, w.x, w.y, w.z, w.yaw, w.s, 1); }
+        }
+        continue;
+      }
       // engaged (77-combat owns them: fleeing, fighting, down) or a cop: stepped there, always drawn at full detail
       if (w.agg) {
         if (CB && CB.stepPed(w, dt)) {
@@ -1645,7 +1656,7 @@ try {
     // talkable passer-by: the nearest walker within 2 m of the player
     if (CR.it && pp.walk) {
       let best = null, bd = 2.2;
-      for (const w of CR.walkers) { if (!w.act || w.lead || w.agg) continue; const d = Math.abs(w.x - pp.x) + Math.abs(w.z - pp.z); if (d < bd) { bd = d; best = w; } }
+      for (const w of CR.walkers) { if (!w.act || w.lead || w.agg || w.net) continue; const d = Math.abs(w.x - pp.x) + Math.abs(w.z - pp.z); if (d < bd) { bd = d; best = w; } }
       for (const e of CR.extras) { if (e.pose !== 'sit' && e.pose !== 'stand') continue; const d = Math.abs(e.x - pp.x) + Math.abs(e.z - pp.z) + Math.abs(e.y - (AF.player.y || 0)) * 0.5; if (d < bd) { bd = d; best = e; } }
       CR.near = best;
       if (best) { if (best.id == null) best.id = Math.floor(hash(best.s) * 1e6); if (!best.name) nameWalker(best); CR.it.x = best.x; CR.it.y = best.y + 1; CR.it.z = best.z; CR.it.label = (best.pose === 'sit' ? 'Chat with ' : 'Talk to ') + best.first; }

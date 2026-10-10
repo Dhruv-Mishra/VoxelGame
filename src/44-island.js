@@ -141,14 +141,14 @@ AF.onTick('island-jetskis',307,(dt,t)=>{
  const M=JS.mesh;if(!M)return;const cp=AF.camera.position;
  if(!JS.cur&&((cp.x-I.cx)/520)**2+((cp.z-I.cz)/430)**2>1){if(M.count){M.count=0;M.layers.set(31);}return;}
  let n=0;
- for(const k of JS.skis){if(JS.cur!==k)k.drift(dt);skiAt(n++,k.x,skiY(k,t),k.z,k.yaw,k.pitch,k.roll);}
+ for(const k of JS.skis){if(JS.cur!==k&&k.net==null)k.drift(dt);skiAt(n++,k.x,k.net!=null?k.y:skiY(k,t),k.z,k.yaw,k.pitch,k.roll);}
  const R=JS.riders;if(R&&R.active)for(const a of R.actors)skiAt(n++,a.x,SEA-0.1+Math.sin(t*2.6+a.ph)*0.06,a.z,a.yaw,0.08,Math.sin(t*0.9+a.ph)*0.12);
  M.count=n;M.layers.set(n?0:31);M.instanceMatrix.needsUpdate=true;
 });
 // a rideable jet ski (AF.Vehicle): boarded from its dock, or wherever it was left (the prompt follows it, reaching up the beach)
 class JetSki extends AF.Vehicle{
  constructor(d,i){super({name:'Serena jet ski',x:d.x,z:d.z,yaw:d.yaw});this.y=SEA;this.w=0;this.ph=i*1.7;this.home=d;
-  this.attach({label:'Ride a jet ski',r:5,prio:0.3,can:()=>AF.mode==='walk'&&JS.cur!==this,act:()=>AF.setMode('jetski',{ski:this})});this.sync();}
+  this.attach({label:'Ride a jet ski',r:5,prio:0.3,can:()=>AF.mode==='walk'&&JS.cur!==this&&this.net==null,act:()=>AF.setMode('jetski',{ski:this})});this.sync();}
  sync(){const it=this.interact,d=this.home;if(Math.hypot(this.x-d.x,this.z-d.z)<4){it.x=d.land[0];it.z=d.land[1];it.y=d.y+1;it.r=5;}else{it.x=this.x;it.z=this.z;it.y=undefined;it.r=11;}}
  // coasting with nobody aboard
  drift(dt){if(Math.abs(this.v)<=0.05)return;this.v*=Math.exp(-dt*0.9);const nx=this.x+Math.sin(this.yaw)*this.v*dt,nz=this.z+Math.cos(this.yaw)*this.v*dt;if(wet(nx,nz)){this.x=nx;this.z=nz;}else this.v=0;this.roll*=Math.exp(-dt*2);this.pitch*=Math.exp(-dt*2);this.sync();}

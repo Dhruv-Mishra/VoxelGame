@@ -1030,7 +1030,7 @@ try {
       const cg = new THREE.CylinderGeometry(3.6, 0.35, 320, 16, 1, true); cg.translate(0, 160, 0);
       spots.forEach((sp, i) => {
         // fades with the camera's distance to each fragment (a nearby beam never reads as a pale blob) and toward the far end
-        const mat = new THREE.ShaderMaterial({ uniforms: { opacity: { value: 0 }, uCol: { value: new THREE.Color(0xd8e6ff) } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        const mat = new THREE.ShaderMaterial({ uniforms: { opacity: { value: 0 }, uCol: { value: new THREE.Color(0xd8e6ff) } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true,
           vertexShader: 'varying vec3 vW; varying float vH; varying vec3 vN; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vH = position.y / 320.0; vN = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * viewMatrix * w; }',
           fragmentShader: 'uniform float opacity; uniform vec3 uCol; uniform float uT; varying vec3 vW; varying float vH; varying vec3 vN; float hh(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); } void main(){ vec3 V = normalize(cameraPosition - vW); float edge = abs(dot(normalize(vN), V)); float soft = pow(edge, 1.6); float d = distance(cameraPosition, vW); float core = 1.0 + 2.5 * exp(-vH * 18.0); float n = 0.85 + 0.15 * sin(vH * 40.0 - uT * 0.7 + hh(floor(vW.xz * 0.2)) * 6.0); float a = opacity * soft * core * n * smoothstep(12.0, 70.0, d) * (1.0 - smoothstep(0.45, 1.0, vH)) * (0.55 + 0.45 * (1.0 - vH)); gl_FragColor = vec4(uCol * a, a); }' });
         mat.uniforms.uT = { value: 0 };

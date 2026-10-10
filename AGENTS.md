@@ -7,11 +7,16 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - `node tools/build.mjs --check` — syntax-checks parts, concatenates `shell.html` + `src/*.js` (sorted) into `output.html`.
   `--min --out=output-min.html` = esbuild whitespace/syntax minify (identifiers kept: worker sources come from `Function.toString()`).
 - `node tools/serve.mjs 8765` → http://127.0.0.1:8765/output.html. `?test` runs `AF.test` self-tests (title `passed/total`, ~35 s;
-  only "boot under 30 s" may fail locally). Other flags: `?nostream ?nofade ?noupscale ?noworker ?mobile ?shot ?near=x,y,z`.
+  only "boot under 30 s" may fail locally). Other flags: `?nostream ?nofade ?noupscale ?noworker ?mobile ?shot ?near=x,y,z`,
+  `?join=CODE` (prefills the co-op code), `?signal=wss://…` (signaling override; also `localStorage['portSolace.signal']`).
+  `serve.mjs` also serves dev signaling at `/signal/*` (same protocol as the Worker), so co-op works on localhost with no Worker.
 - Deploy: rebuild both `output.html` and `output-min.html`, commit, `vercel --prod`. Vercel serves `/` → `output-min.html`
   (`vercel.json`; `.vercelignore` ships only the HTML, `assets/` and config).
 - World map = baked images in `assets/` (`node tools/map-bake.mjs`, server running, `playwright` resolvable); re-bake after
   terrain / road / building edits.
+- Co-op signaling = Cloudflare Worker + Durable Object in `signal/` (`npx wrangler@4 deploy` from `signal/`). Its URL is `SIGNAL` in
+  `79-net.js`; game origins must match `ALLOWED_ORIGINS` in `signal/wrangler.toml`. Optional TURN: `wrangler secret put
+  TURN_KEY_ID` / `TURN_KEY_API_TOKEN`. The build stamps `'%%BUILD_HASH%%'`; hosts reject guests on another build.
 
 ## Architecture (global `AF`)
 - Parts are plain scripts in one module, each wrapped in `try{}catch(e){AF.partError(...)}`; numeric prefix = load order.
@@ -37,6 +42,8 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Gameplay: 76 core (`AF.G` tuning, `AF.save`, money, health/death, `AF.shop` sheet, `AF.fx` particles, `AF.sfx`, `AF.hud`,
   forget policy) · 77 combat (weapons, engaged peds, run-overs, police/wanted, autogyro, vehicle damage) · 78 jobs (jobs,
   counters, Body Works / Motor Exchange zones, carnival games, carousel, wardrobe, Westgate boarding pass).
+- Co-op: 79 net (`AF.net`: lobby, WebRTC links, reliable `send/on`, binary `fast/onFast`) · 80 coop (`AF.coop`: snapshots,
+  remote avatars / vehicles / peds, `passenger` mode, hit forwarding, tags, lobby UI).
 
 ## Gameplay layer (76–78)
 - Balance only in `AF.G` (prices, pay, damage, heat, star thresholds, forget distances). `AF.save` (money, guns, ammo, mags,
@@ -52,6 +59,16 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Keys: Q / click attack, Z / right mouse aim, wheel / 1–5 / X weapon, R reload, C camera, J job. Touch (72): stick to the rim runs;
   one context cluster bottom-right (big primary + ≤ 3 secondaries chosen per mode / weapon, `AF.touchUI`) + CAM / JOB utilities.
 - Path walkers (54: airport, outland, island) react via `AF.walkers.near/knock/stagger/scare/isDown` (77 bumps, hits, run-overs, panic).
+
+## Co-op (79–80)
+- Star around the host (slot 0, guests 1–3) over WebRTC; the Worker only brokers the join. The host relays and stamps `from`;
+  network messages can never fire local-only events (`INTERNAL` in 79). Register every reliable type with `N.on` and validate fields.
+- Ownership: each client simulates its avatar, the vehicle it drives, the peds / police it engaged and its autogyro, and sends them
+  in one binary snapshot (`C.build` / `C.ingest`, 20 Hz, 15 on phones). Ambient crowd, traffic and animals stay local.
+- Remote things: `car.net = slot` (drive `can()` refuses them), 16 pooled `w.net` walkers in 55, `AF.avatar.build` per remote player.
+  Hits on something another player owns are forwarded to its owner (`CB.onNetPed/onNetCar/hurtPeer`); `CB.pvp` = friendly fire.
+- Vehicles are matched by `v.netKey` (name + spawn cell, 04). Seated players and ride riders are placed from the receiver's own copy
+  of the vehicle / ride (`anchorOf`), never their world pose. `passenger` mode = riding in another player's vehicle (F gets out).
 
 ## Rules of thumb
 - Settings live in `localStorage['portSolace.*']` (gfx, fps, resH, lod, shadows, bright2, stars, view, sound; game state in `save`).

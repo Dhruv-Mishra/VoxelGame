@@ -210,7 +210,7 @@ try {
     { const p = beamGeo.attributes.position, cA = new Float32Array(p.count * 3);
       for (let i = 0; i < p.count; i++) { const k = Math.pow(Math.max(0, 1 - p.getX(i) / 80), 1.4); cA[i * 3] = k; cA[i * 3 + 1] = k * 0.95; cA[i * 3 + 2] = k * 0.8; }
       beamGeo.setAttribute('color', new THREE.BufferAttribute(cA, 3)); }
-    beamMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+    beamMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
     lampGeo = new THREE.SphereGeometry(0.9, 10, 8); lampMat = new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.9, fog: false });
     for (const lh of SEA.lighthouses) {
       const b = new THREE.Group(); b.position.set(lh.x, lh.y, lh.z);

@@ -68,12 +68,12 @@ try {
     const pl = Object.assign(new AF.Vehicle({ name: T.name, x, z, yaw }), { id, T, G, root, props, x, y: AF.W.groundY(x, z), z, yaw, pitch: 0, roll: 0, gam: 0, pr: 0, rr: 0, v: 0, throttle: 0, engine: false, home: { x, z, yaw }, onGround: true, spin: 0, name: T.name });
     pl.attach({ r: 2.2, lift: 1, label: 'Fly the ' + T.name, prio: 0.1,
       dist: (px, pz) => { const s = Math.sin(pl.yaw), c = Math.cos(pl.yaw), rx = px - pl.x, rz = pz - pl.z, lx = rx * c - rz * s, lz = rx * s + rz * c; return Math.hypot(Math.max(0, Math.abs(lx) - Math.min(1.5, G.halfW)), Math.max(0, Math.abs(lz) - G.halfL)); },
-      can: () => AF.mode === 'walk' && PL.cur !== pl, act: () => AF.setMode('fly', { plane: pl }) });
+      can: () => AF.mode === 'walk' && PL.cur !== pl && pl.net == null, act: () => AF.setMode('fly', { plane: pl }) });
     PL.list.push(pl); place(pl);
     return pl;
   };
   const place = (pl) => { pl.root.position.set(pl.x, pl.y, pl.z); pl.root.rotation.set(-pl.pitch, pl.yaw, pl.roll, 'YXZ'); if (pl.interact) pl.sync(); };
-  PL.make = make;
+  PL.make = make; PL.place = (pl) => place(pl);
   // the model kit for 53-airtraffic's airframes (palette helper, fuselage / wing rasterisers, the airliner propeller)
   PL.kit = { C, fuselage, wing, propGeo: () => planeGeo('airliner').pgeo };
   // approach guidance picks the nearest of these east-west strips { x0, x1, z } (the island adds its own)

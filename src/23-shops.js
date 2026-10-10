@@ -863,7 +863,7 @@ try {
     for (const d of S.dynamic) {
       const mesh = AF.modelMesh(d.geo); mesh.position.set(d.x, d.y, d.z); AF.scene.add(mesh); d.mesh = mesh;
       if (d.flecks) {
-        const N = 64, g = new THREE.PlaneGeometry(0.22, 0.22), mat = new THREE.MeshBasicMaterial({ color: 0xfff0ff, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false });
+        const N = 64, g = new THREE.PlaneGeometry(0.22, 0.22), mat = new THREE.MeshBasicMaterial({ color: 0xfff0ff, transparent: true, opacity: 0.85, side: THREE.DoubleSide, forceSinglePass: true, depthWrite: false });
         const im = new THREE.InstancedMesh(g, mat, N); im.frustumCulled = false; AF.scene.add(im);
         const r = AF.rng(99), dirs = []; for (let i = 0; i < N; i++) { const y = r() * 1.4 - 0.9, a = r() * Math.PI * 2, s = Math.sqrt(1 - Math.min(0.99, y * y)); dirs.push([Math.cos(a) * s, y, Math.sin(a) * s]); }
         d.fl = { im, dirs, obj: new THREE.Object3D() };

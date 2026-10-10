@@ -421,7 +421,7 @@ try {
       AF.addLabel(LH.name, X, Z, 'building');
       AF.addLabel('Breakwater', 282, 232, 'place');
       // rotating beam: two long additive cones from the lantern
-      const beamMat = new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+      const beamMat = new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, fog: false });
       const cg = new THREE.ConeGeometry(4.5, 120, 16, 1, true); cg.translate(0, -60, 0); cg.rotateZ(Math.PI / 2);
       const beam = new THREE.Group(); beam.position.set(X, TOP + 1.5, Z); AF.scene.add(beam);
       const b1 = new THREE.Mesh(cg, beamMat), b2 = new THREE.Mesh(cg, beamMat); b2.rotation.y = Math.PI; b1.renderOrder = b2.renderOrder = 6; b1.frustumCulled = b2.frustumCulled = false;

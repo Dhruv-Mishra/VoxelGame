@@ -585,7 +585,7 @@ function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   const wheels = [];
   for (const [ai, az] of Wl.axles.entries()) for (const s of [1, -1]) wheels.push({ lx: s * (halfW - 0.17), ly: wr, lz: (az + 0.5) * CVS - halfL, front: ai === 1, side: s });
   const car = Object.assign(new AF.Vehicle({ name: T.name, x, z, yaw }), {
-    id: VV.cars.length, type: T, name: T.name, mesh, x, z, y: 0, yaw, pitch: 0, roll: 0, v: 0, vx: 0, vz: 0, steer: 0, spin: 0,
+    id: VV.cars.length, type: T, name: T.name, mesh, x, z, y: 0, yaw, pitch: 0, roll: 0, v: 0, vx: 0, vz: 0, steer: 0, spin: 0, pi: paintIdx,
     halfL, halfW, wr, ws, wheels, wheelbase: Wl.wb || (Wl.axles.length > 1 ? (Wl.axles[1] - Wl.axles[0]) * CVS : 2.4), gait: Math.random() * 6, height: G.spec.H,
     ai: null, parked: true, player: false, driver: -1, bob: 0, bobV: 0, sway: 0, key: G.key, vPrev: 0, brake: 0,
   });
@@ -593,7 +593,7 @@ function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   VV.cars.push(car);
   if (WHEEL_IM) { let count = 4; for (const existing of VV.cars) if (existing.type.id === typeId) count++; ensureIM(typeId, count); }
   if (!o.noDrive && !T.horse) car.attach({ r: 1.6, lift: 0.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => bodyDist(car, px, pz), prio: 0.1,
-    can: () => AF.mode === 'walk' && car.active !== false && !car.player && !car.dead && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
+    can: () => AF.mode === 'walk' && car.active !== false && !car.player && !car.dead && car.net == null && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
   placeMesh(car);
   return car;
 }
@@ -690,7 +690,7 @@ function carContacts(car, dt) {
       if (!depth) continue;
       const normalX = CONTACT[0], normalZ = CONTACT[1];
       const approach = Math.max(0, -(car.vx * normalX + car.vz * normalZ));
-      if (car.player && !other.static && approach > 0.05) {
+      if (car.player && !other.static && other.net == null && approach > 0.05) {
         const share = other.type.big ? 0.035 : other.type.kind === 'bike' ? 0.8 : other.type.kind === 'van' ? 0.3 : 0.5;
         const nudge = Math.min(depth + 0.03, 0.2 + approach * dt) * share;
         const ox = other.x - normalX * nudge, oz = other.z - normalZ * nudge;
@@ -918,6 +918,8 @@ function ensureIM(key, cap) {
   key = key.split(':')[0];
   let r = IMS.get(key);
   if (r && r.cap >= cap) return r;
+  // runtime cars (squads, kerb cars taken) grow the batch by half again, not one slot per car
+  if (r) cap = Math.max(cap, Math.ceil(r.cap * 1.5), r.cap + 8);
   const G = batchGeo(key);
   if (r) for (const o of [r.full, r.glass, r.lod]) if (o) { AF.scene.remove(o); o.dispose && o.dispose(); }
   const mk = (geo, mat, shadow) => { const im = new THREE.InstancedMesh(geo, mat, cap); im.castShadow = shadow; im.customDepthMaterial = AF.mat.depthInst; im.receiveShadow = true; im.frustumCulled = false; im.count = 0; im.name = 'cars:' + key; AF.scene.add(im); return im; };
@@ -1005,7 +1007,7 @@ function syncInstances(dt) {
       }
     }
     // night: head + tail lamps for every moving (or driven) car, pools under the near ones
-    if (lampsOn && (car.ai || car.player) && !car.type.horse && li + 4 <= LAMP.max * 4) {
+    if (lampsOn && (car.ai || car.player || car.net != null) && !car.type.horse && li + 4 <= LAMP.max * 4) {
       const hy = car.type.big ? 0.95 : 0.78, hw = car.halfW - 0.22;
       const far2 = d > 220 ? 1.6 : 1;   // far lamps a touch brighter so the avenues read as rivers of light
       for (let lamp = 0; lamp < 4; lamp++) {
@@ -1187,20 +1189,23 @@ AF.onBuild('vehicles-parking', 480, () => {
   VV.parkMs = Math.round(performance.now() - t0);
   console.log('[af] parked (static):', out.length, 'models', Object.keys(staticGeos).length, 'in', VV.parkMs, 'ms', JSON.stringify(perRoad), JSON.stringify(rej));
   // every kerb car is drivable: one prompt follows the nearest parked car; using it swaps the merged prop for a real car
+  VV.unpark = (s) => {
+    if (!s.outland) AF.removeStatic(s.pr);
+    else if (AF.outland.removeProp) AF.outland.removeProp(s.pr);
+    else { const props = AF.outland.props; props.splice(props.indexOf(s.pr), 1); if (s.pr.col) AF.removeCollider(s.pr.col); AF.outland.addProp(s.pr.geo, s.x, s.y, s.z, s.pr.rot, { collide: false }); props.pop(); }
+    const i = VV.parkedStatic.indexOf(s); if (i >= 0) VV.parkedStatic.splice(i, 1);
+    const j = VV.parked.indexOf(s); if (j >= 0) VV.parked.splice(j, 1);
+    if (proxy.target === s) { proxy.target = null; proxy.y = -999; }
+    const car = makeCar(s.type.id, s.pi, s.x, s.z, s.yaw, { y: s.y }); VV.parked.push(car);
+    car.temp = true; car.home = { type: s.type.id, pi: s.pi, x: s.x, z: s.z, y: s.y, yaw: s.yaw };
+    return car;
+  };
   const proxy = VV.parkProxy = AF.addInteract({ x: 0, y: -999, z: 0, r: 1.6, label: 'Drive', prio: 0.1, target: null,
     dist: (px, pz) => proxy.target ? bodyDist(proxy.target, px, pz) : 99,
     can: () => AF.mode === 'walk' && !!proxy.target,
     act: () => {
       const s = proxy.target; if (!s) return;
-      if (!s.outland) AF.removeStatic(s.pr);
-      else if (AF.outland.removeProp) AF.outland.removeProp(s.pr);
-      else { const props = AF.outland.props; props.splice(props.indexOf(s.pr), 1); if (s.pr.col) AF.removeCollider(s.pr.col); AF.outland.addProp(s.pr.geo, s.x, s.y, s.z, s.pr.rot, { collide: false }); props.pop(); }
-      const i = VV.parkedStatic.indexOf(s); if (i >= 0) VV.parkedStatic.splice(i, 1);
-      const j = VV.parked.indexOf(s); if (j >= 0) VV.parked.splice(j, 1);
-      proxy.target = null; proxy.y = -999;
-      const car = makeCar(s.type.id, s.pi, s.x, s.z, s.yaw, { y: s.y }); VV.parked.push(car);
-      car.temp = true; car.home = { type: s.type.id, pi: s.pi, x: s.x, z: s.z, y: s.y, yaw: s.yaw };
-      AF.setMode('drive', { car });
+      AF.setMode('drive', { car: VV.unpark(s) });
     } });
   let pf = 0;
   AF.onTick('park-proxy', 170, () => {
