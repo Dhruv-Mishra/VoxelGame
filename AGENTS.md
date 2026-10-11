@@ -27,6 +27,11 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - World: `AF.W` voxels at 0.25 m, x∈[-660,300) = the city. Outside it the outland (`AF.PLAN.world`, 4× the city): ground via
   `AF.outland.h(x,z)`. `AF.addBuilding/placeStatic/removeStatic/addLight/addLabel`, models `AF.Model` + `AF.meshModel`,
   colours `AF.col(hex,{metal,rough,emit})`. Layout lives in `05-plan.js` (`AF.PLAN`). Spawn positions need an explicit y.
+- World clock (01, PERF.md §8c): tick hooks get `(dt, t)` with **t = W**, the shared world seconds (`AF.clock.w`, synced to the
+  co-op host); `AF.clock.t` is the local monotonic clock for gameplay timers. Ambient life (time of day, lights, tram, ferries,
+  boats, rides, planes, fireworks, crowd, residents, animals, traffic) must be a pure function of W and `AF.world.seed`
+  (`AF.whash(a,b,c)`), never of `Math.random`, frame counts, the camera or `AF.clock.t`. Local reactions (talking, dodging, fleeing,
+  pushes) are an offset or lag that eases back onto the schedule. Change the time of day only through `AF.time.set`.
 
 ## Parts map
 - Engine: 00 prologue · 01 core/input/pointer lock · 01-stream (streaming engine, preload, travel veil, shader warm-up) ·
@@ -56,15 +61,18 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   first person / near / far) for walk, chase cams and planes — no wheel zoom.
 - Jobs extend `class Job` (78): implement `plan()` → next stop `{x,z,r,wait,t,pay,label,done}` (null ends the shift).
   Counters: `counter(x,y,z,label,open)` + `AF.shop.open({title,sub,tabs,items(tab)})`; drive-in zones via `zone()`.
-- Keys: Q / click attack, Z / right mouse aim, wheel / 1–5 / X weapon, R reload, C camera, J job. Touch (72): stick to the rim runs;
-  one context cluster bottom-right (big primary + ≤ 3 secondaries chosen per mode / weapon, `AF.touchUI`) + CAM / JOB utilities.
+- Keys: Q / click attack, Z / right mouse aim, wheel / 1–5 / X weapon (hold X = weapon wheel), R reload, C camera, J job. Touch (72):
+  stick to the rim runs; one context cluster bottom-right (big primary + ≤ 3 secondaries chosen per mode / weapon, `AF.touchUI`) +
+  CAM / JOB utilities; WPN tap = next weapon, hold = the wheel (`AF.combat.wheelOpen/wheelAim/wheelClose`).
 - Path walkers (54: airport, outland, island) react via `AF.walkers.near/knock/stagger/scare/isDown` (77 bumps, hits, run-overs, panic).
 
 ## Co-op (79–80)
 - Star around the host (slot 0, guests 1–3) over WebRTC; the Worker only brokers the join. The host relays and stamps `from`;
   network messages can never fire local-only events (`INTERNAL` in 79). Register every reliable type with `N.on` and validate fields.
 - Ownership: each client simulates its avatar, the vehicle it drives, the peds / police it engaged and its autogyro, and sends them
-  in one binary snapshot (`C.build` / `C.ingest`, 20 Hz, 15 on phones). Ambient crowd, traffic and animals stay local.
+  in one binary snapshot (`C.build` / `C.ingest`; 20 Hz busy, half on foot, 2 Hz standing still). The ambient world is never
+  sent: the guest adopts the host's seed + epoch on welcome and derives it. Traffic is the one simulation with history: the guest
+  loads the host's fleet (`VV.trafficSave/Load`) on joining and again if the checksum riding on the host's pongs ever differs.
 - Remote things: `car.net = slot` (drive `can()` refuses them), 16 pooled `w.net` walkers in 55, `AF.avatar.build` per remote player.
   Hits on something another player owns are forwarded to its owner (`CB.onNetPed/onNetCar/hurtPeer`); `CB.pvp` = friendly fire.
 - Vehicles are matched by `v.netKey` (name + spawn cell, 04). Seated players and ride riders are placed from the receiver's own copy

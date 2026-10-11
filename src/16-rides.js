@@ -53,24 +53,23 @@ try {
     enter(o = {}) {
       const FW = L.ferris, CO = L.coaster;
       if (!FW || !CO) { AF.setMode('walk'); return; }
-      const R = RD.cur = { kind: o.ride === 'coaster' ? 'coaster' : 'wheel', t: 0, done: 0, last: 0 };
+      const R = RD.cur = { kind: o.ride === 'coaster' ? 'coaster' : 'wheel', t: 0, done: 0, last: 0, wait: false };
       RD.yaw = 0; RD.pitch = 0;
+      // both rides run on the shared world clock (14-harbour): step into the empty gondola nearest the ground, or onto the
+      // coaster the next time it stands in the station, so co-op friends see you on the same seat
       if (R.kind === 'wheel') {
-        // an empty gondola (odd patterns carry no riders) brought round to the bottom, then the wheel speeds up for one turn
         const n = FW.gonds.length; let best = 1, bd = 1e9;
         for (let i = 1; i < n; i += 2) { const a = FW.wheel.rotation.x + i / n * TAU, d = Math.abs(AF.angDiff(a, -PI / 2)); if (d < bd) { bd = d; best = i; } }
-        R.gi = best; FW.wheel.rotation.x = -PI / 2 - best / n * TAU; R.last = FW.wheel.rotation.x;
-        FW.k = 2.4; RD.yaw = PI;
+        R.gi = best; R.last = FW.wheel.rotation.x; RD.yaw = PI;
         AF.emit('toast', 'All aboard the Big Wheel! ' + (AF.touch ? 'Drag to look around, EXIT to get off.' : 'Move the mouse to look around, E to get off.'));
       } else {
-        CO.st.s = CO.LEN * 0.0151; CO.st.dwell = 2.5; R.last = CO.st.s;
-        AF.emit('toast', 'Front seat on the Sea Serpent \u2014 hold on! ' + (AF.touch ? 'EXIT' : 'E') + ' to get off at the station.');
+        R.wait = !(CO.st.dwell > 0.6); R.last = CO.st.s;
+        AF.emit('toast', R.wait ? 'The Sea Serpent is out on the track — you board when it pulls in.' : 'Front seat on the Sea Serpent — hold on! ' + (AF.touch ? 'EXIT' : 'E') + ' to get off at the station.');
       }
       if (AF.player) AF.player.setVisible(false);
       AF.emit('hint', AF.touch ? '' : 'Mouse look \u00b7 E get off');
     },
     exit() {
-      if (L.ferris) L.ferris.k = 1;
       RD.cur = null;
       if (AF.player) AF.player.setVisible(true);
       AF.emit('hud', { speed: null }); AF.emit('hint', '');
@@ -82,14 +81,18 @@ try {
         RD.yaw -= m.dx * 0.004; RD.pitch = AF.clamp(RD.pitch - m.dy * 0.004, -1.1, 1.1);
       }
       if (R.kind === 'wheel') {
-        const FW = L.ferris; R.done += Math.max(0, FW.wheel.rotation.x - R.last); R.last = FW.wheel.rotation.x;
+        const FW = L.ferris; R.done += Math.max(0, AF.angDiff(R.last, FW.wheel.rotation.x)); R.last = FW.wheel.rotation.x;
         if (R.done >= TAU) { getOff(R, 'Round we go \u2014 thanks for riding the Big Wheel!'); return; }
       } else {
-        const CO = L.coaster; let ds = CO.st.s - R.last; if (ds < -CO.LEN * 0.5) ds += CO.LEN; R.done += Math.max(0, ds); R.last = CO.st.s;
-        if (R.done > CO.LEN * 0.9 && CO.st.dwell > 0) { getOff(R, 'What a ride! The Sea Serpent pulls back into the station.'); return; }
+        const CO = L.coaster;
+        if (R.wait) { if (CO.st.dwell > 0.6) { R.wait = false; R.last = CO.st.s; AF.emit('toast', 'Front seat on the Sea Serpent \u2014 hold on!'); } }
+        else {
+          let ds = CO.st.s - R.last; if (ds < -CO.LEN * 0.5) ds += CO.LEN; R.done += Math.max(0, ds); R.last = CO.st.s;
+          if (R.done > CO.LEN * 0.9 && CO.st.dwell > 0) { getOff(R, 'What a ride! The Sea Serpent pulls back into the station.'); return; }
+        }
       }
       if (I.hit('KeyE') || I.hit('KeyF')) {
-        if (R.kind === 'wheel') getOff(R, 'The operator stops the wheel and lets you off.');
+        if (R.kind === 'wheel' || R.wait) getOff(R, R.wait ? 'You step out of the queue.' : 'The operator stops the wheel and lets you off.');
         else if (L.coaster.st.dwell > 0 || R.done < 1) getOff(R, 'You climb out at the station.');
         else AF.emit('toast', 'Keep your arms inside the car until the station!');
       }
@@ -105,7 +108,14 @@ try {
       cam.position.copy(eye); cam.up.copy(up);
       e.set(RD.pitch, RD.yaw + PI, 0, 'YXZ'); cam.quaternion.setFromEuler(e);
       const FW = L.ferris;
-      AF.emit('hud', { mode: 'fly', speed: FW.WR * 0.07 * (FW.k || 1) * 2.237, alt: Math.max(0, eye.y), car: 'The Big Wheel \u00b7 ' + Math.round(Math.min(1, R.done / TAU) * 100) + '% \u00b7 ' + (AF.touch ? 'EXIT' : 'E') + ' get off' });
+      AF.emit('hud', { mode: 'fly', speed: FW.WR * FW.SPIN * 2.237, alt: Math.max(0, eye.y), car: 'The Big Wheel \u00b7 ' + Math.round(Math.min(1, R.done / TAU) * 100) + '% \u00b7 ' + (AF.touch ? 'EXIT' : 'E') + ' get off' });
+    } else if (R.wait) {
+      // queueing on the station platform, watching for the train
+      const CO = L.coaster; CO.curve.getPointAt(0.015, eye); const sy = CO.hAt(0.015);
+      cam.position.set(eye.x + 3.2, sy + 2.0, eye.z - 3.4); cam.up.copy(up); cam.lookAt(eye.x - 6, sy + 1, eye.z + 2);
+      const P = CO.PERIOD, tau = (((AF.clock.w + 13.7) % P) + P) % P;
+      AF.emit('hud', { mode: 'fly', speed: 0, alt: 0, car: 'Sea Serpent \u00b7 boarding in ' + Math.max(1, Math.ceil(P - tau)) + ' s' });
+      eye.copy(cam.position);
     } else {
       const car = L.coaster.cars[0]; car.updateMatrixWorld();
       eye.set(0, 1.75, -0.1).applyMatrix4(car.matrixWorld);
@@ -121,13 +131,16 @@ try {
     const was = AF.mode, P = AF.player, save = P ? { x: P.x, y: P.y, z: P.z } : null;
     let wheel = false, coaster = false;
     try {
+      const t0 = AF.clock.w; L.hbUpdate(0, t0);
       AF.setMode('funride', { ride: 'wheel' }); const y0 = wheelSeat(RD.cur, new THREE.Vector3()).y;
-      for (let i = 0; i < 60; i++) { L.hbUpdate(1 / 30, i / 30); AF.modes.funride.update(1 / 30); }
+      for (let i = 1; i <= 240; i++) { L.hbUpdate(1 / 30, t0 + i / 30); AF.modes.funride.update(1 / 30); }
       wheel = AF.mode === 'funride' && RD.cur.done > 0 && wheelSeat(RD.cur, new THREE.Vector3()).y > y0;
       AF.setMode('walk');
-      AF.setMode('funride', { ride: 'coaster' }); const s0 = L.coaster.st.s;
-      for (let i = 0; i < 150; i++) { L.hbUpdate(1 / 30, i / 30); AF.modes.funride.update(1 / 30); }
-      coaster = AF.mode === 'funride' && RD.cur.done > 0 && L.coaster.st.s !== s0;
+      // the next time the train stands in the station (+1 s), board, then ride 10 s
+      const CO = L.coaster, P = CO.PERIOD, tb = t0 + ((P - (((t0 + 13.7) % P) + P) % P) % P) + 1;
+      L.hbUpdate(0, tb); AF.setMode('funride', { ride: 'coaster' }); const s0 = CO.st.s, boarded = !RD.cur.wait;
+      for (let i = 1; i <= 300; i++) { L.hbUpdate(1 / 30, tb + i / 30); AF.modes.funride.update(1 / 30); }
+      coaster = boarded && AF.mode === 'funride' && RD.cur.done > 0 && CO.st.s !== s0;
     } finally { AF.setMode(was || 'walk'); if (save && P.teleport) P.teleport(save.x, save.y, save.z); }
     return { ok: wheel && coaster, info: `wheel ${wheel}, coaster ${coaster}` };
   });

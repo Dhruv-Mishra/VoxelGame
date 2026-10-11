@@ -18,22 +18,22 @@ try {
   };
   R.setPixelRatio(AF.basePR());
   // render vs display resolution: the scene + post chain render at AF.renderPR() (base x dynamic scale); while AF.upscaleOn (61-post)
-  // the canvas keeps the display's resolution (<= 2x CSS px) and the last post pass upscales + sharpens instead of the browser's
-  // bilinear stretch. Everything that changes the resolution calls AF.applyPR().
+  // the canvas keeps the display's resolution (<= 2x CSS px; phones <= 2x the render) and the last pass upscales + sharpens instead
+  // of the browser's bilinear stretch. Everything that changes the resolution calls AF.applyPR().
   AF.upscaleOn = false;
   AF.renderPR = () => AF.basePR() * AF.GFX.scale;
-  AF.outputPR = () => { const r = AF.renderPR(); return AF.upscaleOn ? Math.max(r, Math.min(devicePixelRatio || 1, 2)) : r; };
+  AF.outputPR = () => { const r = AF.renderPR(), d = Math.min(devicePixelRatio || 1, 2); return AF.upscaleOn ? Math.max(r, AF.MOBILE ? Math.min(d, r * 2) : d) : r; };
   AF.applyPR = () => { const pr = AF.outputPR(); if (Math.abs(R.getPixelRatio() - pr) > 1e-3) R.setPixelRatio(pr); if (AF.resize) AF.resize(); };
   R.outputColorSpace = THREE.SRGBColorSpace;
   R.toneMapping = THREE.ACESFilmicToneMapping;
   R.toneMappingExposure = 1.0;
   R.shadowMap.enabled = true;
   R.shadowMap.type = THREE.PCFSoftShadowMap;
-  // shadow quality (menu): off / low (near map only, <= 1024, Standard cadence) / high (tier default); phones default to low
+  // shadow quality (menu): off / low (near map only, <= 1024, Standard cadence) / high (tier default); phones default to off
   AF.shadowQ = (() => {
     const SQ = ['off', 'low', 'high'], q = AF.Q.get('shadows'); if (SQ.includes(q)) return q;
     if (!AF.TEST && !AF.SHOT) try { const v = localStorage.getItem('portSolace.shadows'); if (SQ.includes(v)) return v; } catch (e) {}
-    return AF.MOBILE ? 'low' : 'high';
+    return AF.MOBILE ? 'off' : 'high';
   })();
   AF.maxAniso = R.capabilities.getMaxAnisotropy();
 
@@ -103,7 +103,7 @@ try {
 
   // fallback time-of-day (the atmosphere part replaces AF.timeTick)
   AF.timeTick = (dt) => {
-    const T = AF.time; if (!T.paused) T.hours = (T.hours + dt * T.speed) % 24;
+    const T = AF.time; T.hours = T.at();
     const a = (T.hours - 6) / 12 * Math.PI; // 6h sunrise, 18h sunset
     T.sunDir.set(Math.cos(a) * 0.8, Math.max(0.05, Math.sin(a)), 0.45).normalize();
     T.night = AF.smooth(0.15, -0.1, Math.sin(a));
@@ -187,10 +187,12 @@ try {
   const frame = (rdt) => {
     if (graphicsReset) return;
     // AF.timeScale 0 freezes the world (photo mode); AF.clock.real keeps the wall-clock step for cameras
-    const dt = rdt * AF.timeScale;
-    AF.clock.real = rdt; AF.clock.dt = dt; AF.clock.t += dt; AF.clock.frame++;
+    const dt = rdt * AF.timeScale, CK = AF.clock;
+    CK.real = rdt; CK.dt = dt; CK.t += dt; CK.frame++;
+    // world time (01-core): wall clock on the host's timeline; frozen with the world, dt-stepped for deterministic harnesses
+    if (dt > 0) CK.w = AF.TEST || AF.SHOT || CK.stepping ? CK.w + dt : AF.wnow();
     for (const h of AF.hooks.tick) {
-      try { h.fn(dt, AF.clock.t); }
+      try { h.fn(dt, CK.w); }
       catch (e) { if (h.errs++ < 3) console.error('[af] tick ' + h.name + ' threw:', e); if (AF.MOBILE) AF.reportError(e); if (h.errs === 3) AF.errors.push({ part: 'tick:' + h.name, msg: String(e && e.stack || e) }); }
     }
     // near map refresh in Hz, not frames: at the 30 fps cap High + Balanced refresh every frame, Standard + Low every 2nd
@@ -258,7 +260,7 @@ try {
     document.addEventListener('visibilitychange', kick); kick();
   }
   // deterministic stepping for tests / headless shots
-  AF.step = (n = 1, dt = 1 / 60) => { const was = AF.paused; AF.paused = true; for (let i = 0; i < n; i++) frame(dt); AF.paused = was; return AF.clock.frame; };
+  AF.step = (n = 1, dt = 1 / 60) => { const was = AF.paused, ws = AF.clock.stepping; AF.paused = true; AF.clock.stepping = true; try { for (let i = 0; i < n; i++) frame(dt); } finally { AF.paused = was; AF.clock.stepping = ws; } return AF.clock.frame; };
   AF.pause = () => { AF.paused = true; };
   AF.resume = () => { AF.paused = graphicsReset; };
   AF.capture = () => { AF.renderFrame(); return cv.toDataURL('image/png'); };

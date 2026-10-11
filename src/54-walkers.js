@@ -13,12 +13,12 @@ try {
     const lengths=new Float64Array(pts.length),waits=new Float64Array(pts.length);
     for(let index=1;index<pts.length;index++){lengths[index]=lengths[index-1]+Math.hypot(pts[index][0]-pts[index-1][0],pts[index][1]-pts[index-1][1],pts[index][2]-pts[index-1][2]);if(lengths[index]===lengths[index-1])throw new Error('Duplicate walker waypoint');}
     for(const stop of dwell){if(!Number.isInteger(stop.i)||stop.i<0||stop.i>=pts.length||!Number.isFinite(stop.t)||stop.t<0)throw new Error('Invalid walker dwell');waits[stop.i]=stop.t;}
-    const path={name,points:pts,lengths,waits,length:lengths[lengths.length-1],count:count|0,speed,mode,activeRadius,active:false,enabled:true,actors:[],minX:Infinity,minY:Infinity,minZ:Infinity,maxX:-Infinity,maxY:-Infinity,maxZ:-Infinity};
+    const path={name,idx:WK.paths.length,points:pts,lengths,waits,length:lengths[lengths.length-1],count:count|0,speed,mode,activeRadius,active:false,enabled:true,actors:[],minX:Infinity,minY:Infinity,minZ:Infinity,maxX:-Infinity,maxY:-Infinity,maxZ:-Infinity};
     for(const point of pts){path.minX=Math.min(path.minX,point[0]);path.maxX=Math.max(path.maxX,point[0]);path.minY=Math.min(path.minY,point[1]);path.maxY=Math.max(path.maxY,point[1]+2);path.minZ=Math.min(path.minZ,point[2]);path.maxZ=Math.max(path.maxZ,point[2]);}
     const rng=AF.rng(WK.paths.length*733+541);
     for(let index=0;index<path.count;index++){
       const look=looks?.length?looks[index%looks.length]:AF.peopleKit.makeLook('traveler',index%3?'m':'f','adult',rng);
-      const actor={s:path.length*index/Math.max(1,path.count),dir:1,wait:0,gap:0,ph:index*1.7,x:0,y:0,z:0,yaw:0,look,pal:palette(look),bag:rng()<luggage,moving:false,frame:0};
+      const actor={s:path.length*index/Math.max(1,path.count),dir:1,wait:0,gap:0,gap0:2+(index*1.7)%4,idx:index,lag:0,ph:index*1.7,x:0,y:0,z:0,yaw:0,look,pal:palette(look),bag:rng()<luggage,moving:false,frame:0};
       locate(path,actor);path.actors.push(actor);
     }
     WK.paths.push(path);return path;
@@ -30,28 +30,30 @@ try {
     actor.x=before[0]+(at[0]-before[0])*fraction;actor.y=before[1]+(at[1]-before[1])*fraction;actor.z=before[2]+(at[2]-before[2])*fraction;
     actor.yaw=Math.atan2((at[0]-before[0])*actor.dir,(at[2]-before[2])*actor.dir);
   }
-  function advance(path,actor,dt){
+  // Ambient progress along a path is a pure function of the shared world clock (01-core), so every co-op player sees the same
+  // passengers in the same places: one pass (loop / flow) or there-and-back (pingpong) with its dwells is a timetable, each actor
+  // offset by its share of it. Reactions (shoved, down, scared) are local and only shift that actor's clock (a.lag), which eases back.
+  function timeline(path){
+    if(path.tl)return path.tl;
+    const L=path.lengths,n=L.length,t=[],s0=[],s1=[],dur=[],dc=[];let T=0,D=0;
+    const seg=(a,b,d)=>{t.push(T);s0.push(a);s1.push(b);dur.push(d);dc.push(D);T+=d;D+=Math.abs(b-a);};
+    for(let i=1;i<n;i++){seg(L[i-1],L[i],(L[i]-L[i-1])/path.speed);if(path.waits[i]>0)seg(L[i],L[i],path.waits[i]);}
+    if(path.mode==='pingpong')for(let i=n-2;i>=0;i--){seg(L[i+1],L[i],(L[i+1]-L[i])/path.speed);if(path.waits[i]>0)seg(L[i],L[i],path.waits[i]);}
+    return path.tl={t:Float64Array.from(t),s0:Float64Array.from(s0),s1:Float64Array.from(s1),dur:Float64Array.from(dur),dc:Float64Array.from(dc),T};
+  }
+  function placeAt(path,actor,W){
     actor.moving=false;
-    if(!path.speed||!path.length)return;
-    let remaining=dt;
-    if(actor.gap>0){const used=Math.min(remaining,actor.gap);actor.gap-=used;remaining-=used;}
-    if(actor.wait>0){const used=Math.min(remaining,actor.wait);actor.wait-=used;remaining-=used;}
-    for(let hops=0;remaining>0&&hops<16;hops++){
-      let next=actor.dir>0?1:path.lengths.length-2;
-      if(actor.dir>0){while(next<path.lengths.length-1&&path.lengths[next]<=actor.s+1e-7)next++;}
-      else {while(next>0&&path.lengths[next]>=actor.s-1e-7)next--;}
-      const distance=Math.abs(path.lengths[next]-actor.s),travel=Math.min(distance,path.speed*remaining);
-      actor.s+=travel*actor.dir;remaining-=travel/path.speed;actor.moving=travel>0;actor.ph+=travel*4;
-      if(travel+1e-7<distance)break;
-      actor.wait=path.waits[next];
-      if(actor.s>=path.length-1e-7){
-        if(path.mode==='pingpong')actor.dir=-1;
-        else {actor.s=0;if(path.mode==='flow')actor.gap=2+actor.ph%4;}
-      }else if(actor.s<=1e-7&&actor.dir<0)actor.dir=1;
-      if(actor.wait>0||actor.gap>0)break;
-    }
+    if(!path.speed||!path.length){locate(path,actor);return;}
+    const tl=timeline(path),P=tl.T+(path.mode==='flow'?actor.gap0:0),ph0=AF.whash(path.idx,54)*tl.T;
+    const tau=((W-(actor.lag||0)+P*actor.idx/Math.max(1,path.count)+ph0)%P+P)%P;
+    if(tau>=tl.T){actor.gap=P-tau;actor.s=0;actor.dir=1;locate(path,actor);return;}   // flow: off stage between passes
+    actor.gap=0;
+    let lo=0,hi=tl.t.length-1;while(lo<hi){const m=(lo+hi+1)>>1;if(tl.t[m]<=tau)lo=m;else hi=m-1;}
+    const u=Math.min(1,(tau-tl.t[lo])/tl.dur[lo]),a=tl.s0[lo],b=tl.s1[lo];
+    actor.s=a+(b-a)*u;actor.moving=b!==a;actor.dir=b<a?-1:1;actor.wait=actor.moving?0:tl.dur[lo]*(1-u);actor.ph=(tl.dc[lo]+Math.abs(b-a)*u)*4;
     locate(path,actor);
   }
+  const easeLag=(a,dt)=>{if(a.lag)a.lag-=Math.sign(a.lag)*Math.min(Math.abs(a.lag),dt*0.4);};
   WK.distance2=(path,camera)=>Math.max(path.minX-camera.x,0,camera.x-path.maxX)**2+Math.max(path.minY-camera.y,0,camera.y-path.maxY)**2+Math.max(path.minZ-camera.z,0,camera.z-path.maxZ)**2;
   // reactions to the player (77-combat): shoved (stagger), knocked flat (down s, then they get up), scared (run along the path, or cower
   // in place when the path has no speed). Offsets from the path ease back once they walk on. State lives on the actor (actor.rx), made once.
@@ -69,13 +71,14 @@ try {
       for(const a of path.actors)if(!(a.gap>0)&&(a.x-x)**2+(a.z-z)**2<r2&&reacts(a))NEAR.push(a);}
     return NEAR;
   };
-  function react(path,a,dt){
+  function react(path,a,dt,W){
     const R=a.rx;let still=false;
     if(R.down>0){R.down-=dt;R.fall=Math.min(1,R.fall+dt*5);still=true;}
     else if(R.fall>0){R.fall=Math.max(0,R.fall-dt*1.4);still=true;}
     if(R.st>0)R.st=Math.max(0,R.st-dt);
     if(R.fear>0)R.fear-=dt;
-    if(still||!path.speed||!path.length){a.moving=false;locate(path,a);}else advance(path,a,R.fear>0?dt*2.6:dt);
+    if(still)a.lag=(a.lag||0)+dt;else if(R.fear>0)a.lag=(a.lag||0)-dt*1.6;else easeLag(a,dt);
+    placeAt(path,a,W);if(still)a.moving=false;
     const k=Math.exp(-dt*5);R.ox+=R.vx*dt;R.oz+=R.vz*dt;R.vx*=k;R.vz*=k;
     if(!still&&!(R.st>0)){const e=Math.exp(-dt*0.7);R.ox*=e;R.oz*=e;}
     a.x+=R.ox;a.z+=R.oz;
@@ -117,7 +120,7 @@ try {
     if(!active){if(visibleBefore)for(const mesh of WK.meshes){mesh.count=0;mesh.visible=false;}visibleBefore=false;WK.stats.visible=WK.stats.draws=0;return;}
     let count=0,bags=0;
     for(const path of WK.paths){if(!path.active)continue;
-      for(const actor of path.actors){if(actor.rxOn)react(path,actor,dt);else advance(path,actor,dt);if(actor.gap>0)continue;
+      for(const actor of path.actors){if(actor.rxOn)react(path,actor,dt,time);else{easeLag(actor,dt);placeAt(path,actor,time);}if(actor.gap>0)continue;
         const distance2=(actor.x-camera.x)**2+(actor.y-camera.y)**2+(actor.z-camera.z)**2;if(distance2>path.activeRadius**2)continue;
         actor.sin=Math.sin(actor.yaw);actor.cos=Math.cos(actor.yaw);
         if(distance2<3600||Math.floor(time*5)!==actor.frame){actor.frame=Math.floor(time*5);actor.stride=actor.moving?Math.sin(actor.ph)*0.42:0;actor.wave=Math.sin(time*3)*0.35;}
@@ -149,11 +152,15 @@ try {
   AF.test('walkers: local activation, far freeze and six shared batches',()=>{
     const camera=AF.camera.position.clone(),path=WK.paths[0];if(!path)return{ok:false,info:'no paths'};
     try{AF.camera.position.set(path.minX,2,path.minZ);update(0.1,1);const active=path.active&&WK.stats.visible>0,actor=path.actors[0],before=actor.s;AF.camera.position.set(10000,10000,10000);update(0.1,2);return{ok:active&&!path.active&&actor.s===before&&WK.stats.draws===0&&WK.meshes.length<=6,info:'near '+active+', far frozen '+(actor.s===before)+', batches '+WK.meshes.length};}
-    finally{AF.camera.position.copy(camera);update(0,AF.clock.t);}
+    finally{AF.camera.position.copy(camera);update(0,AF.clock.w);}
   });
-  AF.test('walkers: dwell, pingpong and flow obey dt',()=>{
-    const path={points:[[0,0,0],[1,0,0],[2,0,0]],lengths:new Float64Array([0,1,2]),waits:new Float64Array([0,1,0]),speed:1,length:2,mode:'pingpong'},actor={s:0,dir:1,wait:0,gap:0,ph:0,look:{}};
-    advance(path,actor,1);const dwell=actor.s===1&&actor.wait===1;advance(path,actor,0.5);const waiting=actor.s===1;advance(path,actor,1.5);const reverse=actor.dir===-1;path.mode='flow';actor.s=1.9;actor.dir=1;actor.wait=0;advance(path,actor,0.2);return{ok:dwell&&waiting&&reverse&&actor.s===0&&actor.gap>0,info:'dwell '+dwell+', reverse '+reverse+', flow gap '+actor.gap};
+  AF.test('walkers: dwell, pingpong and flow keep the shared timetable',()=>{
+    const path={idx:999,points:[[0,0,0],[1,0,0],[2,0,0]],lengths:new Float64Array([0,1,2]),waits:new Float64Array([0,1,1]),speed:1,length:2,mode:'pingpong',count:1},actor={s:0,dir:1,wait:0,gap:0,gap0:3,idx:0,lag:0,ph:0,look:{}};
+    const tl=timeline(path),w0=-AF.whash(999,54)*tl.T;   // tau 0 at w0
+    placeAt(path,actor,w0+0.5);const half=Math.abs(actor.s-0.5)<1e-6&&actor.moving;placeAt(path,actor,w0+1.5);const dwell=actor.s===1&&!actor.moving;
+    placeAt(path,actor,w0+4.5);const reverse=actor.dir===-1&&actor.moving,s1=actor.s;placeAt(path,actor,w0+4.5);const same=actor.s===s1;
+    path.mode='flow';path.tl=null;const T=timeline(path).T,w1=-AF.whash(999,54)*T;placeAt(path,actor,w1+T+1);
+    return{ok:half&&dwell&&reverse&&same&&actor.gap>0,info:'mid-leg '+half+', dwell '+dwell+', reverse '+reverse+', repeatable '+same+', flow gap '+actor.gap.toFixed(2)};
   });
   AF.test('walkers: an airport passenger is knocked flat, gets up and rejoins the path',()=>{
     const path=WK.paths.find(p=>/^airport-/.test(p.name)&&p.speed>0&&p.actors.some(a=>!a.look.pose));if(!path)return{ok:false,info:'no airport path'};
@@ -164,7 +171,7 @@ try {
       WK.knock(a,1,0,3,1);for(let i=0;i<8;i++)update(0.1,1+i*0.1);const down=WK.isDown(a)&&a.tilt<-1.2;
       for(let i=0;i<90;i++)update(0.1,2+i*0.1);const up=!a.rxOn&&!a.tilt;
       return{ok:found&&down&&up,info:'near '+found+', down '+down+', back on path '+up};
-    }finally{AF.camera.position.copy(camera);update(0,AF.clock.t);}
+    }finally{AF.camera.position.copy(camera);update(0,AF.clock.w);}
   });
 }
 }catch(error){AF.partError('54-walkers.js',error);}

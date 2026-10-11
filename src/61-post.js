@@ -364,6 +364,37 @@ try {
     };
   });
 
+  // ------------------------------------------------------------ phones: no post chain, but a real upscaler
+  // The scene renders at AF.renderPR() (480p by default) into an MSAA RGBA8 target that takes tone mapping + sRGB in the materials
+  // exactly as the screen would (three's XR-target path: same shader programs, nothing extra to compile), then ONE pass upscales and
+  // sharpens it to the canvas: the UPSCALE shader above, the single-pass upscale + adaptive sharpen idea of Snapdragon GSR 1 / FSR 1
+  // without textureGather (not in WebGL2). The canvas stops at 2x the render height; the compositor does any last step.
+  const LITE = P.lite = { on: false, rt: null, ms: 0 };
+  AF.onBuild('post-lite', 701, () => {
+    const R = AF.renderer, S = AF.scene;
+    if (!AF.MOBILE || P.enabled || AF.SHOT || AF.Q.has('noupscale') || AF.Q.has('nopost') || !R.capabilities.isWebGL2) return;
+    const rt = LITE.rt = new THREE.WebGLRenderTarget(4, 4, { samples: 4, type: THREE.UnsignedByteType });
+    rt.texture.colorSpace = THREE.SRGBColorSpace; rt.texture.internalFormat = 'RGBA8'; rt.texture.name = 'af.lite.scene';
+    rt.isXRRenderTarget = true;   // three r160: tone mapping + the texture's colour space are applied when drawing into it
+    const mat = new THREE.ShaderMaterial({ uniforms: THREE.UniformsUtils.clone(UPSCALE.uniforms), vertexShader: VS, fragmentShader: UPSCALE.fragmentShader, depthTest: false, depthWrite: false, toneMapped: false });
+    mat.uniforms.uSharp.value = 0.5;
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat), qs = new THREE.Scene(), qc = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    quad.frustumCulled = false; qs.add(quad);
+    const size = new THREE.Vector2();
+    LITE.on = true; AF.upscaleOn = true; AF.applyPR();
+    AF.renderFrame = () => {
+      const pr = AF.renderPR(), cam = AF.camera;
+      if (!LITE.on || R.getPixelRatio() <= pr * 1.02) { R.render(S, cam); return; }   // nothing to upscale
+      R.getSize(size);
+      const w = Math.max(1, Math.round(size.x * pr)), h = Math.max(1, Math.round(size.y * pr));
+      if (rt.width !== w || rt.height !== h) rt.setSize(w, h);
+      try {
+        R.setRenderTarget(rt); R.render(S, cam);
+        R.setRenderTarget(null); mat.uniforms.tDiffuse.value = rt.texture; mat.uniforms.uIn.value.set(w, h); R.render(qs, qc);
+      } catch (e) { AF.warnOnce('lite upscale failed — direct rendering', e); LITE.on = false; AF.upscaleOn = false; R.setRenderTarget(null); AF.applyPR(); R.render(S, cam); }
+    };
+  });
+
   AF.test('post: renderFrame renders without throwing', () => {
     let err = '';
     try { AF.renderFrame(); } catch (e) { err = String(e && e.message); }

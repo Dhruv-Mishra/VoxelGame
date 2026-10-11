@@ -21,7 +21,7 @@ function herd(kind, x, z, n, r) {
     const a = AF.hash2(x + index, z) * Math.PI * 2, d = r * Math.sqrt(AF.hash2(z + index, x));
     let mx = x + Math.cos(a) * d, mz = z + Math.sin(a) * d;
     if (O.waterY(mx, mz) !== null) { mx = x; mz = z; }
-    h.members.push({ x: mx, z: mz, y: O.groundY(mx, mz), yaw: a, tx: mx, tz: mz, wait: AF.hash2(index, x) * 6, v: 0, phase: index * 1.7, flee: 0 });
+    h.members.push({ uid: 9000 + WD.stats.animals + index, x: mx, z: mz, y: O.groundY(mx, mz), yaw: a, tx: mx, tz: mz, wait: AF.hash2(index, x) * 6, v: 0, phase: index * 1.7, ph0: index * 1.7, flee: 0, ox: 0, oz: 0, ka: null, kb: null, A: { x: mx, z: mz }, B: { x: mx, z: mz } });
   }
   WD.herds.push(h); WD.stats.animals += n; return h;
 }
@@ -61,25 +61,30 @@ AF.onBuild('wild', 668, () => {
   for (const [x, z] of [[220, -700], [-300, -650], [600, -600], [-700, -560], [900, -400], [-1050, -120]]) { const h = herd('hawk', x, z, 1, 0); h.alt = Math.max(O.h(x, z), 0) + 55 + AF.hash2(x, z) * 30; h.r = 35 + AF.hash2(z, x) * 30; }
   WD.stats.herds = WD.herds.length;
 });
-function pick(h, a) {
-  for (let tries = 0; tries < 3; tries++) {
-    const ang = Math.random() * Math.PI * 2, d = h.r * Math.sqrt(Math.random()), x = h.x + Math.cos(ang) * d, z = h.z + Math.sin(ang) * d;
-    if (O.waterY(x, z) === null && O.roadDistance(x, z) > 10) { a.tx = x; a.tz = z; return; }
+// where each animal grazes is a function of the shared world clock (01-core): every 7-15 s it walks to a spot in its herd's
+// circle picked by a seeded hash, so co-op players see the same herds. Fleeing from a player on foot is a local offset that eases back.
+function spot(h, a, k, out) {
+  for (let j = 0; j < 4; j++) {
+    const ang = AF.whash(a.uid, k, j) * Math.PI * 2, d = h.r * Math.sqrt(AF.whash(a.uid, k, j + 10)), x = h.x + Math.cos(ang) * d, z = h.z + Math.sin(ang) * d;
+    if (O.waterY(x, z) === null && O.roadDistance(x, z) > 10) { out.x = x; out.z = z; return out; }
   }
-  a.tx = a.x; a.tz = a.z;
+  out.x = h.x; out.z = h.z; return out;
 }
 const PERIOD = 1 / 15;
-function step(h, dt, cam, player) {
+function step(h, dt, cam, player, W) {
   const S = SPECIES[h.kind];
   for (const a of h.members) {
-    if (S.fly) { a.phase += dt * 6 / h.r; a.x = h.x + Math.cos(a.phase) * h.r; a.z = h.z + Math.sin(a.phase) * h.r; a.y = h.alt + Math.sin(a.phase * 3) * 2; a.yaw = a.phase + Math.PI; continue; }
-    if (player) { const dx = a.x - player.x, dz = a.z - player.z, d2 = dx * dx + dz * dz; if (d2 < (S.run > 3 ? 196 : 36) && S.run) { a.flee = 2.5; const d = Math.sqrt(d2) || 1; a.tx = a.x + dx / d * 14; a.tz = a.z + dz / d * 14; } }
-    const dx = a.tx - a.x, dz = a.tz - a.z, d = Math.hypot(dx, dz);
-    if (d < 0.3) { a.v = 0; a.wait -= dt; if (a.wait <= 0) { pick(h, a); a.wait = 3 + Math.random() * 8; } continue; }
-    a.flee = Math.max(0, a.flee - dt);
-    const v = a.flee > 0 ? S.run : S.speed, move = Math.min(d, v * dt), nx = a.x + dx / d * move, nz = a.z + dz / d * move;
-    if (O.waterY(nx, nz) !== null) { a.tx = a.x; a.tz = a.z; continue; }
-    a.x = nx; a.z = nz; a.v = v; a.yaw += AF.angDiff(a.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 6); a.y = O.groundY(a.x, a.z);
+    if (S.fly) { a.phase = a.ph0 + W * 6 / h.r; a.x = h.x + Math.cos(a.phase) * h.r; a.z = h.z + Math.sin(a.phase) * h.r; a.y = h.alt + Math.sin(a.phase * 3) * 2; a.yaw = a.phase + Math.PI; continue; }
+    const SL = 7 + AF.hash2(a.uid, 5) * 8, u = (W + AF.hash2(a.uid, 6) * SL) / SL, k = Math.floor(u), f = (u - k) * SL;
+    if (a.kb !== k) { if (a.kb === k - 1) { const t = a.A; a.A = a.B; a.B = t; } else spot(h, a, k - 1, a.A); spot(h, a, k, a.B); a.ka = k - 1; a.kb = k; }
+    const A = a.A, B = a.B, d = Math.hypot(B.x - A.x, B.z - A.z), v = Math.max(S.speed, d / (SL * 0.85)), tw = d / v;
+    let x = B.x, z = B.z; a.v = 0;
+    if (f < tw) { const e = f / tw; x = A.x + (B.x - A.x) * e; z = A.z + (B.z - A.z) * e; a.v = v; a.yaw += AF.angDiff(a.yaw, Math.atan2(B.x - A.x, B.z - A.z)) * Math.min(1, dt * 6); }
+    // a player on foot nearby sends it running (this player's screen only); the offset then eases back to the shared spot
+    if (player && S.run) { const dx = a.x - player.x, dz = a.z - player.z, d2 = dx * dx + dz * dz; if (d2 < (S.run > 3 ? 196 : 36)) { a.flee = 2.5; const dd = Math.sqrt(d2) || 1; a.fx = dx / dd; a.fz = dz / dd; } }
+    if (a.flee > 0) { a.flee -= dt; const nx = x + a.ox + a.fx * S.run * dt, nz = z + a.oz + a.fz * S.run * dt; if (O.waterY(nx, nz) === null) { a.ox += a.fx * S.run * dt; a.oz += a.fz * S.run * dt; } a.v = S.run; a.yaw += AF.angDiff(a.yaw, Math.atan2(a.fx, a.fz)) * Math.min(1, dt * 6); }
+    else if (a.ox || a.oz) { const k2 = Math.exp(-dt * 0.25); a.ox *= k2; a.oz *= k2; if (Math.abs(a.ox) + Math.abs(a.oz) < 0.05) a.ox = a.oz = 0; }
+    a.x = x + a.ox; a.z = z + a.oz; a.y = O.groundY(a.x, a.z);
   }
 }
 AF.onTick('wild', 334, (dt, t) => {
@@ -90,7 +95,7 @@ AF.onTick('wild', 334, (dt, t) => {
   for (const h of WD.herds) {
     const S = SPECIES[h.kind], reach = S.fly ? 700 : 260, dx = h.x - cam.x, dz = h.z - cam.z;
     h.active = dx * dx + dz * dz < reach * reach; if (!h.active) continue;
-    h.acc += dt; if (h.acc >= PERIOD) { step(h, Math.min(h.acc, 0.3), cam, player); h.acc = 0; }
+    h.acc += dt; if (h.acc >= PERIOD) { step(h, Math.min(h.acc, 0.3), cam, player, t); h.acc = 0; }
     for (const a of h.members) {
       if (S.write >= S.cap) break;
       const hop = S.hop && a.v > 0 ? Math.abs(Math.sin(t * 9 + a.phase)) * 0.35 : 0, graze = !S.fly && a.v === 0 ? Math.sin(t * 0.8 + a.phase) * 0.08 : 0;

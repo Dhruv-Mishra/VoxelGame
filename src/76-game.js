@@ -44,16 +44,14 @@ try {
   AF.cash = cash;
   const st = document.createElement('style');
   st.textContent = `
-  #ui #h-stat{width:112px;padding:8px 10px;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;border-radius:14px;position:relative;box-sizing:border-box}
-  #ui #h-stat .hp{height:5px;border-radius:5px;background:rgba(255,255,255,.12);overflow:hidden}
-  #ui #h-stat .hp i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#e0524a,#f2906c);transition:width .25s}
+  #ui #h-stat{width:112px;padding:0 2px;display:grid;grid-template-columns:minmax(0,1fr);gap:5px;position:relative;box-sizing:border-box;text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.5)}
+  #ui #h-stat .hp{height:3px;border-radius:3px;background:rgba(0,0,0,.35);overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.08)}
+  #ui #h-stat .hp i{display:block;height:100%;border-radius:3px;background:#e8665a;transition:width .25s}
   #ui #h-stat .hp.low i{background:#ff4a3a;animation:gPulse 1s infinite}
   #ui #h-stat .r{display:flex;justify-content:space-between;align-items:center;gap:4px;min-width:0}
-  #ui #h-stat .m{font-weight:600;font-size:13px;color:#a6e8b4;font-variant-numeric:tabular-nums}
-  #ui #h-stat .st{font-size:10px;letter-spacing:.5px;color:rgba(255,255,255,.16);white-space:nowrap;overflow:hidden}
-  #ui #h-stat .st b{color:#ffd24a;font-weight:400} #ui #h-stat .st.ev b{animation:gPulse .7s infinite} #ui.touch #h-stat .st.none{display:none}
-  #ui #h-stat .w{font-size:11px;color:var(--dim);display:flex;gap:6px;white-space:nowrap;min-width:0} #ui #h-stat .w i{font-style:normal;overflow:hidden;text-overflow:ellipsis;min-width:0}
-  #ui #h-stat .w span{margin-left:auto;flex:none;color:var(--ink);font-variant-numeric:tabular-nums}
+  #ui #h-stat .m{font-weight:600;font-size:14px;color:#b4f0c2;font-variant-numeric:tabular-nums}
+  #ui #h-stat .st{font-size:11px;letter-spacing:.5px;color:rgba(255,255,255,.22);white-space:nowrap;overflow:hidden}
+  #ui #h-stat .st b{color:#ffd24a;font-weight:400} #ui #h-stat .st.ev b{animation:gPulse .7s infinite} #ui #h-stat .st.none{display:none}
   #ui #h-stat .gain{position:absolute;right:calc(100% + 8px);top:18px;font-weight:600;font-size:13px;white-space:nowrap;opacity:0;transition:opacity .3s,transform .9s;pointer-events:none;text-shadow:0 1px 4px #000}
   #ui #h-stat .gain.on{opacity:1;transform:translateY(-8px)} #ui #h-stat .gain.neg{color:#ff9a8a} #ui #h-stat .gain.pos{color:#a6e8b4}
   #ui #h-job{position:absolute;left:max(16px,env(safe-area-inset-left));top:calc(max(16px,env(safe-area-inset-top)) + 50px);padding:7px 12px;border-radius:12px;max-width:min(330px,46vw);font-size:12px;display:none}
@@ -80,7 +78,7 @@ try {
   #ui #m-shop .it i{width:14px;height:14px;border-radius:50%;border:1px solid rgba(255,255,255,.35)} #ui #m-shop .it i.no{visibility:hidden;width:0;margin-right:-10px}
   #ui #m-shop .it small{display:block;color:var(--dim);font-size:11px;margin-top:1px}
   #ui #m-shop .it em{font-style:normal;font-weight:600;color:#a6e8b4;white-space:nowrap} #ui #m-shop .it em.t{color:var(--dim);font-weight:500}
-  #ui.touch #h-stat{width:104px;padding:6px 8px;gap:4px} #ui.touch #h-stat .w{font-size:10px} #ui.touch #h-stat .m{font-size:12px}
+  #ui.touch #h-stat{width:84px;gap:4px} #ui.touch #h-stat .m{font-size:12px}
   #ui.touch #h-job{max-width:min(220px,40vw);font-size:11px;padding:6px 10px}
   @media (orientation:portrait){#ui.touch #h-job{top:auto;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 178px);max-width:calc(100% - 32px)}}
   #ui.photo #h-job,#ui.photo #h-cross,#ui.photo #h-meter,#ui.mapping #h-cross,#ui.mapping #h-meter{display:none!important}
@@ -89,9 +87,9 @@ try {
 
   // ---------------------------------------------------------------- HUD (under the minimap, GTA-style: health, cash, wanted, weapon)
   const right = document.getElementById('h-right'), mini = document.getElementById('h-mini');
-  const stat = h('div', 'panel hud', `<div class="hp"><i></i></div><div class="r"><span class="m"></span><span class="st"></span></div><div class="w"></div><div class="gain"></div>`); stat.id = 'h-stat';
+  const stat = h('div', 'hud', `<div class="hp"><i></i></div><div class="r"><span class="m"></span><span class="st"></span></div><div class="gain"></div>`); stat.id = 'h-stat';
   right.insertBefore(stat, mini.nextSibling);
-  const hpBar = stat.querySelector('.hp'), hpFill = hpBar.firstChild, mEl = stat.querySelector('.m'), starEl = stat.querySelector('.st'), wEl = stat.querySelector('.w'), gainEl = stat.querySelector('.gain');
+  const hpBar = stat.querySelector('.hp'), hpFill = hpBar.firstChild, mEl = stat.querySelector('.m'), starEl = stat.querySelector('.st'), gainEl = stat.querySelector('.gain');
   const job = h('div', 'panel hud', ''); job.id = 'h-job';
   const cross = h('div', '', ''); cross.id = 'h-cross';
   const hurtEl = h('div', '', ''); hurtEl.id = 'h-hurt';
@@ -350,7 +348,6 @@ try {
       text(mEl, cash(S.money));
       const CB = AF.combat, n = CB ? CB.stars : 0, sh = '<b>' + '\u2605'.repeat(n) + '</b>' + '\u2605'.repeat(5 - n);
       if (starEl._h !== sh) { starEl.innerHTML = sh; starEl._h = sh; starEl.classList.toggle('none', !n); } starEl.classList.toggle('ev', !!(CB && n && CB.seenT > 1));
-      const wl = CB ? CB.label() : ''; if (wEl._h !== wl) { wEl.innerHTML = wl; wEl._h = wl; }
       const J = HUD.job, jl = J ? `<b>${esc(J.title)}</b>${esc(J.line)}${J.t != null ? '<span>' + Math.max(0, Math.ceil(J.t)) + 's</span>' : ''}${J.pay ? '<span>' + cash(J.pay) + '</span>' : ''}` : '';
       if (job._h !== jl) { job.innerHTML = jl; job._h = jl; } show(job, !!J);
     }

@@ -204,6 +204,8 @@ AF.onBuild('train', 600, () => {
   const first = Math.max(0, T.stops.findIndex((s) => s.id === 'cityhall'));
   T.s = T.stops[first].stopS; T.station = T.stops[first].id; T.nextIdx = (first + 1) % T.stops.length; T.nextStation = T.stops[T.nextIdx].id;
   buildSpeedProfile(T);
+  bakeTimetable(T);
+  tramAt(T, 0);
   placeCars(0);
   makeWalkers(K); stopsInit();
   RAIL.trainMs = Math.round(performance.now() - t0);
@@ -253,25 +255,67 @@ RAIL.simTrain = (T, dt) => {
   T.s = wrapS(T.s + ds); T.odo += ds;
   T.state = T.speed >= vlim - 0.05 ? 'running' : (T.speed > vt + 0.02 || (vt <= T.speed + 0.02 && d < 60) ? 'braking' : 'accelerating');
 };
-// seconds until the car next stands at a stop (0 if it is there now)
+// seconds until the car next stands at a stop (0 if it is there now): from the shared timetable
 const simCopy = () => { const T = AF.train; return { s: T.s, speed: T.speed, state: T.state, station: T.station, nextIdx: T.nextIdx, nextStation: T.nextStation, timer: T.timer, stops: T.stops, limit: T.limit, odo: 0 }; };
 RAIL.nextArrival = (id) => {
-  const T = AF.train; if (!T || !T.stops) return Infinity;
+  const T = AF.train; if (!T || !T.stops || !T.tt) return Infinity;
   if (T.state === 'stopped' && T.station === id) return 0;
-  const S = simCopy(); let t = 0;
-  for (let i = 0; i < 4000; i++) { const was = S.state; RAIL.simTrain(S, 0.5); t += 0.5; if (S.state === 'stopped' && was !== 'stopped' && S.station === id) return t; }
-  return Infinity;
+  const k = T.stops.findIndex((s) => s.id === id); if (k < 0) return Infinity;
+  const P = T.tt.P; return (((T.tt.arr[k] - T.tau) % P) + P) % P + T.lag;
 };
 
-AF.onTick('train', 250, (dt) => {
-  const T = AF.train; if (!T || !T.defs) return;
+// ---------------------------------------------------------------- the timetable (shared world clock, 01-core)
+// One lap from City Hall back to City Hall is simulated once at build (same physics as simTrain, nothing on the track) and
+// sampled every 0.1 s; the car's state is then a lookup at W, so every co-op player sees it at the same place. Local hold-ups
+// (a car or the player on the track, the conductor waiting for a late runner) build T.lag, which the car makes up again with
+// shorter dwells and a slightly brisker run, rejoining the shared schedule.
+const STATES = ['stopped', 'accelerating', 'running', 'braking'], TDT = 0.1, PHASE = 41;
+function bakeTimetable(T) {
+  const n = T.stops.length, S = { s: T.stops[0].stopS, speed: 0, state: 'stopped', station: T.stops[0].id, nextIdx: 1 % n, nextStation: T.stops[1 % n].id, timer: DWELL, stops: T.stops, limit: T.limit, odo: 0 };
+  const odo = [], spd = [], code = [], at = [], nx = [], arr = new Float64Array(n);
+  let arrivals = 0;
+  for (let i = 0; i < 60000; i++) {
+    odo.push(S.odo); spd.push(S.speed); code.push(Math.max(0, STATES.indexOf(S.state))); nx.push(S.nextIdx);
+    at.push(S.state === 'stopped' ? T.stops.findIndex((q) => q.id === S.station) : -1);
+    const was = S.state; RAIL.simTrain(S, TDT);
+    if (S.state === 'stopped' && was !== 'stopped') { const k = T.stops.findIndex((q) => q.id === S.station); arr[k] = odo.length * TDT; if (++arrivals === n) break; }
+  }
+  const len = odo.length, rem = new Float32Array(len);
+  for (let i = len - 1; i >= 0; i--) rem[i] = at[i] < 0 ? 0 : TDT + (i + 1 < len && at[i + 1] === at[i] ? rem[i + 1] : 0);
+  arr[0] = 0;
+  T.tt = { P: len * TDT, len, odoEnd: S.odo, odo: Float64Array.from(odo), spd: Float32Array.from(spd), code: Int8Array.from(code), at: Int8Array.from(at), next: Int8Array.from(nx), rem, arr };
+  T.lag = 0; T.rate = 1; T.tau = 0; T.hold = false;
+}
+function tramAt(T, tau) {
+  const TT = T.tt, f = tau / TDT, i = Math.min(TT.len - 1, Math.max(0, f | 0)), k = AF.clamp(f - i, 0, 1), last = i + 1 >= TT.len;
+  const o0 = TT.odo[i], o1 = last ? TT.odoEnd : TT.odo[i + 1], a = TT.at[i];
+  T.tau = tau;
+  T.s = wrapS(T.stops[0].stopS + o0 + (o1 - o0) * k);
+  T.speed = TT.spd[i] + ((last ? 0 : TT.spd[i + 1]) - TT.spd[i]) * k;
+  T.state = STATES[TT.code[i]];
+  T.station = a >= 0 ? T.stops[a].id : null; T.timer = a >= 0 ? Math.max(0, TT.rem[i] - k * TDT) : 0;
+  T.nextIdx = TT.next[i]; T.nextStation = T.stops[T.nextIdx].id;
+}
+RAIL.tramAt = tramAt;
+
+AF.onTick('train', 250, (dt, w) => {
+  const T = AF.train; if (!T || !T.defs || !T.tt) return;
   const was = T.state, wasSt = T.station;
   if ((T.obFrame = (T.obFrame || 0) + 1) % 3 === 0) obstacleAhead(T, dt * 3);
-  RAIL.simTrain(T, dt);
-  if (was === 'stopped' && T.state !== 'stopped') { T.bell = 1.6; if (AF.mode === 'ride') { const n = T.stops[T.nextIdx]; AF.emit('toast', 'Clang-clang! Next stop: ' + n.name); } }
-  if (was !== 'stopped' && T.state === 'stopped' && AF.mode === 'ride') { const st = T.stops.find((s) => s.id === T.station); AF.emit('toast', (st ? st.name : '') + ' — E to step off'); }
+  let target = 1;
+  if (T.obst != null && T.obst < 40 && T.state !== 'stopped') { const vt = T.obst < 1.5 ? 0 : Math.sqrt(2 * DEC * 1.6 * Math.max(0, T.obst - 1.5)); target = Math.min(1, vt / Math.max(0.5, T.speed0 || 0.5)); }
+  else if (T.hold) target = 0;
+  else if (T.lag > 0) target = T.state === 'stopped' ? 4 : 1.25;
+  T.rate += AF.clamp(target - T.rate, -dt * 1.5, dt * 0.8);
+  if (dt > 0) { T.lag = AF.clamp(T.lag + (1 - T.rate) * dt, 0, 240); if (T.lag <= 0 && T.rate > 1) T.rate = 1; }
+  const P = T.tt.P;
+  tramAt(T, (((w + PHASE - T.lag) % P) + P) % P);
+  T.speed0 = T.speed; if (T.state !== 'stopped') T.speed *= Math.min(1.25, Math.max(0, T.rate));
+  if (was === 'stopped' && T.state !== 'stopped') { T.departed = wasSt; T.bell = 1.6; if (AF.mode === 'ride') { const n = T.stops[T.nextIdx]; AF.emit('toast', 'Clang-clang! Next stop: ' + n.name); } }
+  if (was !== 'stopped' && T.state === 'stopped' && AF.mode === 'ride') { const st = T.stops.find((s) => s.id === T.station); AF.emit('toast', (st ? st.name : '') + ' \u2014 E to step off'); }
   if (wasSt == null && T.station) T.bell = Math.max(T.bell, 0.8);
   placeCars();
+  T.hold = false;
   passengers(T, dt, was);
   updatePoleAndSparks(dt);
   trainLights();
@@ -477,8 +521,10 @@ function passengers(T, dt, was) {
   if (was !== 'stopped' && T.state === 'stopped' && T.station && WK.st[T.station]) {
     const S = WK.st[T.station];
     T.doorTarget = 1;
-    const nOff = Math.min(Math.max(0, T.paxN - 2), 1 + ((wrand() * 3) | 0));
-    T.ev = { id: T.station, t: 0, off: nOff, offDone: 0, board: 0, runner: null, runT: wrand() < 0.4 ? 5 + wrand() * 3 : -1, hold: 0 };
+    // who gets off and whether a runner is late: seeded by this arrival on the shared timetable, the same for every co-op player
+    const lapN = Math.floor((AF.clock.w + PHASE - T.lag) / T.tt.P), er = AF.rng(Math.floor(AF.whash(lapN, T.stops.findIndex((s) => s.id === T.station), 307) * 4294967296));
+    const nOff = Math.min(Math.max(0, T.paxN - 2), 1 + ((er() * 3) | 0));
+    T.ev = { id: T.station, t: 0, off: nOff, offDone: 0, board: 0, runner: null, runT: er() < 0.4 ? 5 + er() * 3 : -1, hold: 0 };
     S.refill = 0;
   }
   const E = T.ev;
@@ -511,7 +557,8 @@ function passengers(T, dt, was) {
       if (!E.runner) E.runT = -1;
     }
     const busy = E.board > 0 || (E.runner && E.runner !== 'in') || E.offDone < E.off;
-    if (busy && T.timer < 1.8 && E.hold < 14) { T.timer = 1.8; E.hold += dt; }
+    // holding the doors for a late runner puts the car a few seconds behind the shared timetable (made up at the next stops)
+    if (busy && T.timer < 1.8 && E.hold < 8) { T.hold = true; E.hold += dt; }
     T.doorTarget = (T.timer < 1.4 && !busy) ? 0 : 1;
   } else if (T.state !== 'stopped') { T.doorTarget = 0; if (E && !E.left) { E.left = true; const S = WK.st[E.id]; if (S) S.refill = 6 + wrand() * 10; } }
   // islands refill from the sidewalk between cars

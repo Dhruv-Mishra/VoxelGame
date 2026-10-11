@@ -2,8 +2,10 @@
 try {
 // ===== 77-combat: weapons, fighting, the crowd's fight-or-flight, run-overs, police + the wanted level, vehicle damage  (OWNER: game) =====
 // Weapons: slot 0 = the friend's signature melee (keyboard, handbag, dumbbell, microphone, bat, pan, cutlass, guitar), slots 1..4 =
-//   firearms from a gun counter (AF.save.guns / .ammo). Click or Q attack, right mouse (hold) or Z aim, wheel / 1-5 / X switch,
-//   R reload. Touch: HIT / AIM / WPN buttons (72-touch) press the same keys.
+//   firearms from a gun counter (AF.save.guns / .ammo). Click or Q attack, right mouse (hold) or Z aim, R reload. Switching: mouse wheel,
+//   1-5, X taps to the next one, holding X opens the weapon wheel (move the mouse toward one, let go to take it). Touch: HIT / AIM /
+//   WPN buttons (72-touch) press the same keys; holding WPN opens the wheel, slide toward a weapon and lift. The weapon chip under the
+//   minimap shows what is in hand (and the ammo) on a switch, while aiming, firing or reloading, then gets out of the way.
 // Peds: a crowd walker only becomes 'engaged' (w.agg, stepped by CB.stepPed from 55-people's crowd tick) when the player hits it,
 //   shoots near it, runs it over or barges into it at a sprint. Kinds flee | brawl | melee | gun (+ the cop pool). Engaged peds calm
 //   down and go back to the bare pool past G.pedForgetD, so the ambient crowd costs what it always did. Kids and wheelchair users
@@ -66,14 +68,85 @@ try {
   const cur = () => { const o = owned(); if (CB.slot >= o.length) CB.slot = 0; return o[CB.slot]; };
   const melee = () => { const f = AF.friends && AF.friends.current; return (f && MELEE[f.id]) || FISTS; };
   CB.gun = cur; CB.GUNS = GUNS; CB.melee = melee; CB.heldGeo = heldGeo; CB.pvp = false;
-  CB.label = () => {
-    const g = CB.gallery ? 'gallery' : cur();
-    if (g === 'gallery') return `<i>Gallery rifle</i><span>${CB.gallery.shots}</span>`;
-    if (!g) return '<i>' + melee()[0] + '</i>';
-    return `<i>${GUNS[g].name}</i><span>${CB.reloadT > 0 ? '\u21bb' : CB.mag[g] || 0}/${S.ammo[g] || 0}</span>`;
-  };
   CB.give = (id) => { S.guns[id] = true; S.ammo[id] = (S.ammo[id] || 0) + GUNS[id].pack; CB.mag[id] = CB.mag[id] || 0; AF.saveSoon(); };
-  const select = (slot) => { const o = owned(); CB.slot = ((slot % o.length) + o.length) % o.length; CB.reloadT = 0; attachHeld(); SFX.play('click'); };
+  const select = (slot) => { const o = owned(); CB.slot = ((slot % o.length) + o.length) % o.length; CB.reloadT = 0; attachHeld(); SFX.play('click'); chipT = 2.5; };
+  CB.select = select;
+
+  // ---------------------------------------------------------------- weapon wheel + weapon chip
+  const WI = {
+    fists: '<path d="M7 11V7a2 2 0 0 1 4 0v3M11 10V6a2 2 0 0 1 4 0v4M15 10V8a2 2 0 0 1 4 0v5a7 7 0 0 1-7 7h-1a6 6 0 0 1-6-6v-2a2 2 0 0 1 2-2z"/>',
+    melee: '<path d="M5 19 17 7M14.5 4.5l5 5M4 20l2-2M8 13l3 3"/>',
+    revolver: '<path d="M3 9h13l2-2h2v5h-4l-1 1h-3l-1 4H7l1-4H3zM12 12v1"/>',
+    shotgun: '<path d="M1 10h17l2-1h3v3h-7l-2 2h-3l-1 3H6l1-3-6-1z"/>',
+    tommy: '<path d="M2 9h15v3h-3l-1 5h-2l1-5H8v3H6v-3H2zM17 10h5M10 12v3"/>',
+    rifle: '<path d="M1 11h16l4-1h2v2h-3l-6 1-2 3H8l1-3H1zM12 10V8h2"/>',
+  };
+  const wIcon = (k) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + (WI[k] || WI.melee) + '</svg>';
+  const wcss = document.createElement('style');
+  wcss.textContent = `
+  #ui #h-wheel{position:absolute;left:50%;top:50%;width:var(--wd);height:var(--wd);margin:calc(var(--wd) / -2) 0 0 calc(var(--wd) / -2);--wd:min(300px,74vh);--wr:calc(var(--wd) * .36);border-radius:50%;display:none;pointer-events:none;
+    background:radial-gradient(circle,rgba(10,13,17,.78) 0 60%,rgba(10,13,17,.35) 61% 70%,rgba(10,13,17,0) 71%);animation:wIn .12s ease}
+  #ui #h-wheel.open{display:block}
+  #ui #h-wheel .it{position:absolute;left:50%;top:50%;width:70px;margin:-26px 0 0 -35px;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--dim);transition:color .1s,transform .1s;transform:translate(var(--x),var(--y))}
+  #ui #h-wheel .it svg{width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  #ui #h-wheel .it small{font-size:10px;font-variant-numeric:tabular-nums;opacity:.8;white-space:nowrap}
+  #ui #h-wheel .it.on{color:var(--accent);transform:translate(var(--x),var(--y)) scale(1.18)}
+  #ui #h-wheel .ctr{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;width:46%}
+  #ui #h-wheel .ctr b{display:block;font-size:13px;font-weight:600;color:var(--ink)} #ui #h-wheel .ctr span{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+  #ui #h-wpn{display:flex;align-items:center;gap:7px;justify-content:flex-end;font-size:12px;color:var(--ink);text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.5);opacity:0;transition:opacity .25s;max-width:150px}
+  #ui #h-wpn.on{opacity:1} #ui #h-wpn svg{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
+  #ui #h-wpn i{font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink);opacity:.85} #ui #h-wpn b{font-weight:600;font-variant-numeric:tabular-nums} #ui #h-wpn b.out{color:#ff8a7a}
+  #ui.photo #h-wheel,#ui.mapping #h-wheel,#ui.titling #h-wheel{display:none!important}
+  @keyframes wIn{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}`;
+  document.head.appendChild(wcss);
+  const uiRoot = document.getElementById('ui'), hRight = document.getElementById('h-right');
+  const wheelEl = document.createElement('div'); wheelEl.id = 'h-wheel'; wheelEl.innerHTML = '<div class="ctr"><b></b><span></span></div>'; uiRoot.appendChild(wheelEl);
+  const chip = document.createElement('div'); chip.id = 'h-wpn'; chip.className = 'hud';
+  if (hRight) hRight.insertBefore(chip, document.getElementById('h-btns')); else uiRoot.appendChild(chip);
+  const slotInfo = (id) => id ? { k: id, name: GUNS[id].name, ammo: (CB.reloadT > 0 && CB.reloadG === id ? '\u21bb' : CB.mag[id] || 0) + ' / ' + (S.ammo[id] || 0), out: !(CB.mag[id] > 0) && !(S.ammo[id] > 0) }
+    : { k: melee()[4] ? 'melee' : 'fists', name: melee()[0], ammo: '', out: false };
+  let chipT = 0, chipKey = '', firedT = 9;
+  const WH = CB.wheel = { open: false, pick: 0, vx: 0, vy: 0, key: '', items: [] };
+  const wheelBuild = () => {
+    const o = owned(), n = o.length, key = o.join() + '|' + melee()[0];
+    if (key === WH.key) return;
+    WH.key = key; for (const e of WH.items) e.remove(); WH.items.length = 0;
+    o.forEach((id, i) => {
+      const a = -PI / 2 + i * PI * 2 / n, e = document.createElement('div'); e.className = 'it';
+      e.style.setProperty('--x', `calc(var(--wr) * ${Math.cos(a).toFixed(4)})`); e.style.setProperty('--y', `calc(var(--wr) * ${Math.sin(a).toFixed(4)})`);
+      wheelEl.appendChild(e); WH.items.push(e);
+    });
+  };
+  const wheelPaint = () => {
+    const o = owned(), ctr = wheelEl.firstChild;
+    o.forEach((id, i) => { const f = slotInfo(id), e = WH.items[i]; if (!e) return; const html = wIcon(f.k) + '<small>' + (f.ammo || '\u00a0') + '</small>'; if (e._h !== html) { e.innerHTML = html; e._h = html; } e.classList.toggle('on', i === WH.pick); });
+    const f = slotInfo(o[WH.pick]); ctr.firstChild.textContent = f.name; ctr.lastChild.textContent = f.ammo;
+  };
+  CB.wheelOpen = () => {
+    if (WH.open || CB.gallery || AF.mode !== 'walk' || owned().length < 2) return false;
+    wheelBuild(); WH.open = true; WH.pick = CB.slot; WH.vx = WH.vy = 0; AF.PL.wheel = true; wheelEl.classList.add('open'); wheelPaint(); return true;
+  };
+  // a pointer (mouse look deltas, or a finger's slide) steers the pick: the direction of the last few dozen pixels, not the total
+  CB.wheelAim = (dx, dy) => {
+    if (!WH.open || !(dx || dy)) return;
+    WH.vx += dx; WH.vy += dy; const d = Math.hypot(WH.vx, WH.vy); if (d > 70) { WH.vx *= 70 / d; WH.vy *= 70 / d; }
+    if (d < 16) return;
+    const n = owned().length, a = Math.atan2(WH.vy, WH.vx) + PI / 2, pick = ((Math.round(a / (PI * 2) * n) % n) + n) % n;
+    if (pick !== WH.pick) { WH.pick = pick; wheelPaint(); }
+  };
+  CB.wheelClose = (take) => {
+    if (!WH.open) return;
+    WH.open = false; AF.PL.wheel = false; wheelEl.classList.remove('open');
+    if (take && WH.pick !== CB.slot) select(WH.pick); else if (take) chipT = 2.5;
+  };
+  const chipPaint = (dt, g) => {
+    chipT = Math.max(0, chipT - dt); firedT += dt;
+    const on = chipT > 0 || WH.open || (AF.mode === 'walk' && (!!AF.PL.aim || CB.reloadT > 0 || (g && firedT < 2.5)));
+    chip.classList.toggle('on', on);
+    if (!on) return;
+    const f = CB.gallery ? { k: 'rifle', name: 'Gallery rifle', ammo: String(CB.gallery.shots), out: false } : slotInfo(g), key = f.k + f.name + f.ammo + f.out;
+    if (key !== chipKey) { chipKey = key; chip.innerHTML = (f.ammo ? `<b class="${f.out ? 'out' : ''}">${f.ammo}</b>` : `<i>${f.name}</i>`) + wIcon(f.k); }
+  };
   const attachHeld = () => {
     const P = AF.player && AF.player.parts; if (!P) return;
     const id = CB.gallery ? 'rifle' : cur() || melee()[4];
@@ -613,7 +686,7 @@ try {
   };
 
   // ---------------------------------------------------------------- ticks
-  let prevFire = false, slowT = 0;
+  let prevFire = false, slowT = 0, xT = -1;
   AF.onTick('combat', 151, (dt) => {
     if (!AF.ready || !CR()) return;
     CB.cd -= dt; hitCd -= dt;
@@ -624,9 +697,15 @@ try {
     if (!busy) {
       if (CB.heldId !== (CB.gallery ? 'rifle' : g || melee()[4]) || (CB.held && CB.held.parent !== AF.player.parts.armR)) attachHeld();
       if (!CB.gallery) {
-        if (m.wheel && locked) select(CB.slot + Math.sign(m.wheel));
-        for (let k = 1; k <= 5; k++) if (I.hit('Digit' + k)) select(k - 1);
-        if (I.hit('KeyX')) select(CB.slot + 1);
+        // X: a tap is the next weapon, held it opens the wheel; the mouse (or 1-5) picks, letting go takes it
+        if (I.hit('KeyX')) xT = 0;
+        if (xT >= 0 && I.key('KeyX') && (xT += dt) > 0.2 && !WH.open) CB.wheelOpen();
+        if (I.released.has('KeyX')) { if (WH.open) CB.wheelClose(true); else if (xT >= 0 && xT <= 0.2) select(CB.slot + 1); xT = -1; }
+        if (WH.open) { CB.wheelAim(m.dx, m.dy); for (let k = 1; k <= Math.min(5, owned().length); k++) if (I.hit('Digit' + k)) { WH.pick = k - 1; CB.wheelClose(true); } }
+        else {
+          if (m.wheel && locked) select(CB.slot + Math.sign(m.wheel));
+          for (let k = 1; k <= 5; k++) if (I.hit('Digit' + k)) select(k - 1);
+        }
         if (I.hit('KeyR')) reload();
         g = cur();
       }
@@ -634,13 +713,14 @@ try {
       const gunUp = !!(g || CB.gallery);
       AF.PL.aim = gunUp && (CB.aimToggle || (locked && !!(m.buttons & 2)) || !!CB.gallery);
       AF.PL.aimFov = CB.gallery ? 34 : g && GUNS[g].zoom ? GUNS[g].zoom : 40;
-      const down = (locked && !!(m.buttons & 1)) || I.key('KeyQ'), edge = down && !prevFire; prevFire = down;
+      const down = !WH.open && ((locked && !!(m.buttons & 1)) || I.key('KeyQ')), edge = down && !prevFire; prevFire = down;
       if (down && CB.cd <= 0 && CB.reloadT <= 0 && !AF.hud.meterOn()) {
         if (CB.gallery) { if (edge) fire('revolver'); }
-        else if (g) { if (GUNS[g].auto || edge) fire(g); }
+        else if (g) { if (GUNS[g].auto || edge) { fire(g); firedT = 0; } }
         else if (edge) swing();
       }
-    } else { AF.PL.aim = false; prevFire = false; }
+    } else { AF.PL.aim = false; prevFire = false; xT = -1; CB.wheelClose(false); }
+    chipPaint(dt, g);
     if (CB.swing > 0) { CB.swing -= dt; if (CB.hitAt > 0 && CB.swingDur - CB.swing >= CB.hitAt) { CB.hitAt = -1; resolveMelee(); } }
     AF.hud.cross(walk && !!AF.PL.aim);
     if (walk) { overlay(dt, g); bodyPush(dt); }

@@ -49,10 +49,17 @@ function buildGraph() {
   for (const lane of G.lanes) { for (const stop of AF.busStops || []) bindStop(lane, stop, 'bus', 7, 4.5); for (const stop of VV.cabDrops || []) bindStop(lane, stop, 'cab', 6, 9); lane.stops.sort((first, second) => first.s - second.s); }
 }
 function bindStop(lane, stop, kind, dwell, radius) { const dx = stop.x - lane.pts[0], dz = stop.z - lane.pts[1], s = dx * lane.dx + dz * lane.dz, lateral = dz * lane.dx - dx * lane.dz; if (s > 1 && s < lane.len - 6 && lateral > 0.5 && lateral < radius) lane.stops.push({ s, dwell, kind, target: stop }); }
-function pickNext(pc) { if (!pc.next.length) return null; if (rnd() < 0.55) for (const option of pc.next) if (option.turn === 'straight') return option; return pc.next[Math.floor(rnd() * pc.next.length)]; }
+// turns are seeded per car and per turn (AF.world.seed), never from a shared stream: the same on every co-op client
+function pickNext(pc, car) {
+  if (!pc.next.length) return null;
+  const A = car && car.ai, n = A ? (A.turns = (A.turns || 0) + 1) : 0, r1 = car ? AF.whash(car.id, n, 51) : rnd(), r2 = car ? AF.whash(car.id, n, 52) : rnd();
+  if (r1 < 0.55) for (const option of pc.next) if (option.turn === 'straight') return option;
+  return pc.next[Math.floor(r2 * pc.next.length)];
+}
 function attach(car, pc, s, speed = 9) {
   speed *= VV.SPEED_K;
-  car.parked = false; car.active = true; car.ai = { piece: pc, s, v: 0, v0: speed, next: pickNext(pc), ahead: null, behind: null, wait: 0, dwell: 0, served: -1, cd: 0, acc: 0, node: null };
+  car.parked = false; car.active = true; car.ai = { piece: pc, s, v: 0, v0: speed, next: null, ahead: null, behind: null, wait: 0, dwell: 0, served: -1, cd: 0, acc: 0, node: null, turns: 0 };
+  car.ai.next = pickNext(pc, car);
   VV.ai.push(car); pieceAt(pc, s, PP); car.x = PP.x; car.z = PP.z; car.yaw = Math.atan2(PP.dx, PP.dz);
 }
 function unlink(car) {
@@ -69,29 +76,38 @@ function enqueue(car) {
 }
 VV.detachTraffic = car => { if (!car.ai) return; unlink(car); if (car.ai.node?.owner === car) car.ai.node.owner = null; };
 const heads = new Int32Array(256), links = new Int32Array(1024), ox = new Float64Array(1024), oz = new Float64Array(1024), oy = new Float64Array(1024), radius = new Float32Array(1024);
-let obstacleCount = 0, frame = 0, cabSwapT = 0, accumulated = 0;
+let obstacleCount = 0, frame = 0;
 const PERIOD = 1 / 15;
 const hash = (x, z) => (Math.imul(x, 73856093) ^ Math.imul(z, 19349663)) & 255;
+// obstacles every client agrees on (players on foot or driving, remote players, every car out of traffic, the residents), wherever
+// the viewer is: the crowd and tram passengers are left out (their exact places are local)
 function obstacle(x, y, z, size) {
-  const cam = AF.camera.position; if (obstacleCount === links.length || !Number.isFinite(x) || (x - cam.x) ** 2 + (z - cam.z) ** 2 > 4900) return;
+  if (obstacleCount === links.length || !Number.isFinite(x)) return;
   const slot = obstacleCount++, bucket = hash(Math.floor(x / 8), Math.floor(z / 8)); ox[slot] = x; oz[slot] = z; oy[slot] = y || 0; radius[slot] = size; links[slot] = heads[bucket]; heads[bucket] = slot;
 }
+// the shared fleet only yields to what every co-op client agrees on: players (each sees the others through 80-coop) and cars a player
+// has driven (kerb cars a player merely walked past are unparked on that client alone; residents are placed per client and yield
+// at the crossings themselves)
 function rebuild() {
   heads.fill(-1); obstacleCount = 0; const player = AF.player; if (player && AF.mode === 'walk') obstacle(player.x, player.y, player.z, 0.4);
-  for (const car of VV.cars) if (!car.ai && car.active !== false) obstacle(car.x, car.y, car.z, car.halfL);
-  if (AF.people) for (const person of AF.people) if (!person.hidden && person.visible !== false) obstacle(person.x, person.y, person.z, 0.6);
-  const walkers = AF.rail?.walkers?.list; if (walkers) for (const person of walkers) if (person.st === 'walk') obstacle(person.x, person.y, person.z, 0.8);
+  const CP = AF.coop && AF.coop.players; if (CP) for (const r of CP.values()) if (r.seen && !r.veh && r.P && r.P.root.visible) obstacle(r.x, r.y, r.z, 0.4);
+  for (const car of VV.cars) if (!car.ai && car.active !== false && (car.player || car.moved || car.net != null)) obstacle(car.x, car.y, car.z, car.halfL);
   for (const pc of G.pieces) pc.head = pc.tail = null;
   for (const car of VV.ai) if (car.ai && car.active !== false) { car.ai.ahead = car.ai.behind = null; enqueue(car); }
   for (const point of G.nodes) { point.candidate = null; if (point.owner && (!point.owner.ai || point.owner.active === false)) point.owner = null; }
 }
-function localGap(car, gap) {
-  const hx = Math.sin(car.yaw), hz = Math.cos(car.yaw), cx = Math.floor(car.x / 8), cz = Math.floor(car.z / 8);
-  for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let slot = heads[hash(cx + dx, cz + dz)]; slot >= 0; slot = links[slot]) { const rx = ox[slot] - car.x, rz = oz[slot] - car.z, along = rx * hx + rz * hz; if (along > 0 && along < 16 && Math.abs(oy[slot] - car.y) < 2 && Math.abs(rx * hz - rz * hx) < car.halfW + Math.min(1, radius[slot])) gap = Math.min(gap, along - car.halfL - radius[slot]); }
+// what blocks the lane ahead, measured from the car's shared lane position (never its local, shoved body)
+const LP = { x: 0, z: 0, dx: 0, dz: 1 };
+function laneGap(car, A, gap) {
+  pieceAt(A.piece, A.s, LP);
+  const hx = LP.dx, hz = LP.dz, cx = Math.floor(LP.x / 8), cz = Math.floor(LP.z / 8);
+  for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let slot = heads[hash(cx + dx, cz + dz)]; slot >= 0; slot = links[slot]) { const rx = ox[slot] - LP.x, rz = oz[slot] - LP.z, along = rx * hx + rz * hz; if (along > 0 && along < 16 && Math.abs(oy[slot] - car.y) < 2 && Math.abs(rx * hz - rz * hx) < car.halfW + Math.min(1, radius[slot])) gap = Math.min(gap, along - car.halfL - radius[slot]); }
   return gap;
 }
 function exitGap(car, pc) { const tail = pc?.tail; return tail && tail !== car ? tail.ai.s - tail.halfL - car.halfL - 1.2 : Infinity; }
-function green(pc) { return !pc.B.light || AF.trafficLight.stateAt(pc.B.light, pc.axis) === 'green'; }
+// a car that has just left this lane by another turn still hangs back over the stop line
+function turnedGap(car, pc, remaining) { let gap = Infinity; for (const option of pc.next) { const tail = option.tail; if (tail && tail !== car && tail.ai.s - tail.halfL < 2) gap = Math.min(gap, remaining + tail.ai.s - tail.halfL - car.halfL - 1.2); } return gap; }
+function green(pc) { return !pc.B.light || AF.trafficLight.stateAt(pc.B.light, pc.axis, simW) === 'green'; }
 function selectBoxes(dt) {
   for (const point of G.nodes) if (point.owner) {
     const owner = point.owner, A = owner.ai, pc = A.piece; point.age = (point.age || 0) + dt;
@@ -106,24 +122,24 @@ function selectBoxes(dt) {
   }
   for (const point of G.nodes) if (!point.owner && point.candidate) { point.owner = point.candidate; point.age = 0; point.owner.ai.node = point; }
 }
-function aiStep(car, dt, near = false) {
+function aiStep(car, dt) {
   const A = car.ai; let pc = A.piece, gap = Infinity, target = A.v0, remaining = pc.len - A.s, changed = false;
-  if (A.pushT > 0) { A.pushT = Math.max(0, A.pushT - dt); VV.stepPush(car, dt); return; }
+  if (A.pushT > 0) A.pushT = Math.max(0, A.pushT - dt);   // a shove only moves the body (offset below), never the shared lane state
   const leader = A.ahead;
   if (leader) gap = leader.ai.s - A.s - car.halfL - leader.halfL - 1.2;
-  else if (A.next) { gap = remaining + exitGap(car, A.next); if (pc.kind === 'lane') { gap = Math.min(gap, remaining + A.next.len + exitGap(car, A.next.to)); target = Math.min(target, Math.sqrt(A.next.turnV ** 2 + 4.4 * Math.max(0, remaining - 1))); if (pc.B.owner !== car) gap = Math.min(gap, remaining - car.halfL - 0.3); } }
+  else if (A.next) { gap = Math.min(remaining + exitGap(car, A.next), turnedGap(car, pc, remaining)); if (pc.kind === 'lane') { gap = Math.min(gap, remaining + A.next.len + exitGap(car, A.next.to)); target = Math.min(target, Math.sqrt(A.next.turnV ** 2 + 4.4 * Math.max(0, remaining - 1))); if (pc.B.owner !== car) gap = Math.min(gap, remaining - car.halfL - 0.3); } }
   else gap = Math.min(gap, remaining);
-  if (pc.kind === 'conn') target = Math.min(target, pc.turnV); if (near) gap = localGap(car, gap);
+  if (pc.kind === 'conn') target = Math.min(target, pc.turnV); gap = laneGap(car, A, gap);
   A.cd = Math.max(0, (A.cd || 0) - dt);
   if (A.dwell > 0) { A.dwell = Math.max(0, A.dwell - dt); target = 0; }
   else for (let index = 0; index < (pc.stops?.length || 0); index++) {
-    const stop = pc.stops[index]; if (index === A.served || stop.s < A.s - 0.1 || (stop.kind === 'bus' && car.type.id !== 'bus') || (stop.kind === 'cab' && (!car.type.cab || A.cd > 0 || stop.target.cd > VV.clockT))) continue;
+    const stop = pc.stops[index]; if (index === A.served || stop.s < A.s - 0.1 || (stop.kind === 'bus' && car.type.id !== 'bus') || (stop.kind === 'cab' && (!(car.simCab || (car.dayType || car.type).cab) || A.cd > 0 || stop.target.cd > VV.clockT))) continue;
     gap = Math.min(gap, stop.s - A.s);
     if (stop.s - A.s < 0.1 && A.v < 0.2) { A.dwell = stop.dwell; A.served = index; A.cd = stop.kind === 'cab' ? 80 : 0; if (stop.kind === 'cab') { stop.target.cd = VV.clockT + 30; riders(car, stop.target); } else if (stop.kind === 'bus') riders(car); } break;
   }
   target = Math.min(target, Math.sqrt(8 * Math.max(0, gap))); A.v = Math.max(0, Math.min(target, A.v + 2.6 * dt));
   const travel = Math.min(A.v * dt, Math.max(0, gap)); A.s += travel; car.v = dt > 0 ? travel / dt : A.v;
-  while (A.next && A.s >= pc.len) { unlink(car); A.s -= pc.len; pc = A.piece = A.next; A.next = pickNext(pc); A.served = -1; A.wait = 0; enqueue(car); changed = true; }
+  while (A.next && A.s >= pc.len) { unlink(car); A.s -= pc.len; pc = A.piece = A.next; A.next = pickNext(pc, car); A.served = -1; A.wait = 0; enqueue(car); changed = true; }
   if (A.node && pc.kind === 'lane' && A.s > car.halfL + 2) { if (A.node.owner === car) A.node.owner = null; A.node = null; }
   pieceAt(pc, A.s, PP); const yaw = Math.atan2(PP.dx, PP.dz), turn = AF.angDiff(car.yaw, yaw); car.steer = AF.clamp(Math.atan(car.wheelbase * turn / Math.max(0.1, travel)), -0.6, 0.6); car.yaw = yaw;
   if (Math.abs(A.offsetX || 0) + Math.abs(A.offsetZ || 0) > 0.01) { const decay = Math.exp(-dt * 0.75), x = PP.x + A.offsetX * decay, z = PP.z + A.offsetZ * decay; if (!VV.worldHits(car, x, z, yaw)) { car.x = x; car.z = z; } A.offsetX = car.x - PP.x; A.offsetZ = car.z - PP.z; }
@@ -138,15 +154,94 @@ function riders(car, stop) {
   if (!stop && rnd() < 0.55) walkers.spawn(car.x - hx * (car.halfL + 9) - hz * lateral, car.z - hz * (car.halfL + 9) + hx * lateral, car.yaw, { path: [car.x + hx * along - hz * (car.halfW + 1), car.z + hz * along + hx * (car.halfW + 1), car.x + hx * along - hz * (car.halfW - 0.6), car.z + hz * along + hx * (car.halfW - 0.6)], v: 2.6, wait: 1.5, onEnd: walkers.off });
 }
 VV.clockT = 0; VV.aiStep = aiStep;
-VV.simTraffic = dt => {
-  VV.clockT += dt; const cam = AF.camera.position;
-  if ((cabSwapT -= dt) <= 0) { cabSwapT = 3; VV.nightCabs(); }
-  accumulated += dt; VV.renderAlpha = accumulated / PERIOD; if (accumulated + 1e-9 < PERIOD) return;
-  accumulated = Math.max(0, accumulated - PERIOD); VV.renderAlpha = Math.min(1, accumulated / PERIOD); dt = PERIOD; frame++;
-  for (const route of routes) { const distance = Math.max(route.minX - cam.x, 0, cam.x - route.maxX) ** 2 + Math.max(route.minZ - cam.z, 0, cam.z - route.maxZ) ** 2, active = distance <= route.activeRadius ** 2; for (const car of route.cars) if (car.ai) { car.active = active; if (!active) car.ai.acc = 0; } }
-  rebuild(); selectBoxes(dt);
-  for (const car of VV.ai) { if (!car.ai || car.active === false) continue; const A = car.ai, distance = (car.x - cam.x) ** 2 + (car.z - cam.z) ** 2; A.acc += dt; if (distance > 57600 && ((frame + car.id) & (car.inView ? 3 : 7))) continue; car.prevX = car.x; car.prevZ = car.z; car.prevYaw = car.yaw; car.renderNear = distance <= 57600; aiStep(car, Math.min(A.acc, 0.6), distance <= 3600); A.acc = 0; }
-  for (const car of VV.cars) if (!car.ai && !car.player && car.pushLife > 0) VV.stepPush(car, dt);
+// ---------------------------------------------------------------- the shared fleet (01-core world clock)
+// Every AI car steps at a fixed 15 Hz on W, every step, wherever the viewer is, with seeded turns and only obstacles every client
+// agrees on, so co-op players drive through the same traffic. A guest takes the host's fleet on joining (trafficSave / trafficLoad),
+// compares a checksum every 2 s (79-net pongs) and asks for the fleet again if it ever drifts (80-coop).
+let simK = -1, simW = 0, manualT = 0;
+const CHK = new Map();
+const checksum = () => { let h = 0x811c9dc5; for (const car of VV.ai) { const A = car.ai; if (!A || car.active === false) continue; h = Math.imul(h ^ (car.id * 4099 + A.piece.id), 16777619) + Math.round(A.s * 4) | 0; } return h >>> 0; };
+function stepAll(t) {
+  simW = t; VV.clockT = t; frame++;
+  if (Math.round(t / PERIOD) % 45 === 0) VV.nightCabs(t);
+  rebuild(); selectBoxes(PERIOD);
+  const cam = AF.camera.position;
+  for (const car of VV.ai) { if (!car.ai || car.active === false) continue; car.prevX = car.x; car.prevZ = car.z; car.prevYaw = car.yaw; car.renderNear = (car.x - cam.x) ** 2 + (car.z - cam.z) ** 2 <= 57600; aiStep(car, PERIOD); }
+  for (const car of VV.cars) if (!car.ai && !car.player && car.pushLife > 0) VV.stepPush(car, PERIOD);
+  if (simK % 30 === 0) { CHK.set(simK, checksum()); VV.lastChk = { k: simK, c: CHK.get(simK) }; if (CHK.size > 16) CHK.delete(CHK.keys().next().value); }
+}
+VV.trafficChk = (k) => CHK.get(k);
+VV.simTraffic = (dt, W) => {
+  if (W === undefined) {   // harnesses: step on dt, lights on AF.clock.w
+    manualT += dt; while (manualT >= PERIOD - 1e-9) { manualT -= PERIOD; stepAll(AF.clock.w); }
+    VV.renderAlpha = AF.clamp(manualT / PERIOD, 0, 1); return;
+  }
+  const K = Math.floor(W / PERIOD);
+  // a clock nudged back a little (co-op offset refinement) just waits for W to catch up: re-labelling the steps would put this
+  // client's fleet a step out from everyone else's
+  if (simK < 0 || Math.abs(K - simK) > 900) { if (simK >= 0 && VV.onTrafficJump) VV.onTrafficJump(); simK = K - 1; }
+  // at most 12 steps a frame: a longer stall is caught up over the next frames, never dropped (dropping would put this client's
+  // fleet steps behind everyone else's); a minute or more away (a background tab) starts over and co-op asks the host
+  for (let n = 0; simK < K && n < 12; n++) { simK++; stepAll(simK * PERIOD); }
+  VV.renderAlpha = simK > K ? 1 : AF.clamp(W / PERIOD - K, 0, 1);
+};
+// the whole fleet's shared state (+ the intersection boxes and cab stands), as base64 for a reliable message. Lossless (float64 where
+// it is continuous) so the guest then steps bit-identically; fields at their usual value are left out: ~16 bytes a cruising car.
+const SF_V0 = 1, SF_STOP = 2, SF_WAIT = 4, SF_DWELL = 8, SF_CD = 16, SF_NEXT = 32;
+VV.trafficSave = () => {
+  const L = VV.ai.filter((c) => c.ai && c.active !== false), drops = VV.cabDrops || [], owned = G.nodes.filter((n) => n.owner && n.owner.ai);
+  const b = new DataView(new ArrayBuffer(12 + L.length * 52 + owned.length * 12 + drops.length * 8)); let o = 0;
+  b.setUint32(o, Math.max(0, simK) >>> 0, true); o += 4; b.setUint16(o, L.length, true); o += 2; b.setUint16(o, owned.length, true); o += 2; b.setUint16(o, drops.length, true); o += 4;
+  for (const c of L) {
+    const A = c.ai, f = (A.v === A.v0 ? SF_V0 : A.v === 0 ? SF_STOP : 0) | (A.wait ? SF_WAIT : 0) | (A.dwell ? SF_DWELL : 0) | (A.cd ? SF_CD : 0) | (A.next ? SF_NEXT : 0);
+    b.setUint16(o, c.id, true); b.setUint16(o + 2, A.piece.id, true); b.setFloat64(o + 4, A.s, true); b.setUint8(o + 12, f); b.setInt8(o + 13, AF.clamp(A.served, -1, 127)); b.setUint16(o + 14, (A.turns || 0) & 0xffff, true); o += 16;
+    if (f & SF_NEXT) { b.setUint16(o, A.next.id, true); o += 2; }
+    if (!(f & (SF_V0 | SF_STOP))) { b.setFloat64(o, A.v, true); o += 8; }
+    if (f & SF_WAIT) { b.setFloat64(o, A.wait, true); o += 8; }
+    if (f & SF_DWELL) { b.setFloat64(o, A.dwell, true); o += 8; }
+    if (f & SF_CD) { b.setFloat64(o, A.cd, true); o += 8; }
+  }
+  for (const n of owned) { b.setUint16(o, G.nodes.indexOf(n), true); b.setUint16(o + 2, n.owner.id, true); b.setFloat64(o + 4, n.age || 0, true); o += 12; }
+  for (const d of drops) { b.setFloat64(o, d.cd || 0, true); o += 8; }
+  let s = ''; const u8 = new Uint8Array(b.buffer, 0, o); for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s);
+};
+VV.trafficLoad = (b64) => {
+  let b; try { const s = atob(String(b64)); const u8 = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i); b = new DataView(u8.buffer); } catch (e) { return false; }
+  if (b.byteLength < 12) return false;
+  let o = 0; const k = b.getUint32(o, true); o += 4; const n = b.getUint16(o, true); o += 2; const no = b.getUint16(o, true); o += 2; const nd = b.getUint16(o, true); o += 4;
+  // read and check everything first: a short or malformed message leaves the local fleet alone
+  const cars = [], nodes = [], cds = [];
+  try {
+    for (let i = 0; i < n; i++) {
+      const r = { id: b.getUint16(o, true), pc: b.getUint16(o + 2, true), s: b.getFloat64(o + 4, true), f: b.getUint8(o + 12), served: b.getInt8(o + 13), turns: b.getUint16(o + 14, true), next: -1, v: 0, wait: 0, dwell: 0, cd: 0 }; o += 16;
+      if (r.f & SF_NEXT) { r.next = b.getUint16(o, true); o += 2; }
+      if (!(r.f & (SF_V0 | SF_STOP))) { r.v = b.getFloat64(o, true); o += 8; }
+      if (r.f & SF_WAIT) { r.wait = b.getFloat64(o, true); o += 8; }
+      if (r.f & SF_DWELL) { r.dwell = b.getFloat64(o, true); o += 8; }
+      if (r.f & SF_CD) { r.cd = b.getFloat64(o, true); o += 8; }
+      if (![r.s, r.v, r.wait, r.dwell, r.cd].every(Number.isFinite)) return false;
+      cars.push(r);
+    }
+    for (let i = 0; i < no; i++, o += 12) nodes.push([b.getUint16(o, true), b.getUint16(o + 2, true), b.getFloat64(o + 4, true)]);
+    for (let i = 0; i < nd; i++, o += 8) cds.push(b.getFloat64(o, true));
+  } catch (e) { return false; }
+  const byId = new Map(); for (const c of VV.ai) byId.set(c.id, c);
+  for (const c of VV.ai) if (c.ai) unlink(c);
+  const seen = new Set();
+  for (const r of cars) {
+    const c = byId.get(r.id), pc = G.pieces[r.pc]; if (!c || !c.ai || !pc) continue;
+    const A = c.ai, x0 = c.x, z0 = c.z;
+    A.piece = pc; A.next = r.next >= 0 ? G.pieces[r.next] || null : null; A.s = r.s; A.v = r.f & SF_V0 ? A.v0 : r.f & SF_STOP ? 0 : r.v; A.wait = r.wait; A.dwell = r.dwell;
+    A.served = r.served; A.cd = r.cd; A.turns = r.turns; A.node = null; c.active = true; seen.add(c);
+    // slide into the shared place rather than jump (the lane offset eases out)
+    pieceAt(pc, A.s, PP); const ex = x0 - PP.x, ez = z0 - PP.z; if (ex * ex + ez * ez < 900) { A.offsetX = ex; A.offsetZ = ez; } else { A.offsetX = A.offsetZ = 0; c.x = PP.x; c.z = PP.z; c.prevX = c.x; c.prevZ = c.z; }
+  }
+  for (const p of G.nodes) p.owner = null;
+  for (const [ni, id, age] of nodes) { const p = G.nodes[ni], c = byId.get(id); if (p && c && c.ai && Number.isFinite(age)) { p.owner = c; p.age = age; c.ai.node = p; } }
+  const drops = VV.cabDrops || []; cds.forEach((cd, i) => { if (drops[i] && Number.isFinite(cd)) drops[i].cd = cd; });
+  // cars the host no longer has in traffic (driven off, wrecked) park where they are
+  for (const c of VV.ai.slice()) if (c.ai && !seen.has(c)) { VV.detachTraffic(c); const i = VV.ai.indexOf(c); if (i >= 0) VV.ai.splice(i, 1); c.ai = null; c.parked = true; c.v = 0; if (VV.placeMesh) VV.placeMesh(c); }
+  rebuild(); simK = k; if (VV.nightCabs) VV.nightCabs(Math.floor(k / 45) * 45 * PERIOD); return true;
 };
 VV.buildTraffic = () => {
   const initial = VV.ai.length;
@@ -173,24 +268,24 @@ VV.addRoute = (name, points, { count = 3, loop = true, types = ['sedan', 'taxi']
 function crossingCase(check) {
   const node = G.nodes.find(node => Math.abs(node.x) < 0.01 && Math.abs(node.z + 80) < 0.01), lane = node?.inL.find(lane => lane.axis === 'z'), conn = lane?.next.find(conn => conn.to.axis === 'x');
   if (!conn || !node.light) return { ok: false, info: 'missing Grand/Charter turn or signal' };
-  const cars = VV.cars, ai = VV.ai, clock = AF.clock.t, owners = G.nodes.map(node => node.owner), source = cars.find(car => car.type.id === 'sedan');
+  const cars = VV.cars, ai = VV.ai, clock = AF.clock.w, owners = G.nodes.map(node => node.owner), source = cars.find(car => car.type.id === 'sedan');
   const car = Object.assign({}, source, { id: -1, interact: null, player: false, pushLife: 0, y: 0, v: 0 });
   try {
     VV.cars = [car]; VV.ai = []; for (const point of G.nodes) point.owner = null;
     attach(car, lane, lane.len - car.halfL - 0.35, 8); car.ai.next = conn;
     return check(car, lane, conn, node);
-  } finally { VV.cars = cars; VV.ai = ai; AF.clock.t = clock; G.nodes.forEach((node, index) => { node.owner = owners[index]; }); rebuild(); }
+  } finally { VV.cars = cars; VV.ai = ai; AF.clock.w = clock; G.nodes.forEach((node, index) => { node.owner = owners[index]; }); rebuild(); }
 }
 AF.test('traffic: Grand/Charter interior crossing permits a turn', () => crossingCase((car, lane, conn, node) => {
-  AF.clock.t = (lane.axis === 'x' ? 2 : 16) - node.light.off;
+  AF.clock.w = (lane.axis === 'x' ? 2 : 16) - node.light.off;
   for (let index = 0; index < 300 && car.ai.piece !== conn.to; index++) VV.simTraffic(1 / 30);
   return { ok: car.ai.piece === conn.to, info: `crossing ${node.inL.length}/${node.outL.length}, ${conn.turn}, reached ${car.ai.piece.name || car.ai.piece.kind}` };
 }));
 AF.test('traffic: red stops the car and green releases it', () => crossingCase((car, lane, conn, node) => {
-  AF.clock.t = (lane.axis === 'x' ? 16 : 2) - node.light.off; const start = car.ai.s;
+  AF.clock.w = (lane.axis === 'x' ? 16 : 2) - node.light.off; const start = car.ai.s;
   for (let index = 0; index < 90; index++) VV.simTraffic(1 / 30);
   const stopped = car.ai.piece === lane && car.ai.s - start < 0.1 && car.v < 0.1;
-  AF.clock.t = (lane.axis === 'x' ? 2 : 16) - node.light.off;
+  AF.clock.w = (lane.axis === 'x' ? 2 : 16) - node.light.off;
   for (let index = 0; index < 300 && car.ai.piece === lane; index++) VV.simTraffic(1 / 30);
   return { ok: stopped && car.ai.piece !== lane, info: `red stopped ${stopped}, green entered ${car.ai.piece !== lane}` };
 }));
@@ -202,7 +297,7 @@ AF.test('traffic: AI footprints do not overlap after 60 s AF.step', () => {
   for (let index = 0; index < VV.ai.length; index++) for (let other = index + 1; other < VV.ai.length; other++) {
     const first = VV.ai[index], second = VV.ai[other]; if (first.active === false || second.active === false || Math.abs(first.y - second.y) > 2) continue;
     const depth = VV.overlap(first, first.x, first.z, first.yaw, second);
-    if (depth > 0.02) { overlaps++; if (depth > worst) { worst = depth; pair = `${first.id}/${second.id}`; } }
+    if (depth > 0.02) { overlaps++; if (depth > worst) { worst = depth; const d = (c) => `${c.id} ${c.type.id} ${c.ai.piece.kind}#${c.ai.piece.id} s${c.ai.s.toFixed(1)} off${Math.hypot(c.ai.offsetX || 0, c.ai.offsetZ || 0).toFixed(2)} push${(c.pushLife || 0).toFixed(1)}`; pair = `${d(first)} / ${d(second)}`; } }
   }
   return { ok: overlaps === 0, info: `${overlaps} overlaps, max ${worst.toFixed(3)} m (${pair})` };
 });

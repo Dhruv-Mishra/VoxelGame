@@ -11,12 +11,12 @@ try {
   // was bumped to '.bright2' so earlier saved values don't hide the new default. ?shot / ?test keep 1.0 for comparable captures.
   AF.brightness = (() => { try { const v = parseFloat(localStorage.getItem('portSolace.bright2')); if (v >= 0.6 && v <= 2) return v; } catch (e) { /* storage blocked */ } return AF.SHOT || AF.TEST ? 1.0 : 2.0; })();
   AF.setBrightness = (v) => { AF.brightness = clamp(+v || 1, 0.6, 2); try { localStorage.setItem('portSolace.bright2', String(AF.brightness)); } catch (e) { /* storage blocked */ } };
-  if (AF.Q.has('hour')) T.hours = ((+AF.Q.get('hour') % 24) + 24) % 24;
-  else T.hours = 20.6;   // boot at night: the lit city, neon and light pools are the best first look
-  if (AF.Q.has('speed')) T.speed = +AF.Q.get('speed');
+  // boot at night: the lit city, neon and light pools are the best first look
+  AF.time.set({ hours: AF.Q.has('hour') ? +AF.Q.get('hour') : 20.6, speed: AF.Q.has('speed') ? +AF.Q.get('speed') : T.speed }, true);
   // v2 dusk pacing: minute one runs a little fast (17.7 -> ~18.05: the sunset band deepens, lamps and the first windows come on),
-  // then the clock eases to a SLOWED 1 h / 5 min so the sunset and blue hour linger. Any user speed change (UI buttons) wins.
-  A.pace = { on: !AF.Q.has('hour') && !AF.Q.has('speed') && !AF.TEST, t: 0, set: null };
+  // then the clock slows to 1 h / 5 min so the sunset and blue hour linger. Two re-bases only (a co-op host shares each one);
+  // any user speed change, or joining someone else's world, ends it.
+  A.pace = { on: !AF.Q.has('hour') && !AF.Q.has('speed') && !AF.TEST, t: 0, step: 0 };
   // city lights: lamps, lit windows and ground pools start at dusk (sun < ~12 deg), well before full night
   A.cityLights = 0;
   A.litFrac = 0.62;
@@ -162,11 +162,13 @@ try {
   A.lightK = { sun: 1, moon: 0 };
   AF.timeTick = (dt) => {
     const PC = A.pace;
-    if (PC.on && !T.paused && dt > 0) {
-      if (PC.set !== null && Math.abs(T.speed - PC.set) > 1e-9) PC.on = false;   // the user picked a speed
-      else { PC.t += dt; const sp = PC.t < 70 ? 1 / 200 : PC.t < 100 ? lerp(1 / 200, 1 / 300, (PC.t - 70) / 30) : 1 / 300; T.speed = sp; PC.set = sp; }
+    if (PC.on && !T.paused && dt > 0 && AF.ready) {
+      PC.t += dt;
+      const step = PC.t < 70 ? 1 : 2;
+      if (step !== PC.step) { PC.step = step; AF.time.set({ speed: step === 1 ? 1 / 200 : 1 / 300 }); }
+      if (step === 2) PC.on = false;
     }
-    if (!T.paused) { T.hours = (T.hours + dt * T.speed) % 24; if (T.hours < 0) T.hours += 24; }
+    T.hours = AF.time.at();
     A.sunAt(T.hours, sunVec);
     // moon: opposite side of the sky, kept high enough to light the town
     moonVec.set(-sunVec.x * 0.6 - 0.15, Math.max(0.42, -sunVec.y + 0.25), -sunVec.z * 0.5 + 0.55).normalize();
@@ -982,10 +984,10 @@ try {
   // ============================================================ tests
   AF.test('atmos: sky dome exists', () => ({ ok: !!(A.sky && A.sky.parent), info: 'clouds ' + (A.clouds ? A.clouds.length : 0) + ', water mats ' + A.waterMats.length + ', build ' + A.buildMs + ' ms' }));
   AF.test('atmos: night at 23h, day at 13h', () => {
-    const h0 = T.hours, U = AF.mat.uniforms;
-    T.hours = 23; A.applyTime(); const n23 = U.uNight.value;
-    T.hours = 13; A.applyTime(); const n13 = U.uNight.value;
-    T.hours = h0; A.applyTime();
+    const B0 = Object.assign({}, AF.time.base), U = AF.mat.uniforms;
+    AF.time.set({ hours: 23 }, true); A.applyTime(); const n23 = U.uNight.value;
+    AF.time.set({ hours: 13 }, true); A.applyTime(); const n13 = U.uNight.value;
+    AF.time.adopt(B0); A.applyTime();
     return { ok: n23 > 0.8 && n13 < 0.05, info: `uNight 23h=${n23.toFixed(2)} 13h=${n13.toFixed(2)}` };
   });
   AF.test('atmos: point light pool <= 12', () => {
@@ -1080,31 +1082,32 @@ try {
     }
     PX.ms = Math.round(performance.now() - t0);
   });
-  const stepBlimp = (B, dt) => {
-    const M = AF.solaceMast;
-    if (M && Number.isFinite(M.x) && B.mode && B.mode !== 'loop') {   // mooring: glide in nose-first, hold a minute, glide back out
-      B.mt += dt;
-      const D = B.moor, fin = D.fin;
-      if (B.mode === 'in' || B.mode === 'out') {
-        const u = Math.min(1, B.mt / 25), e = u * u * (3 - 2 * u), a = B.mode === 'in' ? D.start : fin, b = B.mode === 'in' ? fin : B.ret();
-        B.mesh.position.set(a.x + (b.x - a.x) * e, a.y + (b.y - a.y) * e, a.z + (b.z - a.z) * e);
-        B.mesh.rotation.set(0, a.yaw + AF.angDiff(a.yaw, b.yaw) * e, 0, 'YXZ');
-        if (u >= 1) { if (B.mode === 'in') { B.mode = 'hold'; B.mt = 0; } else { B.mode = 'loop'; B.cool = 240; } }
-      } else if (B.mode === 'hold') { B.mesh.position.set(fin.x, fin.y + Math.sin(B.mt * 0.5) * 0.2, fin.z); B.mesh.rotation.set(0, fin.yaw + Math.sin(B.mt * 0.15) * 0.04, 0, 'YXZ'); if (B.mt > 60) { B.mode = 'out'; B.mt = 0; } }
-      B.x = B.mesh.position.x; B.z = B.mesh.position.z; return;
+  // the blimp keeps a timetable on the shared world clock: two lazy laps of its ellipse, then (if the lap passes within 110 m of the
+  // Solace Tower mast) 25 s gliding in nose-first, a minute moored, 25 s gliding back out onto the lap
+  const orbitAt = (B, s, out) => { out.x = B.cx + Math.cos(s) * B.rx; out.z = B.cz + Math.sin(s) * B.rz; out.y = B.y + Math.sin(s * 7) * 0.8; out.yaw = Math.atan2(-Math.sin(s) * B.rx, Math.cos(s) * B.rz); return out; };
+  const BO = { x: 0, y: 0, z: 0, yaw: 0 }, BF = { x: 0, y: 0, z: 0, yaw: 0 };
+  const placeBlimp = (B, w) => {
+    const M = AF.solaceMast, om = B.speed / ((B.rx + B.rz) / 2), To = Math.PI * 2 / om;
+    if (B.sm == null) {
+      let best = 0, bd = 1e18;
+      if (M && Number.isFinite(M.x)) for (let i = 0; i < 720; i++) { orbitAt(B, i / 720 * Math.PI * 2, BO); const d = (BO.x - M.x) ** 2 + (BO.z - M.z) ** 2; if (d < bd) { bd = d; best = i / 720 * Math.PI * 2; } }
+      B.sm = best; B.canMoor = !!(M && Number.isFinite(M.y)) && bd < 110 * 110; B.ph = 37;
     }
-    B.cool = (B.cool ?? 90) - dt;
-    if (M && Number.isFinite(M.x) && Number.isFinite(M.y) && B.cool <= 0 && Math.hypot(B.x - M.x, B.z - M.z) < 110) {
-      const yaw = Math.atan2(M.x - B.x, M.z - B.z), fx = Math.sin(yaw), fz = Math.cos(yaw);
-      B.moor = { start: { x: B.mesh.position.x, y: B.mesh.position.y, z: B.mesh.position.z, yaw: B.mesh.rotation.y }, fin: { x: M.x - fx * 21.2 * (B.k || 1), y: M.y - 9.5 * (B.k || 1), z: M.z - fz * 21.2 * (B.k || 1), yaw } };
-      B.ret = () => { const x = B.cx + Math.cos(B.s) * B.rx, z = B.cz + Math.sin(B.s) * B.rz; return { x, y: B.y, z, yaw: Math.atan2(-Math.sin(B.s) * B.rx, Math.cos(B.s) * B.rz) }; };
-      B.mode = 'in'; B.mt = 0; return;
+    const P = B.P = 2 * To + (B.canMoor ? 110 : 0), tau = (((w + B.ph) % P) + P) % P;
+    if (tau < 2 * To) {
+      const s = B.sm + om * tau; orbitAt(B, s, BO); B.mode = 'loop'; B.s = s;
+      B.mesh.position.set(BO.x, BO.y, BO.z); B.mesh.rotation.set(0, BO.yaw, Math.sin(s * 5) * 0.02, 'YXZ');
+    } else {
+      const m = tau - 2 * To, k = B.k || 1; orbitAt(B, B.sm, BO);
+      const yaw = Math.atan2(M.x - BO.x, M.z - BO.z), fx = Math.sin(yaw), fz = Math.cos(yaw);
+      BF.x = M.x - fx * 21.2 * k; BF.y = M.y - 9.5 * k; BF.z = M.z - fz * 21.2 * k; BF.yaw = yaw;
+      if (m < 25 || m >= 85) {
+        const into = m < 25, u = into ? m / 25 : (m - 85) / 25, e = u * u * (3 - 2 * u), a = into ? BO : BF, b = into ? BF : BO;
+        B.mode = into ? 'in' : 'out';
+        B.mesh.position.set(a.x + (b.x - a.x) * e, a.y + (b.y - a.y) * e, a.z + (b.z - a.z) * e); B.mesh.rotation.set(0, a.yaw + AF.angDiff(a.yaw, b.yaw) * e, 0, 'YXZ');
+      } else { const h = m - 25; B.mode = 'hold'; B.mesh.position.set(BF.x, BF.y + Math.sin(h * 0.5) * 0.2, BF.z); B.mesh.rotation.set(0, BF.yaw + Math.sin(h * 0.15) * 0.04, 0, 'YXZ'); }
     }
-    B.s += dt * B.speed / ((B.rx + B.rz) / 2);
-    const x = B.cx + Math.cos(B.s) * B.rx, z = B.cz + Math.sin(B.s) * B.rz;
-    const tx = -Math.sin(B.s) * B.rx, tz = Math.cos(B.s) * B.rz;
-    B.x = x; B.z = z;
-    B.mesh.position.set(x, B.y + Math.sin(B.s * 7) * 0.8, z); B.mesh.rotation.set(0, Math.atan2(tx, tz), Math.sin(B.s * 5) * 0.02, 'YXZ');
+    B.x = B.mesh.position.x; B.z = B.mesh.position.z;
   };
   AF.onTick('atmos-extras', 705, (dt, t) => {
     const night = (AF.time && AF.time.night) || 0, cam = AF.camera.position;
@@ -1169,7 +1172,7 @@ try {
     // blimp + nav lights
     const B = PX.blimp;
     if (B) {
-      stepBlimp(B, dt); const blink = (t % 1.6) < 0.25; for (const n of B.nav) n.visible = blink || night < 0.3 ? blink : true;
+      placeBlimp(B, t); const blink = (t % 1.6) < 0.25; for (const n of B.nav) n.visible = blink || night < 0.3 ? blink : true;
       if (B.envMat) B.envMat.emissiveIntensity = 0.08 * night;
     }
   });
@@ -1180,11 +1183,12 @@ try {
   });
   AF.test('atmos: blimp drifts, steam + searchlights exist', () => {
     const B = PX.blimp; if (!B) return { ok: false, info: 'no blimp' };
-    const sv = { cool: B.cool }; B.cool = 1e9; B.mode = 'loop';
-    const x0 = B.mesh.position.x, z0 = B.mesh.position.z;
-    for (let i = 0; i < 120; i++) stepBlimp(B, 0.25);
-    B.cool = sv.cool;
+    placeBlimp(B, AF.clock.w);
+    const w0 = Math.ceil((AF.clock.w + B.ph) / B.P) * B.P - B.ph;   // the start of a lap
+    placeBlimp(B, w0); const x0 = B.mesh.position.x, z0 = B.mesh.position.z;
+    for (let i = 1; i <= 120; i++) placeBlimp(B, w0 + i * 0.25);
     const moved = Math.hypot(B.mesh.position.x - x0, B.mesh.position.z - z0);
+    placeBlimp(B, AF.clock.w);
     return { ok: moved > 20 && isFinite(moved) && PX.beams.length >= 3 && PX.steam && PX.steam.src.length >= 6, info: `blimp moved ${moved.toFixed(1)} m in 30 s at y ${B.y}, beams ${PX.beams.length}, steam vents ${PX.steam ? PX.steam.src.length : 0}, ${PX.ms} ms` };
   });
 
@@ -1253,18 +1257,32 @@ try {
       FW.bursts++;
       const W2 = AF.water2; if (W2) { W2.dyn = W2.dyn || []; const d = W2.dyn; const e = d.length < 3 ? {} : d.shift(); e.x = s.x; e.y = s.y; e.z = s.z; e.col = c; e.t = 0; d.push(e); }
     };
-    FW.launch = (count = 1, finale = false) => {
+    FW.launch = (count = 1, finale = false, rnd = Math.random, late = 0) => {
       for (let n = 0; n < count; n++) {
-        const site = FW.sites[(Math.random() * FW.sites.length) | 0];
-        const H = 95 + Math.random() * 70, g = 22, vy = Math.sqrt(2 * g * H);
+        const site = FW.sites[(rnd() * FW.sites.length) | 0];
+        const H = 95 + rnd() * 70, g = 22, vy = Math.sqrt(2 * g * H);
         const types = ['peony', 'peony', 'willow', 'ring', 'crackle', 'peony'];
-        const col = (Math.random() * PAL.length) | 0;
+        const col = (rnd() * PAL.length) | 0;
         let s = FW.shells.find((q) => !q.live);
         if (!s) { if (FW.shells.length >= 24) return; s = {}; FW.shells.push(s); }
-        Object.assign(s, { live: true, x: site.x + (Math.random() - 0.5) * 6, y: site.y, z: site.z + (Math.random() - 0.5) * 6, vx: (Math.random() - 0.5) * 5, vy, vz: (Math.random() - 0.5) * 4 - 2, g,
-          fuse: vy / g * (0.86 + Math.random() * 0.1), t: 0, type: finale && Math.random() < 0.4 ? 'crackle' : types[(Math.random() * types.length) | 0], col, col2: (col + 1 + ((Math.random() * 5) | 0)) % PAL.length, speed: 40 + Math.random() * 16 });
+        Object.assign(s, { live: true, x: site.x + (rnd() - 0.5) * 6, y: site.y, z: site.z + (rnd() - 0.5) * 6, vx: (rnd() - 0.5) * 5, vy, vz: (rnd() - 0.5) * 4 - 2, g,
+          fuse: vy / g * (0.86 + rnd() * 0.1), t: 0, type: finale && rnd() < 0.4 ? 'crackle' : types[(rnd() * types.length) | 0], col, col2: (col + 1 + ((rnd() * 5) | 0)) % PAL.length, speed: 40 + rnd() * 16 });
+        // a salvo seen late (a slow frame, a clock correction) starts part-way up
+        if (late > 0 && late < s.fuse) { s.t = late; s.x += s.vx * late; s.z += s.vz * late; s.y += s.vy * late - s.g * late * late / 2; s.vy -= s.g * late; }
       }
     };
+    // the show's salvos: a seeded schedule per 120 s cycle on the shared world clock, so co-op players watch the same shells
+    const SHOW = new Map();
+    const showAt = (c) => {
+      if (SHOW.gen !== AF.world.gen) { SHOW.clear(); SHOW.gen = AF.world.gen; }   // a joined host's seed: its show
+      let E = SHOW.get(c); if (E) return E;
+      const r = AF.rng(Math.floor(AF.whash(c, 1201) * 4294967295) + 1); E = [];
+      for (let x = r() * 0.8; x < 70; x += 0.9 + r() * 2.2) E.push({ t: x, n: r() < 0.3 ? 2 : 1, fin: false, seed: (r() * 4294967295) >>> 0 });
+      for (let x = 70; x < 82; x += 0.28 + r() * 0.25) E.push({ t: x, n: 2, fin: true, seed: (r() * 4294967295) >>> 0 });
+      if (SHOW.size > 4) SHOW.clear();
+      SHOW.set(c, E); return E;
+    };
+    let lastT = null;
     const tmpS = new THREE.Vector2();
     AF.onTick('atmos-fireworks', 707, (dt, t) => {
       if (!FW.heads) return;
@@ -1273,14 +1291,10 @@ try {
       FW.on = want;
       // the show: 120 s cycle, 70 s of salvos, 12 s finale, 38 s pause
       if (want && dt > 0) {
-        const ph = (t % 120);
-        FW.next -= dt;
-        if (FW.next <= 0) {
-          if (ph < 70) { FW.launch(Math.random() < 0.3 ? 2 : 1); FW.next = 0.9 + Math.random() * 2.2; }
-          else if (ph < 82) { FW.launch(2, true); FW.next = 0.28 + Math.random() * 0.25; }
-          else FW.next = 0.5;
-        }
+        const t0 = lastT == null || t < lastT || t - lastT > 3 ? t - dt : lastT;
+        for (let c = Math.floor(t0 / 120); c <= Math.floor(t / 120); c++) for (const e of showAt(c)) { const te = c * 120 + e.t; if (te > t0 && te <= t) FW.launch(e.n, e.fin, AF.rng(e.seed), t - te); }
       }
+      lastT = t;
       // shells: rise with a sparkling trail, then burst
       let live = 0;
       for (const s of FW.shells) {

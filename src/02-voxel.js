@@ -943,7 +943,7 @@ AF.mat = {};
 
 // ---------------------------------------------------------------- world meshing (runs as build stage 500)
 // Regions of 128x128 columns (32 m). Each region -> 1 opaque mesh (terrain + voxels + static props) + 1 glass mesh.
-AF.world = { group: null, regions: new Map(), props: [], water: [] };
+Object.assign(AF.world, { group: null, regions: new Map(), props: [], water: [] });   // AF.world also holds the shared clock + seed (01-core)
 const REG = 128;
 // static props: geometry from AF.meshModel placed in the world (merged into region meshes). rot = quarter turns.
 AF.placeStatic = (geo, x, y, z, rot = 0, o = {}) => {
@@ -1863,20 +1863,46 @@ function updatePartial(cl, RL) {
     if (ready && r.hid) { r.hid = false; r.lvl = -1; }
   }
 }
+// VIEW-AWARE LOD (PERF.md §4): a swap the player can see is the pop the eye catches, so what is on screen keeps its detail a band
+// longer (x1.25) before it drops, and with the camera moving whatever lies ahead in view gains detail VA.lead earlier (1.5 s of
+// travel, <= 90 m: loaded already, the streamer ranks on the 2.5 s look-ahead). Out of view everything follows the plain distance,
+// so turning round never meets less detail than before; the extra cost is a few regions at the edge of the ring while moving.
+const VA = { fx: 0, fz: -1, cos: 0, lead: 0, vx: 0, vz: 0, cx: 0, cz: 0 }, VDIR = new THREE.Vector3();
+function viewAim() {
+  const cam = AF.camera, A = AF.stream.ahead; cam.getWorldDirection(VDIR);
+  const h = Math.hypot(VDIR.x, VDIR.z); VA.cx = cam.position.x; VA.cz = cam.position.z;
+  if (h < 0.25) VA.cos = -2;   // looking (nearly) straight down: all around is on screen
+  else { VA.fx = VDIR.x / h; VA.fz = VDIR.z / h; VA.cos = Math.cos(Math.min(Math.PI, Math.atan(Math.tan(cam.fov * Math.PI / 360) * cam.aspect) + 0.3)); }
+  VA.vx = A.vx; VA.vz = A.vz; VA.lead = Math.min(90, Math.hypot(A.vx, A.vz) * 1.5);
+}
+function inView(x, z, rad) {
+  if (VA.cos < -1) return true;
+  const dx = x - VA.cx, dz = z - VA.cz, d = Math.hypot(dx, dz);
+  return d < rad * 1.5 || dx * VA.fx + dz * VA.fz > d * VA.cos - rad;
+}
+const leadAt = (x, z) => VA.lead > 0 && (x - VA.cx) * VA.vx + (z - VA.cz) * VA.vz > 0 ? VA.lead : 0;
+// a region with only its 0.5 m copy resident shows that until the streamer delivers the full mesh
+function regWant(r, c, RD, vy) {
+  if (!r.fullOk) return 1;
+  if (!r.coarse.length) return 0;
+  const d = Math.hypot(r.cx - c.x, r.cz - c.z, vy), vis = inView(r.cx, r.cz, 23);
+  if (r.lvl === 1) return d < RD - 12 + (vis ? leadAt(r.cx, r.cz) : 0) ? 0 : 1;
+  return d > (vis ? RD * 1.25 : RD) + 12 ? 1 : 0;
+}
 AF.onTick('prop-lod', 880, () => {
   if (!AF.world.group) return;
   const c = AF.camera.position, D = AF.LOD_DIST;
+  viewAim();
   // region LOD: full voxels near the camera, the 0.5 m coarse copy beyond AF.REGION_LOD; whole 128 m clusters swap to their merged
   // 1 m copy once the nearest point of the cluster is beyond AF.FAR_LOD (hysteresis so nothing flickers on a boundary)
   const RL = AF.world.regLod;
   if (RL) {
     const RD = AF.REGION_LOD, FD = AF.FAR_LOD || 1e9, vy = Math.max(0, c.y - 12) * 0.7;
-    // a region with only its 0.5 m copy resident shows that until the streamer delivers the full mesh
-    const regWant = (r) => !r.fullOk || (r.coarse.length && Math.hypot(r.cx - c.x, r.cz - c.z, vy) > RD + (r.lvl === 1 ? -12 : 12)) ? 1 : 0;
     for (const cl of CLS.values()) {
       if (!cl.built) continue;
-      const dx = Math.max(cl.x0 - c.x, 0, c.x - cl.x1), dz = Math.max(cl.z0 - c.z, 0, c.z - cl.z1);
-      const near = Math.hypot(dx, dz, vy) <= FD + (cl.lvl ? -16 : 16);
+      const dx = Math.max(cl.x0 - c.x, 0, c.x - cl.x1), dz = Math.max(cl.z0 - c.z, 0, c.z - cl.z1), ccx = (cl.x0 + cl.x1) / 2, ccz = (cl.z0 + cl.z1) / 2;
+      const vis = inView(ccx, ccz, 91), dist = Math.hypot(dx, dz, vy);
+      const near = cl.lvl ? dist <= FD - 16 + (vis ? leadAt(ccx, ccz) : 0) : dist <= (vis ? FD * 1.15 : FD) + 16;
       const want = cl.pending > 0 || !near ? 1 : 0;
       // PARTIAL REVEAL (PERF.md §5): a streaming cluster in view range shows each region as soon as it is meshed and hides that
       // region's slice of the 1 m copy (geometry groups, one extra draw per slice only while half-loaded)
@@ -1914,7 +1940,7 @@ AF.onTick('prop-lod', 880, () => {
         const ins = [];
         for (const k of cl.regs) {
           const r = RL.get(k); if (!r) continue;
-          r.hid = false; r.lvl = -1; r.lvl = regWant(r); r.sh = false;
+          r.hid = false; r.lvl = -1; r.lvl = regWant(r, c, RD, vy); r.sh = false;
           for (const m of r.full) { if (m.material === AF.mat.voxel) m.castShadow = true; if (r.lvl === 0) ins.push(m); else m.visible = false; }
           for (const m of r.coarse) { if (r.lvl === 1) ins.push(m); else { m.visible = false; m.layers.set(0); } }
         }
@@ -1923,7 +1949,7 @@ AF.onTick('prop-lod', 880, () => {
     }
     for (const r of RL.values()) {
       if (r.fadeE) continue;
-      const want = r.hid ? 3 : regWant(r);
+      const want = r.hid ? 3 : regWant(r, c, RD, vy);
       if (want !== r.lvl) {
         const prev = r.lvl; r.lvl = want; r.sh = false;
         if ((prev === 0 || prev === 1) && want < 2) {
@@ -1958,7 +1984,9 @@ AF.onTick('prop-lod', 880, () => {
     if (hid) { if (r.nearBuilt) { FADE.cancel(r); freeNear(r); } }
     else if (!r.nearBuilt && d < D) { if (sync) buildNear(r); }
     else if (r.nearBuilt && d > D * AF.LOD.prefetch + 70) { FADE.cancel(r); freeNear(r); }
-    const showNear = !hid && r.nearBuilt && d < D + 25, farSeen = !!r.far && !showNear && d < PC;
+    // near props: the view-aware band as for regions (on screen they stay a little longer; ahead of a moving camera they come early)
+    const vis = inView(r.cx, r.cz, 23), nearLim = r.showNear ? (vis ? (D + 25) * 1.25 : D + 25) : D + 25 + (vis ? leadAt(r.cx, r.cz) : 0);
+    const showNear = !hid && r.nearBuilt && d < nearLim, farSeen = !!r.far && !showNear && d < (r.farSeen && vis ? PC * 1.15 : PC);
     // near <-> far props and the far-prop cull cross-fade (PERF.md §4); the first decision for a region just sets the state
     if (!r.fadeE && r.showNear !== undefined && (r.showNear !== showNear || r.farSeen !== farSeen)) {
       const outs = [], ins = [];

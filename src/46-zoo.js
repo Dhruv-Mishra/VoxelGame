@@ -678,35 +678,6 @@ try {
     mesh.geometry.attributes.aZooFade.array[instance] = fade;
     if (fade > -2 && fade < -1 || fade > 0 && fade < 1) mesh.material = zooFadeMaterial();
   };
-  const decide = (an, hours) => {
-    const id = an.sp.id, H = an.H, roll = random(an), night = hours >= 20 || hours < 6;
-    an.elapsed = 0; an.timer = 5 + random(an) * 10; an.next = '';
-    if (night && id !== 'hippo' && id !== 'croc') { an.state = 'sleep'; an.timer = 20; return; }
-    if (id === 'monkey' && roll < 0.68) {
-      an.frame = (an.frame + 1) % H.frames.length;
-      const frame = H.frames[an.frame];
-      target(an, frame[0], frame[1], 'wander', 'climb', 25); return;
-    }
-    if (id === 'penguin' && roll < 0.6 || id === 'hippo' && !night && roll < 0.78) {
-      target(an, H.pool.cx, H.pool.cz, id === 'penguin' ? 'waddle' : 'wander', 'dive', 35); return;
-    }
-    if ((id === 'lion' || id === 'lioness') && roll < 0.78 || id === 'croc' && roll < 0.65 || id === 'bear' && roll < 0.35 || id === 'gorilla' && roll < 0.4) {
-      target(an, H.entry[0], H.entry[1], 'wander', id.startsWith('lion') ? 'ascend' : 'rest', 30); return;
-    }
-    if (id === 'giraffe' && roll < 0.5) {
-      target(an, H.browse[0] + 1.5, H.browse[1], 'wander', 'browse', 30); return;
-    }
-    if (H.pool && roll < 0.35 && H.id !== 'primates') {
-      const pool = H.pool, angle = random(an) * PI * 2;
-      target(an, pool.cx + Math.sin(angle) * pool.rx * 0.95, pool.cz + Math.cos(angle) * pool.rz * 0.95, 'wander', id === 'elephant' && random(an) < 0.65 ? 'spray' : 'drink', 30); return;
-    }
-    if (an.leader && roll < 0.7) {
-      target(an, an.leader.x + an.fl, an.leader.z + an.fb, 'follow', 'graze', 15); return;
-    }
-    if ((id === 'zebra' || id === 'antelope' || id === 'deer' || id === 'giraffe') && roll > 0.9) { dryTarget(an); an.state = 'run'; an.next = 'graze'; an.timer = 12; return; }
-    dryTarget(an); an.state = id === 'penguin' ? 'waddle' : 'wander';
-    an.next = id === 'giraffe' || id === 'zebra' || id === 'antelope' || id === 'deer' || id === 'stag' || id === 'rhino' || id === 'hippo' || id === 'elephant' || id === 'flamingo' ? 'graze' : 'rest'; an.timer = 25;
-  };
   // the dithered LOD fade material's two variants (far: receive only; parts: cast + receive) compile before the first swap
   AF.on('preloaded', () => {
     const sp = Object.values(Z.species)[0]; if (!sp) return;
@@ -744,7 +715,7 @@ try {
       for (let k = 0; k < n; k++) {
         const pad = H.id === 'primates' ? 6 : 4.5;
         const x = a + pad + R() * (c - a - pad * 2), z = b + pad + R() * (d - b - pad * 2);
-        const an = { sp, H, hab: H.id, rect: H.rect, pad, x, z, y: W.groundY(x, z), yaw: R() * PI * 2, tx: x, tz: z,
+        const an = { uid: Z.list.length + 1, sp, H, hab: H.id, rect: H.rect, pad, x, z, y: W.groundY(x, z), yaw: R() * PI * 2, tx: x, tz: z,
           phase: R() * 6, clock: R() * 20, v: 0, scale: id === 'giraffe' ? 0.94 + R() * 0.06 : 0.92 + R() * 0.08,
           state: 'wander', next: 'graze', timer: 25, elapsed: 0, seed: (R() * 4294967296) >>> 0, leader,
           fl: (k % 2 ? -1 : 1) * (2 + k * 0.6), fb: -2 - k * 1.5, frame: k % H.frames.length,
@@ -763,74 +734,95 @@ try {
       for (const id in Z.species) for (const mesh of Z.species[id].meshes) mesh.material = AF.mat.voxelInst;
     });
   });
-  const stepAnimal = Z.stepAnimal = (an, dt, hours, player) => {
-    const id = an.sp.id, S = an.sp.G.S, H = an.H, night = hours >= 20 || hours < 6;
-    an.clock += dt; an.elapsed += dt; an.timer -= dt; an.cooldown -= dt; an.floorAcc += dt;
-    if (night && id !== 'hippo' && id !== 'croc' && an.state !== 'sleep') { an.state = 'sleep'; an.timer = 20; }
-    if (an.state === 'sleep' && !night) decide(an, hours);
-    if (player && player.y < 8 && !night && an.cooldown <= 0 && an.state !== 'swim' && an.state !== 'jump') {
-      const bx = H.side === 'e' ? H.rect[2] : H.rect[0];
-      if (Math.abs(player.x - bx) < 8 && player.z > H.rect[1] && player.z < H.rect[3] && (player.x < H.rect[0] || player.x > H.rect[2])) {
-        an.attention = Math.atan2(player.x - an.x, player.z - an.z);
-        target(an, H.side === 'e' ? H.rect[2] - an.pad : H.rect[0] + an.pad, player.z, 'approach', 'watch', 14);
-        an.cooldown = 24;
-      }
+  // ---------------------------------------------------------------- the shared clock (01-core): what each animal does is a function of W
+  // An animal's day is cut into 18-30 s slots. In each it walks from where the last slot left it to a spot picked by a seeded hash
+  // (a dry corner, the pool edge, the climbing frames, the den, its herd leader) and then grazes, rests, drinks, browses, sprays,
+  // swims or climbs there; at night it sleeps in its den. Co-op players at the zoo see the same animals doing the same things; a
+  // player at the fence only turns heads.
+  const PA = { x: 0, z: 0, st: '', mv: '', fr: -1, a0: 0 }, PB = { x: 0, z: 0, st: '', mv: '', fr: -1, a0: 0 }, PLd = { x: 0, z: 0, st: '', v: 0, yaw: 0, elev: 0 };
+  const slotLen = (an) => an.SL || (an.SL = 18 + AF.hash2(an.uid, 46) * 12);
+  const dryAt = (an, k, out) => {
+    for (let j = 0; j < 12; j++) {
+      const x = boundX(an, an.rect[0] + AF.whash(an.uid, k, j * 2) * (an.rect[2] - an.rect[0])), z = boundZ(an, an.rect[1] + AF.whash(an.uid, k, j * 2 + 1) * (an.rect[3] - an.rect[1]));
+      if (!inPool(an.hab, x, z) && !AF.solidAt(x, W.groundY(x, z) + 0.75, z)) { out.x = x; out.z = z; return out; }
     }
-    if (an.timer <= 0) {
-      if (an.state === 'climb') {
-        const frame = H.frames[(an.frame + 1) % H.frames.length];
-        an.sx = an.x; an.sz = an.z; an.sy = an.elevation; an.frame = (an.frame + 1) % H.frames.length;
-        target(an, frame[0], frame[1], 'jump', 'rest', 2.4);
-      } else if (an.state === 'jump') { an.state = 'rest'; an.timer = 3; an.elapsed = 0; }
-      else if (an.state === 'dive') { an.state = 'swim'; an.timer = 12; an.elapsed = 0; }
-      else if (an.state === 'swim') { dryTarget(an); an.state = 'waddle'; an.next = 'rest'; an.timer = 35; an.elapsed = 0; }
-      else decide(an, hours);
+    out.x = boundX(an, an.rect[2] - an.pad); out.z = boundZ(an, an.rect[3] - an.pad); return out;
+  };
+  const poolPt = (an, a, out) => { const pool = an.H.pool; out.x = boundX(an, pool.cx + Math.sin(a) * pool.rx * 0.65); out.z = boundZ(an, pool.cz + Math.cos(a) * pool.rz * 0.65); return out; };
+  // slot k's plan: where the animal goes (x, z), how (mv) and what it does there (st); mirrors the old decide()
+  const planAt = (an, k, night, out) => {
+    const id = an.sp.id, H = an.H, roll = AF.whash(an.uid, k, 100);
+    out.mv = id === 'penguin' ? 'waddle' : 'wander'; out.fr = -1; out.a0 = 0;
+    if (night && id !== 'hippo' && id !== 'croc') {
+      const den = H.rest || H.entry; if (den) { out.x = boundX(an, den[0] + (AF.hash2(an.uid, 1) - 0.5) * 3); out.z = boundZ(an, den[1] + (AF.hash2(an.uid, 2) - 0.5) * 3); } else dryAt(an, -77, out);
+      out.st = 'sleep'; return out;
     }
-    if (an.state === 'follow') { an.tx = boundX(an, an.leader.x + an.fl); an.tz = boundZ(an, an.leader.z + an.fb); }
-    const moving = an.state === 'wander' || an.state === 'follow' || an.state === 'approach' || an.state === 'waddle' || an.state === 'swim' || an.state === 'run';
-    if (an.state === 'swim') {
-      const pool = H.pool, angle = an.clock * (id === 'penguin' ? 0.5 : 0.12) + an.phase * 0.01;
-      an.tx = boundX(an, pool.cx + Math.sin(angle) * pool.rx * 0.65); an.tz = boundZ(an, pool.cz + Math.cos(angle) * pool.rz * 0.65);
+    if (id === 'monkey' && roll < 0.68) { const f = Math.floor(AF.whash(an.uid, k, 101) * H.frames.length) % H.frames.length; out.x = boundX(an, H.frames[f][0]); out.z = boundZ(an, H.frames[f][1]); out.st = 'climb'; out.fr = f; return out; }
+    if ((id === 'penguin' && roll < 0.6 || id === 'hippo' && roll < 0.78) && H.pool) { out.a0 = AF.whash(an.uid, k, 102) * PI * 2; poolPt(an, out.a0, out); out.st = 'swim'; return out; }
+    if ((id === 'lion' || id === 'lioness') && roll < 0.78 && H.rest) { out.x = boundX(an, H.rest[0] + (id === 'lion' ? -1.5 : (an.uid % 3) * 1.5)); out.z = boundZ(an, H.rest[1]); out.st = 'rest'; return out; }
+    if ((id === 'croc' && roll < 0.65 || id === 'bear' && roll < 0.35 || id === 'gorilla' && roll < 0.4) && H.entry) { out.x = boundX(an, H.entry[0]); out.z = boundZ(an, H.entry[1]); out.st = 'rest'; return out; }
+    if (id === 'giraffe' && roll < 0.5 && H.browse) { out.x = boundX(an, H.browse[0] + 1.5); out.z = boundZ(an, H.browse[1]); out.st = 'browse'; return out; }
+    if (H.pool && roll < 0.35 && H.id !== 'primates') {
+      const pool = H.pool, angle = AF.whash(an.uid, k, 103) * PI * 2; out.x = boundX(an, pool.cx + Math.sin(angle) * pool.rx * 0.95); out.z = boundZ(an, pool.cz + Math.cos(angle) * pool.rz * 0.95);
+      out.st = id === 'elephant' && AF.whash(an.uid, k, 104) < 0.65 ? 'spray' : 'drink'; return out;
     }
-    if (moving) {
-      const dx = an.tx - an.x, dz = an.tz - an.z, distance = Math.hypot(dx, dz);
-      if (distance < 0.45 && an.state !== 'swim' && an.state !== 'follow') {
-        an.state = an.next || 'rest'; an.timer = an.state === 'rest' && (id === 'lion' || id === 'lioness') ? 28 : an.state === 'climb' ? 6 : an.state === 'dive' ? 1.5 : 6 + random(an) * 8;
-        an.elapsed = 0; an.v = 0;
-      } else {
-        const speed = an.state === 'swim' && id === 'penguin' ? 2.2 : an.state === 'run' ? S.speed * 2.6 : S.speed;
-        an.v = Math.min(speed, an.v + dt * 1.5);
-        const heading = Math.atan2(dx, dz);
-        an.yaw += AF.angDiff(an.yaw, heading) * Math.min(1, dt * 3);
-        const travel = Math.min(distance, an.v * dt) * Math.max(0, Math.cos(AF.angDiff(an.yaw, heading)));
-        const nx = boundX(an, an.x + Math.sin(an.yaw) * travel), nz = boundZ(an, an.z + Math.cos(an.yaw) * travel);
-        const pool = inPool(an.hab, nx, nz);
-        const aquatic = id === 'hippo' || id === 'croc' || id === 'flamingo' || id === 'elephant' || id === 'penguin' || id === 'bear' || id === 'tiger';
-        if (pool && !aquatic || !pool && an.elevation < 0.1 && AF.solidAt(nx, an.y + 0.65, nz)) { dryTarget(an); an.state = 'wander'; an.timer = 25; }
-        else { an.x = nx; an.z = nz; }
-      }
-    } else an.v = Math.max(0, an.v - dt * 3);
-    if (an.state === 'climb') {
-      const frame = H.frames[an.frame]; an.elevation += (frame[2] - an.elevation) * Math.min(1, dt * 1.1);
-    } else if (an.state === 'jump') {
-      const amount = Math.min(1, an.elapsed / 2.4), frame = H.frames[an.frame];
-      an.x = boundX(an, an.sx + (an.tx - an.sx) * amount); an.z = boundZ(an, an.sz + (an.tz - an.sz) * amount);
-      an.elevation = an.sy + (frame[2] - an.sy) * amount + Math.sin(amount * PI) * 1.6;
-      an.yaw = Math.atan2(an.tx - an.sx, an.tz - an.sz);
-    } else if (an.state !== 'rest' || id !== 'monkey') an.elevation = Math.max(0, an.elevation - dt * 1.8);
-    an.x = boundX(an, an.x); an.z = boundZ(an, an.z);
-    if (an.state === 'ascend') target(an, H.rest[0], H.rest[1], 'wander', 'rest', 15);
+    if (an.leader && roll < 0.7) { out.st = 'follow'; out.x = an.x; out.z = an.z; return out; }
+    dryAt(an, k, out);
+    if ((id === 'zebra' || id === 'antelope' || id === 'deer' || id === 'giraffe') && roll > 0.9) out.mv = 'run';
+    out.st = id === 'giraffe' || id === 'zebra' || id === 'antelope' || id === 'deer' || id === 'stag' || id === 'rhino' || id === 'hippo' || id === 'elephant' || id === 'flamingo' ? 'graze' : 'rest';
+    return out;
+  };
+  const isNight = (h) => h >= 20 || h < 6;
+  // where slot k ends: its spot (a swim glides back to its start point, a follower stands by its leader)
+  const endOf = (an, k, Wend, hours, out) => {
+    planAt(an, k, isNight(hours), out);
+    if (out.st === 'follow') { posAt(an.leader, Wend, hours, PLd); out.x = boundX(an, PLd.x + an.fl); out.z = boundZ(an, PLd.z + an.fb); }
+    return out;
+  };
+  const posAt = (an, Wt, hours, out) => {
+    const SL = slotLen(an), u = (Wt + AF.hash2(an.uid, 47) * SL) / SL, k = Math.floor(u), f = (u - k) * SL, id = an.sp.id, S = an.sp.G.S, H = an.H;
+    endOf(an, k - 1, Wt - f, hours, PA);
+    const sx = PA.x, sz = PA.z;
+    planAt(an, k, isNight(hours), PB);
+    let tx = PB.x, tz = PB.z;
+    if (PB.st === 'follow') { posAt(an.leader, Wt, hours, PLd); tx = boundX(an, PLd.x + an.fl); tz = boundZ(an, PLd.z + an.fb); }
+    const sp = PB.mv === 'run' ? S.speed * 2.6 : S.speed, d = Math.hypot(tx - sx, tz - sz), v = Math.max(sp, d / (SL * 0.6)), tw = d / v;
+    out.elev = 0; out.k = k; out.f = f;
+    if (f < tw) { const e = f / tw; out.x = sx + (tx - sx) * e; out.z = sz + (tz - sz) * e; out.v = v; out.yaw = Math.atan2(tx - sx, tz - sz); out.st = PB.mv; return out; }
+    const rest = f - tw, left = SL - f;
+    out.x = tx; out.z = tz; out.v = 0; out.yaw = NaN; out.st = PB.st === 'follow' ? 'graze' : PB.st;
+    if (PB.st === 'swim') {
+      const w = id === 'penguin' ? 0.5 : 0.12, a = PB.a0 + rest * w, back = Math.min(1, left / 2);
+      poolPt(an, a, PLd); const e = 1 - back;   // the last 2 s glide back to the start point so the next slot begins there
+      out.x = PLd.x + (tx - PLd.x) * e; out.z = PLd.z + (tz - PLd.z) * e; out.v = id === 'penguin' ? 2.2 : S.speed * 0.6; out.yaw = a + PI / 2;
+      if (rest < 1.5) out.st = 'dive';
+    } else if (PB.st === 'climb') { const fr = H.frames[PB.fr]; out.elev = fr[2] * Math.max(0, Math.min(1, rest / 3, (left - 0.5) / 2)); if (out.elev > 0.2 && left > 2.5 && rest > 3) out.st = 'rest'; else if (out.elev > 0) out.st = 'climb'; }
+    return out;
+  };
+  Z.posAt = posAt;
+  const ZQ = { x: 0, z: 0, st: '', v: 0, yaw: 0, elev: 0, k: 0, f: 0 };
+  const stepAnimal = Z.stepAnimal = (an, dt, hours, player, Wt = AF.clock.w) => {
+    const id = an.sp.id, H = an.H, night = isNight(hours);
+    posAt(an, Wt, hours, ZQ);
+    an.clock = Wt + AF.hash2(an.uid, 49) * 20;
+    an.x = ZQ.x; an.z = ZQ.z; an.state = ZQ.st; an.v = ZQ.v; an.elevation = ZQ.elev;
+    if (ZQ.v > 0 && Number.isFinite(ZQ.yaw)) an.yaw += AF.angDiff(an.yaw, ZQ.yaw) * Math.min(1, dt * 4);
     an.phase += dt * an.v * (4.5 / Math.max(0.5, an.sp.G.lift));
+    // a player at the fence (local): the animal turns to look
+    if (player && player.y < 8 && !night && an.state !== 'swim' && an.state !== 'dive') {
+      const bx = H.side === 'e' ? H.rect[2] : H.rect[0];
+      if (Math.abs(player.x - bx) < 8 && player.z > H.rect[1] && player.z < H.rect[3] && (player.x < H.rect[0] || player.x > H.rect[2]) && an.v === 0 && (an.state === 'graze' || an.state === 'rest')) { an.state = 'watch'; an.attention = Math.atan2(player.x - an.x, player.z - an.z); }
+    }
     const wet = inPool(an.hab, an.x, an.z); an.wet = !!wet;
-    if (an.floorAcc >= (an.far ? 0.9 : 0.3)) {
+    an.floorAcc = (an.floorAcc || 0) + dt;
+    if (an.floorAcc >= (an.far ? 0.9 : 0.3) || dt === 0) {
       an.floorAcc = 0;
-      an.y = wet ? wet.y : H.id === 'primates' ? W.groundY(an.x, an.z) : AF.surfaceBelow(an.x, an.z, Math.max(W.groundY(an.x, an.z) + 1.2, an.y + 0.75), 3);
+      an.y = wet ? wet.y : H.id === 'primates' ? W.groundY(an.x, an.z) : AF.surfaceBelow(an.x, an.z, Math.max(W.groundY(an.x, an.z) + 1.2, (Number.isFinite(an.y) ? an.y : 0) + 0.75), 3);
       if (!Number.isFinite(an.y)) an.y = W.groundY(an.x, an.z);
     }
     const submerge = an.state === 'dive' || an.state === 'swim';
     const lower = submerge && wet ? -an.sp.G.lift - (id === 'penguin' ? 0.45 : 0.4) : wet && (id === 'hippo' || id === 'croc') ? -an.sp.G.lift * 0.9 : 0;
     an.pose += (lower - an.pose) * Math.min(1, dt * 2);
-    if (an.state === 'watch') an.attention = player ? Math.atan2(player.x - an.x, player.z - an.z) : an.yaw;
   };
   const CATS = new Set(['lion', 'lioness', 'tiger']), LIERS = new Set(['lion', 'lioness', 'tiger', 'zebra', 'antelope', 'deer', 'stag', 'giraffe', 'rhino', 'hippo', 'bear', 'croc']);
   const renderAnimal = (an, detail) => {
@@ -893,7 +885,7 @@ try {
       appendInstance(part.mesh, part.matrix, -1 - an.fade);
     }
   };
-  AF.onTick('zoo', 430, (dt) => {
+  AF.onTick('zoo', 430, (dt, Wt) => {
     if (!Z.list.length) return;
     const cp = AF.camera.position, low = AF.GFX && AF.GFX.tier === 'low', limit = low ? 120 : 150;
     viewMatrix.multiplyMatrices(AF.camera.projectionMatrix, AF.camera.matrixWorldInverse); frustum.setFromProjectionMatrix(viewMatrix);
@@ -908,7 +900,7 @@ try {
       else if (distance < 52 * 52) an.far = false;
       an.fade = Math.max(0, Math.min(1, an.fade + (an.far ? dt : -dt) / 0.3));
       const interval = distance < 80 * 80 ? 0 : 0.1;
-      if (an.acc >= interval) { stepAnimal(an, Math.min(an.acc, 0.5), AF.time ? AF.time.hours : 12, cp); an.acc = 0; }
+      if (an.acc >= interval) { stepAnimal(an, Math.min(an.acc, 0.5), AF.time ? AF.time.hours : 12, cp, Wt); an.acc = 0; }
       if (an.fade < 1) renderAnimal(an, true);
       if (an.fade > 0) {
         const G = an.sp.G;
@@ -953,26 +945,29 @@ try {
     }
     return { ok, info: 'three supported rest positions; no rectangular upper lip' };
   });
-  AF.test('zoo: simulated herds move and stay inside their habitat bounds', () => {
-    let moved = 0, inside = true;
+  AF.test('zoo: herds on the shared clock move, stay inside their habitat and agree at the same W', () => {
+    let moved = 0, inside = true, same = true; const W0 = AF.clock.w, Q = { x: 0, z: 0 };
     for (const original of Z.list) {
-      const an = Object.assign({}, original, { state: 'wander', next: 'graze', timer: 25, v: 0, floorAcc: 0 });
-      an.leader = null; an.tx = boundX(an, original.x + (original.x < (an.rect[0] + an.rect[2]) / 2 ? 5 : -5)); an.tz = boundZ(an, original.z + 3);
-      for (let frame = 0; frame < 300; frame++) {
-        stepAnimal(an, 0.1, 12, null);
-        if (an.x < an.rect[0] + an.pad || an.x > an.rect[2] - an.pad || an.z < an.rect[1] + an.pad || an.z > an.rect[3] - an.pad || !Number.isFinite(an.y)) inside = false;
+      const an = Object.assign({}, original, { floorAcc: 0 });
+      stepAnimal(an, 0, 12, null, W0); const x0 = an.x, z0 = an.z;
+      for (let frame = 1; frame <= 600; frame++) {
+        stepAnimal(an, 0.1, 12, null, W0 + frame * 0.1);
+        if (an.x < an.rect[0] + an.pad - 1e-6 || an.x > an.rect[2] - an.pad + 1e-6 || an.z < an.rect[1] + an.pad - 1e-6 || an.z > an.rect[3] - an.pad + 1e-6 || !Number.isFinite(an.y)) inside = false;
       }
-      if (Math.hypot(an.x - original.x, an.z - original.z) > 0.2) moved++;
+      if (Math.hypot(an.x - x0, an.z - z0) > 0.2) moved++;
+      posAt(original, W0 + 60, 12, Q); if (Q.x !== an.x || Q.z !== an.z) same = false;
     }
-    return { ok: inside && moved >= Z.list.length * 0.8, info: moved + '/' + Z.list.length + ' moved; bounded ' + inside };
+    return { ok: inside && same && moved >= Z.list.length * 0.6, info: moved + '/' + Z.list.length + ' moved in 60 s; bounded ' + inside + '; deterministic ' + same };
   });
   AF.test('zoo: species actions and night sleep use articulated parts', () => {
     const elephant = Z.list.find((an) => an.sp.id === 'elephant'), penguin = Z.list.find((an) => an.sp.id === 'penguin'), monkey = Z.list.find((an) => an.sp.id === 'monkey');
     if (!elephant || !penguin || !monkey) return { ok: false, info: 'missing species' };
-    const sleeper = Object.assign({}, elephant); stepAnimal(sleeper, 0.1, 23, null);
-    const diver = Object.assign({}, penguin, { state: 'dive', timer: 0 }); stepAnimal(diver, 0.1, 12, null);
-    const climber = Object.assign({}, monkey, { state: 'climb', timer: 0 }); stepAnimal(climber, 0.1, 12, null);
-    return { ok: sleeper.state === 'sleep' && diver.state === 'swim' && climber.state === 'jump' && elephant.sp.G.parts.some((p) => p.name === 'trunkTip'), info: 'sleep, dive, jump, jointed trunk' };
+    // the time a few seconds before the end of a slot whose plan is `want` (searching forward slot by slot)
+    const late = (an, want, hours) => { const SL = slotLen(an), ph = AF.hash2(an.uid, 47) * SL, k0 = Math.floor((AF.clock.w + ph) / SL); for (let k = k0; k < k0 + 400; k++) { planAt(an, k, isNight(hours), PB); if (PB.st === want) return (k + 1) * SL - ph - (want === 'climb' ? SL * 0.32 : 1.2); } return null; };
+    const Q = { x: 0, z: 0 };
+    const ts = late(elephant, 'sleep', 23), tw = late(penguin, 'swim', 12), tc = late(monkey, 'climb', 12);
+    const sleep = ts != null && posAt(elephant, ts, 23, Q).st === 'sleep', swim = tw != null && posAt(penguin, tw - 3, 12, Q).st === 'swim', climb = tc != null && posAt(monkey, tc, 12, Q).elev > 0;
+    return { ok: sleep && swim && climb && elephant.sp.G.parts.some((p) => p.name === 'trunkTip'), info: 'sleep ' + sleep + ', swim ' + swim + ', climb ' + climb + ', jointed trunk' };
   });
   // keepers
   AF.onBuild('zoo-keepers', 825, () => {

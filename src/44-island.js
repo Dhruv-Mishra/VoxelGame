@@ -180,9 +180,16 @@ AF.modes.jetski={
 };
 function dockY(dock){const point=dock?route.islandPier:route.cityPier;return AF.surfaceBelow(point[0],point[1],4,8);}
 function land(dock){const point=dock?route.islandPier:route.cityPier;AF.setMode('walk',{x:point[0],y:dockY(dock),z:point[1],yaw:dock?0:Math.PI,snap:true});AF.emit('toast',dock?'Welcome to Serena Isle':'Welcome back to Port Solace');}
-F.reset=dock=>{F.dock=F.from=dock;F.to=1-dock;F.elapsed=0;F.acc=0;F.waiting=-1;F.speed=0;const point=route.path[dock];F.x=point[0];F.z=point[1];if(AF.harbour.ferry){AF.harbour.ferry.st.dwell=25;place(0);}return F;};
+// the Solace Belle keeps a timetable on the shared world clock (01-core): dwell at the city pier, cross, dwell at the island, cross back.
+// F.off is only ever non-zero in tests (F.reset(dock) puts her alongside that dock; F.reset() restores the shared schedule).
+F.off=0;F.P=2*(route.dwell+route.crossing);
+F.reset=dock=>{F.waiting=-1;F.acc=0;if(dock==null){F.off=0;}else{const P=F.P,want=dock?route.dwell+route.crossing:0;F.off=((want-AF.clock.w)%P+P)%P;}F.at(AF.clock.w);if(AF.harbour.ferry)place(AF.clock.w);return F;};
+F.at=w=>{const D=route.dwell,X=route.crossing,P=F.P,tau=((w+F.off)%P+P)%P,ship=AF.harbour.ferry;
+ if(tau<D||(tau>=D+X&&tau<2*D+X)){const d=tau<D?0:1;F.dock=F.from=d;F.to=1-d;F.elapsed=0;F.speed=0;if(ship){ship.st.dwell=(d?2*D+X:D)-tau;ship.st.v=0;}}
+ else{const back=tau>=2*D+X;F.dock=-1;F.from=back?1:0;F.to=1-F.from;F.elapsed=tau-(back?2*D+X:D);F.speed=Math.hypot(20,128)*6*(F.elapsed/X)*(1-F.elapsed/X)/X;if(ship){ship.st.dwell=0;ship.st.v=F.speed;}}};
 F.board=dock=>{if(AF.mode==='ferry-ride')return;F.waiting=dock;if(F.dock===dock){F.waiting=-1;AF.setMode('ferry-ride');}else AF.emit('toast','Solace Belle is on her way.');};
-F.skip=()=>{if(!F.rider||AF.stream.traveling)return;F.dock=F.from=F.to;F.to=1-F.dock;F.elapsed=0;AF.harbour.ferry.st.dwell=25;place(AF.clock.t);const dock=F.dock;AF.stream.travel({label:dock?'Serena Isle':'Port Solace',go:()=>land(dock)});};
+// skipping takes the rider across at once; the boat itself keeps the shared timetable
+F.skip=()=>{if(!F.rider||AF.stream.traveling)return;const dock=F.dock>=0?1-F.dock:F.to;AF.stream.travel({label:dock?'Serena Isle':'Port Solace',go:()=>land(dock)});};
 function place(time){
  const mesh=AF.harbour.ferry.mesh,progress=F.dock<0?AF.smooth(0,1,F.elapsed/route.crossing):0,start=route.path[F.from],end=route.path[F.to];
  F.x=F.dock<0?AF.lerp(start[0],end[0],progress):route.path[F.dock][0];F.z=F.dock<0?AF.lerp(start[1],end[1],progress):route.path[F.dock][1];
@@ -192,8 +199,9 @@ function place(time){
 F.update=(dt,time)=>{
  const ship=AF.harbour.ferry;if(!ship)return;
  if(F.waiting>=0&&(AF.mode!=='walk'||Math.hypot(AF.player.x-(F.waiting?route.islandPier:route.cityPier)[0],AF.player.z-(F.waiting?route.islandPier:route.cityPier)[1])>7))F.waiting=-1;
- if(F.dock>=0){if(F.waiting===F.dock){F.waiting=-1;AF.setMode('ferry-ride');}ship.st.dwell-=dt;if(ship.st.dwell<=0){let occupied=false;for(const yacht of AF.land.yachts)if(yacht.me.position.x>-45&&yacht.me.position.x<25)occupied=true;if(occupied)ship.st.dwell=0.1;else{F.from=F.dock;F.to=1-F.from;F.dock=-1;F.elapsed=0;}}}
- else {F.elapsed=Math.min(route.crossing,F.elapsed+dt);F.speed=Math.hypot(20,128)*6*(F.elapsed/40)*(1-F.elapsed/40)/40;ship.st.v=F.speed;if(F.elapsed>=route.crossing){F.dock=F.from=F.to;F.to=1-F.dock;ship.st.dwell=25;F.speed=ship.st.v=0;place(time);if(F.rider)land(F.dock);}}
+ const wasDock=F.dock;F.at(time);
+ if(F.dock>=0&&F.waiting===F.dock){F.waiting=-1;AF.setMode('ferry-ride');}
+ if(F.dock>=0&&wasDock<0){place(time);if(F.rider)land(F.dock);}
  F.acc+=dt;if(F.rider||F.acc>=0.25||(AF.camera.position.x-F.x)**2+(AF.camera.position.z-F.z)**2<90000){place(time);F.acc=0;}
  if(F.cityPrompt){F.cityPrompt.label=F.dock===0?'Board the ferry to Serena Isle':'Wait for the ferry to Serena Isle';F.islandPrompt.label=F.dock===1?'Board the ferry to Port Solace':'Wait for the ferry to Port Solace';}
 };
@@ -209,13 +217,15 @@ AF.modes['ferry-ride']={
  }
 };
 AF.onBuild('island-ferry',675,()=>{
- F.reset(0);
+ F.reset();
  const decorative=AF.sea.ships.find(ship=>ship.name==='island ferry');if(decorative){AF.scene.remove(decorative.grp);AF.sea.ships.splice(AF.sea.ships.indexOf(decorative),1);}
- for(let index=0;index<AF.land.yachts.length;index++)AF.land.yachts[index].z=318+index*12;
+ // yachts lap the bay in a whole number of ferry cycles, timed to sail through her lane (x -50..30) only while she is alongside:
+ // no runtime give-way, so every co-op player sees the same boats
+ for(let index=0;index<AF.land.yachts.length;index++){const y=AF.land.yachts[index],k=[3,4,4,3,4][index%5],tc=(index%2?77.5:12.5)+index*F.P;y.z=318+index*12;y.v=(y.v<0?-1:1)*1400/(k*F.P);y.x0=-10-y.v*tc;}
  for(const dock of [0,1]){const point=dock?route.islandPier:route.cityPier,prompt=AF.addInteract({x:point[0],y:dockY(dock)+1,z:point[1],r:4,prio:0.7,label:'Board the ferry',can:()=>AF.mode==='walk',act:()=>F.board(dock)});if(dock)F.islandPrompt=prompt;else F.cityPrompt=prompt;}
 });
 AF.onTick('island-ferry',145,F.update);
-AF.onTick('island-sea-lane',329,(dt,time)=>{const yachts=AF.land.yachts;if(!yachts)return;for(const yacht of yachts){const x=((yacht.x0+yacht.v*time+700)%1400+1400)%1400-700,previous=x-yacht.v*dt,entry=yacht.v>0?-45:25;if(F.dock<0&&((yacht.v>0&&previous<=entry&&x>=entry)||(yacht.v<0&&previous>=entry&&x<=entry)))yacht.x0-=x-entry;}});
+AF.test('island: yachts never sail through the ferry lane while she crosses',()=>{let bad=0;const saved=F.off;F.off=0;try{for(let t=0;t<F.P*20;t+=0.5){F.at(t);if(F.dock>=0||F.elapsed<6||F.elapsed>34)continue;for(const y of AF.land.yachts){const x=((y.x0+y.v*t+700)%1400+1400)%1400-700;if(x>-50&&x<30)bad++;}}}finally{F.off=saved;F.at(AF.clock.w);}return{ok:!bad,info:bad+' conflicting samples over '+Math.round(F.P*20)+' s'};});
 S.hotelWalk=[[-20,424],[-20,478],[-20,514],[-90,514],[-130,580],[-145,610],[-145,651]];
 AF.test('island: sites have solid colliders and beach palms',()=>{const names=['Hotel Serena',"Fisher's Landing",'Serena Point Light','Serena Airstrip','Crater Lookout'],missing=names.filter(name=>!S.sites.find(site=>site.name===name)?.props.some(prop=>prop.col));return{ok:!missing.length&&S.palms>=100&&S.walkers<=120,info:S.palms+' palms, '+S.walkers+' actors, missing '+missing.join(',')};});
 AF.test('island: pier to hotel walk is unobstructed',()=>{let blocked=0,samples=0;const hits=[];for(let index=1;index<S.hotelWalk.length;index++){const from=S.hotelWalk[index-1],to=S.hotelWalk[index],steps=Math.ceil(Math.hypot(to[0]-from[0],to[1]-from[1])/0.5);for(let part=0;part<=steps;part++){const x=AF.lerp(from[0],to[0],part/steps),z=AF.lerp(from[1],to[1],part/steps),y=feetY(x,z);samples++;if(AF.boxBlocked(x,y+0.05,z,0.3,1.7)){blocked++;if(hits.length<5)hits.push([x,y,z]);}}}return{ok:!blocked,info:blocked+'/'+samples+' blocked '+JSON.stringify(hits)};});
@@ -246,6 +256,6 @@ AF.test('island: sea routes clear terrain and yield to ferry lane',()=>{let dry=
 AF.test('island: ferry round trip and safe pier height',()=>{
  const saved={mode:AF.mode,x:AF.player.x,y:AF.player.y,z:AF.player.z,yaw:AF.player.yaw},rows=[];
  try{for(const dock of [0,1]){F.reset(dock);const point=dock?route.islandPier:route.cityPier;AF.setMode('walk',{x:point[0],y:dockY(dock),z:point[1],snap:true});F.board(dock);let frames=0;while(AF.mode==='ferry-ride'&&frames++<3600)AF.step(1,1/30);const end=dock?route.cityPier:route.islandPier;rows.push(AF.mode==='walk'&&Math.hypot(AF.player.x-end[0],AF.player.z-end[1])<0.5&&Math.abs(AF.player.y-dockY(1-dock))<0.1&&!AF.boxBlocked(AF.player.x,AF.player.y+0.05,AF.player.z,0.3,1.7));}return{ok:rows.every(Boolean),info:'outbound/return '+rows.join('/')};}
- finally{F.reset(0);AF.setMode(saved.mode==='walk'?'walk':'aerial',saved);}
+ finally{F.reset();AF.setMode(saved.mode==='walk'?'walk':'aerial',saved);}
 });
 }catch(error){AF.partError('44-island.js',error);}

@@ -47,6 +47,8 @@ try {
     i16(v) { v = Math.round(v); this.d.setInt16(this.o, v < -32768 ? -32768 : v > 32767 ? 32767 : v || 0, true); this.o += 2; }
     u32(v) { this.d.setUint32(this.o, v >>> 0, true); this.o += 4; }
     f32(v) { this.d.setFloat32(this.o, Number.isFinite(v) ? v : 0, true); this.o += 4; }
+    // a world position in centimetres (+-83 km) in 3 bytes
+    p24(v) { v = Math.round(v * 100) || 0; v = v < -8388607 ? -8388607 : v > 8388607 ? 8388607 : v; this.d.setUint16(this.o, v & 0xffff, true); this.d.setInt8(this.o + 2, v >> 16); this.o += 3; }
   }
   class Rd {
     set(u8) { this.d = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); this.o = 0; this.n = u8.byteLength; return this; }
@@ -57,6 +59,7 @@ try {
     i16() { this.need(2); const v = this.d.getInt16(this.o, true); this.o += 2; return v; }
     u32() { this.need(4); const v = this.d.getUint32(this.o, true); this.o += 4; return v; }
     f32() { this.need(4); const v = this.d.getFloat32(this.o, true); this.o += 4; if (!Number.isFinite(v)) throw new RangeError('bad float'); return v; }
+    p24() { this.need(3); const v = this.d.getUint16(this.o, true) | (this.d.getInt8(this.o + 2) << 16); this.o += 3; return v / 100; }
   }
   N.Wr = Wr; N.Rd = Rd;
 
@@ -203,12 +206,25 @@ try {
   const deliver = (m, from) => { if (L.has(m.t) && !INTERNAL.has(m.t)) fire(m.t, m, from); };
   const INTERNAL = new Set(['hello', 'welcome', 'reject', 'join', 'left', 'ping', 'pong', 'status', 'hosting', 'end']);
   const rateOk = (l) => { const now = performance.now(); if (now - (l.rt || 0) > 1000) { l.rt = now; l.rn = 0; } return ++l.rn <= 120; };
+  // world clock (01-core): the host stamps its W on every pong; a guest keeps the offset from the least-delayed recent round trip
+  const CS = [];
+  const clockSample = (rtt, w) => {
+    if (!(rtt >= 0 && rtt < 5000 && Number.isFinite(w))) return;
+    CS.push({ rtt, err: w + rtt / 2000 - AF.wnow() }); if (CS.length > 8) CS.shift();
+    let b = CS[0]; for (const s of CS) if (s.rtt < b.rtt) b = s;
+    const e = b.err; if (Math.abs(e) < 0.002) return;
+    AF.world.off += e * 1000; for (const s of CS) s.err -= e;
+  };
+  N.ping = (l = links.get(0)) => { if (l) l.sendRel(JSON.stringify({ t: 'ping', s: performance.now() })); };
   const onRel = (l, text) => {
     if (typeof text !== 'string' || text.length > 8192 || !rateOk(l)) return;
     let m; try { m = JSON.parse(text); } catch (e) { return; }
     if (!m || typeof m.t !== 'string') return;
-    if (m.t === 'ping') { l.sendRel(JSON.stringify({ t: 'pong', s: m.s })); return; }
-    if (m.t === 'pong') { if (typeof m.s === 'number') { l.rtt = Math.max(0, performance.now() - m.s); const p = N.peers.get(l.slot); if (p) p.rtt = l.rtt; } return; }
+    if (m.t === 'ping') { l.sendRel(JSON.stringify(N.role === 'host' ? Object.assign({ t: 'pong', s: m.s, w: Math.round(AF.wnow() * 1000) / 1000 }, N.pongExtra ? N.pongExtra() : null) : { t: 'pong', s: m.s })); return; }
+    if (m.t === 'pong') {
+      if (typeof m.s === 'number') { l.rtt = Math.max(0, performance.now() - m.s); const p = N.peers.get(l.slot); if (p) p.rtt = l.rtt; if (N.role === 'guest' && l.slot === 0 && l.ok) { clockSample(l.rtt, m.w); if (N.onPong) N.onPong(m); } }
+      return;
+    }
     if (N.role === 'host') {
       if (m.t === 'hello') { onHello(l, m); return; }
       if (!l.ok || INTERNAL.has(m.t)) return;
@@ -249,6 +265,7 @@ try {
     N.me = m.slot;
     for (const q of Array.isArray(m.roster) ? m.roster : []) { const p = peerOf(q); if (p && p.slot !== N.me) N.peers.set(p.slot, p); }
     links.get(0).ok = true; closeSignal();
+    CS.length = 0; N.ping(); setTimeout(() => N.ping(), 400); setTimeout(() => N.ping(), 1100);
     const w = joinWait; joinWait = null; clearTimeout(w.t);
     guestStatus();
     fire('welcome', m); w.res(m);
@@ -263,26 +280,54 @@ try {
     return d > 500 ? 4 : d > 250 ? 2 : 1;
   };
   N.tier = tier;
+  // the host bundles what it sends each guest (its own snapshot and the newest relayed one per origin) into one datagram (type 2:
+  // count, then length-prefixed packets): with 50-100 byte snapshots the per packet DTLS/SCTP/UDP overhead is most of the traffic.
+  // Relays wait at most RELAY_MS for company.
+  const OQ = new Map(), RELAY_MS = 35;
+  let flushT = 0;
+  const qOf = (s) => { let q = OQ.get(s); if (!q) OQ.set(s, q = new Map()); return q; };
+  const flushLink = (s) => {
+    const q = OQ.get(s), l = links.get(s); if (!q || !q.size) return;
+    if (!l || !l.ok) { q.clear(); return; }
+    let n = 2; for (const u of q.values()) n += 2 + u.length;
+    if (q.size === 1 || n > 4000) { for (const u of q.values()) l.sendFast(u); q.clear(); return; }
+    const b = new Uint8Array(n); b[0] = 2; b[1] = q.size; let o = 2;
+    for (const u of q.values()) { b[o] = u.length & 255; b[o + 1] = u.length >> 8; b.set(u, o + 2); o += 2 + u.length; }
+    q.clear(); l.sendFast(b);
+  };
+  const flushAll = () => { flushT = 0; for (const s of OQ.keys()) flushLink(s); };
   N.fast = (u8, len, seq) => {
     u8[1] = N.me;
-    const view = u8.subarray(0, len);
-    if (N.role === 'host') { for (const [s, l] of links) if (l.ok && seq % tier(0, s) === 0) l.sendFast(view); }
-    else { const l = links.get(0); if (l && l.ok) l.sendFast(view); }
+    if (N.role === 'host') {
+      const own = u8.slice(0, len);
+      for (const [s, l] of links) if (l.ok && seq % tier(0, s) === 0) { qOf(s).set(0, own); flushLink(s); }
+    } else { const l = links.get(0); if (l && l.ok) l.sendFast(u8.subarray(0, len)); }
   };
   // per origin packet budget (senders run 15-20 Hz): a flood is dropped before it is parsed or relayed
   const FB = new Float64Array(4).fill(20), FT = new Float64Array(4);
   const fastOk = (o) => { const now = performance.now(); FB[o] = Math.min(20, FB[o] + (now - FT[o]) * 0.04); FT[o] = now; if (FB[o] < 1) return false; FB[o] -= 1; return true; };
+  const onPacket = (u8, origin) => { if (fastFn) { try { fastFn(u8, origin); } catch (e) { AF.warnOnce('net fast', e); } } };
   const onFastData = (l, buf) => {
     if (!(buf instanceof ArrayBuffer) || buf.byteLength < 8 || buf.byteLength > 4096 || !l.ok) return;
     const u8 = new Uint8Array(buf);
-    let origin;
     if (N.role === 'host') {
-      origin = l.slot; if (!fastOk(origin)) return;
+      const origin = l.slot; if (u8[0] === 2 || !fastOk(origin)) return;
       u8[1] = origin;
       const seq = u8[2] | (u8[3] << 8);
-      for (const [s, k] of links) if (k.ok && s !== origin && seq % tier(origin, s) === 0) k.sendFast(u8);
-    } else { origin = u8[1]; if (origin === N.me || !N.peers.has(origin) || !fastOk(origin)) return; }
-    if (fastFn) { try { fastFn(u8, origin); } catch (e) { AF.warnOnce('net fast', e); } }
+      let queued = false;
+      for (const [s, k] of links) if (k.ok && s !== origin && seq % tier(origin, s) === 0) { qOf(s).set(origin, u8); queued = true; }
+      if (queued && !flushT) flushT = setTimeout(flushAll, RELAY_MS);
+      onPacket(u8, origin);
+      return;
+    }
+    if (l.slot !== 0) return;
+    if (u8[0] !== 2) { const origin = u8[1]; if (origin !== N.me && N.peers.has(origin) && fastOk(origin)) onPacket(u8, origin); return; }
+    for (let i = 0, o = 2; i < u8[1] && o + 2 <= u8.length; i++) {
+      const n = u8[o] | (u8[o + 1] << 8); o += 2;
+      if (n < 8 || o + n > u8.length) return;
+      const sub = u8.subarray(o, o + n), origin = sub[1]; o += n;
+      if (sub[0] !== 2 && origin !== N.me && N.peers.has(origin) && fastOk(origin)) onPacket(sub, origin);
+    }
   };
 
   // ---------------------------------------------------------------- sessions
@@ -324,7 +369,7 @@ try {
     closeSignal();
     for (const l of links.values()) l.close();
     for (const l of sids.values()) l.close();
-    links.clear(); sids.clear(); N.peers.clear();
+    links.clear(); sids.clear(); N.peers.clear(); OQ.clear(); clearTimeout(flushT); flushT = 0;
     N.role = 'off'; N.code = ''; N.me = 0;
     status(why || ''); fire('end', why || '');
   };
@@ -333,15 +378,35 @@ try {
   addEventListener('pagehide', () => N.leave());
 
   // ---------------------------------------------------------------- heartbeat (independent of the frame loop: the travel veil and menus pause that)
-  let lastStat = performance.now(), upLast = 0, downLast = 0;
+  // a ping every 4 s per link (keep-alive, RTT, the guest's clock sync); snapshots also count as traffic for the 10 s timeout
+  let lastStat = performance.now(), upLast = 0, downLast = 0, beat = 0;
   setInterval(() => {
-    const now = performance.now();
+    const now = performance.now(); beat++;
     for (const l of new Set([...links.values(), ...sids.values()])) {
-      if (l.ok || l.open) l.sendRel(JSON.stringify({ t: 'ping', s: now }));
+      if ((l.ok || l.open) && (beat & 1 || now - l.born < 15000)) l.sendRel(JSON.stringify({ t: 'ping', s: now }));
       if (now - l.last > (l.ok ? 10000 : 25000)) drop(l, 'timed out');
     }
     const S = N.stats, dt = (now - lastStat) / 1000; lastStat = now;
     S.upK = (S.up - upLast) / 1024 / dt; S.downK = (S.down - downLast) / 1024 / dt; upLast = S.up; downLast = S.down;
   }, 2000);
+
+  AF.test('net: 3-byte positions round-trip and a host bundle unpacks into its packets', () => {
+    const w = new Wr(32), r = new Rd(), xs = [0, -0.01, 1234.56, -5999.99, 83000];
+    for (const x of xs) w.p24(x);
+    r.set(w.u8.subarray(0, w.o)); const back = xs.map(() => r.p24()), posOk = back.every((v, i) => Math.abs(v - xs[i]) < 0.006);
+    const pk = (o, v) => { const u = new Uint8Array(10); u[0] = 1; u[1] = o; u[8] = v; return u; };
+    const bun = new Uint8Array(26); bun[0] = 2; bun[1] = 2; bun[2] = 10; bun.set(pk(1, 7), 4); bun[14] = 10; bun.set(pk(2, 9), 16);
+    const saved = { role: N.role, me: N.me, fn: fastFn, p1: N.peers.get(1), p2: N.peers.get(2) }, got = [];
+    try {
+      N.role = 'guest'; N.me = 3; N.peers.set(1, { slot: 1 }); N.peers.set(2, { slot: 2 }); FB.fill(20);
+      fastFn = (u8, o) => got.push(o + ':' + u8[8]);
+      onFastData({ ok: true, slot: 0 }, bun.buffer);
+    } finally {
+      N.role = saved.role; N.me = saved.me; fastFn = saved.fn;
+      if (saved.p1) N.peers.set(1, saved.p1); else N.peers.delete(1);
+      if (saved.p2) N.peers.set(2, saved.p2); else N.peers.delete(2);
+    }
+    return { ok: posOk && got.join() === '1:7,2:9', info: `positions ${back.join(' ')}, unpacked ${got.join()}` };
+  });
 }
 } catch (e) { AF.partError('79-net.js', e); }

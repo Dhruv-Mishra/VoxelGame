@@ -381,7 +381,7 @@ try {
     HR.tug = { mesh: tugB, path: tugPath, st: tst, get x() { return tugB.position.x; }, get z() { return tugB.position.z; } };
     HR.tugs = [tugA, tugB];
     const tugUpd = (dt, t) => {
-      tst.s = (tst.s + dt * 3.2) % tugLen;
+      tst.s = ((t * 3.2) % tugLen + tugLen) % tugLen;
       const u = tst.s / tugLen, p = tugPath.getPointAt(u), tg = tugPath.getTangentAt(u);
       tugB.position.set(p.x, SEA_Y - 0.7 + Math.sin(t * 1.1) * 0.08, p.z); tugB.rotation.y = Math.atan2(tg.x, tg.z); tugB.rotation.z = Math.sin(t * 0.9) * 0.03;
       tugA.position.y = SEA_Y - 0.7 + Math.sin(t * 0.9 + 2) * 0.07; tugA.rotation.z = Math.sin(t * 0.7) * 0.025;

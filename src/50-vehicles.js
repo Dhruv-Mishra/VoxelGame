@@ -844,7 +844,7 @@ AF.modes.drive = {
     if (!car) { AF.setMode(from || 'aerial'); return; }
     DR.car = car; VV.player = car;
     if (car.ai) { VV.detachTraffic(car); VV.ai.splice(VV.ai.indexOf(car), 1); car.ai = null; }
-    car.player = true; car.active = true; car.parked = false; car.driver = -1;
+    car.player = true; car.active = true; car.parked = false; car.driver = -1; car.moved = true;
     car.pushLife = car.pushX = car.pushZ = car.pushSpin = 0;
     car.vx = Math.sin(car.yaw) * car.v; car.vz = Math.cos(car.yaw) * car.v;
     DR.bike = car.type.kind === 'bike' && !!car.type.solo;
@@ -1052,16 +1052,19 @@ const pickPaint = (T, rnd) => {
 };
 VV.pickPaint = pickPaint;
 const NIGHT_CABS = ['taxi', 'gullcab', 'taxi', 'beaconcab'];
-VV.nightCabs = () => {
-  const hours = AF.time?.hours, night = hours != null && (hours > 19.6 || hours < 5.5), cam = AF.camera.position;
+VV.nightCabs = (W) => {
+  const hours = W !== undefined && AF.time.at ? AF.time.at(W) : AF.time?.hours, night = hours != null && (hours > 19.6 || hours < 5.5), cam = AF.camera.position;
   for (const car of VV.ai) {
     if (car.ai?.piece.kind === 'route') continue;
     const want = night && car.id % 2 === 0 && (car.nightCab || /^(sedan|coupe|wagon|stream|convertible)$/.test(car.type.id));
+    // cab duty (the cab stands in 51-traffic) follows the world clock on every client; only the body waits until it is out of view
+    car.simCab = want;
     if (want === !!car.isNightCab || (car.x - cam.x) ** 2 + (car.z - cam.z) ** 2 < 12100) continue;
     if (want) { car.dayType = car.type; car.dayKey = car.key; car.type = TYPES.find(type => type.id === NIGHT_CABS[car.id % 4]); car.key = getGeo(car.type, 0).key; car.nightCab = true; }
     else { car.type = car.dayType; car.key = car.dayKey; }
-    const wheel = WHEELS[car.type.id]; car.halfL = wheel.L * CVS / 2; car.halfW = wheel.W * CVS / 2; car.wr = wheel.wr * CVS; car.ws = car.wr / 0.37; car.height = VV.models[car.key].spec.H; car.wheelbase = (wheel.axles[1] - wheel.axles[0]) * CVS;
-    for (let index = 0; index < car.wheels.length; index++) { const spec = car.wheels[index]; spec.lx = spec.side * (car.halfW - 0.17); spec.ly = car.wr; spec.lz = (wheel.axles[index >> 1] + 0.5) * CVS - car.halfL; }
+    // the cab swap is only a new body: the shared traffic sim keeps the car's day dimensions (51-traffic determinism)
+    const wheel = WHEELS[car.type.id]; car.wr = wheel.wr * CVS; car.ws = car.wr / 0.37; car.height = VV.models[car.key].spec.H;
+    for (let index = 0; index < car.wheels.length; index++) { const spec = car.wheels[index]; spec.lx = spec.side * (car.halfW - 0.17); spec.ly = car.wr; spec.lz = AF.clamp((wheel.axles[index >> 1] + 0.5) * CVS - wheel.L * CVS / 2, -car.halfL + 0.3, car.halfL - 0.3); }
     car.isNightCab = want; let count = 4; for (const existing of VV.cars) if (existing.type === car.type) count++; ensureIM(car.type.id, count);
   }
 };
@@ -1329,9 +1332,9 @@ AF.onBuild('vehicles', 600, async () => {
   VV.buildMs = Math.round(performance.now() - t0);
   console.log('[af] vehicles:', VV.cars.length, 'cars (', VV.ai.length, 'AI ) + static parked', VV.parkedStatic.length, 'models', Object.keys(VV.models).length, 'lanes', VV.graph.lanes.length, 'conns', VV.graph.conns.length, 'in', VV.buildMs, 'ms', 'deliveries', DLV.map((D) => D.name + '@' + D.x.toFixed(0) + ',' + D.z.toFixed(0)).join(' | '));
 });
-AF.onTick('traffic', 200, (dt) => {
+AF.onTick('traffic', 200, (dt, w) => {
   if (!WHEEL_IM) return;
-  VV.simTraffic(Math.min(dt, 0.05));
+  VV.simTraffic(dt, w);
   syncInstances(dt);
   stepDelivery(Math.min(dt, 0.05));
 });
@@ -1341,11 +1344,11 @@ AF.test('vehicles: 60+ AI cars run 60 s (no NaN, stay on the asphalt)', () => {
   if (VV.ai.length < 60) return { ok: false, info: 'ai cars ' + VV.ai.length };
   let worst = 0, nan = 0, moved = 0;
   const start = VV.ai.map((c) => [c.x, c.z]);
-  const clock = AF.clock.t;
+  const clock = AF.clock.w;
   try { for (let i = 0; i < 1800; i++) {
-    AF.clock.t += 1 / 30; VV.simTraffic(1 / 30);
+    AF.clock.w += 1 / 30; VV.simTraffic(1 / 30);
     if (i % 10 === 0) for (const c of VV.ai) { if (!isFinite(c.x) || !isFinite(c.z) || !isFinite(c.yaw)) nan++; else if (c.ai.piece.kind !== 'route') worst = Math.max(worst, VP.nearestRoad(c.x, c.z).edge + 1); }
-  } } finally { AF.clock.t = clock; }
+  } } finally { AF.clock.w = clock; }
   VV.ai.forEach((c, i) => { if (Math.hypot(c.x - start[i][0], c.z - start[i][1]) > 20) moved++; });
   const live = VV.ai.filter((c) => c.active !== false).length;
   syncInstances(0);

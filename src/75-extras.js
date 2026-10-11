@@ -67,7 +67,7 @@ try {
       dir.subVectors(PH.pos, PH.origin); if (dir.length() > 150) PH.pos.copy(PH.origin).addScaledVector(dir.normalize(), 150);
       PH.pos.y = Math.max(PH.pos.y, ground(PH.pos.x, PH.pos.z) + 0.4);
       if (m.wheel) { cam.fov = AF.clamp(cam.fov * Math.exp(m.wheel * 0.001), 12, 90); cam.updateProjectionMatrix(); }
-      const T = AF.time; if (I.key('BracketLeft')) T.hours = (T.hours - dt * 1.5 + 24) % 24; if (I.key('BracketRight')) T.hours = (T.hours + dt * 1.5) % 24;
+      const T = AF.time, dh = (I.key('BracketRight') ? 1 : 0) - (I.key('BracketLeft') ? 1 : 0); if (dh) AF.time.set({ hours: T.hours + dh * AF.clock.real * 1.5 });
       if (I.hit('KeyF')) { PH.freeze = !PH.freeze; AF.timeScale = PH.freeze ? 0 : 1; }
       if (I.hit('KeyK') || I.hit('Enter')) PH.capture();
       cam.position.copy(PH.pos); AF.camTarget.copy(PH.pos).addScaledVector(fwd, 10); cam.lookAt(AF.camTarget);

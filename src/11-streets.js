@@ -437,22 +437,23 @@ try {
       });
       lens.count = li; lens.frustumCulled = false; AF.scene.add(lens);
       const COL = { red: [new THREE.Color(0xff2a1a), new THREE.Color(0x3a1210)], amber: [new THREE.Color(0xffb020), new THREE.Color(0x3a2a10)], green: [new THREE.Color(0x40ff70), new THREE.Color(0x10301a)] };
+      // phases run on the shared world clock (01-core), so every co-op player sees the same lights; w lets schedules look ahead
       const CYCLE = 28;
-      const stateAt = (L, axis) => {
-        const ph = ((AF.clock.t + L.off) % CYCLE + CYCLE) % CYCLE;
+      const stateAt = (L, axis, w = AF.clock.w) => {
+        const ph = ((w + L.off) % CYCLE + CYCLE) % CYCLE;
         if (axis === 'x') return ph < 10.5 ? 'green' : ph < 13.5 ? 'amber' : 'red';
         return ph < 14 ? 'red' : ph < 24.5 ? 'green' : ph < 27.5 ? 'amber' : 'red';
       };
       AF.trafficLight = {
-        at: TL.map((L) => [L.x, L.z]), lights: TL, stateAt,
-        state(x, z, dirAxis) {
+        at: TL.map((L) => [L.x, L.z]), lights: TL, stateAt, CYCLE,
+        nearest(x, z) { let best = null, bd = 20; for (const L of TL) { const d = Math.hypot(L.x - x, L.z - z); if (d < bd) { bd = d; best = L; } } return best; },
+        state(x, z, dirAxis, w) {
           let axis = 'x';
           if (dirAxis === 'z' || dirAxis === 1 || dirAxis === 2 || dirAxis === false) axis = 'z';
           else if (Array.isArray(dirAxis)) axis = Math.abs(dirAxis[0]) >= Math.abs(dirAxis[1]) ? 'x' : 'z';
           else if (dirAxis && typeof dirAxis === 'object') { const dx = dirAxis.x ?? dirAxis.dx ?? 0, dz = dirAxis.z ?? dirAxis.dz ?? 0; axis = Math.abs(dx) >= Math.abs(dz) ? 'x' : 'z'; }
-          let best = null, bd = 20;
-          for (const L of TL) { const d = Math.hypot(L.x - x, L.z - z); if (d < bd) { bd = d; best = L; } }
-          return best ? stateAt(best, axis) : 'green';
+          const best = this.nearest(x, z);
+          return best ? stateAt(best, axis, w) : 'green';
         },
       };
       let acc = 0;
@@ -1027,9 +1028,9 @@ try {
   });
   AF.test('streets: traffic lights cycle', () => {
     const T = AF.trafficLight; if (!T || !T.at || T.at.length < 8) return { ok: false, info: 'lights ' + (T && T.at ? T.at.length : 0) };
-    const [x, z] = T.at[0], seen = new Set(), t0 = AF.clock.t;
-    for (let s = 0; s < 28; s += 0.5) { AF.clock.t = t0 + s; seen.add(T.state(x, z, [1, 0]) + T.state(x, z, [0, 1])); }
-    AF.clock.t = t0;
+    const [x, z] = T.at[0], seen = new Set(), t0 = AF.clock.w;
+    for (let s = 0; s < 28; s += 0.5) { AF.clock.w = t0 + s; seen.add(T.state(x, z, [1, 0]) + T.state(x, z, [0, 1])); }
+    AF.clock.w = t0;
     return { ok: seen.size >= 4, info: T.at.length + ' intersections, ' + seen.size + ' phase combos' };
   });
   AF.test('streets: sidewalk life (r2)', () => {

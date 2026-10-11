@@ -63,6 +63,30 @@ try {
       b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
       B[id] = b;
     }
+    // WPN: a tap is the next weapon; held, it opens the weapon wheel (77-combat): slide toward one and lift to take it
+    {
+      const b = B.wpn, fresh = b.cloneNode(true); b.replaceWith(fresh); B.wpn = fresh;
+      let pid = null, holdT = 0, px = 0, py = 0;
+      const tapNext = () => { I.pressed.add('KeyX'); I.released.add('KeyX'); };
+      fresh.addEventListener('pointerdown', (e) => {
+        e.preventDefault(); e.stopPropagation(); if (pid != null) return;
+        pid = e.pointerId; px = e.clientX; py = e.clientY; try { fresh.setPointerCapture(pid); } catch (err) { /* old browsers */ }
+        holdT = setTimeout(() => { holdT = 0; const CB = AF.combat; if (CB && CB.wheelOpen && CB.wheelOpen()) fresh.classList.add('on'); }, 260);
+      });
+      fresh.addEventListener('pointermove', (e) => {
+        if (e.pointerId !== pid) return;
+        const CB = AF.combat; if (CB && CB.wheel && CB.wheel.open) CB.wheelAim((e.clientX - px) * 1.6, (e.clientY - py) * 1.6);
+        px = e.clientX; py = e.clientY;
+      });
+      const end = (e) => {
+        if (e.pointerId !== pid) return; e.preventDefault(); pid = null;
+        const CB = AF.combat, open = CB && CB.wheel && CB.wheel.open;
+        if (holdT) { clearTimeout(holdT); holdT = 0; if (e.type === 'pointerup') tapNext(); }
+        else if (open) CB.wheelClose(e.type === 'pointerup');
+        fresh.classList.remove('on');
+      };
+      fresh.addEventListener('pointerup', end); fresh.addEventListener('pointercancel', end);
+    }
 
     // ---------------------------------------------------------------- context: which buttons the current action needs (5 Hz, DOM only on change)
     const RIDES = new Set(['row', 'ride', 'funride', 'jetski', 'carousel', 'passenger']), CAM_MODES = new Set(['walk', 'drive', 'fly', 'jetski', 'passenger']);

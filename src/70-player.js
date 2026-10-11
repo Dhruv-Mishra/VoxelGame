@@ -569,7 +569,7 @@ try {
       WK.fp = AF.view.fp();
       if (!modal) {
         // mouse / touch look: pointer lock (click the view) or drag
-        if ((locked || ((m.buttons & 3) && !onPanel())) && (m.dx || m.dy)) {
+        if ((locked || ((m.buttons & 3) && !onPanel())) && (m.dx || m.dy) && !PL.wheel) {
           const ks = AF.lookSens() * (PL.aim ? 0.6 : 1); WK.camYaw -= m.dx * 0.0045 * ks; WK.camPitch = AF.clamp(WK.camPitch + m.dy * 0.0035 * ks, -0.75, 1.25); WK.lastMouse = AF.clock.t;
         }
         if (!locked && m.clicked && !onPanel()) I.requestLock();

@@ -1,14 +1,17 @@
 // ================================================================ 80-coop.js
 try {
 // ===== 80-coop: co-op play over AF.net  (OWNER: net) =====
-// Everyone simulates what they own and sends it 20x a second (15 on phones) in one binary snapshot of ~60-700 bytes: their avatar
-// (root pose + 11 joint angles, so every mode, ride, fight and fall looks right), the vehicle they drive (cars, bikes, planes, jet
-// skis), their engaged peds and police (cops, squad cars, the autogyro) and the shots they fired since the last snapshot.
+// Everyone simulates what they own and sends it in one binary snapshot of ~45-700 bytes: their avatar (root pose + 11 joint angles,
+// so every mode, ride, fight and fall looks right; the joints only while they change), the vehicle they drive (cars, bikes, planes,
+// jet skis), their engaged peds and police (cops, squad cars, the autogyro) and the shots they fired since the last snapshot.
+// The rate follows what is going on: 20x a second (15 on phones) while driving, flying, fighting or falling, half that on foot,
+// 2x a second standing still. Positions are 3-byte centimetres. The world itself (time, traffic, trams, crowd, rides, animals,
+// planes, fireworks) never goes over the wire: every client derives it from the shared seed and world clock (01-core AF.world).
 // Receivers keep a short time-ordered buffer per thing and draw it ~100 ms in the past (adapts 70-320 ms to rate and jitter): late
 // or reordered packets slot into place, stale ones are dropped, a gap is bridged by extrapolating the last motion for up to 250 ms,
 // then the pose holds. Seated players are placed from the receiver's own copy of the vehicle (or ride), never from their world
 // position, so a passenger can't trail behind a car. Hits on something another player owns are sent to that owner (peds, cars, the
-// autogyro, the player himself); friendly fire is off by default. Ambient life (crowd, traffic, animals) stays local to each player.
+// autogyro, the player himself); friendly fire is off by default.
 {
   const N = AF.net, PI = Math.PI, TAU = PI * 2, VV = AF.vehicles;
   const C = AF.coop = { pvp: false, players: new Map(), ride: null, stats: { rx: 0, stale: 0, extrap: 0 } };
@@ -21,7 +24,7 @@ try {
   const VK_CAR = 1, VK_PLANE = 2, VK_SKI = 3;
   const AK = { carousel: 1, wheel: 2, coaster: 3, train: 4, ferry: 5 };
   const COLORS = ['#ffd24a', '#5ad1ff', '#ff7ab8', '#9dff7a'];
-  const F_VIS = 1, F_SIT = 2, F_TP = 4, F_GROUND = 8, F_AIM = 16, F_DEAD = 32;
+  const F_VIS = 1, F_SIT = 2, F_TP = 4, F_GROUND = 8, F_AIM = 16, F_DEAD = 32, F_J = 64;
   const V_ENGINE = 1, V_DEAD = 2, V_BURN = 4, V_SQUAD = 8, V_GROUND = 16;
   const HIT_KINDS = new Set(['gun', 'melee', 'car', 'boom']);
   const num = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
@@ -96,7 +99,7 @@ try {
     const off = now - stamp;
     if (k.off == null || off < k.off) k.off = off; else k.off += Math.min(0.5, (off - k.off) * 0.002);
     k.jit += (Math.abs(off - k.off) - k.jit) * 0.08;
-    if (k.last) { const iv = stamp - k.last; if (iv > 0 && iv < 1000) k.iv += (iv - k.iv) * 0.15; }
+    if (k.last) { const iv = stamp - k.last; if (iv > 0 && iv < 1000) k.iv += (Math.min(iv, 160) - k.iv) * 0.15; }   // an idle sender's 2 Hz says nothing about motion
     if (stamp > k.last) k.last = stamp;
     k.delay = AF.clamp(k.iv * 1.3 + k.jit * 2 + 8, 60, 320);
   };
@@ -110,7 +113,7 @@ try {
   const addRemote = (p) => {
     if (RP.has(p.slot)) return RP.get(p.slot);
     const tag = document.createElement('div'); tag.className = 'coop-tag hud'; tagLayer.appendChild(tag);
-    const r = { slot: p.slot, peer: p, P: null, lookKey: '', heldId: null, held: null, tr: new Track(PT, 12), out: new Float32Array(PT.length), clk: { off: null, jit: 0, iv: 50, last: 0, delay: 100 },
+    const r = { slot: p.slot, peer: p, P: null, lookKey: '', heldId: null, held: null, tr: new Track(PT, 12), out: new Float32Array(PT.length), jl: new Float32Array(NJ), clk: { off: null, jit: 0, iv: 50, last: 0, delay: 100 },
       x: p.x || 0, y: 0, z: p.z || 0, seen: false, last: 0, mode: 0, stars: 0, hp: 1, dead: false, veh: 0, seat: 0, ak: 0, ai: 0, tag, tagKey: '', tagX: -1, tagY: -1,
       hit: { slot: p.slot, heli: false }, heliHit: { slot: p.slot, heli: true }, heli: null, tg: { x: 0, y: 0, z: 0, car: null, away: true, speed: 0, peer: p.slot } };
     RP.set(p.slot, r); hideNpc(p.friend, true);
@@ -196,16 +199,24 @@ try {
 
   // ---------------------------------------------------------------- sending
   const W = new N.Wr(1400), SHOTS = new Float32Array(24 * 7);
-  let nShots = 0, seq = 0, sendAt = 0, lastX = 0, lastY = 0, lastZ = 0, sentVeh = null;
+  let nShots = 0, seq = 0, sendAt = 0, lastX = 0, lastY = 0, lastZ = 0, lastYaw = 0, sentVeh = null, busyAt = -1e9, moveAt = -1e9, jHold = 0, sentNV = 0, sentNN = 0;
+  // joint angles quantised as sent (1/40 rad); the last sent set decides whether they go again
+  const JQ = new Int8Array(NJ), JL = new Int8Array(NJ);
+  const jq = (parts, j) => AF.clamp(Math.round(parts[JP[j]].rotation[JA[j]] * 40) || 0, -128, 127);
   const writeVeh = (w, v) => {
     const k = kindOf(v); w.u32(hashOf(v)); w.u8v(k);
     if (k === VK_CAR) { w.u8v(VV.TYPES.indexOf(v.type)); w.u8v(v.pi | 0); } else { w.u8v(0); w.u8v(0); }
     let f = 0;
     if (k !== VK_PLANE || v.engine) f |= V_ENGINE; if (v.dead) f |= V_DEAD; if (v.burnT > 0) f |= V_BURN; if (v.netOwned) f |= V_SQUAD; if (k !== VK_PLANE || v.onGround) f |= V_GROUND;
-    w.u8v(f); w.f32(v.x); w.f32(v.y + (k === VK_CAR ? v.bob || 0 : 0)); w.f32(v.z);
+    w.u8v(f); w.p24(v.x); w.p24(v.y + (k === VK_CAR ? v.bob || 0 : 0)); w.p24(v.z);
     w.i16(wrap(v.yaw) * 10430); w.i8((v.pitch || 0) * 40); w.i8((v.roll || 0) * 40); w.i16((v.v || 0) * 100); w.i8((v.steer || 0) * 100); w.u8v((v.dmg || 0) * 255);
   };
   const peerNear = (x, z, R) => { for (const p of N.peers.values()) if ((p.x - x) ** 2 + (p.z - z) ** 2 < R * R) return true; return false; };
+  // ped ids on the wire: the shared crowd's global walker id (the same person on every client, 55-people) below GID_MAX,
+  // else GID_MAX + the local pool index (cops, group members: only ever shown as proxies)
+  const GID_MAX = 3800;
+  const netId = (p) => p.gid >= 0 ? p.gid : GID_MAX + p.id;
+  const localPed = (id) => { const CR = crowd(); if (!CR) return null; return id < GID_MAX ? CR.byGid.get(id) || null : CR.walkers[id - GID_MAX] || null; };
   // one snapshot of everything this client owns into W; returns its length
   C.build = (now) => {
     const P = AF.player, parts = P.parts, root = P.mesh;
@@ -216,10 +227,14 @@ try {
     let fl = 0;
     if (P.visible) fl |= F_VIS; if (parts.sitting) fl |= F_SIT; if ((x - lastX) ** 2 + (y - lastY) ** 2 + (z - lastZ) ** 2 > 900) fl |= F_TP;
     if (P.body && P.body.onGround) fl |= F_GROUND; if (AF.PL.aim) fl |= F_AIM; if (AF.health && AF.health.dead) fl |= F_DEAD;
-    lastX = x; lastY = y; lastZ = z;
-    w.u8v(MODE_I.get(AF.mode) ?? M.other); w.u8v(fl); w.f32(x); w.f32(y); w.f32(z);
+    lastX = x; lastY = y; lastZ = z; lastYaw = root.rotation.y;
+    // joints go while they change, three more times after (a lost packet), and every 8th snapshot
+    let jch = false; for (let j = 0; j < NJ; j++) { JQ[j] = jq(parts, j); if (JQ[j] !== JL[j]) jch = true; }
+    if (jch) { jHold = 4; JL.set(JQ); }
+    if (jHold > 0 || (seq & 7) === 0) fl |= F_J; if (jHold > 0) jHold--;
+    w.u8v(MODE_I.get(AF.mode) ?? M.other); w.u8v(fl); w.p24(x); w.p24(y); w.p24(z);
     w.i16(wrap(root.rotation.y) * 10430); w.i8(root.rotation.x * 40); w.i8(root.rotation.z * 40);
-    for (let j = 0; j < NJ; j++) w.i8(parts[JP[j]].rotation[JA[j]] * 40);
+    if (fl & F_J) for (let j = 0; j < NJ; j++) w.i8(JQ[j]);
     w.u8v(parts.hips.position.y * 100); w.u8v((AF.PL.walk && AF.PL.walk.speed || 0) * 10);
     const CB = AF.combat; w.u8v(CB ? Math.max(0, HELD.indexOf(CB.heldId)) : 0);
     w.u8v(((CB ? Math.min(7, CB.stars) : 0) << 5) | Math.round(AF.clamp(AF.health ? AF.health.v / AF.health.max : 1, 0, 1) * 31));
@@ -228,7 +243,7 @@ try {
     const vAt = w.o; w.u8v(0); let nv = 0;
     if (veh) { writeVeh(w, veh); nv++; }
     for (const c of VV.cars) if (c.netOwned && c.active !== false && c.net == null && nv < 5 && (c.x - x) ** 2 + (c.z - z) ** 2 < 160000) { writeVeh(w, c); nv++; }
-    W.u8[vAt] = nv;
+    W.u8[vAt] = nv; sentNV = nv;
     // fights and police only matter to players nearby
     const near = peerNear(x, z, 320), CR = crowd();
     const nAt = w.o; w.u8v(0); let nn = 0;
@@ -236,12 +251,12 @@ try {
       if (!p.act || !p.agg || nn >= 20) continue;
       const dx = p.x - x, dy = p.y - y, dz = p.z - z; if (dx * dx + dz * dz > 22500) continue;
       const V = CR.V[p.v], A = p.agg; let f = A.f; if (!V || !V.im[f]) f = f === 'runA' || f === 'runB' ? WF[Math.floor(p.ph) & 3] : 'p';
-      w.u16(p.id); w.u8v(p.v); w.u8v(Math.max(0, FRAMES.indexOf(f)) | (A.lie ? 128 : 0)); w.i16(dx * 100); w.i16((dy + (A.dy || 0)) * 100); w.i16(dz * 100); w.u8v(((p.yaw % TAU + TAU) % TAU) / TAU * 256);
+      w.u16(netId(p)); w.u8v(p.v); w.u8v(Math.max(0, FRAMES.indexOf(f)) | (A.lie ? 128 : 0)); w.i16(dx * 100); w.i16((dy + (A.dy || 0)) * 100); w.i16(dz * 100); w.u8v(((p.yaw % TAU + TAU) % TAU) / TAU * 256);
       nn++;
     }
-    W.u8[nAt] = nn;
+    W.u8[nAt] = nn; sentNN = nn;
     const H = CB && CB.heli;
-    if (near && H && H.on) { w.u8v(1); w.f32(H.x); w.f32(H.y); w.f32(H.z); w.i16(wrap(H.yaw) * 10430); w.u8v(H.fall ? 1 : 0); } else w.u8v(0);
+    if (near && H && H.on) { w.u8v(1); w.p24(H.x); w.p24(H.y); w.p24(H.z); w.i16(wrap(H.yaw) * 10430); w.u8v(H.fall ? 1 : 0); } else w.u8v(0);
     const sAt = w.o; w.u8v(0); let ns = 0;
     if (near) for (let i = 0; i < nShots; i++) { const o = i * 7; w.u8v(SHOTS[o]); w.i16((SHOTS[o + 1] - x) * 100); w.i16((SHOTS[o + 2] - y) * 100); w.i16((SHOTS[o + 3] - z) * 100); w.i16((SHOTS[o + 4] - x) * 10); w.i16((SHOTS[o + 5] - y) * 10); w.i16((SHOTS[o + 6] - z) * 10); ns++; }
     W.u8[sAt] = ns; nShots = 0;
@@ -254,7 +269,17 @@ try {
     const veh = myVeh();
     if (sentVeh && sentVeh !== veh) { const v = sentVeh; N.send('vleave', { h: hashOf(v), x: v.x, y: v.y, z: v.z, yaw: v.yaw, v: v.v || 0, g: kindOf(v) !== VK_PLANE || !!v.onGround }); }
     sentVeh = veh;
-    const now = performance.now(); if (now - sendAt < 1000 / N.rate - 4) return;
+    // full rate while anything fast or violent is going on, half on foot, 2 Hz standing still (each kept 0.3 s after it ends, so the
+    // stop itself goes out promptly and receivers don't extrapolate past it)
+    const now = performance.now(), root = P.mesh, CB = AF.combat;
+    if (veh || nShots || sentNV || sentNN || AF.PL.aim || AF.mode === 'skydive' || AF.mode === 'row' || (CB && CB.heli && CB.heli.on)) busyAt = now;
+    else {
+      let moved = (root.position.x - lastX) ** 2 + (root.position.y - lastY) ** 2 + (root.position.z - lastZ) ** 2 > 4e-4 || Math.abs(AF.angDiff(lastYaw, root.rotation.y)) > 0.01;
+      for (let j = 0; j < NJ && !moved; j++) if (jq(P.parts, j) !== JL[j]) moved = true;
+      if (moved) moveAt = now;
+    }
+    const hz = now - busyAt < 300 ? N.rate : now - moveAt < 300 ? N.rate / 2 : 2;
+    if (now - sendAt < 1000 / hz - 4) return;
     sendAt = now;
     N.fast(W.u8, C.build(now), seq);
   };
@@ -271,10 +296,10 @@ try {
     const R = RD.set(u8); R.u8v(); R.u8v(); R.u16(); const stamp = R.u32(), now = performance.now();
     if (r.tr.len && stamp < r.tr.t[0]) { C.stats.stale++; return; }
     clockIn(r.clk, stamp, now); C.stats.rx++;
-    const mode = R.u8v(), fl = R.u8v(), x = R.f32(), y = R.f32(), z = R.f32();
+    const mode = R.u8v(), fl = R.u8v(), x = R.p24(), y = R.p24(), z = R.p24();
     if (Math.abs(x) > 6000 || Math.abs(z) > 6000 || Math.abs(y) > 3000) return;
     PV[0] = x; PV[1] = y; PV[2] = z; PV[3] = R.i16() / 10430; PV[4] = R.i8() / 40; PV[5] = R.i8() / 40;
-    for (let j = 0; j < NJ; j++) PV[6 + j] = R.i8() / 40;
+    if (fl & F_J) for (let j = 0; j < NJ; j++) PV[6 + j] = r.jl[j] = R.i8() / 40; else for (let j = 0; j < NJ; j++) PV[6 + j] = r.jl[j];
     PV[P_HIPS] = R.u8v() / 100; PV[P_SPD] = R.u8v() / 10; PV[P_WPN] = R.u8v(); PV[P_STAT] = R.u8v();
     const vh = R.u32(); PV[P_VLO] = vh & 0xffff; PV[P_VHI] = vh >>> 16; PV[P_SEAT] = R.u8v(); PV[P_AK] = R.u8v(); PV[P_AI] = R.u8v();
     PV[P_MODE] = mode < MODES.length ? mode : M.other; PV[P_FLAGS] = fl;
@@ -284,7 +309,7 @@ try {
     const nv = R.u8v();
     for (let i = 0; i < nv && i < 8; i++) {
       const h = R.u32(), kind = R.u8v(), type = R.u8v(), paint = R.u8v(), vf = R.u8v();
-      VVb[0] = R.f32(); VVb[1] = R.f32(); VVb[2] = R.f32(); VVb[3] = R.i16() / 10430; VVb[4] = R.i8() / 40; VVb[5] = R.i8() / 40; VVb[6] = R.i16() / 100; VVb[7] = R.i8() / 100; VVb[8] = R.u8v(); VVb[9] = vf;
+      VVb[0] = R.p24(); VVb[1] = R.p24(); VVb[2] = R.p24(); VVb[3] = R.i16() / 10430; VVb[4] = R.i8() / 40; VVb[5] = R.i8() / 40; VVb[6] = R.i16() / 100; VVb[7] = R.i8() / 100; VVb[8] = R.u8v(); VVb[9] = vf;
       if (Math.abs(VVb[0]) > 6000 || Math.abs(VVb[2]) > 6000 || VVb[1] < -500 || VVb[1] > 3000) continue;
       const e = vehicleFor(h, kind, type, paint, from); if (!e) continue;
       if ((VVb[0] - e.obj.x) ** 2 + (VVb[2] - e.obj.z) ** 2 > 2500 && e.tr.len && stamp > e.tr.t[e.tr.len - 1]) e.tr.clear();
@@ -297,7 +322,7 @@ try {
       if (id < 4096) npcIn(from, id, stamp, now);
     }
     if (R.u8v()) {
-      HV[0] = R.f32(); HV[1] = R.f32(); HV[2] = R.f32(); HV[3] = R.i16() / 10430; HV[4] = R.u8v();
+      HV[0] = R.p24(); HV[1] = R.p24(); HV[2] = R.p24(); HV[3] = R.i16() / 10430; HV[4] = R.u8v();
       if (Math.abs(HV[0] - x) < 1500 && Math.abs(HV[2] - z) < 1500 && HV[1] > -500 && HV[1] < 3000) {
         if (!r.heli) r.heli = { tr: new Track(HT, 8), out: new Float32Array(HT.length), grp: null, last: 0, x: 0, y: -1e4, z: 0 };
         r.heli.tr.push(stamp, HV); r.heli.last = now;
@@ -324,7 +349,7 @@ try {
     v.net = owner; v.keep = true;
     if (kind === VK_CAR) {
       if (v.ai) { VV.detachTraffic(v); const i = VV.ai.indexOf(v); if (i >= 0) VV.ai.splice(i, 1); v.ai = null; }
-      v.driver = -1; v.parked = false; v.pushLife = 0; v.burnT = 0;
+      v.driver = -1; v.parked = false; v.pushLife = 0; v.burnT = 0; v.moved = true;
     } else if (kind === VK_PLANE) v.ghost = false;
   };
   const vehicleFor = (h, kind, type, paint, owner) => {
@@ -388,6 +413,12 @@ try {
   const npcIn = (owner, id, stamp, now) => {
     const key = owner * 4096 + id; let e = RN.get(key);
     const CR = crowd(); if (!CR || NV[4] >= CR.V.length) return;
+    if (id < GID_MAX) {
+      // our copy of the same person: hidden while they fight; if we both grabbed them, the lower slot keeps them
+      const mine = CR.byGid.get(id);
+      if (mine && mine.agg) { if (N.me < owner) return; if (CB) CB.release(mine); }
+      CR.remote.set(id, now + 1500);
+    }
     if (!e) {
       let w = null; for (const q of CR.walkers) if (q.net && !q.netEntry) { w = q; break; }
       if (!w) return;
@@ -565,13 +596,11 @@ try {
   const FX_hit = (x, y, z) => { if (AF.fx && AF.fx.glow) AF.fx.burst('hit', x, y, z, 1); };
 
   // ---------------------------------------------------------------- reliable events
-  const timeMsg = () => ({ h: AF.time.hours, sp: AF.time.speed, p: !!AF.time.paused });
-  const applyTime = (t) => {
-    if (!t || !num(t.h, 0, 24)) return;
-    const d = ((t.h - AF.time.hours + 36) % 24) - 12;
-    AF.time.hours = Math.abs(d) > 0.25 ? t.h : (AF.time.hours + d * 0.5 + 24) % 24;
-    if (num(t.sp, 0, 1)) AF.time.speed = t.sp; AF.time.paused = !!t.p;
-  };
+  // time of day is a base on the shared W timeline (01-core): sent only when someone changes it (menu, keys, the dusk pacing)
+  let timeQ = null, timeSentAt = 0;
+  const sendTime = () => { if (timeQ && N.live()) { N.send('time', { b: timeQ }); timeSentAt = performance.now(); } timeQ = null; };
+  AF.on('timeset', (B) => { timeQ = { h0: B.h0, w0: B.w0, sp: B.sp, p: B.p }; if (performance.now() - timeSentAt > 250) sendTime(); });
+  const adoptTime = (b) => { if (b && num(b.h0, -1, 25) && num(b.w0, -1e7, 1e7) && num(b.sp, 0, 1) && AF.time.adopt(b) && AF.atmos && AF.atmos.pace) AF.atmos.pace.on = false; };
   const myOwned = (h) => { const v = myVeh(); if (v && hashOf(v) === h) return v; for (const c of VV.cars) if (c.netOwned && c.active !== false && hashOf(c) === h) return c; return null; };
   const npcNear = (owner, R) => {
     const p = AF.player.mesh ? AF.player.mesh.position : AF.player;
@@ -581,7 +610,7 @@ try {
   N.on('hit', (m, from) => {
     const CR = crowd(), r = RP.get(from);
     if (!CR || !r || !CB || !num(m.id, 0, 4095) || !num(m.dmg, 0, 200) || !HIT_KINDS.has(m.k)) return;
-    const w = CR.walkers[m.id]; if (!w || w.net || !w.act || (w.x - r.x) ** 2 + (w.z - r.z) ** 2 > 40000) return;
+    const w = localPed(m.id); if (!w || w.net || !w.act || (w.x - r.x) ** 2 + (w.z - r.z) ** 2 > 40000) return;
     CB.netHitPed(w, m.dmg, m.k, num(m.fx, -1, 1) ? m.fx : 0, num(m.fz, -1, 1) ? m.fz : 0, from);
   });
   N.on('hurt', (m, from) => {
@@ -628,14 +657,30 @@ try {
     r.peer.look = N.cleanLook(m.look, B[r.peer.friend].look);
   });
   N.on('pvp', (m, from) => { if (from === 0 && N.role === 'guest') { C.pvp = !!m.on; if (CB) CB.pvp = C.pvp; toast(C.pvp ? 'Friendly fire is ON.' : 'Friendly fire is off.'); } });
-  N.on('time', (m, from) => { if (from === 0 && N.role === 'guest') applyTime(m); });
+  N.on('time', (m) => adoptTime(m && m.b));
+  // traffic (51-traffic) runs the same on every client; the host's pongs carry a fleet checksum every 2 s of world time, and a guest
+  // whose fleet drifted (a hijack seen late, a player crossing a road a few frames apart, a stalled tab) asks for the host's fleet
+  // again, at most every 10 s (~4 KB, and only while the fleets actually differ)
+  let tsyncAt = -1e9; const tsyncFrom = new Map();
+  const askTraffic = () => { const now = performance.now(); if (N.role !== 'guest' || now - tsyncAt < 10000) return; tsyncAt = now; N.send('tsync', {}, 0); };
+  N.pongExtra = () => { const c = VV.lastChk; return c ? { tk: c.k, tc: c.c } : null; };
+  N.onPong = (m) => { if (!Number.isInteger(m.tk) || !VV.trafficChk) return; const mine = VV.trafficChk(m.tk); if (mine !== undefined && mine !== m.tc) { C.stats.tdrift = (C.stats.tdrift || 0) + 1; askTraffic(); } };
+  VV.onTrafficJump = () => askTraffic();
+  N.on('tsync', (m, from) => { const now = performance.now(); if (N.role !== 'host' || !RP.has(from) || now - (tsyncFrom.get(from) || -1e9) < 8000 || !VV.trafficSave) return; tsyncFrom.set(from, now); N.send('tstate', { d: VV.trafficSave() }, from); });
+  N.on('tstate', (m, from) => { if (from === 0 && N.role === 'guest' && typeof m.d === 'string' && m.d.length < 8000 && VV.trafficLoad) { VV.trafficLoad(m.d); C.stats.tsync = (C.stats.tsync || 0) + 1; } });
   N.on('join', (p) => { addRemote(p); toast(p.name + ' joined.'); });
   N.on('left', (p) => { removeRemote(p.slot); toast(p.name + ' left.'); });
   N.on('end', (why) => { for (const slot of [...RP.keys()]) removeRemote(slot); if (AF.mode === 'passenger') getOut(true); C.pvp = false; if (CB) CB.pvp = false; if (why) toast(why); });
   N.on('hosting', (code) => toast('Hosting co-op \u2014 code ' + code + '. Esc \u2192 Co-op to share the invite link.'));
   N.on('welcome', (m) => {
     const x = m.extra || {};
-    C.pvp = !!x.pvp; if (CB) CB.pvp = C.pvp; applyTime(x.time);
+    C.pvp = !!x.pvp; if (CB) CB.pvp = C.pvp;
+    // the host's world: seed + epoch (every ambient schedule), a first clock offset (79-net's pings refine it), its time of day
+    if (num(x.seed, 1, 4294967295) && num(x.epoch, 1e12, 1e14)) AF.world.set(x.seed, x.epoch);
+    if (num(x.w, -1e7, 1e7)) AF.world.off += (x.w - AF.wnow()) * 1000;
+    adoptTime(x.tb);
+    if (AF.atmos && AF.atmos.pace) AF.atmos.pace.on = false;
+    if (x.traffic && AF.vehicles && AF.vehicles.trafficLoad) AF.vehicles.trafficLoad(x.traffic);
     for (const p of N.peers.values()) addRemote(p);
     const host = N.peers.get(0), name = host ? host.name : 'your friend';
     if (AF.ui.titleOpen && AF.ui.titleOpen()) AF.ui.start();
@@ -652,7 +697,11 @@ try {
     const id = AF.friends.current ? AF.friends.current.id : AF.ui.pick && AF.ui.pick(), F = AF.friends.byId[id];
     return { name: F ? F.name : 'Friend', friend: id, look: AF.friends.current ? AF.player.look : myLook(id), x: N.mine.x, z: N.mine.z };
   };
-  N.welcomeExtra = () => { const m = AF.player.mesh ? AF.player.mesh.position : AF.player; return { pvp: C.pvp, time: timeMsg(), pos: { x: m.x, y: m.y, z: m.z } }; };
+  N.welcomeExtra = () => {
+    const m = AF.player.mesh ? AF.player.mesh.position : AF.player, B = AF.time.base;
+    return { pvp: C.pvp, seed: AF.world.seed, epoch: AF.world.epoch, w: AF.wnow(), tb: { h0: B.h0, w0: B.w0, sp: B.sp, p: B.p }, pos: { x: m.x, y: m.y, z: m.z },
+      traffic: AF.vehicles && AF.vehicles.trafficSave ? AF.vehicles.trafficSave() : null };
+  };
   let lookT = 0;
   const sendLook = () => { if (N.live() && AF.friends.current) N.send('look', { friend: AF.friends.current.id, look: AF.player.look }); };
   AF.on('look', () => { lookT = 0.5; });
@@ -666,8 +715,8 @@ try {
   };
 
   // ---------------------------------------------------------------- ticks: apply after the local mode (150) and combat (151), before traffic draws cars (200)
-  let timeT = 0;
   AF.onTick('coop', 155, (dt) => {
+    if (timeQ && performance.now() - timeSentAt > 250) sendTime();
     if (!RP.size && !RV.size && !RN.size) { if (PR.veh) ridePlace(dt); return; }
     const now = performance.now();
     for (const e of RV.values()) applyVeh(e, now, dt);
@@ -675,7 +724,6 @@ try {
     applyNpcs(now);
     if (PR.veh) ridePlace(dt);
     rideScan(dt);
-    if (N.role === 'host' && (timeT -= dt) <= 0) { timeT = 2; N.send('time', timeMsg()); }
     if (lookT > 0 && (lookT -= dt) <= 0) sendLook();
   });
   AF.onTick('coop-late', 341, () => { if (RP.size) lateAnchors(); });
@@ -719,7 +767,7 @@ try {
   #ui .coop-t .jn{display:flex;gap:6px} #ui .coop-t .jn.hide{display:none}
   #ui .coop-t input,#ui .coop-m input{width:96px;text-align:center;font:600 15px var(--font);letter-spacing:3px;text-transform:uppercase;background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:5px}
   #ui .coop-t .st,#ui .coop-m .st{font-size:11px;color:var(--dim);min-height:14px;text-align:center;max-width:300px}
-  #ui .coop-m{border-top:1px solid var(--line);margin-top:6px;padding-top:4px}
+  #ui .coop-m{margin-top:0}
   #ui .coop-m .code{font:600 16px var(--font);letter-spacing:3px;color:var(--accent)} #ui .coop-m .pl{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px}
   #ui .coop-m .pl i{width:8px;height:8px;border-radius:50%} #ui .coop-m .pl span{flex:1} #ui .coop-m .pl small{color:var(--dim)}
   #ui .coop-m .acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -788,6 +836,11 @@ try {
   AF.onTick('coop-menu', 953, (dt) => { if ((menuT -= dt) > 0) return; menuT = 0.5; if (AF.ui.state && AF.ui.state.menu) renderMenu(); });
 
   // ---------------------------------------------------------------- tests (no network: packets go straight into the receive path)
+  AF.test('coop: the shared world clock and seed are intact (finite W, seeded hashes)', () => {
+    const Wd = AF.world, w = AF.wnow(), a = AF.whash(5, 6, 7);
+    const ok = Wd.seed === 0x5eed && Number.isFinite(Wd.epoch) && Wd.epoch > 1e12 && Number.isFinite(w) && w > -1e5 && w < 2e5 && typeof Wd.set === 'function' && a >= 0 && a < 1 && Number.isFinite(AF.clock.w);
+    return { ok, info: `seed ${Wd.seed}, epoch ${Wd.epoch}, W ${w && w.toFixed(1)}, clock.w ${AF.clock.w.toFixed(1)}` };
+  });
   AF.test('coop: Track keeps time order, interpolates, extrapolates up to 250 ms, then holds', () => {
     const t = new Track([1, 3, 4], 4), o = new Float32Array(3);
     t.push(100, [0, 0, 1]); t.push(300, [20, 0.4, 3]); t.push(200, [10, 0.2, 2]);   // late packet slots in
@@ -813,6 +866,16 @@ try {
       const got = r.P.root.position.x - x0;
       return { ok: Math.abs(got - 1.5) < 0.05 && r.tr.len === 3, info: 'x at t=75 ms: ' + got.toFixed(3) + ' (want 1.5), samples ' + r.tr.len };
     } finally { removeRemote(3); N.me = savedMe; if (savedPeer) N.peers.set(3, savedPeer); else N.peers.delete(3); }
+  });
+  AF.test('coop: a still player sends small snapshots, with the joints only while they move', () => {
+    const arm = AF.player.parts.armL, ax = arm.rotation.x, now = performance.now(), sizes = [];
+    let moving = 0;
+    try {
+      arm.rotation.x = ax + 0.3; moving = C.build(now);
+      for (let i = 1; i <= 12; i++) sizes.push(C.build(now + i));
+    } finally { arm.rotation.x = ax; }
+    const still = Math.min(...sizes), refresh = sizes.filter((n) => n === moving).length;
+    return { ok: moving - still === NJ && still <= 40 && refresh >= 4, info: `moving ${moving} B, still ${still} B, sizes ${sizes.join(' ')}` };
   });
   AF.test('coop: riding along seats you in another player\u2019s car and lets you out', () => {
     const car = VV.cars.find((c) => !c.static && !c.player && !c.ai && c.active !== false && c.type.kind === 'car' && c.net == null); if (!car) return { ok: false, info: 'no car' };

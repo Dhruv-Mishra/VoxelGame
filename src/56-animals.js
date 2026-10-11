@@ -448,11 +448,33 @@ try {
     for (let b = 0; b < 2; b++) for (let f = 0; f < 3; f++) { const im = DW.ims[b][f], n = Math.min(24, cnt[b][f]); im.count = n; im.visible = n > 0; if (n) im.instanceMatrix.needsUpdate = true; }
     DW.line.geometry.setDrawRange(0, li / 3); DW.line.geometry.attributes.position.needsUpdate = true;
   }
+  // where an animal is follows the shared world clock (01-core): orbits are analytic, wanderers walk between seeded spots, one per
+  // time slot, and flocks take off on a seeded schedule, so co-op players see the same ducks, grazers and pigeons. A player who gets
+  // close (scattering pigeons, a dog turning to look) only changes things on that player's screen, and they drift back.
+  const seed0 = (a) => { const p = a.root.position, x = a.x ?? p.x, z = a.z ?? p.z; return AF.hash2(Math.round(x * 8), Math.round(z * 8) + 977); };
+  const slotAt = (a, t, SL, out) => { const u = (t + a.t0 * SL) / SL, k = Math.floor(u); out.k = k; out.f = (u - k) * SL; return out; };
+  const SLOT = { k: 0, f: 0 }, TA = { x: 0, z: 0 }, TB = { x: 0, z: 0 };
+  const inHome = (a, k, out) => {
+    const h1 = AF.whash(a.uid, k, 1), h2 = AF.whash(a.uid, k, 2);
+    if (a.rect) { const R = a.rect; out.x = AF.lerp(R[0] + 2, R[2] - 2, h1); out.z = AF.lerp(R[1] + 2, R[3] - 2, h2); }
+    else if (a.home) { const ang = h1 * TAU, r = Math.sqrt(h2) * a.home.r; out.x = a.home.x + Math.cos(ang) * r; out.z = a.home.z + Math.sin(ang) * r; }
+    else { out.x = a.x0 + (h1 - 0.5) * 4; out.z = a.z0 + (h2 - 0.5) * 4; }
+    return out;
+  };
+  // a wanderer this slot: walking from last slot's spot to this one at sp (faster if it must, to arrive in 85% of the slot), then idle
+  const wander = (a, t, SL, sp, dt) => {
+    slotAt(a, t, SL, SLOT); inHome(a, SLOT.k - 1, TA); inHome(a, SLOT.k, TB);
+    const d = Math.hypot(TB.x - TA.x, TB.z - TA.z), v = Math.max(sp, d / (SL * 0.85)), tw = d / v;
+    if (SLOT.f < tw) { const e = SLOT.f / tw; a.x = TA.x + (TB.x - TA.x) * e; a.z = TA.z + (TB.z - TA.z) * e; a.tyaw = Math.atan2(TB.x - TA.x, TB.z - TA.z); a.phase = (SLOT.f * v) * 9 / Math.max(0.5, sp); return true; }
+    a.x = TB.x; a.z = TB.z; return false;
+  };
+  let uidN = 0;
   const animalsTick = (dt, t) => {
     if (!animals.length) return;
     const cam = AF.camera.position, pp = playerPos();
     for (const a of animals) {
-      a.t = (a.t || 0) + dt;
+      if (a.t0 === undefined) { a.t0 = seed0(a); a.uid = 7000 + uidN++; a.x0 = a.x ?? a.root.position.x; a.z0 = a.z ?? a.root.position.z; a.ang0 = a.ang || 0; }
+      a.t = t + a.t0 * 20;
       if (a.type === 'geese') { // always visible in the sky
         const u = ((t + a.t * 0) % a.period) / a.period, L = 900, x = -450 + u * L;
         const ang = a.f ? 0.6 : -0.35;
@@ -490,9 +512,8 @@ try {
         case 'yarddog': {
           const dp = Math.hypot(pp.x - a.x, pp.z - a.z);
           if (dp < 6 && pp.walk) { a.tyaw = Math.atan2(pp.x - a.x, pp.z - a.z); a.wag = Math.max(a.wag || 0, 1); }
-          a.wait = (a.wait ?? 0) - dt;
-          if (a.wait <= 0) { a.wait = 4 + Math.random() * 10; const ang = Math.random() * TAU, r = Math.random() * a.home.r; a.tx = a.home.x + Math.cos(ang) * r; a.tz = a.home.z + Math.sin(ang) * r; }
-          const moving = a.tx != null && moveQuad(a, a.tx, a.tz, 1.1, dt);
+          const moving = wander(a, t, 7 + a.t0 * 10, 1.1, dt);
+          if (moving) { const k = a.kit, g = Math.floor(a.phase) % 2 ? k.B : k.C; if (a.body.geometry !== g) a.body.geometry = g; a.y += (AF.surfaceBelow(a.x, a.z, a.y + 0.6, 3) - a.y) * Math.min(1, dt * 10); }
           if (!moving && a.body.geometry !== a.kit.A) a.body.geometry = a.kit.A;
           a.yaw += AF.angDiff(a.yaw, a.tyaw) * Math.min(1, dt * 5);
           a.root.position.set(a.x, a.y, a.z); a.root.rotation.y = a.yaw;
@@ -502,13 +523,8 @@ try {
           break;
         }
         case 'grazer': {
-          a.wait -= dt;
-          if (a.wait <= 0) {
-            a.wait = 6 + Math.random() * 16;
-            if (a.rect) { const R = a.rect; a.tx = AF.lerp(R[0] + 2, R[2] - 2, Math.random()); a.tz = AF.lerp(R[1] + 2, R[3] - 2, Math.random()); if (Math.random() < 0.5) { a.tx = a.x + (a.tx - a.x) * 0.25; a.tz = a.z + (a.tz - a.z) * 0.25; } }
-            else if (a.home) { const ang = Math.random() * TAU, r = Math.random() * a.home.r; a.tx = a.home.x + Math.cos(ang) * r; a.tz = a.home.z + Math.sin(ang) * r; }
-          }
-          const moving = a.tx != null && moveQuad(a, a.tx, a.tz, a.speed, dt);
+          const moving = wander(a, t, 10 + a.t0 * 16, a.speed, dt);
+          if (moving) { const k = a.kit, g = Math.floor(a.phase) % 2 ? k.B : k.C; if (a.body.geometry !== g) a.body.geometry = g; a.y += (AF.surfaceBelow(a.x, a.z, a.y + 0.6, 3) - a.y) * Math.min(1, dt * 10); }
           if (!moving && a.body.geometry !== a.kit.A) a.body.geometry = a.kit.A;
           a.yaw += AF.angDiff(a.yaw, a.tyaw) * Math.min(1, dt * 2);
           a.root.position.set(a.x, a.y, a.z); a.root.rotation.y = a.yaw;
@@ -534,14 +550,14 @@ try {
             const p = tr.length > n ? tr[tr.length - 1 - n] : null;
             if (p) { a.x = p[0]; a.z = p[1]; a.yaw = p[2]; }
           } else if (a.ell) {
-            a.ang += a.dir * dt * a.speed / Math.max(a.ell[0], a.ell[1]);
+            a.ang = a.ang0 + a.dir * t * a.speed / Math.max(a.ell[0], a.ell[1]);
             const nx = a.cx + Math.cos(a.ang) * a.ell[0], nz = a.cz + Math.sin(a.ang) * a.ell[1];
-            a.yaw = Math.atan2(nx - a.x, nz - a.z); a.x = nx; a.z = nz;
+            a.yaw = Math.atan2(-a.dir * Math.sin(a.ang) * a.ell[0], a.dir * Math.cos(a.ang) * a.ell[1]); a.x = nx; a.z = nz;
           } else {
-            a.ang += a.dir * dt * a.speed / Math.max(1.5, a.rr);
+            a.ang = a.ang0 + a.dir * t * a.speed / Math.max(1.5, a.rr);
             const wob = Math.sin(a.t * 0.2) * 0.8;
             const nx = a.cx + Math.cos(a.ang) * (a.rr + wob), nz = a.cz + Math.sin(a.ang) * (a.rr + wob);
-            a.yaw = Math.atan2(nx - a.x, nz - a.z); a.x = nx; a.z = nz;
+            a.yaw = Math.atan2(-a.dir * Math.sin(a.ang), a.dir * Math.cos(a.ang)); a.x = nx; a.z = nz;
           }
           a.sampleT = (a.sampleT || 0) + dt; if (a.sampleT > 0.05) { a.sampleT = 0; a.trail = a.trail || []; a.trail.push([a.x, a.z, a.yaw]); if (a.trail.length > 60) a.trail.shift(); }
           a.root.position.set(a.x, a.y + Math.sin(a.t * 2.2 + a.cx) * 0.02, a.z); a.root.rotation.y = a.yaw;
@@ -550,8 +566,9 @@ try {
           break;
         }
         case 'coopbird': {
-          const F = a.flock, T0 = t || 0, k = T0 - F.start, air = k >= 0 && k < 16;
-          if (!air && a === F.members[0] && Math.random() < dt / 40) F.start = T0 + 0.3;
+          // the flock goes up for 16 s once every 40-70 s, on a schedule seeded per flock
+          const F = a.flock, T0 = t || 0; if (F.per === undefined) { F.per = 40 + AF.hash2(Math.round(F.cx * 4), Math.round(F.cz * 4)) * 30; F.ph = AF.hash2(Math.round(F.cz * 4), Math.round(F.cx * 4)) * F.per; }
+          const k = (((T0 + F.ph + F.per * AF.whash(Math.round(F.cx), Math.round(F.cz), 3)) % F.per) + F.per) % F.per, air = k < 16;
           if (air) {
             const e = Math.min(1, k / 2, (16 - k) / 2), ang = a.ph + k * 0.55;
             a.root.position.set(F.cx + Math.cos(ang) * a.r * e + (a.px - F.cx) * (1 - e), F.y + e * (9 + Math.sin(k + a.ph) * 1.5), F.cz + Math.sin(ang) * a.r * e + (a.pz - F.cz) * (1 - e));
@@ -568,7 +585,7 @@ try {
           break;
         }
         case 'gullfly': {
-          a.ang += a.w * dt; const x = a.cx + Math.cos(a.ang) * a.r, z = a.cz + Math.sin(a.ang) * a.r;
+          a.ang = a.ang0 + a.w * t; const x = a.cx + Math.cos(a.ang) * a.r, z = a.cz + Math.sin(a.ang) * a.r;
           a.root.position.set(x, a.y + Math.sin(a.t * 0.7) * 1.2, z); a.root.rotation.set(0, a.ang + (a.w > 0 ? Math.PI : 0), a.w > 0 ? -0.35 : 0.35, 'YXZ');
           a.root.geometry = a.geos[Math.sin(a.t * (a.pigeonWheel ? 13 : 5)) > 0.3 ? 0 : 1];
           break;
@@ -580,7 +597,12 @@ try {
             const now = AF.clock.t;
             if (F && dp < 4.5 && (pp.walk || pp.y < 4)) { F.scatter = now; F.src = null; F.auto = Math.max(F.auto ?? 0, 30); }
             // R2: now and then a flock bursts up on its own (a cab backfires, a dog runs through) so a still camera sees the take-off + landing
-            if (F && a === F.members[0] && !F.lady) { F.auto = (F.auto ?? 25 + Math.random() * 60) - dt; if (F.auto <= 0) { F.auto = 45 + Math.random() * 70; if (dc < 140) { F.scatter = now; const an = Math.random() * TAU; F.src = { x: a.hx + Math.cos(an) * 3, z: a.hz + Math.sin(an) * 3 }; } } }
+            if (F && a === F.members[0] && !F.lady) {   // a flock bursts up on a seeded schedule (a cab backfires, a dog runs through)
+              if (F.aper === undefined) F.aper = 45 + AF.hash2(Math.round(a.hx * 4), Math.round(a.hz * 4)) * 70;
+              const kk = Math.floor((t + a.t0 * F.aper) / F.aper);
+              if (F.ak !== undefined && kk !== F.ak && dc < 140) { F.scatter = now; const an = AF.whash(a.uid, kk, 9) * TAU; F.src = { x: a.hx + Math.cos(an) * 3, z: a.hz + Math.sin(an) * 3 }; }
+              F.ak = kk;
+            }
             const burst = (dp < 3.2 && (pp.walk || pp.y < 4)) || (F && F.scatter > 0 && Math.abs(now - F.scatter) < 0.6);
             // R2: birds that landed away from their flock drift home in short hops now and then (never while someone is close)
             const away = Math.hypot(a.x - a.ox, a.z - a.oz) > 3.5 && dp > 7 && a.t - (a.landT || 0) > 15 && Math.random() < dt / 14;
@@ -603,8 +625,8 @@ try {
               a.fx = a.lx - a.x; a.fz = a.lz - a.z; a.root.geometry = a.geos[1];
             }
             else {
-              a.wait = (a.wait ?? Math.random() * 2) - dt;
-              if (a.wait <= 0) { a.wait = 0.6 + Math.random() * 2.5; a.tx = a.hx + (Math.random() - 0.5) * 3; a.tz = a.hz + (Math.random() - 0.5) * 3; if (Math.abs(a.gy - (a.oy ?? a.gy)) > 0.6) { a.tx = a.hx + (Math.random() - 0.5) * 0.4; a.tz = a.hz + (Math.random() - 0.5) * 0.4; } }
+              slotAt(a, t, 1.8, SLOT);
+              if (SLOT.k !== a.hk) { a.hk = SLOT.k; const sm = Math.abs(a.gy - (a.oy ?? a.gy)) > 0.6 ? 0.4 : 3; a.tx = a.hx + (AF.whash(a.uid, SLOT.k, 1) - 0.5) * sm; a.tz = a.hz + (AF.whash(a.uid, SLOT.k, 2) - 0.5) * sm; }
               if (a.tx != null) { const dx = a.tx - a.x, dz = a.tz - a.z, d = Math.hypot(dx, dz); if (d > 0.05) { const st = Math.min(d, 0.5 * dt); a.x += dx / d * st; a.z += dz / d * st; a.yaw = Math.atan2(dx, dz); } }
               a.root.position.set(a.x, a.gy + (Math.sin(a.t * 12) > 0.6 ? 0.01 : 0), a.z); a.root.rotation.y = a.yaw;
               a.root.rotation.x = Math.sin(a.t * 3 + a.hx) > 0.5 ? 0.55 : 0;
@@ -627,8 +649,8 @@ try {
           break;
         }
         case 'chicken': {
-          a.wait -= dt;
-          if (a.wait <= 0) { a.wait = 1 + Math.random() * 3; a.tx = a.hx + (Math.random() - 0.5) * 4; a.tz = a.hz + (Math.random() - 0.5) * 4; a.pecking = Math.random() < 0.5; }
+          slotAt(a, t, 2.5, SLOT); const hk = AF.whash(a.uid, SLOT.k, 4);
+          a.pecking = hk < 0.5; a.tx = (a.hx ?? a.x0) + (AF.whash(a.uid, SLOT.k, 1) - 0.5) * 4; a.tz = (a.hz ?? a.z0) + (AF.whash(a.uid, SLOT.k, 2) - 0.5) * 4;
           const dx = a.tx - a.x, dz = a.tz - a.z, d = Math.hypot(dx, dz);
           if (d > 0.08 && !a.pecking) { const st = Math.min(d, 0.9 * dt); a.x += dx / d * st; a.z += dz / d * st; a.yaw = Math.atan2(dx, dz); }
           const peck = a.pecking && Math.sin(a.t * 9) > 0.2;
@@ -639,7 +661,7 @@ try {
         case 'squirrel': {
           const cyc = (a.t % 14) / 14; // 0-0.35 hop around base, 0.35-0.55 climb, 0.55-0.8 sit high, 0.8-1 down
           let h = 0, r = 0.75, pitch = 0;
-          if (cyc < 0.35) { a.ang += dt * 0.9 * (Math.sin(a.t * 7) > 0 ? 1 : 0); r = 1.1 + Math.sin(a.t * 0.5) * 0.3; }
+          if (cyc < 0.35) { a.ang = a.ang0 + t * 0.45; r = 1.1 + Math.sin(a.t * 0.5) * 0.3; }
           else if (cyc < 0.55) { h = (cyc - 0.35) / 0.2 * 3; r = 0.62; pitch = -1.45; }
           else if (cyc < 0.8) { h = 3; r = 0.62; pitch = -1.45; }
           else { h = (1 - (cyc - 0.8) / 0.2) * 3; r = 0.62; pitch = 1.45; }

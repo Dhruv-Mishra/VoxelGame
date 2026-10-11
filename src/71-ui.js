@@ -57,17 +57,19 @@ try {
   }
   #ui.titling .hud{display:none!important}
   #ui.mapping .hud,#ui.mapping #h-toasts,#ui.mapping #h-banner,#ui.mapping .bubble,#ui.mapping #h-dlg{display:none!important}
-  #ui #h-clock{position:absolute;left:max(16px,env(safe-area-inset-left));top:max(16px,env(safe-area-inset-top));padding:8px 12px;display:flex;align-items:center;gap:12px;max-width:calc(100% - 156px)}
-  #ui #h-clock .t{font-size:15px;font-weight:600;white-space:nowrap}
-  #ui #h-clock .t small{font-size:10px;color:var(--dim);margin-left:3px;font-weight:500}
-  #ui #h-clock .p{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;min-width:0}
+  #ui #h-clock{position:absolute;left:max(18px,env(safe-area-inset-left));top:max(16px,env(safe-area-inset-top));display:flex;align-items:baseline;gap:10px;max-width:calc(100% - 156px);text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.5)}
+  #ui #h-clock .t{font-size:17px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+  #ui #h-clock .t small{font-size:10px;color:var(--ink);opacity:.8;margin-left:3px;font-weight:500}
+  #ui #h-clock .p{font-size:12px;color:var(--ink);opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;min-width:0}
   #ui #h-right{position:absolute;right:max(14px,env(safe-area-inset-right));top:max(14px,env(safe-area-inset-top));display:flex;flex-direction:column;align-items:flex-end;gap:8px}
-  #ui #h-mini{width:112px;height:112px;border-radius:50%;overflow:hidden;position:relative;padding:0;cursor:pointer;border:1px solid rgba(255,255,255,.5)}
+  #ui #h-mini{width:112px;height:112px;border-radius:50%;overflow:hidden;position:relative;padding:0;cursor:pointer;border:1px solid rgba(255,255,255,.28);box-shadow:0 2px 12px rgba(0,0,0,.35);backdrop-filter:none;-webkit-backdrop-filter:none}
   #ui.touch #h-mini{width:112px;height:112px}
   #ui #h-mini canvas{width:100%;height:100%;display:block}
   #ui #h-mini .n{position:absolute;left:50%;top:4px;transform:translateX(-50%);font:700 10px var(--font);color:#213b37}
   #ui .round{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px}
-  #ui #h-btns{display:flex;gap:8px}
+  #ui #h-btns{display:flex;gap:6px}
+  #ui #h-btns .round{background:rgba(14,16,20,.32);border-color:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;opacity:.7;transition:opacity .15s,background .15s}
+  #ui #h-btns .round:hover{opacity:1;background:rgba(14,16,20,.6)}
   #ui #h-prompt{position:absolute;left:50%;bottom:max(56px,calc(env(safe-area-inset-bottom) + 56px));transform:translateX(-50%);padding:6px 12px 6px 6px;display:none;max-width:calc(100% - 32px);font-size:13px;align-items:center;gap:8px}
   #ui #h-prompt b{display:grid;place-items:center;min-width:22px;height:22px;border-radius:5px;background:rgba(255,255,255,.1);color:var(--accent);font-weight:600}
   #ui.touch #h-prompt{bottom:auto;top:60%;max-width:60%}
@@ -95,16 +97,19 @@ try {
   #ui #h-dlg .more{position:absolute;right:14px;bottom:6px;font-size:11px;color:var(--dim)}
   #ui .bubble{position:absolute;left:0;top:0;transform:translate(-50%,-100%);padding:6px 10px;border-radius:10px;background:var(--bg2);color:var(--ink);font-size:12px;max-width:240px;text-align:center;border:1px solid var(--line);pointer-events:none}
   #ui .bubble b{display:block;font-size:10px;color:var(--accent);margin-bottom:2px}
-  #ui .sheet{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(4,10,16,.5);padding:16px}
+  #ui .sheet{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(4,10,16,.42);padding:16px}
   #ui .sheet.open{display:flex}
-  #ui .sheet>.panel{background:var(--bg2);width:min(420px,100%);max-height:100%;overflow:auto;padding:18px}
-  #ui .sheet h2{margin:0 0 16px;font-size:18px;font-weight:500;color:var(--ink)}
-  #ui .row{display:flex;align-items:center;gap:12px;padding:8px 0}
-  #ui .row label{flex:1;color:var(--dim)}
-  #ui .seg{display:flex;background:rgba(255,255,255,.04);border-radius:8px;padding:3px}
-  #ui .seg button{padding:5px 8px;border-radius:5px;font-size:12px;color:var(--dim)} #ui .seg button.on{background:rgba(255,255,255,.12);color:var(--accent)}
-  #ui input[type=range]{flex:1.2;min-width:0;accent-color:var(--accent)}
-  #ui .stack{display:grid;gap:8px;margin-top:12px}
+  #ui .sheet>.panel{background:var(--bg2);width:min(440px,100%);max-height:100%;overflow:auto;padding:18px 20px;border-radius:16px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent;animation:uiIn .14s ease}
+  #ui .sheet>.panel::-webkit-scrollbar{width:6px} #ui .sheet>.panel::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:6px} #ui .sheet>.panel::-webkit-scrollbar-track{background:transparent}
+  #ui .sheet h2{margin:0 0 6px;font-size:13px;font-weight:600;letter-spacing:2px;color:var(--dim)}
+  #ui .sheet h4{margin:14px 0 0;font:600 10px var(--font);letter-spacing:1.4px;text-transform:uppercase;color:var(--accent);opacity:.75}
+  #ui .row{display:flex;align-items:center;gap:12px;padding:6px 0}
+  #ui .row label{flex:1;color:var(--ink);opacity:.82}
+  #ui .row label small{color:var(--dim);margin-left:4px}
+  #ui .seg{display:flex;background:rgba(255,255,255,.05);border-radius:8px;padding:2px}
+  #ui .seg button{padding:5px 9px;border-radius:6px;font-size:12px;color:var(--dim);transition:color .12s,background .12s} #ui .seg button.on{background:rgba(255,255,255,.1);color:var(--accent)}
+  #ui input[type=range]{flex:1.2;min-width:0;accent-color:var(--accent);height:4px}
+  #ui .stack{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:16px} #ui .stack .primary{grid-column:1/-1;padding:10px 14px}
   #ui #m-help>.panel{width:min(560px,100%)}
   #ui #m-help .cols{display:grid;grid-template-columns:1fr 1fr;gap:4px 22px}
   #ui #m-help h3{margin:10px 0 6px;font-size:12px;font-weight:500;color:var(--accent)}
@@ -150,7 +155,7 @@ try {
     <div class="stage"><button class="arr l" aria-label="Previous character">&#8249;</button><button class="arr r" aria-label="Next character">&#8250;</button><div class="cnt"></div></div>
     <div class="n"></div><div class="tg"></div><div class="d"></div><div class="dots"></div>
     <button class="btn primary go"><span class="ic">&#9654;</span><span class="lb">Let's Play</span></button></div>`); title.id = 't-title';
-  const clock = h('div', 'panel hud', `<div class="t"><span class="tm">4:30</span><small class="ap">PM</small></div><div class="p">Port Solace</div>`); clock.id = 'h-clock';
+  const clock = h('div', 'hud', `<div class="t"><span class="tm">4:30</span><small class="ap">PM</small></div><div class="p">Port Solace</div>`); clock.id = 'h-clock';
   const right = h('div', 'hud', `<div id="h-mini" class="panel pe"><canvas width="220" height="220"></canvas><div class="n">N</div></div><div id="h-btns">${TOUCH ? '<button class="panel round pe" data-k="full" title="Fullscreen">&#x26F6;</button>' : '<button class="panel round pe" data-k="map" title="Map (M)">&#x1F5FA;</button>'}<button class="panel round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); right.id = 'h-right';
   for (const button of right.querySelectorAll('button')) { button.innerHTML = UI.icon(button.dataset.k); button.setAttribute('aria-label', button.title); }
   const miniButton = right.querySelector('#h-mini'); miniButton.setAttribute('role', 'button'); miniButton.setAttribute('aria-label', 'Open world map'); miniButton.tabIndex = 0;
@@ -177,23 +182,27 @@ try {
   const dlg = h('div', 'panel pe', `<div class="face"></div><div><span class="nm"></span><span class="rl"></span></div><div class="ln"></div><div class="more">${TOUCH ? 'tap' : 'E / click'} to continue</div>`); dlg.id = 'h-dlg';
   const bubbleEl = h('div', 'bubble', ''); bubbleEl.style.display = 'none';
   const menu = h('div', 'sheet pe', `<div class="panel"><h2>PAUSED</h2>
+    <h4>Display</h4>
     <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="lite" title="Default: Balanced without AO, god rays and MSAA">Standard</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
-    <div class="row"><label>Resolution <small class="rv"></small></label><input data-k="resH" type="range" min="360" max="2160" step="60" title="Render height in device pixels (default 720p)"></div>
+    <div class="row"><label>Resolution <small class="rv"></small></label><input data-k="resH" type="range" min="360" max="2160" step="60" title="Render height in device pixels (default 720p, 480p on phones)"></div>
     <div class="row"><label>View distance <small class="lv"></small></label><input data-k="lod" type="range" min="0.6" max="2.5" step="0.1" title="How far full-detail terrain, buildings and trees reach before the lower LODs"></div>
-    <div class="row"><label>Shadows</label><div class="seg" data-k="shadows"><button data-v="off">Off</button><button data-v="low" title="Near shadows only (default on phones)">Low</button><button data-v="high">High</button></div></div>
-    <div class="row"><label></label><small class="rr" style="opacity:.75"></small></div>
+    <div class="row"><label>Shadows</label><div class="seg" data-k="shadows"><button data-v="off" title="Default on phones">Off</button><button data-v="low" title="Near shadows only">Low</button><button data-v="high">High</button></div></div>
+    <div class="row"><label>Frame rate</label><div class="seg" data-k="fps"><button data-v="30" title="Default: smooth, cool and battery-friendly">30</button><button data-v="60">60</button><button data-v="0">Max</button></div></div>
+    <div class="row"><label>Brightness</label><input data-k="bright" type="range" min="0.6" max="2" step="0.05"></div>
+    <div class="row"><label></label><small class="rr" style="opacity:.6"></small></div>
+    <h4>World</h4>
     <div class="row"><label>Time of day</label><input data-k="hour" type="range" min="0" max="23.95" step="0.05"></div>
     <div class="row"><label>Clock</label><div class="seg" data-k="clock"><button data-v="run">Running</button><button data-v="stop">Stopped</button></div></div>
+    <h4>Controls</h4>
     <div class="row"><label>Look sensitivity</label><input data-k="sens" type="range" min="0.1" max="1.5" step="0.05"></div>
-    <div class="row"><label>Brightness</label><input data-k="bright" type="range" min="0.6" max="2" step="0.05"></div>
-    <div class="row"><label>Frame rate</label><div class="seg" data-k="fps"><button data-v="30" title="Default: smooth, cool and battery-friendly">30</button><button data-v="60">60</button><button data-v="0">Max</button></div></div>
+    <h4>Co-op &amp; sound</h4>
     <div class="stack"><button class="btn primary" data-k="resume">Resume</button><button class="btn" data-k="map">Map</button><button class="btn" data-k="help">Controls</button><button class="btn" data-k="switch">Switch friend</button></div></div>`); menu.id = 'm-menu';
   const help = h('div', 'sheet pe', ''); help.id = 'm-help';
   const K = (k, d) => `<div class="k"><span>${d}</span><span>${k.split('+').map((x) => '<kbd>' + x + '</kbd>').join(' ')}</span></div>`;
   help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>push the stick to its edge</span></div><div class="k"><span>Camera \u00b7 job</span><span>small buttons</span></div></div>
-    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Main action</span><span>big button (HIT, FIRE, BRAKE, THR\u2026)</span></div><div class="k"><span>More</span><span>buttons around it change with what you do</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
+    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Main action</span><span>big button (HIT, FIRE, BRAKE, THR\u2026)</span></div><div class="k"><span>More</span><span>buttons around it change with what you do</span></div><div class="k"><span>Weapon wheel</span><span>hold WPN, slide, lift</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
     : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('C', 'Camera: first person / near / far')}${K('Tab', 'Aerial view')}</div>
-    <div><h3>Fighting</h3>${K('Click+Q', 'Attack / shoot')}${K('Right-drag+Z', 'Aim (hold / toggle)')}${K('Wheel+1+2+3+4+5', 'Switch weapon')}${K('R', 'Reload')}<h3>Work</h3>${K('J', 'Start / quit a job (taxi, bus, van, fire engine, on foot: courier)')}</div>
+    <div><h3>Fighting</h3>${K('Click+Q', 'Attack / shoot')}${K('Right-drag+Z', 'Aim (hold / toggle)')}${K('Wheel+1-5+X', 'Switch weapon')}${K('Hold X', 'Weapon wheel')}${K('R', 'Reload')}<h3>Work</h3>${K('J', 'Start / quit a job (taxi, bus, van, fire engine, on foot: courier)')}</div>
     <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('F', 'Get out (on the ground)')}</div>
     <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}<h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}</div></div>`}
     <div class="stack"><button class="btn primary" data-k="closehelp">Got it</button></div></div>`;
@@ -489,7 +498,7 @@ try {
       G.res = +b.dataset.v; try { localStorage.setItem('portSolace.res', b.dataset.v); } catch (er) {}
       AF.applyPR();
     }
-    else if (seg === 'clock') AF.time.paused = b.dataset.v === 'stop';
+    else if (seg === 'clock') AF.time.set({ paused: b.dataset.v === 'stop' });
     else if (seg === 'fps') AF.setFpsCap(b.dataset.v);
     else if (seg === 'shadows') AF.gfx.setShadows(b.dataset.v);
     else if (b.dataset.k === 'resume') toggleMenu(false);
@@ -498,7 +507,7 @@ try {
     else if (b.dataset.k === 'switch') { toggleMenu(false, false); UI.showTitle(); }
     syncMenu();
   });
-  menu.querySelector('[data-k=hour]').addEventListener('input', (e) => { AF.time.hours = +e.target.value; });
+  menu.querySelector('[data-k=hour]').addEventListener('input', (e) => { AF.time.set({ hours: +e.target.value }); });
   menu.querySelector('[data-k=sens]').addEventListener('input', (e) => AF.setLookSens(e.target.value));
   menu.querySelector('[data-k=bright]').addEventListener('input', (e) => AF.setBrightness && AF.setBrightness(e.target.value));
   menu.querySelector('[data-k=resH]').addEventListener('change', (e) => { AF.gfx.setResH(e.target.value); syncMenu(); });

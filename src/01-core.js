@@ -34,12 +34,12 @@ AF.GFX = {
 };
 { const g = AF.Q.get('gfx'); if (g && ['ultra', 'high', 'lite', 'low', 'cinema'].includes(g)) { AF.GFX.tier = g === 'cinema' ? 'ultra' : g === 'lite' ? 'high' : g; AF.GFX.cinema = g === 'cinema'; AF.GFX.lite = g === 'lite'; AF.GFX.forced = true; AF.GFX.auto = false; } }
 { const r = +(() => { try { return localStorage.getItem('portSolace.res'); } catch (e) { return 0; } })(); if ([0.75, 0.9, 1].includes(r)) AF.GFX.res = r; }
-// render resolution as a target height in device pixels (default 720p in the screen's aspect ratio; 0 = tier default) and the
-// view-distance multiplier on every LOD range (menu sliders; ?test/?shot keep the tier defaults)
+// render resolution as a target height in device pixels (default 720p in the screen's aspect ratio, 480p on phones; 0 = tier
+// default) and the view-distance multiplier on every LOD range (menu sliders; ?test/?shot keep the tier defaults)
 {
   const read = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
   const h = +read('portSolace.resH'), s = +read('portSolace.lod');
-  AF.GFX.resH = AF.TEST || AF.SHOT ? 0 : h >= 240 && h <= 4320 ? h : 720;
+  AF.GFX.resH = AF.TEST || AF.SHOT ? 0 : h >= 240 && h <= 4320 ? h : AF.MOBILE ? 480 : 720;
   AF.lodScale = AF.TEST || AF.SHOT ? 1 : s >= 0.5 && s <= 3 ? s : 1;
 }
 
@@ -288,7 +288,48 @@ AF.input = { down: new Set(), pressed: new Set(), released: new Set(), mouse: { 
 // hours 0..24. speed = game hours per real second (default: one day = 24 real minutes).
 // AF.time.night (0 day .. 1 full night) and AF.time.sunDir are maintained by the atmosphere part (fallback below).
 AF.time = { hours: +(AF.Q.get('hour') ?? 16.5), speed: 1 / 240, paused: false, day: 1, night: 0, sunDir: new THREE.Vector3(0.5, 0.7, 0.3).normalize() };
-AF.clock = { t: 0, frame: 0, dt: 1 / 60 };
+
+// ---------------------------------------------------------------- shared world clock + seed (PERF.md §8c)
+// W = world seconds since AF.world.epoch (UTC midnight of the day the session began), on the host's clock. Everything ambient that
+// no player controls (time of day, traffic lights, streetcar, rides, ferries, boats, planes, fireworks, crowds, animals, traffic)
+// is a function of W and AF.world.seed, so every co-op player sees the same world without it ever being sent. A guest adopts the
+// host's epoch + seed when it joins (80-coop) and ping/pong round trips refine AF.world.off, its clock offset to the host (79-net).
+// AF.clock.w = W this frame: frozen while AF.timeScale is 0 (photo mode), dt-stepped in ?test / ?shot / AF.step (deterministic
+// harnesses). Tick hooks receive it as their `t`; AF.clock.t stays the local, monotonic clock for gameplay timers.
+AF.world = { seed: AF.TEST || AF.SHOT ? 0x5eed : (crypto.getRandomValues(new Uint32Array(1))[0] >>> 0) || 1, epoch: 0, off: 0, gen: 0 };
+{ const d = new Date(); AF.world.epoch = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
+AF.wnow = () => (performance.timeOrigin + performance.now() + AF.world.off - AF.world.epoch) / 1000;
+// a different seed / epoch (joining a host) re-times everything at once: systems that cache per-seed data watch AF.world.gen
+AF.world.set = (seed, epoch) => {
+  const W = AF.world; seed = seed >>> 0 || 1;
+  if (seed === W.seed && (!Number.isFinite(epoch) || epoch === W.epoch)) return;
+  W.seed = seed; if (Number.isFinite(epoch)) W.epoch = epoch; W.gen++;
+  if (!AF.TEST && !AF.SHOT && AF.clock) AF.clock.w = AF.wnow();
+  if (AF.emit) AF.emit('world', W);
+};
+// seeded hashes for deterministic schedules: whash(a, b, c) -> [0, 1), the same on every client sharing AF.world.seed
+AF.whash = (a, b = 0, c = 0) => {
+  let h = Math.imul((a | 0) ^ AF.world.seed, 0x9e3779b1) ^ Math.imul(b | 0, 0x85ebca77) ^ Math.imul((c | 0) + 0x165667b1, 0xc2b2ae3d);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d); h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
+  return ((h ^ (h >>> 15)) >>> 0) / 4294967296;
+};
+AF.clock = { t: 0, frame: 0, dt: 1 / 60, w: AF.TEST || AF.SHOT ? 43200 : AF.wnow(), stepping: false };
+// time of day = f(W): hours = h0 + (W - w0) * speed, held while paused. Whatever changes the clock (menu, keys, the dusk pacing,
+// a co-op peer) goes through AF.time.set, which re-bases at the current W; the 'timeset' event lets 80-coop share the new base.
+AF.time.base = { h0: AF.time.hours, w0: AF.clock.w, sp: AF.time.speed, p: false };
+AF.time.at = (W = AF.clock.w) => { const B = AF.time.base; return B.p ? B.h0 : (((B.h0 + (W - B.w0) * B.sp) % 24) + 24) % 24; };
+AF.time.set = (o = {}, quiet = false) => {
+  const T = AF.time, B = T.base, W = AF.clock.w, h = Number.isFinite(o.hours) ? ((o.hours % 24) + 24) % 24 : T.at(W);
+  B.h0 = h; B.w0 = W; if (Number.isFinite(o.speed)) B.sp = o.speed; if (o.paused != null) B.p = !!o.paused;
+  T.hours = h; T.speed = B.sp; T.paused = B.p;
+  if (!quiet && AF.emit) AF.emit('timeset', B);
+};
+// a base from elsewhere (a co-op peer): absolute on the shared W timeline, so applying it is idempotent
+AF.time.adopt = (b) => {
+  if (!b || !Number.isFinite(b.h0) || !Number.isFinite(b.w0) || !Number.isFinite(b.sp)) return false;
+  const T = AF.time, B = T.base; B.h0 = ((b.h0 % 24) + 24) % 24; B.w0 = b.w0; B.sp = AF.clamp(b.sp, 0, 1); B.p = !!b.p;
+  T.speed = B.sp; T.paused = B.p; T.hours = T.at(); return true;
+};
 
 // ---------------------------------------------------------------- registries shared between parts (see CONTRACT.md)
 AF.buildings = [];   // {id, name, kind, box:[x0,y0,z0,x1,y1,z1], doors:[{x,y,z,yaw}], floors:[y], owner}

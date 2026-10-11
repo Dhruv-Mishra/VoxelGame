@@ -19,24 +19,32 @@ compare draws and GPU ms.
 - `AF.fpsCap` 30 default (menu 30/60/Max, `portSolace.fps`). Skipped rAF callbacks run idle work (`AF.onIdle(name, fn(ms))`,
   ≤ 60 % of an interval, max 10 ms desktop / 6 ms phone). Auto-tier and dynamic resolution compare against the cap interval.
 - Sun shadows refresh on a time cadence (≈30 Hz High/Balanced, ≈15 Hz lower) but every frame while the subject moves.
-  Shadows setting Off/Low/High (`AF.gfx.setShadows`, `portSolace.shadows`); Low = near map only, 4-tap compare; phones default Low.
+  Shadows setting Off/Low/High (`AF.gfx.setShadows`, `portSolace.shadows`); Low = near map only, 4-tap compare; phones default Off.
 - Simulation uses `dt` (≤ 0.1 s); nothing assumes 60 Hz.
 
 ## 3. Renderer (locked)
 - **Resolution / upscaling**: the scene renders at `AF.renderPR()` (= `basePR` × tier/dynres scale; menu target height,
-  default 720p, `portSolace.resH`). When the post chain runs, the canvas stays at `AF.outputPR()` (display res, ≤ 2×) and the
-  final `UPSCALE` pass (61-post) does Catmull-Rom 9-tap upsampling + contrast-adaptive sharpening; `?noupscale` / `?shot`
-  turn it off. Change resolution only through `AF.applyPR()`. Point sprites size by `renderPR`.
+  default 720p, 480p on phones, `portSolace.resH`). When the post chain runs, the canvas stays at `AF.outputPR()` (display res,
+  ≤ 2×) and the final `UPSCALE` pass (61-post) does Catmull-Rom 9-tap upsampling + contrast-adaptive sharpening; `?noupscale` /
+  `?shot` turn it off. Change resolution only through `AF.applyPR()`. Point sprites size by `renderPR`.
+- **Phones** (`AF.MOBILE`) skip the post chain but not the upscaler (`AF.post.lite`): the scene renders into an MSAA RGBA8 target
+  flagged `isXRRenderTarget` (three r160 then applies tone mapping + sRGB in the materials, the same programs as the screen) and one
+  `UPSCALE` pass draws it to a canvas of ≤ 2× the render height (single-pass upscale + sharpen, the Snapdragon GSR 1 / FSR 1 idea
+  without textureGather). Any error falls back to direct rendering.
 - Instanced voxel meshes use `AF.mat.voxelInst` / `voxelInstC` + `AF.mat.depthInst` (sharing `AF.mat.voxel` made three
   re-derive programs ~75× per pass). `inst-ranges` uploads only `[0, count)` of instanced buffers.
 - Dynamic near plane (`cam-near`): 0.1 m on foot/driving, up to 6 m when high. Never hard-code `camera.near`.
 - No coplanar opaque surfaces (lift ≥ 0.02 m or `polygonOffset`). Position-keyed shader hashes sample a few cm behind the face.
-- Post chain: bloom + AO (tier-gated) + grade + upscale. No tilt-shift/DOF (removed). Phones (`AF.MOBILE`) skip post.
+- Post chain: bloom + AO (tier-gated) + grade + upscale. No tilt-shift/DOF (removed). Phones use the lite path above.
 
 ## 4. LOD transitions (locked)
 - Every LOD swap of voxel-material meshes is a dithered 0.3 s cross-fade (`AF.world.fade`, `fadeIn`/`fadeOut` variants).
   Never write `.visible` on such meshes while `owner.fadeE` is set — use `FADE.swap`. During `AF.stream.loading` swaps are instant.
 - Fade programs are precompiled (`AF.world.fade.warm()`, via `AF.stream.compileAhead`) so the first swap never hitches.
+- View-aware thresholds (02 `prop-lod`: `viewAim` / `inView` / `leadAt`): on-screen regions, props and clusters keep their detail
+  a band longer (×1.25 regions + props, ×1.15 clusters / prop cull) and, with the camera moving, upgrade 1.5 s of travel (≤ 90 m)
+  earlier ahead; out of view the plain distances apply. Driving the length of Grand Avenue at 25 m/s: in-view swaps under 120 m
+  went 82 → 1, median in-view swap distance 112 → 150 m.
 
 ## 5. Streaming (locked) — one engine, `01-stream.js`
 - Post-boot content registers once: `AF.stream.register(name, { work(ms), near(), gen, order })`. `gen: true` = one-time
@@ -65,7 +73,9 @@ compare draws and GPU ms.
 - All outland water is one mesh (+ island lagoon). Idle-built lights register at build time.
 
 ## 7. Actors (locked)
-- Traffic (`51`): lane graph, 15 Hz step + interpolation; full rate ≤ 240 m, 1/4 beyond in view, 1/8 off screen.
+- Traffic (`51`): lane graph; every AI car steps at a fixed 15 Hz on the world clock wherever the viewer is (co-op clients must
+  agree; ~0.3 ms/frame for the fleet), drawn interpolated. Turns are seeded per car (`AF.whash`), obstacles are only what every
+  client sees (players, cars a player drove). A stall is caught up ≤ 12 steps a frame, never dropped.
   `AF.vehicles.addRoute`, `placeParked` (merged static until used). Vehicles at `SPEED_K` 0.82.
 - Walkers (`54`): `AF.walkers.addPath` — every path pedestrian shares 4 instanced draws (512 cap), limbs 5 Hz beyond 60 m.
   Reactions (shoved / knocked flat / scared) are per-actor state on the same instances; only touched actors run `react`.
@@ -89,14 +99,29 @@ compare draws and GPU ms.
 9. Memory: iOS dies near 1.5 GB — check `AF.memStats()`. Runtime objects must have a forget path (76 forget policy, `AF.avatar.release`).
 
 ## 8b. Co-op network (locked) — `79-net`, `80-coop`
-- One binary snapshot per client at 20 Hz (15 on phones) on the unordered, no-retransmit `fast` channel: header 8 B, player 40 B,
-  28 B per vehicle (driven + squad cars within 400 m), 12 B per engaged ped within 150 m (only while a peer is within 320 m), shots.
-  Walking ≈ 1.2 KB/s per direction per peer. Players > 250 m apart get 1/2 rate, > 500 m 1/4. A link skips `fast` sends while
-  `bufferedAmount` > 32 KB. Reliable JSON (`rel`) is for rare events only (hits, seats, looks); 120 msgs/s per link cap.
-- Receivers: time-ordered buffer per thing, render delay = clamp(1.3·interval + 2·jitter + 8, 60, 320) ms, extrapolate ≤ 250 ms
-  then hold; stale / duplicate samples are dropped. `C.build` / `C.ingest` reuse one writer and scratch arrays (no per-frame garbage).
+- One binary snapshot per client on the unordered, no-retransmit `fast` channel, rate by activity: `N.rate` (20 Hz, 15 on phones)
+  while driving, flying, fighting, aiming or falling, half on foot, 2 Hz standing still (each held 0.3 s after it ends). Header 8 B,
+  player 26 B + 11 B of joints only while they change (and 3 snapshots after, and every 8th), positions as 3-byte centimetres,
+  4 B of counts, 25 B per vehicle (driven + squad cars within 400 m), 12 B per engaged ped within 150 m (only while a peer is within 320 m), shots.
+  Standing ≈ 80 B/s, walking ≈ 0.5 KB/s per direction per peer. Players > 250 m apart get 1/2 rate, > 500 m 1/4. The host bundles
+  what it sends each guest (its snapshot + the newest relay per origin, ≤ 35 ms wait) into one datagram (type 2). A link skips
+  `fast` sends while `bufferedAmount` > 32 KB. Reliable JSON (`rel`) is for rare events only (hits, seats, looks, time changes,
+  traffic resync); pings every 4 s (2 s in a link's first 15 s); 120 msgs/s per link cap.
+- Receivers: time-ordered buffer per thing, render delay = clamp(1.3·interval + 2·jitter + 8, 60, 320) ms (interval samples capped
+  at 160 ms so an idle sender's 2 Hz doesn't inflate it), extrapolate ≤ 250 ms then hold; stale / duplicate samples are dropped.
+  `C.build` / `C.ingest` reuse one writer and scratch arrays (no per-frame garbage).
 - Remote players: ≤ 3 avatars (`AF.avatar.build`), hidden beyond 500 m; remote peds reuse 55's 16 `net` walkers (same instanced draws);
   remote cars are the local copies (or one runtime car each). Co-op adds no draws and no tick work while offline.
+
+## 8c. World clock (locked) — 01-core, everything ambient
+- W = `AF.clock.w` = seconds since `AF.world.epoch` (UTC midnight of the session day) on the host's clock (`AF.world.off`, refined
+  by min-RTT ping samples). Hooks get it as `t`. Frozen while `AF.timeScale` is 0, dt-stepped in `?test` / `?shot` / `AF.step`.
+- Ambient systems are schedules of W + `AF.world.seed`: time of day (`AF.time.base`, `AF.time.at(W)`, changed via `AF.time.set`
+  → one reliable `time` message), traffic lights, tram timetable, ferries / yachts / tugs, rides (carousel, wheel, coaster laps),
+  air traffic (fixed 10 Hz sim), fireworks show, blimp, crowd tours (~880 global walkers bound near the camera), residents' plan
+  loops, path walkers, animals (slot wanders), zoo plans, wild fauna, traffic (15 Hz fixed step). Nothing ambient is ever sent.
+- Fixed-step sims never re-label steps when W nudges back a little (they wait) and never drop steps (backlog ≤ 12 a frame);
+  only a jump of a minute or more restarts them.
 
 ## 9. Measuring
 - `node tools/serve.mjs 8765`; `node tools/build.mjs --check`. Baseline: `git show HEAD:output.html > tools/output-base.html`.

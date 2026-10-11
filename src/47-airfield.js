@@ -366,8 +366,10 @@ try {
       for(let step=0;step<=steps;step++){const fraction=step/steps;probes++;if(AF.boxBlocked(before[0]+(after[0]-before[0])*fraction,before[1]+(after[1]-before[1])*fraction,before[2]+(after[2]-before[2])*fraction,0.22,1.7))blocked++;}
     }return{ok:blocked===0,info:probes+' passenger-path probes, '+blocked+' blocked'};
   });
-  AF.test('airfield: local vehicles and passengers deactivate remotely',()=>{
-    const camera=AF.camera.position.clone();try{AF.camera.position.set(10000,20,10000);AF.vehicles.simTraffic(1/15);AF.walkers.update(0.1,1);return{ok:A.dropoff.cars.every(car=>!car.active)&&A.shuttle.cars.every(car=>!car.active)&&A.passengers.every(path=>!path.active),info:'drop-off, shuttle and departures/arrivals gated'};}finally{AF.camera.position.copy(camera);AF.vehicles.simTraffic(1/15);AF.walkers.update(0,AF.clock.t);}
+  // the drop-off and shuttle cars are part of the shared fleet (51-traffic steps every AI car on the world clock, so co-op players
+  // see them in the same places); only the passengers switch off out of range
+  AF.test('airfield: passengers deactivate remotely, its cars stay in the shared traffic',()=>{
+    const camera=AF.camera.position.clone();try{AF.camera.position.set(10000,20,10000);AF.vehicles.simTraffic(1/15);AF.walkers.update(0.1,1);return{ok:A.dropoff.cars.every(car=>car.active!==false&&car.ai)&&A.shuttle.cars.every(car=>car.active!==false&&car.ai)&&A.passengers.every(path=>!path.active),info:'drop-off and shuttle running, departures/arrivals gated'};}finally{AF.camera.position.copy(camera);AF.vehicles.simTraffic(1/15);AF.walkers.update(0,AF.clock.w);}
   });
   AF.test('airfield: entry and security arches are walkable', () => {
     let ok = true;

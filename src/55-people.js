@@ -563,6 +563,10 @@ try {
   }
   // route between two points via the graph: returns [[x,z],...] (excluding the start point)
   const dist = new Float64Array(4096), prev = new Int32Array(4096), done = new Uint8Array(4096);
+  // binary heap (lazy deletion) for Dijkstra: the residents' plan loops route a few hundred legs at build
+  const HD = new Float64Array(16384), HI = new Int32Array(16384); let hn = 0;
+  const hpush = (d, i) => { if (hn >= HD.length) return; let k = hn++; while (k > 0) { const pa = (k - 1) >> 1; if (HD[pa] <= d) break; HD[k] = HD[pa]; HI[k] = HI[pa]; k = pa; } HD[k] = d; HI[k] = i; };
+  const hpop = () => { const d = HD[--hn], i = HI[hn]; let k = 0; for (;;) { let c = 2 * k + 1; if (c >= hn) break; if (c + 1 < hn && HD[c + 1] < HD[c]) c++; if (HD[c] >= d) break; HD[k] = HD[c]; HI[k] = HI[c]; k = c; } HD[k] = d; HI[k] = i; };
   function route(ax, az, bx, bz) {
     const A = nearestEdge(ax, az), Bq = nearestEdge(bx, bz);
     if (!A || !Bq) return [[bx, bz]];
@@ -571,10 +575,11 @@ try {
     const a0 = A.e[0], a1 = A.e[1];
     dist[a0.i] = Math.hypot(A.x - a0.x, A.z - a0.z); dist[a1.i] = Math.hypot(A.x - a1.x, A.z - a1.z);
     const g0 = Bq.e[0].i, g1 = Bq.e[1].i;
-    for (let it = 0; it < N; it++) {
-      let u = -1, ud = 1e18; for (let i = 0; i < N; i++) if (!done[i] && dist[i] < ud) { ud = dist[i]; u = i; }
-      if (u < 0) break; done[u] = 1; if (done[g0] && done[g1]) break;
-      for (const e of G.nodes[u].adj) { const nd = ud + e.d; if (nd < dist[e.n.i]) { dist[e.n.i] = nd; prev[e.n.i] = u; } }
+    hn = 0; hpush(dist[a0.i], a0.i); hpush(dist[a1.i], a1.i);
+    while (hn) {
+      const ud = HD[0], u = HI[0]; hpop();
+      if (done[u] || ud > dist[u]) continue; done[u] = 1; if (done[g0] && done[g1]) break;
+      for (const e of G.nodes[u].adj) { const v = e.n.i; if (v >= 4096) continue; const nd = ud + e.d; if (nd < dist[v]) { dist[v] = nd; prev[v] = u; hpush(nd, v); } }
     }
     const c0 = dist[g0] + Math.hypot(Bq.x - Bq.e[0].x, Bq.z - Bq.e[0].z), c1 = dist[g1] + Math.hypot(Bq.x - Bq.e[1].x, Bq.z - Bq.e[1].z);
     let g = c0 < c1 ? g0 : g1;
@@ -621,7 +626,7 @@ try {
     const p = Object.assign({
       id: people.length, first: o.first, last: o.last, name: o.first + ' ' + o.last, role: ROLE_TITLE[o.role] || o.role, roleKey: o.role, gender: o.gender, age: o.age,
       home: o.home || null, look: L, parts, root: parts.root,
-      x: o.x, y: o.y ?? 0.25, z: o.z, yaw: o.yaw ?? 0, tyaw: o.yaw ?? 0,
+      x: o.x, y: o.y ?? 0.25, z: o.z, y0: o.y ?? 0.25, yaw: o.yaw ?? 0, tyaw: o.yaw ?? 0, lag: 0,
       state: 'idle', pose: 'stand', speed: o.speed ?? (o.age === 'elder' ? 0.75 : o.age === 'kid' ? 1.9 : 1.2 + r() * 0.25),
       route: null, ri: 0, wait: 0, phase: r() * TAU, rnd: r, lines: [], li: 0, talkT: 0, waveT: 0, waveCd: 0, lookYaw: 0, lookT: r() * 5, far: false, acc: 0,
       job: o.job, spot: null, visible: true,
@@ -685,48 +690,95 @@ try {
   let PUBLIC = [], HOMESPOT = new Map();
   let SHOPDOORS = [];
   const centreBias = (x, z) => Math.min(Math.abs(x) * 0.6 + Math.abs(z) * 0.08, Math.abs(z) * 0.6 + Math.abs(x) * 0.08, Math.hypot(x + 40, z + 40), Math.hypot(x - 20, z - 150) * 1.2);
-  function walkerNext(p) {
-    releaseSpot(p.spot);
-    const from = p.spot && spotPath(p.spot) ? spotPath(p.spot).slice().reverse() : [];
-    const sx = from.length ? from[from.length - 1][0] : p.x, sz = from.length ? from[from.length - 1][1] : p.z;
-    p.spot = null;
-    let s = null;
-    const night = isNight();
-    if (night && p.home) s = HOMESPOT.get(p.home.id);
-    const q = p.rnd();
-    if (!s && !night && q < 0.55 && SHOPDOORS.length) { // window shopping on the sidewalk
-      let d = null, bd = 1e9;
-      for (let i = 0; i < 5; i++) { const c = SHOPDOORS[Math.floor(p.rnd() * SHOPDOORS.length)]; const sc = Math.hypot(c.x - sx, c.z - sz) * 0.5 + p.rnd() * 40; if (sc < bd && Math.hypot(c.x - sx, c.z - sz) > 6) { bd = sc; d = c; } }
-      if (d) {
-        const pts = route(sx, sz, d.wx, d.wz);
-        goTo(p, from.concat(laneOffset(pts, 0.45, 0, pts.length - 2)), () => { p.state = 'idle'; p.tyaw = d.yaw; p.wait = 5 + p.rnd() * 10; });
-        return;
-      }
+
+  // ------------------------------------------------------------ residents on the shared world clock (01-core)
+  // A walking resident keeps a loop of five stops (a shop window, one of the public spots dealt to them, a street corner near the
+  // centre) routed once over the sidewalk graph; where they are at W is a lookup on that loop, so co-op players meet the same
+  // residents in the same places. Kids at play and farm hands pick a spot every few seconds from a seeded hash. Talking to someone
+  // or standing in their way puts them a little behind (p.lag), which they then make up at 1.4x.
+  const PLAN_N = 5, SLOT_KID = 7, SLOT_FARM = 24;
+  let walkerSpots = new Map();
+  function planWalker(p) {
+    const r = AF.rng(77001 + p.id * 131), stops = [], mine = walkerSpots.get(p) || [];
+    for (let k = 0; k < PLAN_N; k++) {
+      const q = r();
+      if (q < 0.4 && SHOPDOORS.length) { const d = SHOPDOORS[Math.floor(r() * SHOPDOORS.length)]; stops.push({ x: d.wx, z: d.wz, yaw: d.yaw, s: null, dwell: 5 + r() * 10 }); }
+      else if (q < 0.75 && mine.length) { const s = mine[Math.floor(r() * mine.length)]; stops.push({ x: s.x, z: s.z, yaw: s.yaw || 0, s, dwell: s.kind === 'sit' || s.kind === 'bench' ? 18 + r() * 35 : 8 + r() * 16 }); }
+      else { let n = G.nodes[0], bd = 1e9; for (let i = 0; i < 4; i++) { const c = G.nodes[Math.floor(r() * G.nodes.length)]; const sc = centreBias(c.x, c.z) + r() * 50; if (sc < bd) { bd = sc; n = c; } } stops.push({ x: n.x, z: n.z, yaw: null, s: null, dwell: 2 + r() * 6 }); }
     }
-    if (!s || spotsTaken.has(s)) {
-      s = null; let bd = 1e9;
-      for (let i = 0; i < 10; i++) { const c = PUBLIC[Math.floor(p.rnd() * PUBLIC.length)]; if (!c || spotsTaken.has(c) || Math.hypot(c.x - p.x, c.z - p.z) < 8) continue; const sc = centreBias(c.x, c.z) + p.rnd() * 70; if (sc < bd) { bd = sc; s = c; } }
+    const legs = []; let T = 0;
+    for (let k = 0; k < PLAN_N; k++) {
+      const from = stops[(k + PLAN_N - 1) % PLAN_N], to = stops[k];
+      const fp = from.s && spotPath(from.s) ? spotPath(from.s).slice().reverse() : [];
+      const sx = fp.length ? fp[fp.length - 1][0] : from.x, sz = fp.length ? fp[fp.length - 1][1] : from.z;
+      const tp = to.s ? spotPath(to.s) : null, entry = tp ? tp[0] : [to.x, to.z];
+      const g = route(sx, sz, entry[0], entry[1]), lane = laneOffset(g, 0.45, 0, g.length - 2);
+      const pts = [[from.x, from.z]].concat(fp.map((q) => [q[0], q[1]]), lane, tp ? tp.slice(1).map((q) => [q[0], q[1]]) : [], [[to.x, to.z]]);
+      const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+      const dur = cum[cum.length - 1] / p.speed;
+      legs.push({ pts, cum, t0: T, dur, to }); T += dur + to.dwell;
     }
-    if (!s || (!night && q > 0.5)) { // stroll to a graph node near the centre
-      let n = null, bd = 1e9;
-      for (let i = 0; i < 4; i++) { const c = G.nodes[Math.floor(p.rnd() * G.nodes.length)]; const sc = centreBias(c.x, c.z) + p.rnd() * 50; if (sc < bd) { bd = sc; n = c; } }
-      const pts = route(sx, sz, n.x, n.z);
-      goTo(p, from.concat(laneOffset(pts, 0.45, 0, pts.length - 2)), () => { p.state = 'idle'; p.wait = 2 + p.rnd() * 6; p.spot = null; });
-      return;
+    return { legs, P: Math.max(1, T) };
+  }
+  const RPOS = { x: 0, z: 0, yaw: 0, moving: false, stop: null };
+  function walkerAt(p, W, out) {
+    const PLN = p.plan || (p.plan = planWalker(p)), P = PLN.P, tau = ((W + AF.whash(p.id, 1953) * P) % P + P) % P;
+    let k = PLN.legs.length - 1; while (k > 0 && PLN.legs[k].t0 > tau) k--;
+    const L = PLN.legs[k], e = tau - L.t0;
+    if (e < L.dur) {
+      const d = e * p.speed; let i = 1; while (i < L.cum.length - 1 && L.cum[i] < d) i++;
+      const a = L.pts[i - 1], b = L.pts[i], seg = L.cum[i] - L.cum[i - 1] || 1, u = Math.min(1, Math.max(0, (d - L.cum[i - 1]) / seg));
+      out.x = a[0] + (b[0] - a[0]) * u; out.z = a[1] + (b[1] - a[1]) * u; out.yaw = Math.atan2(b[0] - a[0], b[1] - a[1]); out.moving = true; out.stop = null;
+    } else { out.x = L.to.x; out.z = L.to.z; out.yaw = L.to.yaw; out.moving = false; out.stop = L.to; }
+    return out;
+  }
+  K.walkerAt = walkerAt;
+  const holdLag = (p, hold, dt) => { if (hold) p.lag = Math.min(120, (p.lag || 0) + dt); else if (p.lag > 0) p.lag = Math.max(0, p.lag - dt * 0.4); return p.lag || 0; };
+  function placeWalker(p, W, dt, pp) {
+    let hold = p.talkT > 0;
+    if (!hold && pp.walk && p.state === 'walk') { const ax = pp.x - p.x, az = pp.z - p.z; if (ax * ax + az * az < 1.21 && ax * Math.sin(p.yaw) + az * Math.cos(p.yaw) > 0) hold = true; }
+    walkerAt(p, W - holdLag(p, hold, dt), RPOS);
+    const s = RPOS.stop ? RPOS.stop.s : null;
+    if (RPOS.moving) {
+      if (p.spot) { releaseSpot(p.spot); p.spot = null; }
+      if (p.pose === 'sit') setPose(p, 'stand');
+      p.state = 'walk'; p.x = RPOS.x; p.z = RPOS.z; if (!hold) p.tyaw = RPOS.yaw;
+      const gy = AF.surfaceBelow(p.x, p.z, p.y + 0.6, 3); if (Number.isFinite(gy)) p.y += (gy - p.y) * Math.min(1, dt * 14);
+      return hold ? 0 : p.speed * (p.lag > 0 ? 1.4 : 1);
     }
-    takeSpot(s);
-    const path = spotPath(s);
-    const entry = path ? path[0] : [s.x, s.z];
-    const pts = route(sx, sz, entry[0], entry[1]);
-    const g = laneOffset(pts, 0.45, 0, pts.length - 2);
-    const tail = path ? path.slice(1).map((q) => [q[0], q[1]]) : [];
-    tail.push([s.x, s.z]);
-    goTo(p, from.concat(g, tail), () => {
-      placeAtSpot(p, s);
-      const home = isNight() && p.home && HOMESPOT.get(p.home.id) === s;
-      p.wait = home ? 1e9 : (s.kind === 'sit' || s.kind === 'bench' ? 18 + p.rnd() * 35 : 8 + p.rnd() * 16);
-      p.homeRest = home;
-    });
+    if (s) { if (p.spot !== s || p.state === 'walk') { if (p.spot && p.spot !== s) releaseSpot(p.spot); takeSpot(s); placeAtSpot(p, s); } }
+    else { if (p.spot) { releaseSpot(p.spot); p.spot = null; } if (p.pose === 'sit') setPose(p, 'stand'); p.state = 'idle'; p.x = RPOS.x; p.z = RPOS.z; if (RPOS.yaw != null && p.talkT <= 0) p.tyaw = RPOS.yaw; }
+    return 0;
+  }
+  const slotTargets = (p) => { if (!p.wt || p.wtGen !== AF.world.gen) { p.wt = new Map(); p.wtGen = AF.world.gen; } return p.wt; };
+  function kidTarget(p, k) {
+    const c = slotTargets(p); let t = c.get(k); if (t) return t;
+    const J = p.job, R = J.rect, A = J.avoid, y0 = p.y0 ?? p.y;
+    let x = (R[0] + R[2]) / 2, z = (R[1] + R[3]) / 2;
+    for (let j = 0; j < 8; j++) {
+      const tx = AF.lerp(R[0], R[2], AF.whash(p.id, k, j * 2)), tz = AF.lerp(R[1], R[3], AF.whash(p.id, k, j * 2 + 1));
+      if (A && Math.hypot(tx - A.x, tz - A.z) < A.r) continue;
+      const gy = AF.surfaceBelow(tx, tz, y0 + 1.5, 3); if (Number.isFinite(gy) && Math.abs(gy - y0) < 0.6 && !AF.boxBlocked(tx, gy, tz, 0.25, 1.1)) { x = tx; z = tz; break; }
+    }
+    t = { x, z, yaw: null, sp: (AF.whash(p.id, k, 99) < 0.5 ? 2.6 : 1.4) + AF.whash(p.id, k, 98) * 0.6 };
+    if (c.size > 6) c.clear(); c.set(k, t); return t;
+  }
+  function farmTarget(p, k) {
+    const c = slotTargets(p); let t = c.get(k); if (t) return t;
+    const S = p.job.spots, s = S[Math.floor(AF.whash(p.id, k, 5) * S.length) % S.length];
+    t = { x: s.x, z: s.z, yaw: s.yaw ?? null, sp: p.speed };
+    if (c.size > 6) c.clear(); c.set(k, t); return t;
+  }
+  function placeSlot(p, W, dt, pp, targetAt, SL, work) {
+    const u = (W - holdLag(p, p.talkT > 0, dt) + AF.whash(p.id, 7) * SL) / SL, k = Math.floor(u), f = (u - k) * SL;
+    const A = targetAt(p, k - 1), B = targetAt(p, k), d = Math.hypot(B.x - A.x, B.z - A.z), sp = Math.max(B.sp, d / (SL * 0.9)), tw = d / sp;
+    if (f < tw && p.talkT <= 0) {
+      const e = f / tw; p.x = A.x + (B.x - A.x) * e; p.z = A.z + (B.z - A.z) * e; p.tyaw = Math.atan2(B.x - A.x, B.z - A.z); p.state = 'walk';
+      const gy = AF.surfaceBelow(p.x, p.z, p.y + 0.6, 3); if (Number.isFinite(gy)) p.y += (gy - p.y) * Math.min(1, dt * 14);
+      return sp;
+    }
+    p.x = B.x; p.z = B.z; p.state = work ? 'work' : 'idle'; if (B.yaw != null && p.talkT <= 0) p.tyaw = B.yaw;
+    return 0;
   }
 
   // ------------------------------------------------------------ build
@@ -934,6 +986,9 @@ try {
       }
     }
     K.walkerStart = walkerStart;
+    // the public spots are dealt among the walking residents (each keeps their own, so two never share a bench)
+    { const ws = people.filter((p) => p.job.type === 'walker'), used = new Set(people.filter((p) => p.job.type !== 'walker' && p.spot).map((p) => p.spot));
+      if (ws.length) PUBLIC.filter((s) => !used.has(s)).forEach((s, i) => { const p = ws[i % ws.length]; let a = walkerSpots.get(p); if (!a) walkerSpots.set(p, a = []); a.push(s); }); }
     for (const p of people) { p.root.position.set(p.x, p.y, p.z); p.root.rotation.y = p.yaw; }
     K.stats = { people: people.length, nodes: G.nodes.length, edges: G.edges.length, geos: geoCache.size, ms: Math.round(performance.now() - t0) };
     console.log('[af] people', JSON.stringify(K.stats));
@@ -1015,7 +1070,7 @@ try {
   }
 
   let rr = 0;
-  const peopleTick = (dt) => {
+  const peopleTick = (dt, t = AF.clock.w) => {
     if (!people.length) return;
     const pp = playerPos(), cam = AF.camera.position;
     const night = isNight();
@@ -1041,22 +1096,13 @@ try {
       if (p.waveCd > 0) p.waveCd -= pdt;
       let moving = false, sp = 0;
       const J = p.job;
-      if (p.talkT <= 0) {
+      // the shared plans (walkers, kids at play, farm hands) run while talking too: a talk only builds lag
+      if (J.type === 'walker') { sp = placeWalker(p, t, pdt, pp); moving = sp > 0; }
+      else if (J.type === 'wander') { sp = placeSlot(p, t, pdt, pp, kidTarget, SLOT_KID, false); moving = sp > 0; }
+      else if (J.type === 'farm' && J.spots && J.spots.length) { sp = placeSlot(p, t, pdt, pp, farmTarget, SLOT_FARM, true); moving = sp > 0; }
+      else if (p.talkT <= 0) {
         if (p.state === 'walk') { sp = stepWalk(p, pdt); moving = true; }
-        else if (J.type === 'walker') {
-          p.wait -= pdt;
-          if (p.homeRest && !night) p.wait = Math.min(p.wait, p.rnd() * 20);
-          if (night && !p.homeRest && p.wait > 5) p.wait = 5;
-          if (p.wait <= 0) { if (p.pose === 'sit') { setPose(p, 'stand'); p.y = standY(p.x, p.z, p.spot ? (p.spot.y ?? 0.25) : 0.25); } p.homeRest = false; walkerNext(p); }
-        } else if (J.type === 'wander') {
-          p.wait -= pdt;
-          if (p.wait <= 0) {
-            const R = J.rect; let x = p.x, z = p.z;
-            const A = J.avoid; for (let k = 0; k < 6; k++) { const tx = AF.lerp(R[0], R[2], p.rnd()), tz = AF.lerp(R[1], R[3], p.rnd()); if (A) { const dx = tx - p.x, dz = tz - p.z, L2 = dx * dx + dz * dz || 1, u = Math.max(0, Math.min(1, ((A.x - p.x) * dx + (A.z - p.z) * dz) / L2)); if (Math.hypot(p.x + dx * u - A.x, p.z + dz * u - A.z) < A.r) continue; } const gy = AF.surfaceBelow(tx, tz, p.y + 1.5, 3); if (Math.abs(gy - p.y) < 0.6 && !AF.boxBlocked(tx, gy, tz, 0.25, 1.1)) { x = tx; z = tz; break; } }
-            p.speed = (p.rnd() < 0.5 ? 2.6 : 1.4) + p.rnd() * 0.6;
-            goTo(p, [[x, z]], () => { p.wait = 0.5 + p.rnd() * 3.5; });
-          }
-        } else if (J.type === 'follow') {
+        else if (J.type === 'follow') {
           const Ld = J.leader, ry = Ld.yaw, rx = Math.cos(ry), rz = -Math.sin(ry);
           let tx = Ld.x - rx * 0.62, tz = Ld.z - rz * 0.62;
           if (Ld.pose === 'sit' || Ld.state !== 'walk') { if (AF.boxBlocked(tx, p.y + 0.3, tz, 0.22, 1.2)) { tx = Ld.x - Math.sin(ry) * 0.8; tz = Ld.z - Math.cos(ry) * 0.8; } }
@@ -1066,9 +1112,6 @@ try {
           else if (Ld.state === 'walk') p.tyaw = Ld.yaw;
           if (Ld.state !== 'walk' && d < 0.12) p.tyaw = Math.atan2(Ld.x - p.x, Ld.z - p.z);
           const gy = AF.surfaceBelow(p.x, p.z, p.y + 0.6, 3); if (Number.isFinite(gy)) p.y += (gy - p.y) * Math.min(1, pdt * 14);
-        } else if (J.type === 'farm') {
-          p.wait -= pdt;
-          if (p.wait <= 0) { const s = J.spots[Math.floor(p.rnd() * J.spots.length)]; goTo(p, [[s.x, s.z]], () => { p.state = 'work'; p.wait = 8 + p.rnd() * 20; p.tyaw = s.yaw || p.tyaw; }); }
         }
       }
       // separation from other walkers (cheap: only walkers near the camera)
@@ -1261,7 +1304,7 @@ try {
   // ---- walkers
   const crossC = new Map();
   const isCross = (a, b) => { const k = a.i * 8192 + b.i; let c = crossC.get(k); if (c === undefined) { c = !!(a.cross && b.cross && PL.onRoad((a.x + b.x) / 2, (a.z + b.z) / 2)); crossC.set(k, c); crossC.set(b.i * 8192 + a.i, c); } return c; };
-  let candEdges = [], candAt = { x: 1e9, z: 1e9 };
+  let candN = 0;
   // R2 PROMENADES (crowd only, not used by resident routing): the boardwalk, the quay front, Harbour Square and the piers.
   // Nodes carry their own deck height (py) because piers / boardwalk planks are voxels above the heightmap.
   const PROM = [];
@@ -1297,81 +1340,193 @@ try {
     crowdView.x = focus.x; crowdView.z = focus.z; crowdView.R = (focus === c ? 100 : 130) * (AF.MOBILE ? 0.6 : 1);
     return crowdView;
   }
-  function refreshCand(C) {
-    candEdges = []; candAt = { x: C.x, z: C.z };
-    for (const [a, b] of (PROM.length ? G.edges.concat(PROM) : G.edges)) {
-      const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2, d = Math.hypot(mx - C.x, mz - C.z);
-      if (d > C.R) continue;
-      const main = Math.min(a.rw || 10, b.rw || 10) >= 14 || /Grand|Meridian|Park Row|Harbour Boulevard/.test(a.rn || '');
-      const gww = CR.night && /Grand/.test(a.rn || '') && mz > 4 && mz < 165;   // the Great White Way after dark
-      const len = Math.hypot(b.x - a.x, b.z - a.z), busy = main || mz > 170;
-      const wgt = Math.max(1, Math.round(len / (CR.night ? gww ? 9 : 26 : busy ? 12 : 21)));
+  // ============================================================ the deterministic crowd (shared world clock, 01-core)
+  // Every ambient walker is one of ~1000 GLOBAL walkers that exist city-wide whether anyone is near or not: each has a home edge
+  // (density as before: every 12 m of busy sidewalk, 21 m of side street, plus evening strollers on the Great White Way) and a
+  // fixed tour: a 180-560 m stroll along the sidewalk graph (crossing at the lights) and back the same way, with a few pauses,
+  // stretched to a whole number of light cycles. Where a walker is at W is a lookup on its timeline (phase from AF.world.seed),
+  // so every co-op player sees the same people in the same places and nothing is sent. The NW pooled walkers (CR.walkers, drawn
+  // exactly as before) are bound to the global walkers nearest the crowd centre; talking, stepping aside for the player and fights
+  // are local overlays (w.lag: the walker then catches up with its tour at 1.4x).
+  const GW = CR.global = [], GGRID = new Map(), GCELL = 64, ST = ['walk', 'idle', 'phone', 'browse', 'chat'];
+  const EP = { x: 0, z: 0, py: undefined, u: 0, moving: false, dist: 0, state: 'walk', A: null, B: null };
+  const gkey = (gx, gz) => (gx + 500) * 2000 + gz + 500;
+  const wr = AF.rng(4242);   // cosmetic only (sizes of followers): never feeds a shared schedule
+  const legLen = (a, b) => Math.hypot(b.x - a.x, b.z - a.z) || 0.1;
+  CR.byGid = new Map(); CR.away = new Map(); CR.remote = new Map(); CR.benchTaken = new Set(); CR.benches = [];
+  function buildGlobal() {
+    const r = AF.rng(55001), all = PROM.length ? G.edges.concat(PROM) : G.edges, nv = CR.nEve || CR.V.length, nd = CR.nDay || nv, nn = nv - nd, SP = CR.SP || {}, homes = [];
+    for (const [a, b] of all) {
       if (isCross(a, b)) continue;
-      for (let k = 0; k < wgt; k++) candEdges.push(a.i < b.i ? [a, b] : [b, a]);
+      const mz = (a.z + b.z) / 2, len = legLen(a, b), main = Math.min(a.rw || 10, b.rw || 10) >= 14 || /Grand|Meridian|Park Row|Harbour Boulevard/.test(a.rn || ''), step = main || mz > 170 ? 12 : 21;
+      for (let acc = r() * step; acc < len; acc += step) homes.push([a, b, false]);
+      if (/Grand/.test(a.rn || '') && mz > 4 && mz < 165) for (let acc = r() * 14; acc < len; acc += 14) homes.push([a, b, true]);   // the Great White Way after dark
     }
+    for (let i = 0; i < homes.length && GW.length < 3800; i++) {
+      const [a0, b0, gww] = homes[i], id = GW.length, flip = r() < 0.5, a = flip ? b0 : a0, b = flip ? a0 : b0, mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+      let vd = (id * 7 + (id >> 3)) % nd; if (CR.V[vd].kid && r() < 0.5) vd = (vd + 1) % nd;
+      const g = { id, gww, vd, vn: nn > 0 ? nd + (id * 3 + (id >> 2)) % nn : vd, lat: -0.55 + r() * 1.1, s: 0.88 + r() * 0.24, width: 0.88 + r() * 0.25, grp: null, fol: null,
+        eve: Math.abs(mx) < 35 && mz > 4 && mz < 165, stamp: 0, d2: 0, tl: null, tlGen: -1, slot: null, v: 1.2, nodes: null };
+      // company: one in twelve walks as a couple / parent and child / friends / arm in arm; a wheelchair user every ~45
+      if (id % 12 === 0 && SP.coupleM !== undefined) {
+        switch ((id / 12) % 6) {
+          case 0: case 4: g.grp = 'couple'; g.vd = g.vn = SP.coupleM; g.fol = [[SP.coupleF, 0.72, 0]]; break;
+          case 1: g.grp = 'kid'; g.vd = g.vn = SP.mom; g.fol = [[SP.girl, 0.95, 0]]; break;
+          case 2: g.grp = 'friends'; g.vd = g.vn = SP.teenM; g.fol = [[SP.teenF, 0.8, 0.15], [SP.teenM2, 0.35, 0.95]]; break;
+          case 3: g.grp = 'kid'; g.vd = g.vn = SP.dad; g.fol = [[SP.boy, 0.95, 0]]; break;
+          case 5: g.grp = 'armin'; g.fol = [[CR.V[g.vd].L.female ? 0 : 2, 0.55, 0, CR.nDay ? (CR.V[g.vn].L.female ? CR.nDay : CR.nDay + 1) : null]]; break;
+        }
+        if (g.grp !== 'armin') { g.lat = -0.45 + r() * 0.2; g.s = 1; }
+      } else if (id % 45 === 44 && SP.chairM !== undefined) { g.grp = 'chair'; g.vd = g.vn = SP[(id / 45 | 0) & 1 ? 'chairF' : 'chairM']; g.s = 1; }
+      const V = CR.V[g.vd];
+      g.v = V.chair ? 0.75 + r() * 0.15 : V.L.plan === 'elder' ? 0.9 + r() * 0.2 : V.kid ? 1.3 + r() * 0.3 : 0.9 + r() * 0.7;
+      if (!g.grp && V.im.runA && r() < 0.2) g.v = 2.5 + r() * 0.5;
+      // the tour: mostly straight on, turning at corners, across at the lights about half the time; then back the same way
+      const nodes = [a, b], target = g.v > 2 ? 400 + r() * 500 : 180 + r() * 380; let A = a, B = b, len = legLen(a, b);
+      while (len < target && nodes.length < 90) {
+        const L0 = legLen(A, B), hx = (B.x - A.x) / L0, hz = (B.z - A.z) / L0, straight = r() < 0.6, crossOk = r() < 0.5;
+        let pick = null, best = -9, opts = 0;
+        for (const e of B.adj) if (e.n !== A) opts++;
+        if (!opts) break;
+        for (const e of B.adj) {
+          if (e.n === A || (!crossOk && opts > 1 && isCross(B, e.n))) continue;
+          const sc = ((e.n.x - B.x) * hx + (e.n.z - B.z) * hz) / (e.d || 0.1) + (straight ? 0 : r() * 2.2);
+          if (sc > best) { best = sc; pick = e; }
+        }
+        if (!pick) break;
+        nodes.push(pick.n); len += pick.d; A = B; B = pick.n;
+      }
+      for (let k = nodes.length - 2; k >= 0; k--) nodes.push(nodes[k]);
+      const n = nodes.length, pause = new Float32Array(n), pst = new Uint8Array(n), mid = (n - 1) >> 1;
+      for (let k = 1; k < n - 1; k++) if (r() < 0.1) { pause[k] = 2 + r() * 6; pst[k] = V.im.phone && r() < 0.4 ? 2 : /Grand|Meridian|Harbour/.test(nodes[k].rn || '') && r() < 0.5 ? 3 : 1; }
+      pause[mid] = 4 + r() * 12; pst[mid] = g.fol ? 4 : V.im.phone && r() < 0.3 ? 2 : 1;
+      g.nodes = nodes; g.pause = pause; g.pst = pst;
+      let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; for (const q of nodes) { if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z; }
+      for (let gx = Math.floor(x0 / GCELL); gx <= Math.floor(x1 / GCELL); gx++) for (let gz = Math.floor(z0 / GCELL); gz <= Math.floor(z1 / GCELL); gz++) { const k = gkey(gx, gz); let Lc = GGRID.get(k); if (!Lc) GGRID.set(k, Lc = []); Lc.push(g); }
+      GW.push(g);
+    }
+    CR.GN = GW.length;
   }
-  const wr = AF.rng(4242);
-  // crowd density per 9 m cell (rebuilt each tick): spawns and turns avoid cells that are already busy
-  const dens = new Map(), flows = new Map(), DCAP = 3;
-  const flowKey = (a, b) => Math.min(a.i, b.i) * 100000 + Math.max(a.i, b.i);
-  const flowSign = (a, b) => a.i < b.i ? 1 : -1;
-  const cellK = (x, z) => (Math.floor(x / 9) + 500) * 4000 + Math.floor(z / 9) + 500;
-  const densAt = (x, z) => dens.get(cellK(x, z)) || 0;
-  function spawnWalker(w, C, farOnly) {
-    if (w.bench && CR.benchTaken) CR.benchTaken.delete(w.bench);
-    if (!candEdges.length) { w.act = false; return; }
-    let edge = null, start = 0;
-    for (let attempt = 0; attempt < 24; attempt++) {
-      const candidate = candEdges[Math.floor(wr() * candEdges.length)], phase = wr();
-      const x = candidate[0].x + (candidate[1].x - candidate[0].x) * phase, z = candidate[0].z + (candidate[1].z - candidate[0].z) * phase;
-      if (farOnly && Math.hypot(x - C.x, z - C.z) < C.R * 0.55) continue;
-      if (densAt(x, z) + 1 + (w.nf || 0) > DCAP) continue;
-      edge = candidate; start = phase; break;
+  const greenAt = (A, B, w) => { const T = AF.trafficLight; if (!T || !T.state) return true; crossingAxis[0] = B.x - A.x; crossingAxis[1] = B.z - A.z; return T.state((A.x + B.x) / 2, (A.z + B.z) / 2, crossingAxis, w) === 'green'; };
+  // arrival / start-walking times per node: pauses, plus the wait for green at each crossing (the tour lasts a whole number of
+  // 28 s light cycles, so those waits are the same every lap). Rebuilt lazily when the shared seed changes.
+  function timeline(g) {
+    if (g.tl && g.tlGen === AF.world.gen) return g.tl;
+    const N = g.nodes.length, ta = new Float64Array(N), ts = new Float64Array(N), cum = new Float64Array(N), phi = AF.whash(g.id, 4242) * 2800;
+    let t = 0;
+    for (let i = 0; i < N - 1; i++) {
+      ta[i] = t; const A = g.nodes[i], B = g.nodes[i + 1], L = legLen(A, B);
+      let wait = g.pause[i];
+      if (isCross(A, B)) { const w0 = wait; for (let k = 0; k < 70 && !greenAt(A, B, t + wait - phi); k++) wait += 0.5; if (wait > w0) wait += 0.3 + AF.whash(g.id, i) * 0.6; }
+      t += wait; ts[i] = t; t += L / g.v; cum[i + 1] = cum[i] + L;
     }
-    if (!edge) { w.act = false; return; }
-    const key = flowKey(edge[0], edge[1]), balance = flows.get(key) || 0, fw = balance ? balance * flowSign(edge[0], edge[1]) < 0 : wr() < 0.5;
-    w.A = fw ? edge[0] : edge[1]; w.B = fw ? edge[1] : edge[0];
-    flows.set(key, balance + flowSign(w.A, w.B));
-    w.len = Math.hypot(w.B.x - w.A.x, w.B.z - w.A.z) || 0.1; w.d = (fw ? start : 1 - start) * w.len;
-    w.x = w.A.x + (w.B.x - w.A.x) * w.d / w.len; w.z = w.A.z + (w.B.z - w.A.z) * w.d / w.len;
-    w.yaw = Math.atan2(w.B.x - w.A.x, w.B.z - w.A.z); w.act = true; w.wait = 0; w.pend = null; w.state = 'walk'; w.bench = null; w.decide = 0.5 + wr() * 2;
-    const V = CR.V[w.v]; w.speed = V.chair ? 0.75 + wr() * 0.15 : V.L.plan === 'elder' ? 0.9 + wr() * 0.2 : V.kid ? 1.3 + wr() * 0.3 : 0.9 + wr() * 0.7;
-    if (!w.grp && V.im.runA && wr() < 0.2) w.speed = 2.5 + wr() * 0.5;
-    const cell = cellK(w.x, w.z); dens.set(cell, (dens.get(cell) || 0) + 1 + (w.nf || 0));
+    ta[N - 1] = t; const P = Math.ceil((t + 1) / 28) * 28; ts[N - 1] = P;
+    g.tl = { ta, ts, cum, P, phi }; g.tlGen = AF.world.gen; return g.tl;
   }
-  function initWalkers() {
-    const C = crowdCentre(); refreshCand(C);
-    const nv = CR.nEve || CR.V.length;
-    for (let i = 0; i < CR.NW; i++) {
-      const nd = CR.nDay || nv, nn = nv - nd;
-      const w = { id: i, v: (i * 7 + (i >> 3)) % nd, lat: -0.55 + wr() * 1.1, s: 0.88 + wr() * 0.24, width: 0.88 + wr() * 0.25, ph: wr() * 4, age: wr() * 20, x: 0, y: 0.25, z: 0, yaw: 0, talk: 0, name: null, state: 'walk' };
-      if (CR.V[w.v].kid && wr() < 0.5) w.v = (w.v + 1) % nd;
-      if (i && w.v === CR.walkers[i - 1].vd) w.v = (w.v + 1) % nd;
-      w.vd = w.v; w.vn = nn > 0 ? nd + (i * 3 + (i >> 2)) % nn : w.v;
-      CR.walkers.push(w);
+  function evalWalker(g, W, out) {
+    const tl = timeline(g), P = tl.P, tau = ((W + tl.phi) % P + P) % P, N = g.nodes.length, ta = tl.ta;
+    let lo = 0, hi = N - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (ta[m] <= tau) lo = m; else hi = m - 1; }
+    const A = g.nodes[lo];
+    if (lo >= N - 1 || tau < tl.ts[lo]) {
+      const B = lo < N - 1 ? g.nodes[lo + 1] : g.nodes[N - 2];
+      out.x = A.x; out.z = A.z; out.py = A.py; out.u = 0; out.moving = false; out.dist = tl.cum[lo]; out.A = A; out.B = B === A ? g.nodes[Math.max(0, lo - 1)] : B;
+      out.state = lo >= N - 1 ? 'idle' : isCross(A, B) ? 'crossing' : ST[g.pst[lo]] || 'idle';
+    } else {
+      const B = g.nodes[lo + 1], L = legLen(A, B), u = Math.min(1, (tau - tl.ts[lo]) * g.v / L);
+      out.x = A.x + (B.x - A.x) * u; out.z = A.z + (B.z - A.z) * u; out.py = A.py !== undefined && B.py !== undefined ? A.py + (B.py - A.py) * u : undefined;
+      out.u = u; out.moving = true; out.dist = tl.cum[lo] + u * L; out.A = A; out.B = B; out.state = 'walk';
     }
-    // groups: every block of 12 walkers seeds one group; a rare wheelchair user every ~45
-    const SP = CR.SP || {}, W = CR.walkers;
-    const lead = (w, look, grp) => { w.v = w.vd = w.vn = SP[look]; w.grp = grp; w.lat = -0.45 + wr() * 0.2; w.s = 1; };
-    const follow = (f, L, look, lat, back) => { f.lead = L; f.v = f.vd = f.vn = SP[look]; f.fl = lat; f.fb = back || 0; f.s = CR.V[SP[look]].kid ? 1 : 0.97 + wr() * 0.06; L.nf = (L.nf || 0) + 1; };
-    if (SP.coupleM !== undefined) for (let i = 0, g = 0; i + 3 < W.length; i += 12, g++) {
-      const a = W[i], b = W[i + 1], c = W[i + 2];
-      switch (g % 6) {
-        case 0: case 4: lead(a, 'coupleM', 'couple'); follow(b, a, 'coupleF', 0.72); break;
-        case 1: lead(a, 'mom', 'kid'); follow(b, a, 'girl', 0.95); break;
-        case 2: lead(a, 'teenM', 'friends'); follow(b, a, 'teenF', 0.8, 0.15); follow(c, a, 'teenM2', 0.35, 0.95); break;
-        case 3: lead(a, 'dad', 'kid'); follow(b, a, 'boy', 0.95); break;
-        case 5: b.lead = a; b.fl = 0.55; a.grp = 'armin'; a.nf = 1; b.v = b.vd = CR.V[a.v].L.female ? 0 : 2; b.vn = CR.nDay ? (CR.V[a.vn].L.female ? CR.nDay : CR.nDay + 1) : b.v; break;
+    return out;
+  }
+  CR.evalWalker = evalWalker;
+  // who is out at this hour (by the shared clock): everyone by day, fewer late, extra strollers on Grand in the evening
+  const activeAt = (g, h, nightW) => {
+    if (g.gww) return nightW && !(h >= 23 || h < 5);
+    const f = h < 5 || h >= 23 ? 0.45 : nightW ? (g.eve ? 0.8 : 0.6) : h < 8 ? 0.75 : 1;
+    return f >= 1 || AF.whash(g.id, 31) < f;
+  };
+  const freeSlot = () => { for (let i = 0; i < CR.NW; i++) { const w = CR.walkers[i]; if (w.gid === -1 && !w.lead && !w.agg) return w; } return null; };
+  function unbind(w) {
+    const g = GW[w.gid]; if (g && g.slot === w) g.slot = null;
+    CR.byGid.delete(w.gid); w.gid = -1; w.act = false; w.nf = 0; w.lag = 0; w.ret = false; w.talk = 0;
+    for (let i = 0; i < CR.NW; i++) { const q = CR.walkers[i]; if (q.lead === w && !q.agg) { q.lead = null; q.gid = -1; q.act = false; } }
+  }
+  function bind(g, W) {
+    const w = freeSlot(); if (!w) return;
+    w.gid = g.id; g.slot = w; CR.byGid.set(g.id, w);
+    Object.assign(w, { vd: g.vd, vn: g.vn, v: CR.night ? g.vn : g.vd, lat: g.lat, s: g.s, width: g.width, grp: g.grp, nf: 0, lag: 0, talk: 0, act: true, ret: false, dodge: 0, state: 'walk', lead: null, name: null, first: null, lines: null });
+    if (g.fol) for (const f of g.fol) {
+      const q = freeSlot(); if (!q) break;
+      q.gid = -2; q.lead = w; q.vd = f[0]; q.vn = f[3] ?? f[0]; q.v = CR.night ? q.vn : q.vd; q.fl = f[1]; q.fb = f[2]; q.s = CR.V[f[0]].kid ? 1 : 0.97 + wr() * 0.06; q.width = 1; q.act = true; q.name = null; w.nf++;
+    }
+    placeBound(w, W, 0, null, false); w.yaw = w.ty;
+  }
+  // which global walkers the pool shows: the nearest ones out at this hour inside the crowd radius (engaged / talking slots stay)
+  let stamp = 0; const CAND = [], KEEP = new Set();
+  function rebind(C, W) {
+    const h = AF.time ? AF.time.hours : 12, nightW = h >= 19.2 || h < 5, R = C.R, R2 = R * R;
+    stamp++; CAND.length = 0;
+    for (let gx = Math.floor((C.x - R) / GCELL); gx <= Math.floor((C.x + R) / GCELL); gx++) for (let gz = Math.floor((C.z - R) / GCELL); gz <= Math.floor((C.z + R) / GCELL); gz++) {
+      const Lc = GGRID.get(gkey(gx, gz)); if (!Lc) continue;
+      for (const g of Lc) {
+        if (g.stamp === stamp) continue; g.stamp = stamp;
+        const w = g.slot;
+        if (w && (w.agg || w.talk > 0 || w.ret)) { g.d2 = -1; CAND.push(g); continue; }
+        if (!activeAt(g, h, nightW) || (CR.away.get(g.id) || -1e9) > W || CR.remote.has(g.id)) continue;
+        evalWalker(g, W - (w ? w.lag || 0 : 0), EP); g.d2 = (EP.x - C.x) ** 2 + (EP.z - C.z) ** 2;
+        if (g.d2 < R2) CAND.push(g);
       }
     }
-    if (SP.chairM !== undefined) for (let i = 44, k = 0; i < W.length; i += 45, k++) { const w = W[i]; if (w.lead || w.grp) continue; w.v = w.vd = w.vn = SP[k & 1 ? 'chairF' : 'chairM']; w.grp = 'chair'; w.s = 1; }
-    for (const w of W) if (!w.lead) spawnWalker(w, C, false);
+    CAND.sort((p, q) => p.d2 - q.d2);
+    KEEP.clear(); let used = 0;
+    for (const g of CAND) { const need = 1 + (g.fol ? g.fol.length : 0); if (used + need > CR.NW) continue; used += need; KEEP.add(g); }
+    for (let i = 0; i < CR.NW; i++) { const w = CR.walkers[i]; if (w.gid >= 0 && !w.agg && !KEEP.has(GW[w.gid])) unbind(w); }
+    for (const g of KEEP) if (!g.slot) bind(g, W);
+    candN = CAND.length;
+  }
+  // a bound walker's place this frame: its tour at W - lag, the sidewalk lane, dodging the player, a talk or a return walk
+  function placeBound(w, W, dt, pp, near) {
+    const g = GW[w.gid];
+    let hold = false, dg = 0;
+    if (w.talk > 0) { w.talk -= dt; hold = true; }
+    else if (pp && pp.walk && w.moving) {
+      const ax = pp.x - w.x, az = pp.z - w.z, d2 = ax * ax + az * az, fwd = ax * Math.sin(w.yaw) + az * Math.cos(w.yaw);
+      if (d2 < 1.0 && fwd > 0) hold = true;
+      else if (d2 < 7 && fwd > 0) { const side = ax * Math.cos(w.yaw) - az * Math.sin(w.yaw); dg = side > 0 ? -0.9 : 0.9; }   // step aside for the player
+    }
+    if (hold) w.lag = Math.min(90, (w.lag || 0) + dt); else if (w.lag > 0) w.lag = Math.max(0, w.lag - dt * 0.4);
+    w.dodge = (w.dodge || 0) + (dg - (w.dodge || 0)) * Math.min(1, dt * 3);
+    evalWalker(g, W - (w.lag || 0), EP);
+    const A = EP.A, B = EP.B, L = legLen(A, B), dx = (B.x - A.x) / L, dz = (B.z - A.z) / L, cross = isCross(A, B);
+    const wander = near && !w.nf ? Math.sin(W * (CR.V[w.v].kid ? 1.1 : 0.36) + w.gid) * 0.12 : 0;
+    const cr = (cross ? (w.nf ? -0.3 : 0.2) : w.lat + wander) + (w.dodge || 0) * 0.35;
+    const tx = EP.x + dz * cr, tz = EP.z - dx * cr;
+    w.A = A; w.B = B; w.speed = g.v;
+    if (w.ret) {   // walking back to its stroll after a fright
+      const ex = tx - w.x, ez = tz - w.z, d = Math.hypot(ex, ez), st = 2.2 * dt;
+      if (d < 0.5 || d > 40) w.ret = false;
+      else { w.x += ex / d * Math.min(d, st); w.z += ez / d * Math.min(d, st); w.moving = true; w.ph += st * 2.3 / w.s; w.ty = Math.atan2(ex, ez); w.yaw += AF.angDiff(w.yaw, w.ty) * Math.min(1, dt * 8); w.y = AF.W.groundY(w.x, w.z); w.state = 'walk'; return; }
+    }
+    w.x = tx; w.z = tz; w.moving = EP.moving && !hold; w.ph = EP.dist * 2.3 / w.s;
+    w.state = w.talk > 0 ? 'idle' : EP.state === 'crossing' ? 'idle' : EP.state;
+    if (w.state === 'browse') { const outward = PL.onRoad(w.x + dz * 3, w.z - dx * 3) ? -1 : 1; w.ty = Math.atan2(dz * outward, -dx * outward); }
+    else w.ty = Math.atan2(dx, dz);
+    if (w.state === 'chat') w.chatYaw = w.ty;
+    if (w.talk > 0 && pp) w.ty = Math.atan2(pp.x - w.x, pp.z - w.z);
+    w.yaw += AF.angDiff(w.yaw, w.state === 'chat' ? w.ty + Math.PI / 2 : w.ty) * (dt > 0 ? Math.min(1, dt * 8) : 1);
+    w.y = EP.py !== undefined ? EP.py : AF.W.groundY(w.x, w.z);
+  }
+  function initWalkers() {
+    const W = CR.walkers;
+    for (let i = 0; i < CR.NW; i++) W.push({ id: i, gid: -1, v: 0, vd: 0, vn: 0, lat: 0, s: 1, width: 1, ph: 0, age: wr() * 20, x: 0, y: 0.25, z: 0, yaw: 0, ty: 0, talk: 0, lag: 0, name: null, state: 'walk', act: false });
+    buildGlobal();
+    const SP = CR.SP || {};
     // the police pool (77-combat): 8 inactive walkers in the cop look, woken with an .agg when the wanted level calls for them
-    if (SP.cop !== undefined) for (let i = 0; i < 8; i++) W.push({ id: CR.NW + i, v: SP.cop, vd: SP.cop, vn: SP.cop, cop: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk' });
-    // co-op proxy pool (80-coop): ids are their index, so a remote owner's ped id never collides with these
-    for (let i = 0; i < 16; i++) W.push({ id: W.length, v: 0, vd: 0, vn: 0, net: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk', nf: 'p', lie: false });
-    CR.benches = AF.spots.filter((spot) => spot.kind === 'bench' && !spotsTaken.has(spot));
-    CR.benchTaken = new Set();
+    if (SP.cop !== undefined) for (let i = 0; i < 8; i++) W.push({ id: CR.NW + i, gid: -1, v: SP.cop, vd: SP.cop, vn: SP.cop, cop: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk' });
+    // co-op proxy pool (80-coop): another player's engaged peds and police, drawn like the crowd
+    for (let i = 0; i < 16; i++) W.push({ id: W.length, gid: -1, v: 0, vd: 0, vn: 0, net: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk', nf: 'p', lie: false });
+    CR.night = AF.time.hours >= 19.2 || AF.time.hours < 5;
+    rebind(crowdCentre(), AF.clock.w);
   }
   const E = new Float32Array(16);
   function putInst(im, i, x, y, z, yaw, s, width = 1) {
@@ -1386,104 +1541,12 @@ try {
     a[o + 8] = 0; a[o + 9] = s; a[o + 10] = 0; a[o + 11] = 0; a[o + 12] = x; a[o + 13] = y + 0.14 * s; a[o + 14] = z; a[o + 15] = 1;
   }
   const crossingAxis = [0, 0];
-  function crowdGreen(A, B) {
-    const lights = AF.trafficLight; if (!lights || !lights.state) return true;
-    crossingAxis[0] = B.x - A.x; crossingAxis[1] = B.z - A.z;
-    return lights.state((A.x + B.x) / 2, (A.z + B.z) / 2, crossingAxis) === 'green';
-  }
-  function crowdDecision(w, pp) {
-    w.decide = 0.5 + wr() * 1.5;
-    if (w.state !== 'walk' || w.wait > 0 || w.pend || isCross(w.A, w.B)) return;
-    const chance = wr(), V = CR.V[w.v];
-    if (chance < 0.035 && !w.grp) {
-      const node = w.A; w.A = w.B; w.B = node; w.d = w.len - w.d; return;
-    }
-    if (chance > 0.18) return;
-    w.wait = 2.5 + wr() * 5; w.state = 'idle';
-    if (w.nf) { w.state = 'chat'; w.chatYaw = w.yaw; return; }
-    if (!V.chair && V.im.sit && CR.benches) {
-      for (const bench of CR.benches) {
-        if (CR.benchTaken.has(bench) || occupied(bench, AF.time.hours) || Math.hypot(bench.x - w.x, bench.z - w.z) > 2.2 || Math.abs((bench.y ?? 0.75) - w.y) > 1) continue;
-        let clear = true;
-        for (let sample = 1; sample <= 4; sample++) if (AF.boxBlocked(w.x + (bench.x - w.x) * sample / 4, w.y + 0.8, w.z + (bench.z - w.z) * sample / 4, 0.2, 0.7)) { clear = false; break; }
-        if (!clear) continue;
-        w.bench = bench; CR.benchTaken.add(bench); w.state = 'seatApproach'; w.wait = 8 + wr() * 12; return;
-      }
-    }
-    if (V.im.phone && chance < 0.09) w.state = 'phone';
-    else if (/Grand|Meridian|Harbour/.test(w.A.rn || '') && chance < 0.13) {
-      w.state = 'browse';
-      const dx = (w.B.x - w.A.x) / w.len, dz = (w.B.z - w.A.z) / w.len;
-      const outward = PL.onRoad(w.x + dz * 3, w.z - dx * 3) ? -1 : 1;
-      w.yaw = Math.atan2(dz * outward, -dx * outward);
-    } else if (V.im.hail) {
-      let passer = null;
-      for (const other of CR.walkers) if (other !== w && other.act && other.moving && Math.hypot(other.x - w.x, other.z - w.z) < 3) { passer = other; break; }
-      if (passer || (pp.walk && Math.hypot(pp.x - w.x, pp.z - w.z) < 4)) {
-        w.state = 'wave'; w.wait = 1.5; w.yaw = Math.atan2((passer || pp).x - w.x, (passer || pp).z - w.z);
-      }
-    }
-  }
-  function stepWalker(w, dt, pp, near = true) {
+  // group members keep station beside / behind their leader (a bound global walker)
+  function stepWalker(w, dt) {
     w.age += dt;
-    if (w.lead) {   // group member: keep station beside / behind the leader
-      const L = w.lead, heading = L.state === 'chat' ? L.chatYaw : L.yaw, c = Math.cos(heading), sn = Math.sin(heading), lat = w.fl ?? 0.55, bk = w.fb || 0;
-      w.x = L.x + c * lat - sn * bk; w.z = L.z - sn * lat - c * bk; w.yaw = L.state === 'chat' ? Math.atan2(L.x - w.x, L.z - w.z) : L.yaw;
-      w.state = L.state; w.moving = L.moving; w.ph = L.ph + 2; w.act = L.act; w.y = L.A && L.A.py !== undefined ? L.y : AF.W.groundY(w.x, w.z); return;
-    }
-    if (w.talk > 0) { w.talk -= dt; w.moving = false; w.yaw = Math.atan2(pp.x - w.x, pp.z - w.z); return; }
-    if (near) { w.decide -= dt; if (w.decide <= 0) crowdDecision(w, pp); }
-    if (w.state === 'seatApproach' || w.state === 'seatLeave') {
-      const leaving = w.state === 'seatLeave', bench = w.bench;
-      const dx = (w.B.x - w.A.x) / w.len, dz = (w.B.z - w.A.z) / w.len;
-      const targetX = leaving ? w.A.x + dx * w.d + dz * w.lat : bench.x, targetZ = leaving ? w.A.z + dz * w.d - dx * w.lat : bench.z;
-      const distance = Math.hypot(targetX - w.x, targetZ - w.z), fraction = Math.min(1, dt * w.speed / Math.max(0.001, distance));
-      w.y = AF.W.groundY(w.x, w.z); w.x += (targetX - w.x) * fraction; w.z += (targetZ - w.z) * fraction; w.moving = true; w.ph += dt * w.speed * 2.3 / w.s;
-      w.yaw = Math.atan2(targetX - w.x, targetZ - w.z);
-      if (distance < 0.08) {
-        if (leaving) { CR.benchTaken.delete(bench); w.bench = null; w.state = 'walk'; w.wait = 0; }
-        else { w.state = 'sit'; w.moving = false; w.yaw = bench.yaw || 0; w.y = (bench.y ?? 0.75) - CR.V[w.v].hipY * w.s + 0.02; }
-      }
-      return;
-    }
-    if (w.wait > 0) {
-      w.wait -= dt; w.moving = false;
-      if (w.state === 'chat') w.yaw = w.chatYaw + Math.PI / 2;
-      if (w.state === 'sit') { if (w.wait <= 0) w.state = 'seatLeave'; return; }
-      if (w.wait <= 0 && w.pend) { if (crowdGreen(w.B, w.pend.n)) { const o = w.pend; w.pend = null; w.A = w.B; w.B = o.n; w.d = 0; w.len = o.d || 0.1; } else w.wait = 0.5; }
-      if (w.wait <= 0) w.state = 'walk';
-    } else {
-      let sp = w.speed;
-      let dg = 0;
-      if (pp.walk) { const ax = pp.x - w.x, az = pp.z - w.z, d2 = ax * ax + az * az, fwd = ax * Math.sin(w.yaw) + az * Math.cos(w.yaw);
-        if (d2 < 1.0 && fwd > 0) sp = 0;
-        else if (d2 < 7 && fwd > 0) { const side = ax * Math.cos(w.yaw) - az * Math.sin(w.yaw); dg = side > 0 ? -0.9 : 0.9; sp *= 0.8; } }   // step aside for the player
-      w.dodge = (w.dodge || 0) + (dg - (w.dodge || 0)) * Math.min(1, dt * 3);
-      if (near && CR.V[w.v].kid) sp *= 0.94 + Math.sin(w.age * 2.1 + w.id) * 0.06;
-      w.d += sp * dt; w.moving = sp > 0; w.ph += dt * sp * 2.3 / w.s;
-      if (w.d >= w.len) {
-        const A = w.A, B = w.B;
-        if (!B.adj.length) { w.act = false; return; }
-        let choice = null, bestScore = Infinity;
-        for (const option of B.adj) {
-          if (option.n === A && B.adj.length > 1) continue;
-          const balance = (flows.get(flowKey(B, option.n)) || 0) * flowSign(B, option.n);
-          const score = densAt(option.n.x, option.n.z) + Math.max(0, balance) * 0.65 + wr() * 2;
-          if (score < bestScore) { bestScore = score; choice = option; }
-        }
-        choice = choice || B.adj[0];
-        if (isCross(B, choice.n) && !crowdGreen(B, choice.n)) { w.pend = choice; w.wait = 0.4 + wr() * 0.6; w.d = w.len; w.state = 'crossing'; }
-        else { w.A = B; w.B = choice.n; w.d = 0; w.len = choice.d || 0.1; }
-      }
-    }
-    const dx = (w.B.x - w.A.x) / w.len, dz = (w.B.z - w.A.z) / w.len, t = Math.min(w.d, w.len);
-    const wander = near && !w.nf ? Math.sin(w.age * (CR.V[w.v].kid ? 1.1 : 0.36) + w.id) * 0.12 : 0;
-    const cr = (isCross(w.A, w.B) ? (w.nf ? -0.3 : 0.2) : w.lat + wander) + (w.dodge || 0) * 0.35;
-    const tx = w.A.x + dx * t + dz * cr, tz = w.A.z + dz * t - dx * cr;
-    if (w.moving && (!near || !AF.boxBlocked(tx, w.y + 0.3, tz, 0.2, 1.2))) { w.x = tx; w.z = tz; }
-    else if (w.moving) { w.d = Math.max(0, w.d - w.speed * dt); w.dodge = 0; w.lat *= -0.5; w.moving = false; }
-    const ty = Math.atan2(dx, dz); if (w.moving) w.yaw += AF.angDiff(w.yaw, ty) * Math.min(1, dt * 8);
-    w.y = w.A.py !== undefined ? w.A.py + (w.B.py - w.A.py) * (t / w.len) : AF.W.groundY(w.x, w.z);
+    const L = w.lead, heading = L.state === 'chat' ? L.chatYaw : L.yaw, c = Math.cos(heading), sn = Math.sin(heading), lat = w.fl ?? 0.55, bk = w.fb || 0;
+    w.x = L.x + c * lat - sn * bk; w.z = L.z - sn * lat - c * bk; w.yaw = L.state === 'chat' ? Math.atan2(L.x - w.x, L.z - w.z) : L.yaw;
+    w.state = L.state; w.moving = L.moving; w.ph = L.ph + 2; w.act = L.act; w.y = L.A && L.A.py !== undefined ? L.y : AF.W.groundY(w.x, w.z);
   }
   // ---- extras
   const EX_NO = /^(gull|duck|pigeon|cat|dog|bird|swan|horse|bed|goose|sparrow)$/;
@@ -1543,33 +1606,23 @@ try {
       CR.extras.push({ s, v, pose, x: s.x, y: sit ? s._ey - V.hipY + 0.02 : s._ey, z: s.z, yaw: s.yaw || 0, ph: hash(s) * 10 });
     }
   }
+  let bindT = 0; const bindAt = { x: 1e9, z: 1e9 };
   function crowdTick(dt, t) {
     if (!CR.V.length || !CR.on) return;
     const C = crowdCentre(), pp = crowdPlayer, player = AF.player, camera = AF.camera.position;
     pp.walk = AF.mode === 'walk' && !!player && (player.x ?? (player.body && player.body.x)) != null;
     pp.x = pp.walk ? player.x ?? player.body.x : camera.x; pp.z = pp.walk ? player.z ?? player.body.z : camera.z;
     const hN = AF.time ? AF.time.hours : 12, nightW = hN >= 19.2 || hN < 5;
-    if (nightW !== CR.night) { CR.night = nightW; for (const w of CR.walkers) w.v = nightW ? w.vn : w.vd; candAt.x = candAt.z = 1e9; }
-    const jump = Math.hypot(C.x - candAt.x, C.z - candAt.z);
-    if (jump > 25) {
-      refreshCand(C);
-      if (jump > 45) {
-        dens.clear(); flows.clear();
-        for (const w of CR.walkers) if (!w.lead && !w.cop && !w.agg && !w.net) spawnWalker(w, C, false);
-      }
-    }
+    if (nightW !== CR.night) { CR.night = nightW; for (const w of CR.walkers) w.v = nightW ? w.vn : w.vd; bindT = 0; }
+    if (Math.hypot(C.x - bindAt.x, C.z - bindAt.z) > 25) bindT = 0;
+    // co-op: a ped another player is fighting is drawn from their snapshots (80-coop), not from our copy
+    if (CR.remote.size) for (const [gid, until] of CR.remote) { if (until < performance.now()) CR.remote.delete(gid); else { const w = CR.byGid.get(gid); if (w && !w.agg) unbind(w); } }
+    if ((bindT -= dt) <= 0) { bindT = 0.25; bindAt.x = C.x; bindAt.z = C.z; rebind(C, t); }
     dt = Math.min(dt, 0.1);
     const cnt = CR.cnt;
     for (const c of cnt) for (const frame of FRAMES) c[frame] = 0;
     let act = 0, mov = 0, stopped = 0, draws = 0;
-    const eveningDistrict = Math.abs(C.x) < 35 && C.z > 4 && C.z < 165;
-    const population = Math.floor(CR.NW * 0.85 * (hN < 5 || hN >= 23 ? 0.45 : nightW ? eveningDistrict ? 0.8 : 0.6 : hN < 8 ? 0.75 : 1));
-    dens.clear(); flows.clear();
-    for (const w of CR.walkers) if (w.act && !w.lead && !w.agg && w.A && w.id < population) {
-      const cell = cellK(w.x, w.z); dens.set(cell, (dens.get(cell) || 0) + 1 + (w.nf || 0));
-      const key = flowKey(w.A, w.B); flows.set(key, (flows.get(key) || 0) + flowSign(w.A, w.B));
-    }
-    const fr = AF.clock ? AF.clock.frame | 0 : 0, FAR2 = 65 * 65, LOOK2 = 38 * 38;
+    const FAR2 = 65 * 65, LOOK2 = 38 * 38;
     const fc = CR.farCnt; for (const c of fc) c.a = c.p = c.b = 0;
     const CB = AF.combat;
     for (const w of CR.walkers) {
@@ -1591,25 +1644,25 @@ try {
           if (c[f] < im.instanceMatrix.count) { if (!c[f]) draws++; if (A.lie) putLie(im, c[f]++, w.x, w.y, w.z, w.yaw, w.s); else putInst(im, c[f]++, w.x, w.y + (A.dy || 0), w.z, w.yaw, w.s, w.width); }
           act++; continue;
         }
+        const wasDown = w.agg.st === 'down';
         if (CB) CB.release(w);
         if (w.cop) continue;
-        if (!w.lead) spawnWalker(w, C, true);
+        // back into the shared crowd: walk back to its stroll, or (knocked down / chased far off) leave the scene for a while
+        if (w.gid >= 0) {
+          evalWalker(GW[w.gid], t, EP);
+          if (wasDown || (EP.x - w.x) ** 2 + (EP.z - w.z) ** 2 > 1600) { CR.away.set(w.gid, t + (wasDown ? 600 : 120)); unbind(w); continue; }
+          w.ret = true; w.lag = 0;
+        } else if (!w.lead) { w.gid = -1; w.act = false; continue; }
       }
       if (w.cop) continue;
-      if ((w.lead ? w.lead.id : w.id) >= population) {
-        w.act = false;
-        if (w.bench) { CR.benchTaken.delete(w.bench); w.bench = null; }
-        continue;
-      }
-      if (!w.act && !w.lead) { spawnWalker(w, C, true); if (!w.act) continue; }
-      // far walkers step at half rate (their accumulated dt is applied next frame)
-      const ddx = w.x - C.x, ddz = w.z - C.z;
-      if (!w.lead && ddx * ddx + ddz * ddz > FAR2 && ((fr + w.id) & 1)) w.acc = (w.acc || 0) + dt;
-      else { stepWalker(w, Math.min(0.2, dt + (w.acc || 0)), pp, ddx * ddx + ddz * ddz <= FAR2); w.acc = 0; }
-      if (!w.lead && Math.hypot(w.x - C.x, w.z - C.z) > C.R + 12) { spawnWalker(w, C, true); continue; }
+      if (!w.act) continue;
+      const ddx = w.x - C.x, ddz = w.z - C.z, near = ddx * ddx + ddz * ddz <= FAR2;
+      if (w.lead) stepWalker(w, dt);
+      else if (w.gid >= 0) placeBound(w, t, dt, pp, near);
+      else { w.act = false; continue; }
       if (!w.act) continue;
       act++; if (w.moving) mov++; else stopped++;
-      const V = CR.V[w.v], near = ddx * ddx + ddz * ddz <= FAR2;
+      const V = CR.V[w.v];
       if (!V.chair && CR.FAR.length) {
         const px = w.x - camera.x, pz = w.z - camera.z;
         if (px * px + pz * pz > LOOK2) {
@@ -1652,7 +1705,7 @@ try {
     }
     for (let v = 0; v < CR.V.length; v++) for (const f in CR.V[v].im) { const im = CR.V[v].im[f], n = cnt[v][f]; if (im.count !== n || n) { im.count = n; im.visible = n > 0; if (n) im.instanceMatrix.needsUpdate = true; } }
     for (let i = 0; i < CR.FAR.length; i++) for (const f in CR.FAR[i]) { const im = CR.FAR[i][f], n = fc[i][f]; if (im.count !== n || n) { im.count = n; im.visible = n > 0; if (n) im.instanceMatrix.needsUpdate = true; } }
-    const stats = CR.stats; stats.walkers = act; stats.moving = mov; stats.extras = CR.extras.length; stats.cand = candEdges.length; stats.draws = draws; stats.stopped = stopped;
+    const stats = CR.stats; stats.walkers = act; stats.moving = mov; stats.extras = CR.extras.length; stats.cand = candN; stats.global = GW.length; stats.draws = draws; stats.stopped = stopped;
     // talkable passer-by: the nearest walker within 2 m of the player
     if (CR.it && pp.walk) {
       let best = null, bd = 2.2;
@@ -1685,7 +1738,7 @@ try {
     "I'm people-watching. It's cheaper than the pictures and the plot's better.", "If you're heading to the zoo, buy the ticket at the booth first. The turnstiles are strict.", "They say there's a river out east now. Boats and everything. Progress!",
     "Sit a while. The city's not going anywhere, and neither am I."];
   function nameWalker(w) {
-    const V = CR.V[w.v], r = AF.rng(9001 + w.id * 31), f = V.L.female;
+    const V = CR.V[w.v], r = AF.rng(9001 + (w.gid >= 0 ? w.gid + 50000 : w.id) * 31), f = V.L.female;
     w.first = V.kid ? pick(r, BOY) : f ? pick(r, FEMALE) : pick(r, MALE); w.last = pick(r, SURN);
     const G = w.pose === 'sit' ? BENCH_LINES : GROUP_LINES[w.grp];
     w.name = w.first;
@@ -1831,45 +1884,32 @@ try {
   K.copTick = copTick;
 
   // ------------------------------------------------------------ tests
-  AF.test('people: crowd + extras populated', () => { if (!CR.V.length) return { ok: false, info: 'no crowd' }; for (let i = 0; i < 20; i++) crowdTick(0.05, AF.clock.t + i * 0.05); const s = CR.stats; return { ok: s.walkers >= Math.min(60, CR.NW * 0.35) && s.draws <= 110, info: JSON.stringify(s) }; });
-  AF.test('people: busy sidewalk two-way flow + near idle behaviour', () => {
-    const edge = G.edges.find(([a, b]) => /Grand|Meridian/.test(a.rn || '') && !isCross(a, b) && Math.hypot(b.x - a.x, b.z - a.z) > 4);
-    if (!edge || !CR.V.length) return { ok: false, info: 'no busy sidewalk' };
-    const savedEdges = candEdges, savedDensity = new Map(dens), savedFlows = new Map(flows), savedBenches = new Set(CR.benchTaken), probes = [];
-    const centre = { x: edge[0].x, z: edge[0].z, R: 120 }, observer = { x: 1e6, z: 1e6, walk: false };
-    let forward = 0, stopped = 0;
-    try {
-      candEdges = [edge]; flows.clear();
-      for (let index = 0; index < 24; index++) {
-        dens.clear();
-        const probe = { id: 1000 + index, v: index % CR.nDay, lat: (index % 3 - 1) * 0.3, s: 1, ph: index * 0.37, age: index, talk: 0, x: 0, z: 0, y: 0.25 };
-        spawnWalker(probe, centre, false); probes.push(probe); if (probe.A.i < probe.B.i) forward++;
-      }
-      for (let tick = 0; tick < 80; tick++) for (const probe of probes) if (probe.act) stepWalker(probe, 0.1, observer, true);
-      for (const probe of probes) if (probe.act && probe.state !== 'walk') stopped++;
-      return { ok: forward >= 10 && forward <= 14 && stopped > 0, info: forward + '/24 forward, ' + stopped + ' stopped after 8 s' };
-    } finally {
-      candEdges = savedEdges; dens.clear(); flows.clear(); CR.benchTaken.clear();
-      for (const [key, value] of savedDensity) dens.set(key, value);
-      for (const [key, value] of savedFlows) flows.set(key, value);
-      for (const bench of savedBenches) CR.benchTaken.add(bench);
+  AF.test('people: crowd + extras populated', () => { if (!CR.V.length) return { ok: false, info: 'no crowd' }; bindT = 0; for (let i = 0; i < 20; i++) crowdTick(0.05, AF.clock.w + i * 0.05); const s = CR.stats; return { ok: s.walkers >= Math.min(60, CR.NW * 0.35) && s.draws <= 110, info: JSON.stringify(s) }; });
+  AF.test('people: shared crowd (global tours both ways, pauses, crossings wait for green, same place at the same W)', () => {
+    if (!GW.length) return { ok: false, info: 'no global walkers' };
+    const W0 = AF.clock.w; let fwd = 0, back = 0, paused = 0, crossing = 0, crossRed = 0, same = true;
+    for (const g of GW) {
+      evalWalker(g, W0, EP); const x = EP.x, z = EP.z;
+      if (EP.moving) { if (EP.A.i < EP.B.i) fwd++; else back++; if (isCross(EP.A, EP.B)) { crossing++; if (greenAt(EP.A, EP.B, W0 - EP.u * legLen(EP.A, EP.B) / g.v) === false && AF.trafficLight.state((EP.A.x + EP.B.x) / 2, (EP.A.z + EP.B.z) / 2, crossingAxis, W0 - EP.u * legLen(EP.A, EP.B) / g.v) === 'red') crossRed++; } } else paused++;
+      evalWalker(g, W0, EP); if (EP.x !== x || EP.z !== z) same = false;
     }
+    return { ok: GW.length > 300 && fwd > GW.length * 0.25 && back > GW.length * 0.25 && paused > 5 && same && crossRed <= Math.max(1, crossing * 0.05), info: GW.length + ' global walkers: ' + fwd + ' / ' + back + ' each way, ' + paused + ' paused, ' + crossRed + '/' + crossing + ' crossing set off on red, deterministic ' + same };
   });
   AF.test('people: names valid (no " home", no Court surnames)', () => { const bad = people.filter((p) => /\bhome\b|Court|Apartments|Building|undefined|null/i.test(p.name) || /\bhome place\b/.test(p.lines.join(' '))); return { ok: bad.length === 0, info: bad.length + ' bad ' + bad.slice(0, 5).map((p) => p.name).join(', ') }; });
   AF.test('people: nobody standing on awnings (> floor + 0.6 only on solid stoops/steps)', () => { const bad = []; for (const p of people) { if (p.pose === 'sit' || p.state === 'walk') continue; const g = AF.W.groundY(p.x, p.z), fl = p.spot ? Math.max(g, p.spot.y ?? g) : g; let hung = false; if (p.y > fl + 0.65) for (let y = g + 0.12; y < p.y - 0.3; y += 0.25) { const c = AF.W.getM(p.x, y, p.z); if (!(c && AF.PAL.solid[c])) { hung = true; break; } } if (hung) bad.push(p.name + '@' + p.x.toFixed(1) + ',' + p.y.toFixed(2) + ',' + p.z.toFixed(1)); } return { ok: bad.length === 0, info: bad.length + ' floating ' + bad.slice(0, 5).join(' | ') }; });
   AF.test('people: traffic cop signals with the lights (Grand x Meridian)', () => {
     const c = COP.p; if (!c) return { ok: false, info: 'no cop' };
-    const T = AF.trafficLight, clk = AF.clock.t, res = [];
-    let o0 = 0; if (T && T.state) for (let o = 0; o < 28; o += 0.5) { AF.clock.t = clk + o; if (T.state(c.x, c.z, 'x') === 'green') { o0 = o; break; } }
-    for (const dtc of [o0, o0 + 14]) { AF.clock.t = clk + dtc; for (let i = 0; i < 60; i++) copTick(1 / 30, clk + dtc + i / 30); res.push([c.lastFlow, +c.yaw.toFixed(2), +c.parts.armL.rotation.z.toFixed(2)]); }
-    AF.clock.t = clk;
+    const T = AF.trafficLight, clk = AF.clock.w, res = [];
+    let o0 = 0; if (T && T.state) for (let o = 0; o < 28; o += 0.5) { AF.clock.w = clk + o; if (T.state(c.x, c.z, 'x') === 'green') { o0 = o; break; } }
+    for (const dtc of [o0, o0 + 14]) { AF.clock.w = clk + dtc; for (let i = 0; i < 60; i++) copTick(1 / 30, clk + dtc + i / 30); res.push([c.lastFlow, +c.yaw.toFixed(2), +c.parts.armL.rotation.z.toFixed(2)]); }
+    AF.clock.w = clk;
     const ext = CR.extras.filter((e) => e.s && e.s.building === 'traffic-cop').length;
     return { ok: res[0][0] !== res[1][0] && Math.abs(res[0][2]) > 1 && ext === 0, info: JSON.stringify(res) + ' extrasOnPodium ' + ext + ' doorSkipped ' + CR.doorSkipped };
   });
   AF.test('people: >= 100 residents', () => ({ ok: people.length >= 100, info: people.length + ' residents ' + JSON.stringify(K.stats) }));
   AF.test('people: dialogue interact exists', () => { const it = AF.interacts.find((i) => i.person); let got = null; const f = (d) => { got = d; }; AF.on('dialogue', f); if (it) it.act(); AF._ev.dialogue.splice(AF._ev.dialogue.indexOf(f), 1); return { ok: !!it && !!got && !!got.line, info: it ? it.label + ' -> ' + (got && got.line) : 'none' }; });
   AF.test('people: 60 s simulated, none NaN / underground / inside voxels', () => {
-    for (let i = 0; i < 600; i++) peopleTick(0.1);
+    const w0 = AF.clock.w; for (let i = 0; i < 600; i++) peopleTick(0.1, w0 + i * 0.1);
     let bad = [], walking = 0;
     for (const p of people) {
       const ok = isFinite(p.x) && isFinite(p.y) && isFinite(p.z);

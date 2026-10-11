@@ -211,7 +211,7 @@ try {
         horses.push({ m: hm, ph: i * 0.9 + ring * 0.45 });
       }
       L.carousel = { grp, horses };
-      dyn.push({ x: CX, z: CZ, r: 170, update(dt, t) { grp.rotation.y -= dt * 0.55; for (const h of horses) h.m.position.y = 0.55 + Math.sin(t * 2.2 + h.ph) * 0.28; } });
+      dyn.push({ x: CX, z: CZ, r: 170, update(dt, t) { grp.rotation.y = -((t * 0.55) % TAU); for (const h of horses) h.m.position.y = 0.55 + Math.sin(t * 2.2 + h.ph) * 0.28; } });
       // sign
       const sg = LIB.sign('CAROUSEL', C.gold, C.red, 1 / 12); put(sg, CX, 5.6, CZ + CR + 0.6, 0, false);
       AF.addSpot({ building: null, x: CX + 3, y: 0.5, z: CZ + CR + 2.4, yaw: Math.PI, kind: 'stand' });
@@ -493,9 +493,10 @@ try {
       const GG = [gond(C.red, 0), gond(C.teal, 1), gond(C.cream, 2), gond(C.red, 3), gond(C.teal, 4), gond(C.cream, 5)];
       const gonds = [];
       for (let i = 0; i < NS; i++) { const gm = AF.modelMesh(GG[i % 6]); gm.castShadow = false; gm.rotation.y = Math.PI / 2; AF.scene.add(gm); gonds.push(gm); }
-      L.ferris = { wheel, gonds, WX, WY, WZ, WR };
+      L.ferris = { wheel, gonds, WX, WY, WZ, WR, SPIN: 0.1 };
+      // one turn every ~63 s on the shared world clock: every co-op player sees the same gondola at the top
       dyn.push({ x: WX, z: WZ, r: 400, update(dt, t) {
-        wheel.rotation.x += dt * 0.07 * (L.ferris.k || 1);
+        wheel.rotation.x = (t * L.ferris.SPIN) % TAU;
         for (let i = 0; i < NS; i++) { const a = wheel.rotation.x + i / NS * TAU; gonds[i].position.set(WX - Math.cos(a) * (WR - 0.4), WY + Math.sin(a) * (WR - 0.4) + 0.1, WZ); gonds[i].rotation.x = Math.sin(t * 0.8 + i) * 0.05; }
       } });
       AF.addLight({ x: WX, y: WY, z: WZ - 3, color: 0xffe0a0, intensity: 2.2, range: 26, kind: 'sign' });
@@ -607,18 +608,18 @@ try {
         curve.getPointAt(u, q); curve.getPointAt(u2, ahead);
         mm.position.set(q.x, hAt(u) + 0.25, q.z); ahead.y = hAt(u2) + 0.25; mm.lookAt(ahead);
       };
-      const upd = (dt) => {
-        const u = st.s / LEN;
-        if (st.dwell > 0) { st.dwell -= dt; st.v = 0; }
-        else if (u < 0.03 || u > 0.965) st.v = 3;
-        else if (u < 0.255) st.v = 2.6;                                                    // chain lift (clack clack)
-        else st.v = Math.max(3.2, Math.sqrt(Math.max(0, 2 * 9.81 * (23.6 - hAt(u)))) * 0.92);
-        const s0 = st.s; st.s = (st.s + st.v * dt) % LEN;
-        if (s0 < LEN * 0.015 && st.s >= LEN * 0.015) st.dwell = 7;                          // load at the station
+      // the lap as a timetable (shared world clock): 7 s loading at the station, then the chain lift + the drop by the speed profile
+      const DWELL = 7, LDT = 0.05, S0 = LEN * 0.015, vAt = (u) => u < 0.03 || u > 0.965 ? 3 : u < 0.255 ? 2.6 : Math.max(3.2, Math.sqrt(Math.max(0, 2 * 9.81 * (23.6 - hAt(u)))) * 0.92);
+      const LAP = (() => { const a = [S0]; let s = S0; while (s < S0 + LEN && a.length < 40000) { s += vAt((((s / LEN) % 1) + 1) % 1) * LDT; a.push(Math.min(s, S0 + LEN)); } return Float64Array.from(a); })();
+      const PERIOD = DWELL + (LAP.length - 1) * LDT;
+      const upd = (dt, t) => {
+        const tau = (((t + 13.7) % PERIOD) + PERIOD) % PERIOD;
+        if (tau < DWELL) { st.s = S0; st.v = 0; st.dwell = DWELL - tau; }
+        else { const f = (tau - DWELL) / LDT, i = Math.min(LAP.length - 2, f | 0), k = f - i; st.s = (LAP[i] + (LAP[i + 1] - LAP[i]) * k) % LEN; st.v = (LAP[i + 1] - LAP[i]) / LDT; st.dwell = 0; }
         for (let i = 0; i < 3; i++) placeCar(cars[i], st.s - i * CARL);
       };
-      upd(0);
-      L.coaster = { cars, st, LEN, curve, hAt };
+      upd(0, AF.clock.w);
+      L.coaster = { cars, st, LEN, curve, hAt, PERIOD, DWELL };
       dyn.push({ x: -270, z: 234, r: 420, update: upd });
       AF.addLabel('Sea Serpent Coaster', -270, 234, 'building');
     }
@@ -1218,8 +1219,9 @@ try {
   });
   AF.test('harbour: ferry sails its loop', () => {
     const f = HR.ferry; if (!f) return { ok: false, info: 'no ferry' };
-    const x0 = f.mesh.position.x, z0 = f.mesh.position.z; f.st.dwell = 0;
-    for (let i = 0; i < 30; i++) AF.island.ferry.update(0.2, 20 + i * 0.2);
+    const I = AF.island.ferry, t0 = 30 - (I.off || 0); I.update(0.2, t0);
+    const x0 = f.mesh.position.x, z0 = f.mesh.position.z;
+    for (let i = 1; i <= 30; i++) I.update(0.2, t0 + i * 0.2);
     const d = Math.hypot(f.mesh.position.x - x0, f.mesh.position.z - z0);
     return { ok: d > 3, info: `moved ${d.toFixed(1)} m` };
   });

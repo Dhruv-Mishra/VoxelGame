@@ -4,9 +4,10 @@ try {
   // Arrivals land eastbound on R1 (z 152) and taxi west along the taxiway to one of three stands; departures push back onto the taxiway,
   // taxi west, cross R1 at its west end (held while an arrival is on short final) and take off eastbound from R2 (z 188), climbing away
   // in a right turn over the sea. A ground mover holds while anything sits in front of it and a pushback waits for a clear taxiway,
-  // so aircraft never taxi through each other. Within 900 m: ten flights on a 360 s timetable (an arrival and a departure every 36 s),
-  // eight airlines, two airframes (turboprop, regional jet) at 0.82-1.05 scale with per-instance liveries; else two flights on 480 s.
-  // All aircraft = 7 InstancedMeshes; full rate within 350 m, 4 Hz beyond, nothing drawn beyond 2 km.
+  // so aircraft never taxi through each other. Ten flights on a 360 s timetable (an arrival and a departure every 36 s), stepped at
+  // 10 Hz on the shared world clock wherever the viewer is (co-op players see the same aircraft), eight airlines, two airframes
+  // (turboprop, regional jet) at 0.82-1.05 scale with per-instance liveries.
+  // All aircraft = 7 InstancedMeshes; drawn at full rate within 350 m, 4 Hz beyond, nothing drawn beyond 2 km.
   const A = AF.PLAN.west.air, R1 = A.runway, R2 = A.runway2, TZ = A.taxiZ, WX = A.westX, STANDS = A.stands, PI = Math.PI;
   const PERIOD = 480, BUSY_PERIOD = 360, BUSY = 10, GAP = BUSY_PERIOD / BUSY;
   const traffic = AF.airTraffic = { period: PERIOD, flights: [], runway: -1, bridges: [false, false], busy: false, holds: 0, changes: Array.from({ length: 32 }, () => ({ index: -1, time: -1, enabled: false, oldSafe: true, newSafe: true })), changeCount: 0, visible: false };
@@ -146,8 +147,8 @@ try {
         return { stand: stand.x, standInfo: stand, standZ, arrival, departure, tIn: arrival.length / 7, tOut: departure.length / 8 };
       });
       M.body.geometry.attributes.livery.setXYZ(index, AF.col(airline.a, { jitter: 0.05, edge: 0.3, rough: 0.3 }), AF.col(airline.b, { jitter: 0.05, edge: 0.3, rough: 0.3 }), AF.col(airline.c, { jitter: 0.05, edge: 0.3, metal: 0.4, rough: 0.3 }));
-      traffic.flights.push(Object.assign({ name: airline.code + (100 + ((index * 37 + 9) % 900)) + ' ' + names[index], airline: airline.name, index, model, size, home, si: home, routes, assigned: -1, enabled: index < 2, period: index < 2 ? PERIOD : BUSY_PERIOD, offset: index < 2 ? index * 240 : index * GAP,
-        cycle: -999, delay: 0, diverted: false, pushOk: -1, rollOk: -1, goAt: 0, goX: 0, goY: 0, goZ: 0, x: 0, y: -1e4, z: 0, phase: '', p: 0, pose: { x: 0, y: -1e4, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' } }, routes[home]));
+      traffic.flights.push(Object.assign({ name: airline.code + (100 + ((index * 37 + 9) % 900)) + ' ' + names[index], airline: airline.name, index, model, size, home, si: home, routes, assigned: -1, enabled: true, period: BUSY_PERIOD, offset: index * GAP,
+        cycle: -999, delay: 0, diverted: false, pushOk: -1, rollOk: -1, goAt: 0, goX: 0, goY: 0, goZ: 0, x: 0, y: -1e4, z: 0, phase: '', p: 0, pose: { x: 0, y: -1e4, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' }, prev: { x: 0, y: -1e4, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true } }, routes[home]));
     }
     for (const M of models) M.body.geometry.attributes.livery.needsUpdate = true;
     for (const mesh of batches) { mesh.visible = false; mesh.instanceMatrix.array.fill(0); }
@@ -181,30 +182,20 @@ try {
   };
   const update = traffic.update = (dt, time) => {
     if (!models) return;
-    const camera = AF.camera.position, farSlot = Math.floor(time * 4);
-    const flying = AF.mode === 'fly' && AF.planes.cur, local = nearAirport(camera, 900) || (flying && nearAirport(flying, 900));
-    traffic.busy = !!local; traffic.period = local ? BUSY_PERIOD : PERIOD;
-    if (!nearAirport(camera, 2000) && !(flying && nearAirport(flying, 2000))) {
-      let close = false; for (const flight of traffic.flights) if (flight.enabled && (flight.x - camera.x) ** 2 + (flight.y - camera.y) ** 2 + (flight.z - camera.z) ** 2 < 4000000) { close = true; break; }
-      if (!close) { if (traffic.visible) for (const mesh of batches) mesh.visible = false; traffic.visible = false; traffic.bridges[0] = traffic.bridges[1] = false; return; }
-    }
-    if (!nearAirport(camera, 350) && farSlot === lastFar) return;
+    const K = Math.floor(time / STEP);
+    if (simK < 0 || Math.abs(K - simK) > 9000) { simK = K - 1; traffic.runway = -1; for (const f of traffic.flights) { f.cycle = -999; f.delay = 0; f.diverted = false; } }   // a small step back (clock refinement) just waits
+    while (simK < K) { simK++; sim(simK * STEP, STEP); }
+    draw(time, simK > K ? 1 : AF.clamp(time / STEP - K, 0, 1));
+  };
+  // the whole timetable (ten flights, an arrival and a departure every 36 s) steps at a fixed 10 Hz on the shared world clock
+  // (01-core) wherever the viewer is, so every co-op player sees the same aircraft; drawing interpolates the last two steps
+  const sim = (time, dt) => {
     const blocked1 = hazard(R1), blocked2 = hazard(R2);
-    AF.camera.updateMatrixWorld(); viewMatrix.multiplyMatrices(AF.camera.projectionMatrix, AF.camera.matrixWorldInverse); view.setFromProjectionMatrix(viewMatrix);
-    let dirty = false, near = false, inRange = false;
     traffic.bridges[0] = traffic.bridges[1] = false; movers.length = 0;
-    // 1: timetable changes (only while the old and the new pose are both off screen), cycles, the R1 reservation and go-arounds
+    for (const flight of traffic.flights) { const a = flight.pose, b = flight.prev; b.x = a.x; b.y = a.y; b.z = a.z; b.yaw = a.yaw; b.pitch = a.pitch; b.roll = a.roll; b.gear = a.gear; }
+    // 1: cycles, the R1 reservation and go-arounds
     for (let index = 0; index < traffic.flights.length; index++) {
-      const flight = traffic.flights[index], wantedPeriod = traffic.busy ? BUSY_PERIOD : PERIOD, wantedOffset = traffic.busy ? index * GAP : index * 240, wanted = index < 2 || traffic.busy;
-      const oldPhase = flight.cycle === -999 ? phaseAt(time, flight.offset, flight.period) : time - flight.offset - flight.cycle * flight.period - flight.delay;
-      sample(flight, oldPhase, pose); sample(flight, phaseAt(time, wantedOffset, wantedPeriod), candidate);
-      const oldSafe = !flight.enabled || safe(pose, camera), newSafe = !wanted || safe(candidate, camera);
-      if ((flight.enabled !== wanted || flight.period !== wantedPeriod || flight.offset !== wantedOffset) && oldSafe && newSafe && (pose.phase === 'climb' || !flight.enabled) && (candidate.phase === 'climb' || candidate.phase === 'arrival' || !wanted)) {
-        if (traffic.runway === index) traffic.runway = -1;
-        const change = traffic.changes[traffic.changeCount++ % 32]; change.index = index; change.time = time; change.enabled = wanted; change.oldSafe = oldSafe; change.newSafe = newSafe;
-        flight.enabled = wanted; flight.period = wantedPeriod; flight.offset = wantedOffset; flight.cycle = -999; flight.delay = 0; flight.diverted = false;
-      }
-      if (!flight.enabled) { flight.p = -1; flight.phase = ''; continue; }
+      const flight = traffic.flights[index];
       const cycle = Math.floor((time - flight.offset) / flight.period);
       // a new cycle starts at phase 0 (far out on final), never mid-timeline; hold time is made up on the far side of the climb-out
       if (flight.cycle === -999 || cycle < flight.cycle) { if (traffic.runway === index) traffic.runway = -1; flight.cycle = cycle; flight.delay = 0; flight.diverted = false; }
@@ -236,14 +227,30 @@ try {
       if (!wait && f.phase === 'taxi-out' && f.pose.x < WX + 20 && f.pose.z > TZ + 3 && f.pose.z < R1.z - R1.w / 2 - 2 && crossingBusy()) wait = true;
       if (wait) holdAt(f, f.p - dt);
     }
-    // 3: instances (each flight owns slot `index` in its airframe's batches; the other airframe's slot stays empty)
-    const propMesh = models[0].propMesh;
-    for (let index = 0; index < traffic.flights.length; index++) {
-      const flight = traffic.flights[index], M = models[flight.model], other = models[1 - flight.model], s = flight.size, P = flight.pose;
-      if (!flight.enabled) { matrix.makeScale(0, 0, 0); for (const m of models) { m.body.setMatrixAt(index, matrix); m.gear.setMatrixAt(index, matrix); } strobes.setMatrixAt(index, matrix); propMesh.setMatrixAt(index * 2, matrix); propMesh.setMatrixAt(index * 2 + 1, matrix); flight.y = -1e4; dirty = true; continue; }
+    for (const flight of traffic.flights) {
+      const P = flight.pose;
       if (flight.diverted) { const elapsed = time - flight.goAt, turn = Math.min(PI / 2, elapsed * 0.05); P.x = flight.goX + 700 * Math.sin(turn); P.z = flight.goZ - 700 * (1 - Math.cos(turn)) - Math.max(0, elapsed - PI * 10) * 35; P.y = flight.goY + elapsed * 4; P.yaw = PI / 2 + turn; P.pitch = 0.11; P.roll = turn < PI / 2 ? -0.18 : 0; P.gear = elapsed < 4; P.phase = flight.phase = 'go-around'; }
       flight.x = P.x; flight.y = P.y; flight.z = P.z;
       if (P.phase === 'parked' && flight.standInfo.bridge !== undefined) traffic.bridges[flight.standInfo.bridge] = true;
+    }
+  };
+  const Q = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, gear: true, phase: '' };
+  const draw = (time, alpha) => {
+    const camera = AF.camera.position, farSlot = Math.floor(time * 4), flying = AF.mode === 'fly' && AF.planes.cur;
+    if (!nearAirport(camera, 2000) && !(flying && nearAirport(flying, 2000))) {
+      let close = false; for (const flight of traffic.flights) if (flight.enabled && (flight.x - camera.x) ** 2 + (flight.y - camera.y) ** 2 + (flight.z - camera.z) ** 2 < 4000000) { close = true; break; }
+      if (!close) { if (traffic.visible) for (const mesh of batches) mesh.visible = false; traffic.visible = false; return; }
+    }
+    if (!nearAirport(camera, 350) && farSlot === lastFar) return;
+    let dirty = false, near = false, inRange = false;
+    // 3: instances (each flight owns slot `index` in its airframe's batches; the other airframe's slot stays empty)
+    const propMesh = models[0].propMesh;
+    for (let index = 0; index < traffic.flights.length; index++) {
+      const flight = traffic.flights[index], M = models[flight.model], other = models[1 - flight.model], s = flight.size, A = flight.prev, B = flight.pose, P = Q;
+      if (!flight.enabled) { matrix.makeScale(0, 0, 0); for (const m of models) { m.body.setMatrixAt(index, matrix); m.gear.setMatrixAt(index, matrix); } strobes.setMatrixAt(index, matrix); propMesh.setMatrixAt(index * 2, matrix); propMesh.setMatrixAt(index * 2 + 1, matrix); flight.y = -1e4; dirty = true; continue; }
+      const k = (A.x - B.x) ** 2 + (A.z - B.z) ** 2 > 40000 ? 1 : alpha;   // a new cycle starts far out on final: no streak
+      Q.x = A.x + (B.x - A.x) * k; Q.y = A.y + (B.y - A.y) * k; Q.z = A.z + (B.z - A.z) * k; Q.yaw = A.yaw + AF.angDiff(A.yaw, B.yaw) * k;
+      Q.pitch = A.pitch + (B.pitch - A.pitch) * k; Q.roll = A.roll + (B.roll - A.roll) * k; Q.gear = k < 0.5 ? A.gear : B.gear; Q.phase = B.phase;
       const distance2 = (P.x - camera.x) ** 2 + (P.y - camera.y) ** 2 + (P.z - camera.z) ** 2;
       if (distance2 < 6400) near = true;
       if (distance2 < 4000000 || P.phase === 'parked') inRange = true;
@@ -272,6 +279,8 @@ try {
     traffic.visible = inRange;
     if (dirty) for (const mesh of batches) { mesh.instanceMatrix.needsUpdate = true; mesh.computeBoundingSphere(); }   // a handful of instances: cheap
   };
+  const STEP = 0.1;
+  let simK = -1;
   AF.onTick('air-traffic', 442, update);
   // ---------------------------------------------------------------- ground crew
   // Per stand a fuel truck (right) and a catering truck (left) wait on the service row (z 80.5, north of every nose and clear of the
@@ -341,7 +350,7 @@ try {
     const camera = AF.camera.position.clone(), quaternion = AF.camera.quaternion.clone(), runway = traffic.runway, holds = traffic.holds;
     const saved = traffic.flights.map((flight) => Object.assign({}, flight, { pose: Object.assign({}, flight.pose) }));
     try { return fn(); }
-    finally { saved.forEach((flight, index) => Object.assign(traffic.flights[index], flight)); traffic.runway = runway; traffic.holds = holds; AF.camera.position.copy(camera); AF.camera.quaternion.copy(quaternion); lastFar = -1; update(0, AF.clock.t); }
+    finally { saved.forEach((flight, index) => Object.assign(traffic.flights[index], flight)); traffic.runway = runway; traffic.holds = holds; AF.camera.position.copy(camera); AF.camera.quaternion.copy(quaternion); lastFar = -1; simK = -1; update(0, AF.clock.w); }
   };
   AF.test('air traffic: two runways and one-way taxiing keep every aircraft apart', () => simulate(() => {
     let enabled = 0, closest = Infinity, pair = '', wrong = 0, below = 0, parkedHit = 0, departed = 0;
@@ -369,14 +378,10 @@ try {
     const tris = models.map((model) => model.tris);
     return { ok: enabled === BUSY && closest > 22 && !wrong && !below && !parkedHit && departed > 0 && tris.every((t) => t < 6000), info: 'flights ' + enabled + ', closest ' + closest.toFixed(1) + ' m (' + pair + '), off-runway ' + wrong + ', below ground ' + below + ', parked hits ' + parkedHit + ', holds ' + traffic.holds.toFixed(0) + ' s, tris ' + tris.join('/') };
   }));
-  AF.test('air traffic: busy near, light far, transitions stay off-screen', () => simulate(() => {
-    let nearCount = 0;
-    AF.camera.position.set(-480, 20, 110); AF.camera.lookAt(-480, 20, 200);
-    for (let time = 0; time < 1200; time += 0.1) { update(0.1, time); nearCount = Math.max(nearCount, traffic.flights.filter((flight) => flight.enabled).length); }
-    AF.camera.position.set(700, 20, -200); AF.camera.lookAt(900, 20, -200);
-    for (let time = 1200; time < 2400; time += 0.1) update(0.1, time);
-    const farCount = traffic.flights.filter((flight) => flight.enabled).length;
-    return { ok: nearCount === BUSY && farCount === 2 && traffic.changes.every((change) => change.oldSafe && change.newSafe), info: 'near ' + nearCount + ', far ' + farCount + ', safe changes ' + traffic.changeCount };
+  AF.test('air traffic: one shared timetable, the same near and far (deterministic replay)', () => simulate(() => {
+    const run = (cx, cz) => { AF.camera.position.set(cx, 20, cz); simK = -1; for (let time = 5000; time < 5600; time += 0.1) update(0.1, time); return traffic.flights.map((f) => f.pose.x.toFixed(3) + ',' + f.pose.z.toFixed(3) + ',' + f.phase).join('|'); };
+    const near = run(-480, 110), enabledNear = traffic.flights.filter((f) => f.enabled).length, far = run(700, -200), enabledFar = traffic.flights.filter((f) => f.enabled).length;
+    return { ok: enabledNear === BUSY && enabledFar === BUSY && near === far, info: 'near ' + enabledNear + ', far ' + enabledFar + ', replay ' + (near === far ? 'identical' : 'DIFFERS') };
   }));
 }
 } catch (error) { AF.partError('53-airtraffic.js', error); }
