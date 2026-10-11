@@ -97,9 +97,12 @@ compare draws and GPU ms.
 - The liner (`48`): one hull mesh (+ its glass) and one InstancedMesh per furniture kind (1/8 m), the furniture drawn only within
   140 m of the ship; its ~66 passengers, dealers and dancers are path walkers (shared draws). The heist (`81`) adds a gate, two key
   boxes, a hatch and four bags (hidden outside the mission); its guards are path walkers, the mob reuses 55's pooled `goon` walkers.
-- Audio (`75`): one AudioContext; samples (`assets/sfx`, MP3 ≤ 64 kbps) decode on first use, the core set at unlock; ≤ 32 voices
-  (20 on phones); loops fade by distance and are reaped after 120 s unused; the context suspends while the page is hidden.
-  Ambience beds are weighted by zone in a 4 Hz tick; nothing allocates per frame.
+- Audio (`75`): one AudioContext; samples (`assets/sfx`, mono MP3: one-shots 32 kHz / 48 kbps, loops + beds 24 kHz / 40 kbps,
+  voice 16 kHz / 24 kbps; ~2.3 MB for 167 files) decode on first use, the core set at unlock; ≤ 32 voices (20 on phones); loops
+  fade by distance and are reaped after 120 s unused; the context suspends while the page is hidden. Ambience beds are weighted by
+  zone in a 4 Hz tick and each weight eases (~1.3 s) so zones crossfade; one master compressor glues the mix. Per frame only the
+  player's own vehicle / wind / footsteps; nearby cars, sirens, flights at 15 Hz; water + farm machines + tram at 4 Hz. Nothing
+  allocates per frame.
 
 ## 8. Content rules (locked)
 1. Static → voxels (`W.fill`) or `AF.placeStatic`; outland → `AF.outland.addProp`.

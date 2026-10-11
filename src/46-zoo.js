@@ -31,6 +31,9 @@ try {
       sign: ['Brown bears: excellent swimmers, excellent climbers, excellent nappers.', 'A bear\u2019s sense of smell is seven times better than a bloodhound\u2019s.'] },
   ];
   const POOLS = ZOO.pools = [];   // [{cx, cz, rx, rz, y, hab}]
+  // opening hours on the shared clock: the gate, the ticket booth, visitors and keepers follow them (46-zoo-visit)
+  ZOO.hours = [8, 22];
+  ZOO.isOpen = (h = AF.time ? AF.time.hours : 12) => h >= ZOO.hours[0] && h < ZOO.hours[1];
 
   // ---------------------------------------------------------------- world: walls, paths, habitats, water
   AF.onBuild('west-zoo', 312, () => {
@@ -65,25 +68,12 @@ try {
       if (edge < 0.11 * (1.1 / cs)) { W.C[i] = zone === 'moss' && q < 0.45 ? mossC : groutC[zone]; return; }
       W.C[i] = q < 0.006 ? pebW : q < 0.012 ? pebD : P2[Math.floor(h2(id, 5) * P2.length) % P2.length];
     });
-    // paw-print trails in darker stone: [x, z0, z1, kind] along the walks beside the animals that made them
-    const prints = (x, zA, zB, kind, step) => {
-      const dark = pebD;
-      for (let z = zA, k = 0; z > zB; z -= step, k++) {
-        const px = x + (k & 1 ? 0.35 : -0.35);
-        const dot = (ox, oz, r) => W.eachCol(px + ox - r, z + oz - r, px + ox + r, z + oz + r, (bx, bz, i, xx, zz) => { if (Math.hypot(xx - px - ox, zz - z - oz) < r) W.C[i] = dark; });
-        if (kind === 'cat') { dot(0, 0, 0.22); for (const [ox, oz] of [[-0.2, -0.3], [-0.07, -0.38], [0.07, -0.38], [0.2, -0.3]]) dot(ox, oz, 0.09); }
-        else if (kind === 'elephant') dot(0, 0, 0.45);
-        else if (kind === 'bird') { for (const [ox, oz] of [[0, -0.25], [-0.18, -0.2], [0.18, -0.2], [0, 0]]) dot(ox, oz, 0.07); }
-        else { dot(-0.1, 0, 0.12); dot(0.1, 0, 0.12); }
-      }
-    };
     path(-553, -282, -539, -8);   // the promenade, from the gate to the north wall
     path(-640, -165, -454, -158.5); path(-640, -148, -454, -141.5);   // the two riverside walks (the Solace Brook runs between them)
     path(-560, -148, -553, -26); path(-494, -150, -486, -26); path(-494, -282, -486, -160); path(-602, -282, -594, -160); path(-560, -282, -553, -160);
     path(-553, -30, -454, -22);   // along the south habitats
     path(-603.5, -146, -594.5, -26); path(-640, -88.5, -562, -81.5); path(-640, -29, -553, -22);   // between the four plains enclosures + the south walk
-    prints(-541.5, -96, -136, 'cat', 1.4); prints(-599, -40, -136, 'elephant', 1.9); prints(-490, -36, -86, 'bird', 0.9);
-    prints(-556.5, -172, -216, 'bird', 0.8); prints(-490, -172, -272, 'hoof', 1.1); prints(-546, -250, -276, 'cat', 1.4);
+    ZOO.isPave = isPave;
     // perimeter wall with the gate on the promenade
     const wall = (a, b, c, d) => { W.fill(a, 0.25, b, c, 2.75, d, stoneW); W.fill(Math.max(x0, a - 0.25), 2.75, Math.max(z0, b - 0.25), Math.min(x1, c + 0.25), 3.0, Math.min(z1, d + 0.25), cap); };
     wall(x0, z0, x1, z0 + 0.5); wall(x0, z0, x0 + 0.5, z1); wall(x1 - 0.5, z0, x1, z1);
@@ -93,8 +83,10 @@ try {
     W.fill(-555, 6.5, z1 - 2, -537, 7.5, z1 - 1, col(0x2f6a4a));
     const g = K().text('SOLACE ZOO', 0xffe9b0, { font: 'deco', vs: 1 / 9, k: 2.2 });
     AF.placeStatic(g, -546, 6.55, z1 - 0.95, 0, { collide: false }); AF.placeStatic(g, -546, 6.55, z1 - 2.05, 2, { collide: false });
-    // ticket booth on the forecourt OUTSIDE the wall, window facing the gate
+    // ticket booth on the forecourt OUTSIDE the wall, window facing the gate; hollow, with Hazel at the window (46-zoo-visit)
     W.fill(-535, 0.25, z1 + 0.5, -531, 3, z1 + 4, col(0xe8dcc0, { pat: 'stucco' })); W.fill(-535.25, 3, z1 + 0.25, -530.75, 3.5, z1 + 4.25, col(0xc0392b)); W.fill(-535.1, 1.25, z1 + 1.25, -535, 2.25, z1 + 3.25, col(0xa9c9d6, { glass: true }));
+    W.clear(-534.75, 0.25, z1 + 0.75, -531.25, 2.75, z1 + 3.75); W.clear(-535, 1.25, z1 + 1.25, -534.75, 2.25, z1 + 3.25);
+    W.fill(-534.75, 0.25, z1 + 0.75, -531.25, 0.5, z1 + 3.75, col(0x8a5a36, { pat: 'plank' })); W.fill(-532.5, 2.5, z1 + 2, -532, 2.75, z1 + 2.5, glow(0xffe0a0, 1.6, 'night'));
     W.fill(-535.35, 1.0, z1 + 1.0, -535, 1.25, z1 + 3.5, col(0x8a5a36));
     for (const gx of [-556, -536]) AF.addLight({ x: gx, y: 9, z: z1, color: 0xffe0a0, intensity: 1, range: 12, kind: 'street' });
     // turnstile posts across the gate (the arms are a live mesh that swings open with a ticket, see zoo-gate below)
@@ -127,7 +119,7 @@ try {
       // gentle mounds inside (never within 2.5 m of the glass): animals walk the contours
       W.eachCol(a + 2.5, b + 2.5, c - 2.5, d - 2.5, (bx, bz, i, x, z) => { const m = AF.fbm2(x * 0.055 + 3, z * 0.055 - 7, 3), e = Math.min(x - a - 2.5, c - 2.5 - x, z - b - 2.5, d - 2.5 - z); W.H[i] = 1 + Math.max(0, Math.min(3, Math.round((m - 0.47) * 10 * Math.min(1, e / 4)))); });
       // the board: a slanted lectern on the path side, name in raised letters, facts on interact
-      const east = H.side === 'e', bx0 = east ? c + 1.4 : a - 1.4, bz0 = (b + d) / 2, face = east ? 1 : 3, fx = east ? 1 : -1;
+      const east = H.side === 'e', bx0 = east ? c + 1.4 : a - 1.4, bz0 = H.id === 'penguins' ? -176 : (b + d) / 2, face = east ? 1 : 3, fx = east ? 1 : -1;   // penguins: clear of the underwater gallery
       W.fill(bx0 - 0.125, 0.25, bz0 - 0.125, bx0 + 0.125, 1.25, bz0 + 0.125, boardC);
       W.fill(Math.min(bx0, bx0 + fx * 0.25), 1.25, bz0 - 1.1, Math.max(bx0, bx0 + fx * 0.25), 2.25, bz0 + 1.1, boardC);
       W.fill(Math.min(bx0 + fx * 0.25, bx0 + fx * 0.5), 1.35, bz0 - 1.0, Math.max(bx0 + fx * 0.25, bx0 + fx * 0.5), 2.15, bz0 + 1.0, paper);
@@ -135,7 +127,7 @@ try {
       const paperX = Math.round((bx0 + fx * 0.5) * 4) / 4 + fx * 0.045;
       AF.placeStatic(fitText(H.name.toUpperCase(), 0x2f4a3a, 2.0, 'deco'), paperX, 1.8, bz0, face, { collide: false });
       AF.placeStatic(fitText(H.animals.map((q) => q[0]).join(' \u00b7 '), 0x6a4a2a, 1.6), paperX, 1.5, bz0, face, { collide: false });
-      AF.addInteract({ x: bx0 + fx * 1.2, y: 1.2, z: bz0, r: 2.2, label: 'Read: ' + H.name, act: () => AF.emit('dialogue', { name: H.name, role: 'Solace Zoo', lines: H.sign }) });
+      AF.addInteract({ x: bx0 + fx * 1.2, y: 1.2, z: bz0, r: 2.2, label: 'Read: ' + H.name, act: () => { AF.emit('dialogue', { name: H.name, role: 'Solace Zoo', lines: H.sign }); if (Z.stamp) Z.stamp(H); } });
       AF.addLabel(H.name, (a + c) / 2, (b + d) / 2, 'place');
       // onlookers lean on the rail along the path side (the crowd's instanced extras fill these)
       const rx = east ? c + 1.1 : a - 1.1, ryaw = east ? -PI / 2 : PI / 2;
@@ -196,8 +188,16 @@ try {
       H.entry = H.id === 'lions' ? [-524, -105] : H.rest;
       H.frames = [[a + 9, b + 15, 3.25], [c - 10, b + 27, 4.5], [a + 11, d - 13, 3.75]];
     }
-    const timber = col(0x886944), rope = col(0xc7b287), ice = col(0xdcebf0), mud = col(0x665043);
-    W.eachCol(-636, -111, -628, -100, (bx, bz, i) => { W.C[i] = mud; });
+    const timber = col(0x886944), rope = col(0xc7b287), ice = col(0xdcebf0), mud = col(0x665043), mudD = col(0x52402f, { jitter: 0.6 }), mudL = col(0x8a7454, { jitter: 0.8 });
+    // the elephants' mud wallow: a soft-edged dip, wet and dark in the middle, drying lighter towards a ragged rim
+    W.eachCol(-638.5, -114, -625.5, -97, (bx, bz, i, x, z) => {
+      const e = Math.hypot((x + 632) / 5.2, (z + 105.5) / 6.6) + (AF.noise2(x * 0.35, z * 0.35) - 0.5) * 0.4;
+      if (e > 1.08) return;
+      if (e > 0.84) { if (AF.hash2(bx, bz) < (1.08 - e) * 4) W.C[i] = mudL; return; }
+      W.C[i] = e < 0.5 ? mudD : AF.hash2(bx, bz + 7) < 0.55 ? mud : mudL;
+      if (e < 0.62) W.H[i] = Math.max(0, W.H[i] - 1);
+    });
+    W.tDirty = true;
     for (const [x, z, height] of HAB.find((h) => h.id === 'primates').frames) {
       for (const dx of [-2, 2]) for (const dz of [-2, 2]) W.fill(x + dx, 0.25, z + dz, x + dx + 0.5, height, z + dz + 0.5, timber);
       W.fill(x - 2.5, height, z - 2.5, x + 3, height + 0.25, z + 3, timber);
@@ -234,9 +234,21 @@ try {
       AF.addWater(geo);
     }
     P.pools.push({ x0: -594.25, z0: -208, x1: -585, z1: -184, y: 0 });
-    for (let k = 0; k < 8; k++) {
-      W.eachCol(-601, -211 - k * 0.5, -595, -210.5 - k * 0.5, (bx, bz, i) => { W.H[i] = -7 + k; W.C[i] = pave; });
-      W.fill(-601, -1.75 + k * 0.25, -211 - k * 0.5, -595, -1.5 + k * 0.25, -210.5 - k * 0.5, pave);
+    // the underwater gallery: steps down at both ends (one 0.25 m riser every 0.5 m), railings along both lips, a sign
+    for (let k = 0; k < 8; k++) for (const [za, zb] of [[-209.5 - k * 0.5, -209 - k * 0.5], [-183 + k * 0.5, -182.5 + k * 0.5]]) {
+      W.eachCol(-601, za, -595, zb, (bx, bz, i) => { W.H[i] = -7 + k; W.C[i] = pave; });
+      W.fill(-601, -1.75 + k * 0.25, za, -595, -1.5 + k * 0.25, zb, pave);
+    }
+    for (const rx of [-601.25, -595]) {
+      for (let z = -213; z <= -179.25; z += 1.5) W.fill(rx, 0.25, z, rx + 0.25, 1.25, z + 0.25, iron);
+      W.fill(rx, 1.0, -213, rx + 0.25, 1.25, -179, iron);
+    }
+    // arches over both stair heads, the name on each side
+    for (const az of [-213.25, -179]) {
+      for (const ax of [-601.25, -595]) W.fill(ax, 0.25, az, ax + 0.25, 3.0, az + 0.25, boardC);
+      W.fill(-601.25, 2.4, az, -594.75, 3.0, az + 0.25, boardC);
+      AF.placeStatic(fitText('UNDERWATER VIEWING', 0xf2ead0, 5.4, 'deco'), -598, 2.45, az - 0.03, 2, { collide: false });
+      AF.placeStatic(fitText('UNDERWATER VIEWING', 0xf2ead0, 5.4, 'deco'), -598, 2.45, az + 0.28, 0, { collide: false });
     }
     W.fill(-594.5, -1.75, -209, -590, 1, -208.5, stoneW); W.fill(-594.5, -1.75, -183.5, -590, 1, -183, stoneW);
     for (const [x, z] of [[-602, -113], [-495, -112], [-495, -240]]) {
@@ -294,7 +306,8 @@ try {
       const bushC = [col(0x3f6a2e, { jitter: 0.8 }), col(0x4f7a34, { jitter: 0.8 }), col(0x5a8a3a, { jitter: 0.8 }), col(0x6a7a30, { jitter: 0.8 })];
       const THEME = { elephants: 'dry', giraffes: 'dry', rhinos: 'dry', lions: 'dry', primates: 'lush', tigers: 'lush', flamingos: 'wet', hippos: 'wet', crocs: 'wet', penguins: 'ice', deer: 'lush', bears: 'lush' };
       const clearOf = (H, x, z, r) => !POOLS.some((p) => p.hab === H.id && Math.hypot((x - p.cx) / (p.rx + r), (z - p.cz) / (p.rz + r)) < 1)
-        && !(H.id === 'primates' && H.frames.some((f) => Math.hypot(x - f[0], z - f[1]) < 4.5)) && !AF.solidAt(x, W.groundY(x, z) + 0.6, z);
+        && !(H.id === 'primates' && H.frames.some((f) => Math.hypot(x - f[0], z - f[1]) < 4.5)) && !(Math.hypot((x + 632) / (5.6 + r), (z + 105.5) / (7 + r)) < 1)   // the mud wallow stays bare
+        && !AF.solidAt(x, W.groundY(x, z) + 0.6, z);
       for (const H of HAB) {
         const [a, b, c, d] = H.rect, t = THEME[H.id], area = (c - a) * (d - b), G = t === 'dry' ? dryG : lushG;
         const rx = () => a + 3 + dR() * (c - a - 6), rz = () => b + 3 + dR() * (d - b - 6);
@@ -408,13 +421,16 @@ try {
         const arm = new THREE.Mesh(geo, mat); arm.position.set(px, 1.0, zg); arm.castShadow = true; arm.name = 'zoo-turnstile'; AF.scene.add(arm); G.arms.push(arm);
       }
       G.coll = AF.addCollider(-555, 0, zg - 0.3, -537, 2.5, zg + 0.3, 'zoo-gate');
-      AF.addInteract({ x: -536, y: 1.3, z: z1 + 2.25, r: 3, label: 'Buy a zoo ticket \u00b7 25\u00a2', prio: 2, can: () => AF.mode === 'walk' && !G.ticket,
-        act: () => { G.ticket = true; AF.emit('toast', 'Admit one \u2014 Solace Zoo. Enjoy your visit!'); AF.emit('dialogue', { name: 'Ticket booth', role: 'Solace Zoo', line: 'Here you go, one adult. The turnstile\u2019s all yours \u2014 and the brook bridge is lovely at sunset.' }); } });
+      AF.addInteract({ x: -536, y: 1.3, z: z1 + 2.25, r: 3, label: 'Buy a zoo ticket \u00b7 25\u00a2', prio: 2, can: () => AF.mode === 'walk' && !G.ticket && ZOO.isOpen(),
+        act: () => { G.ticket = true; AF.emit('toast', 'Admit one \u2014 Solace Zoo. Enjoy your visit!'); AF.emit('dialogue', { name: 'Hazel', role: 'Ticket booth \u00b7 Solace Zoo', lines: ['Here you go, one adult. The turnstile\u2019s all yours \u2014 and the brook bridge is lovely at sunset.', 'Follow the coloured paw prints: each trail goes round a different part of the zoo.'] }); } });
+      AF.addInteract({ x: -536, y: 1.3, z: z1 + 2.25, r: 3, label: 'Zoo closed \u00b7 open 8 am \u2013 10 pm', prio: 2, can: () => AF.mode === 'walk' && !ZOO.isOpen(),
+        act: () => AF.emit('toast', 'Solace Zoo is closed for the night. Opening hours: 8 am to 10 pm.') });
       AF.addInteract({ x: -546, y: 1.2, z: z1 - 0.5, r: 3.2, label: 'Tickets at the booth \u2192', prio: 0.5, can: () => AF.mode === 'walk' && !G.ticket && AF.player && AF.player.z > zg,
-        act: () => AF.emit('toast', 'You need a ticket \u2014 the booth is just to the right of the gate.') });
+        act: () => AF.emit('toast', ZOO.isOpen() ? 'You need a ticket \u2014 the booth is just to the right of the gate.' : 'The zoo is closed for the night \u2014 back at 8 am.') });
       AF.onTick('zoo-gate', 432, (dt) => {
-        const p = AF.player, leaving = p && p.z < zg - 0.2 && p.z > zg - 9 && Math.abs(p.x + 546) < 11;
-        const want = G.ticket || leaving ? 1 : 0;
+        const p = AF.player, leaving = p && p.z < zg - 0.2 && p.z > zg - 9 && Math.abs(p.x + 546) < 11, open = ZOO.isOpen();
+        if (!open && G.ticket && !leaving) G.ticket = false;   // tickets are good for one day
+        const want = (G.ticket && open) || leaving ? 1 : 0;
         G.open += (want - G.open) * Math.min(1, dt * 4);
         for (const arm of G.arms) arm.rotation.y = -G.open * PI / 2;
         const shut = G.open < 0.5; G.coll.y0 = shut ? 0 : -50; G.coll.y1 = shut ? 2.5 : -49;
@@ -749,6 +765,14 @@ try {
     out.x = boundX(an, an.rect[2] - an.pad); out.z = boundZ(an, an.rect[3] - an.pad); return out;
   };
   const poolPt = (an, a, out) => { const pool = an.H.pool; out.x = boundX(an, pool.cx + Math.sin(a) * pool.rx * 0.65); out.z = boundZ(an, pool.cz + Math.cos(a) * pool.rz * 0.65); return out; };
+  // keeper feeding times (time of day on the shared clock, judged at each slot's start so every client agrees): the animals gather
+  const FEED = Z.feed = [
+    { hab: 'elephants', name: 'Elephant bath time', where: 'Elephant Plains', at: [10, 14], len: 0.5, pool: true, st: 'spray', keeper: [-601.6, 0.75, -116.5, -PI / 2] },
+    { hab: 'penguins', name: 'Penguin feeding', where: 'Penguin Coast', at: [11, 15], len: 0.5, x: -577, z: -217.5, st: 'graze', keeper: [-597.6, 0.25, -177, PI / 2] },
+    { hab: 'lions', name: 'Big cat feeding', where: 'Pride Rock', at: [12.5, 17], len: 0.5, x: -531, z: -113, st: 'graze', keeper: [-538.4, 0.25, -111.5, PI / 2] },
+    { hab: 'giraffes', name: 'Giraffe breakfast', where: 'Acacia Savanna', at: [9, 16.5], len: 0.5, x: -589.5, z: -114.5, st: 'browse', keeper: [-596.4, 0.25, -118.5, PI / 2] },
+  ];
+  Z.feedAt = (hab, h) => { for (const F of FEED) if (F.hab === hab) for (const s of F.at) if (h >= s && h < s + F.len) return F; return null; };
   // slot k's plan: where the animal goes (x, z), how (mv) and what it does there (st); mirrors the old decide()
   const planAt = (an, k, night, out) => {
     const id = an.sp.id, H = an.H, roll = AF.whash(an.uid, k, 100);
@@ -756,6 +780,12 @@ try {
     if (night && id !== 'hippo' && id !== 'croc') {
       const den = H.rest || H.entry; if (den) { out.x = boundX(an, den[0] + (AF.hash2(an.uid, 1) - 0.5) * 3); out.z = boundZ(an, den[1] + (AF.hash2(an.uid, 2) - 0.5) * 3); } else dryAt(an, -77, out);
       out.st = 'sleep'; return out;
+    }
+    const F = !night && AF.time && AF.time.at && Z.feedAt(an.hab, AF.time.at((k - AF.hash2(an.uid, 47)) * slotLen(an)));
+    if (F) {
+      if (F.pool && H.pool) { out.a0 = AF.whash(an.uid, k, 105) * PI * 2; const pool = H.pool; out.x = boundX(an, pool.cx + Math.sin(out.a0) * pool.rx * 0.95); out.z = boundZ(an, pool.cz + Math.cos(out.a0) * pool.rz * 0.95); }
+      else { out.x = boundX(an, F.x + (AF.whash(an.uid, k, 106) - 0.5) * 3.5); out.z = boundZ(an, F.z + (AF.whash(an.uid, k, 107) - 0.5) * 3.5); }
+      out.st = F.st; return out;
     }
     if (id === 'monkey' && roll < 0.68) { const f = Math.floor(AF.whash(an.uid, k, 101) * H.frames.length) % H.frames.length; out.x = boundX(an, H.frames[f][0]); out.z = boundZ(an, H.frames[f][1]); out.st = 'climb'; out.fr = f; return out; }
     if ((id === 'penguin' && roll < 0.6 || id === 'hippo' && roll < 0.78) && H.pool) { out.a0 = AF.whash(an.uid, k, 102) * PI * 2; poolPt(an, out.a0, out); out.st = 'swim'; return out; }
@@ -800,6 +830,12 @@ try {
     return out;
   };
   Z.posAt = posAt;
+  // feeding stations: the n animals of a habitat nearest (x, z) come to the fence for dur seconds, facing the visitor
+  Z.lure = (hab, x, z, n = 1, dur = 16, st = 'graze', yaw = 0) => {
+    const L = Z.list.filter((an) => an.hab === hab && !an.lure).sort((a, b) => ((a.x - x) ** 2 + (a.z - z) ** 2) - ((b.x - x) ** 2 + (b.z - z) ** 2)).slice(0, n);
+    L.forEach((an, i) => { an.lure = { x: boundX(an, x + (i - (n - 1) / 2) * 1.6), z: boundZ(an, z + (i & 1) * 0.9), t0: AF.clock.t, dur, st, yaw }; });
+    return L.length;
+  };
   const ZQ = { x: 0, z: 0, st: '', v: 0, yaw: 0, elev: 0, k: 0, f: 0 };
   const stepAnimal = Z.stepAnimal = (an, dt, hours, player, Wt = AF.clock.w) => {
     const id = an.sp.id, H = an.H, night = isNight(hours);
@@ -807,6 +843,18 @@ try {
     an.clock = Wt + AF.hash2(an.uid, 49) * 20;
     an.x = ZQ.x; an.z = ZQ.z; an.state = ZQ.st; an.v = ZQ.v; an.elevation = ZQ.elev;
     if (ZQ.v > 0 && Number.isFinite(ZQ.yaw)) an.yaw += AF.angDiff(an.yaw, ZQ.yaw) * Math.min(1, dt * 4);
+    // a treat at a feeding station (local, 46-zoo-visit): walk over, eat, then ease back onto the schedule
+    const Lr = an.lure;
+    if (Lr) {
+      const t = AF.clock.t - Lr.t0, inK = Math.min(1, t / 5), outK = Math.min(1, (Lr.dur - t) / 4);
+      if (outK <= 0 || night) an.lure = null;
+      else {
+        const e = Math.min(inK, outK), k = e * e * (3 - 2 * e), tx = inK < 1 ? Lr.x : ZQ.x, tz = inK < 1 ? Lr.z : ZQ.z;
+        an.x = ZQ.x + (Lr.x - ZQ.x) * k; an.z = ZQ.z + (Lr.z - ZQ.z) * k;
+        if (e < 1) { an.v = an.sp.G.S.speed; an.state = 'wander'; an.yaw += AF.angDiff(an.yaw, Math.atan2(tx - an.x, tz - an.z)) * Math.min(1, dt * 4); }
+        else { an.v = 0; an.state = Lr.st; an.yaw += AF.angDiff(an.yaw, Lr.yaw) * Math.min(1, dt * 3); }
+      }
+    }
     an.phase += dt * an.v * (4.5 / Math.max(0.5, an.sp.G.lift));
     // a player at the fence (local): the animal turns to look
     if (player && player.y < 8 && !night && an.state !== 'swim' && an.state !== 'dive') {

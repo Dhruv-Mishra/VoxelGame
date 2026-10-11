@@ -43,6 +43,17 @@ train_whistle: "Steam Whistle.mp3" by Bidone — CC0 — https://freesound.org/p
 wind_loop: "WIND, Wind through Wheatfield.wav" by Uganda — CC0 — https://freesound.org/people/Uganda/sounds/38976/
 splash: "Water Splash" by qubodup — CC0 — https://freesound.org/people/qubodup/sounds/737234/
 chute: "Paracaídas.wav" by sbaneat — CC0 — https://freesound.org/people/sbaneat/sounds/393056/
+fall_loop: "air over mic.wav" by cognito perceptu — CC0 — https://freesound.org/people/cognito perceptu/sounds/20108/
+canopy_loop: "A flag flapping in the wind, at the small village of Assem Souk, in the High Atlas (Morocco)." by felix.blume — CC0 — https://freesound.org/people/felix.blume/sounds/154794/
+stream_loop: "Stream River Water Up Close" by jackthemurray — CC0 — https://freesound.org/people/jackthemurray/sounds/433589/
+falls_loop: "Wilkies Pools Waterfalls.mp3" by laughatlantic — CC0 — https://freesound.org/people/laughatlantic/sounds/565737/
+fountain_loop: "Water Fountain Sound" by Legnalegna55 — CC0 — https://freesound.org/people/Legnalegna55/sounds/554789/
+lap_loop: "Gentle small waves lapping on shore.wav" by Alex_hears_things — CC0 — https://freesound.org/people/Alex_hears_things/sounds/352356/
+step_water_0: "Walking through water" by rosenberg3 — CC0 — https://freesound.org/people/rosenberg3/sounds/627004/
+step_water_1: "Walking through water" by rosenberg3 — CC0 — https://freesound.org/people/rosenberg3/sounds/627004/
+tractor_loop: "Tractor Engine" by lucasfuchs — CC0 — https://freesound.org/people/lucasfuchs/sounds/518294/
+combine_loop: "Combine Harvester.wav" by underscore_001 — CC0 — https://freesound.org/people/underscore_001/sounds/352688/
+tram_loop: "erilee_int_tram.wav" by erilee — CC0 — https://freesound.org/people/erilee/sounds/108359/
 amb_city: "Ciudad de Mexico DF Colonia Roma Busy Street traffic urban city ambience Ed Larez VSNR" by visionear — CC0 — https://freesound.org/people/visionear/sounds/723607/
 amb_crowd: "AMBLM ext day people crowd walla berlin kulturforum international german english summer" by LudwigMueller — CC0 — https://freesound.org/people/LudwigMueller/sounds/459161/
 amb_park: "Bird Park Ambience " by nick121087 — CC0 — https://freesound.org/people/nick121087/sounds/234315/

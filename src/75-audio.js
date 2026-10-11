@@ -29,6 +29,10 @@ try {
     heli_loop: [['heli_loop'], 0.7, 'veh', 30, 1], eng_idle: [['eng_idle'], 0.45, 'veh', 6, 1], eng_run: [['eng_run'], 0.5, 'veh', 8, 1],
     prop_loop: [['prop_loop'], 0.5, 'veh', 20, 1], boat_loop: [['boat_loop'], 0.5, 'veh', 15, 1], jetski_loop: [['jetski_loop'], 0.5, 'veh', 10, 1],
     wind_loop: [['wind_loop'], 0.6, 'amb', 1, 1], drill_loop: [['drill_loop'], 0.5, 'sfx', 6, 1], torch_loop: [['torch_loop'], 0.5, 'sfx', 6, 1],
+    fall_loop: [['fall_loop'], 0.75, 'amb', 1, 1], canopy_loop: [['canopy_loop'], 0.5, 'amb', 1, 1],
+    stream_loop: [['stream_loop'], 0.55, 'amb', 7, 1], falls_loop: [['falls_loop'], 0.75, 'amb', 25, 1], fountain_loop: [['fountain_loop'], 0.5, 'amb', 6, 1], lap_loop: [['lap_loop'], 0.5, 'amb', 8, 1],
+    tractor_loop: [['tractor_loop'], 0.55, 'veh', 12, 1], combine_loop: [['combine_loop'], 0.6, 'veh', 16, 1], tram_loop: [['tram_loop'], 0.5, 'veh', 12, 1],
+    step_water: [['step_water_0', 'step_water_1'], 0.32, 'sfx', 2],
     // beds
     amb_city: [['amb_city'], 0.38, 'amb', 1, 1], amb_crowd: [['amb_crowd'], 0.32, 'amb', 1, 1], amb_park: [['amb_park'], 0.42, 'amb', 1, 1], amb_sea: [['amb_sea'], 0.45, 'amb', 1, 1],
     amb_harbour: [['amb_harbour'], 0.38, 'amb', 1, 1], amb_wind: [['amb_wind'], 0.35, 'amb', 1, 1], amb_night: [['amb_night'], 0.35, 'amb', 1, 1], amb_forest: [['amb_forest'], 0.42, 'amb', 1, 1],
@@ -73,7 +77,11 @@ try {
     try {
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
       try { ctx = new AC({ latencyHint: 'interactive' }); } catch (e) { ctx = new AC(); }
-      master = ctx.createGain(); master.gain.value = A.vol; master.connect(ctx.destination);
+      master = ctx.createGain(); master.gain.value = A.vol;
+      // one gentle compressor on the whole mix: recordings from many sources sit together and peaks never clip
+      let out = ctx.destination;
+      try { const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -12; comp.knee.value = 10; comp.ratio.value = 2.5; comp.attack.value = 0.006; comp.release.value = 0.3; comp.connect(ctx.destination); out = comp; } catch (e) { /* old webkit: straight out */ }
+      master.connect(out);
       for (const k in BUS_GAIN) { const g = ctx.createGain(); g.gain.value = BUS_GAIN[k]; bus[k] = g; }
       // indoors the outdoor beds go dull (one low-pass on the ambience bus)
       ambLP = ctx.createBiquadFilter(); ambLP.type = 'lowpass'; ambLP.frequency.value = 18000; ambLP.Q.value = 0.5;
@@ -174,6 +182,7 @@ try {
     constructor(id, o = {}) {
       this.id = id; this.L = LIB[id]; this.vol = o.vol ?? 1; this.rate = o.rate ?? 1; this.busK = o.bus || (this.L && this.L[2]) || 'sfx';
       this.pos = null; this.ref = o.ref || (this.L && this.L[3]) || 10; this.src = null; this.gn = null; this.pan = null; this.f = null; this.dead = false; this.cur = 0;
+      this.tc = o.tc ?? (this.busK === 'amb' ? 0.5 : 0.12);   // ambience glides slowly, engines follow the throttle
       loops.add(this); A.stats.loops = loops.size; A.need(id);
     }
     at(x, y, z, ref) { if (!this.pos) this.pos = { x: 0, y: 0, z: 0 }; this.pos.x = x; this.pos.y = y; this.pos.z = z; if (ref) this.ref = ref; return this; }
@@ -196,7 +205,7 @@ try {
       if (!this.src) { if (this.vol > 0.001) this.start(); if (!this.src) return; }
       let g = this.L[1] * this.vol, pan = 0;
       if (this.pos) { const P = place(this.pos.x, this.pos.y, this.pos.z, this.ref); g *= P.g; pan = P.pan; }
-      if (Math.abs(g - this.cur) > 0.002) { this.gn.gain.setTargetAtTime(g, ctx.currentTime, 0.12); this.cur = g; }
+      if (Math.abs(g - this.cur) > 0.002) { this.gn.gain.setTargetAtTime(g, ctx.currentTime, this.tc); this.cur = g; }
       if (Math.abs(this.src.playbackRate.value - this.rate) > 0.005) this.src.playbackRate.setTargetAtTime(this.rate, ctx.currentTime, 0.08);
       if (this.pan && Math.abs(this.pan.pan.value - pan) > 0.02) this.pan.pan.setTargetAtTime(pan, ctx.currentTime, 0.1);
       if (this.f) this.f.used = AF.clock.t;
@@ -209,6 +218,7 @@ try {
   A.loop = (id, o) => (LIB[id] ? new Loop(id, o) : null);
   // a loop owned by a named slot: created on first use, stopped when its volume stays 0 for a while
   const named = new Map();
+  A.holds = named;
   A.hold = (key, id, vol, rate, x, y, z) => {
     let h = named.get(key);
     if (vol <= 0.001) { if (h && (h.idle = (h.idle || 0) + 1) > 30) { h.stop(); named.delete(key); } else if (h) h.set(0); return h; }
@@ -267,12 +277,14 @@ try {
     const lk = P.lake, nearLake = Math.hypot((x - lk.cx) / (lk.rx + 40), (z - lk.cz) / (lk.rz + 40)) < 1 || Math.hypot(x - P.pond.cx, z - P.pond.cz) < P.pond.r + 35;
     W8.frogs = nearLake ? night * lowK : 0;
     A.zone = ship ? 'ship:' + ship : inR(x, z, ZR.zoo) ? 'zoo' : inR(x, z, ZR.air) ? 'airfield' : inR(x, z, ZR.park) ? 'park' : city ? 'city' : 'outland';
-    ambLP.frequency.setTargetAtTime(AF.lerp(18000, 900, indoor * (W8.casino ? 0 : 1)), ctx.currentTime, 0.25);
+    ambLP.frequency.setTargetAtTime(AF.lerp(18000, 900, indoor * (W8.casino ? 0 : 1)), ctx.currentTime, 0.4);
   };
-  const bedTick = () => {
-    let n = 0;
+  // beds crossfade over a few seconds (zone edges, doors, time of day): each weight eases toward its target, then the loop glides
+  const SMW = {};
+  const bedTick = (dt) => {
+    let n = 0; const a = 1 - Math.exp(-dt / 1.3);
     for (const k in W8) {
-      const w = W8[k]; let b = beds.get(k);
+      const s = SMW[k] = (SMW[k] || 0) + (W8[k] - (SMW[k] || 0)) * a, w = s < 0.005 ? 0 : s; let b = beds.get(k);
       if (w > 0.02 && !b) { b = A.loop(BED_ID[k], { bus: 'amb' }); b.owned = true; beds.set(k, b); }
       if (!b) continue;
       b.set(w); b.tick(); if (w > 0.02) n++;
@@ -365,38 +377,56 @@ try {
     const ski = mode === 'jetski' && AF.island && AF.island.jetski && AF.island.jetski.cur;
     A.hold('ski', 'jetski_loop', ski ? 0.4 + Math.min(0.6, Math.abs(ski.v) / 14) : 0, ski ? 0.8 + Math.abs(ski.v) / 22 : 1);
     A.hold('ferry', 'boat_loop', mode === 'ferry-ride' ? 0.7 : 0, 0.9);
-    // rushing air: freefall, an open cockpit, standing on the liner's top deck in the wind
-    A.hold('wind', 'wind_loop', mode === 'skydive' || mode === 'fly' ? AF.smooth(12, 50, LS.speed) * (AF.view && AF.view.fp && AF.view.fp() ? 1 : 0.7) : 0, 0.8 + AF.smooth(20, 60, LS.speed) * 0.4);
-    if (mode === 'skydive' && VT.prevMode !== 'skydive') VT.fallT = 0;
-    if (mode === 'skydive') { VT.fallT += dt; const SKr = AF.scene.getObjectByName('parachute'); if (SKr && SKr.visible && !VT.chute) { VT.chute = true; A.play('chute'); } }
+    // rushing air: freefall roars, the open canopy flaps, an open cockpit hisses (one wind family, crossfaded by speed)
+    const sky = mode === 'skydive', fp = AF.view && AF.view.fp && AF.view.fp();
+    if (sky && VT.prevMode !== 'skydive') { VT.fallT = 0; VT.chute = false; }
+    if (sky) { VT.fallT += dt; const rig = VT.rig || (VT.rig = AF.scene.getObjectByName('parachute')); if (rig && rig.visible && !VT.chute) { VT.chute = true; A.play('chute'); } }
     else VT.chute = false;
+    const fall = sky && !VT.chute, canopy = sky && VT.chute;
+    A.hold('wind', 'wind_loop', mode === 'fly' ? AF.smooth(12, 50, LS.speed) * (fp ? 1 : 0.7) : canopy ? 0.25 + AF.smooth(4, 12, LS.speed) * 0.3 : fall ? 0.3 : 0, 0.8 + AF.smooth(20, 60, LS.speed) * 0.4);
+    A.hold('fall', 'fall_loop', fall ? 0.35 + AF.smooth(10, 50, LS.speed) * 0.65 : 0, 0.85 + AF.smooth(15, 55, LS.speed) * 0.3);
+    A.hold('canopy', 'canopy_loop', canopy ? 0.55 + AF.smooth(3, 10, LS.speed) * 0.45 : 0, 0.9 + AF.smooth(3, 10, LS.speed) * 0.2);
     if (VT.prevMode === 'skydive' && mode === 'walk' && AF.player && AF.player.z > 206 && AF.player.y < -0.5) A.play('splash');
     VT.prevMode = mode;
-    // traffic passing: the two nearest moving cars carry their own engine
-    if (VV && VV.cars) {
-      let a = null, ad = 900, b = null, bd = 900;
-      for (const c of VV.cars) {
-        if (c.player || c.active === false || Math.abs(c.v || 0) < 2) continue;
-        const d = (c.x - LS.x) ** 2 + (c.z - LS.z) ** 2; if (d >= bd) continue;
-        if (d < ad) { b = a; bd = ad; a = c; ad = d; } else { b = c; bd = d; }
-      }
-      A.hold('traffic-a', 'eng_run', a ? 0.5 : 0, a ? 0.7 + Math.min(0.6, Math.abs(a.v) / 30) : 1, a && a.x, a && a.y + 0.6, a && a.z);
-      A.hold('traffic-b', 'eng_idle', b ? 0.6 : 0, b ? 0.9 + Math.min(0.5, Math.abs(b.v) / 30) : 1, b && b.x, b && b.y + 0.6, b && b.z);
+    // footsteps (wading where the feet are under water)
+    if (mode === 'walk' && AF.player && AF.PL.walk) {
+      const sp = AF.PL.walk.speed || 0, body = AF.player.body;
+      if (sp > 1.2 && body && body.onGround) {
+        VT.stepT -= dt * sp;
+        if (VT.stepT <= 0) { VT.stepT = sp > 7 ? 2.6 : 2.0; VT.stepSide ^= 1; A.play(wetFeet(AF.player) ? 'step_water' : surface(), { vol: sp > 7 ? 1.25 : 1, rate: 0.92 + Math.random() * 0.16 }); }
+      } else VT.stepT = 0.4;
     }
-    // the police autogyro, the siren of the nearest squad car, the nearest burning wreck
-    const CB = AF.combat, H = CB && CB.heli;
-    A.hold('heli', 'heli_loop', H && H.on ? 1 : 0, 1, H && H.x, H && H.y, H && H.z);
+  };
+  const wetFeet = (p) => {
+    const y = p.y - 0.05;
+    for (const q of P.pools) if (p.x > q.x0 && p.x < q.x1 && p.z > q.z0 && p.z < q.z1 && y < q.y) return true;
+    const O = AF.outland;
+    for (const w of (O && O.waters) || WATERS0) if (y < w.waterY && ((p.x - w.cx) / w.rx) ** 2 + ((p.z - w.cz) / w.rz) ** 2 < 1) return true;
+    if (y < P.harbour.waterY && (p.z > 200 || AF.W.col(p.x, p.z) < 0)) return true;
+    const R = O && O.riverInfo && O.riverInfo(p.x, p.z);
+    return !!(R && R.d < R.hw && y < R.y);
+  };
+  // 15 Hz: what is moving around the listener
+  const scan = () => {
+    const VV = AF.vehicles, CB = AF.combat, H = CB && CB.heli;
+    // traffic passing: the two nearest moving cars carry their own engine; the nearest squad car's siren, the nearest burning wreck
     if (VV && VV.cars) {
-      let s = null, sd = 160 * 160, f = null, fd = 60 * 60;
+      let a = null, ad = 900, b = null, bd = 900, s = null, sd = 160 * 160, f = null, fd = 60 * 60;
       for (const c of VV.cars) {
         if (c.active === false) continue;
         const d = (c.x - LS.x) ** 2 + (c.z - LS.z) ** 2;
         if (c.squad && d < sd && CB && CB.stars) { sd = d; s = c; }
         if ((c.burnT > 0 || (c.dead && c.smokeT > 10)) && d < fd) { fd = d; f = c; }
+        if (c.player || Math.abs(c.v || 0) < 2 || d >= bd) continue;
+        if (d < ad) { b = a; bd = ad; a = c; ad = d; } else { b = c; bd = d; }
       }
+      A.hold('traffic-a', 'eng_run', a ? 0.5 : 0, a ? 0.7 + Math.min(0.6, Math.abs(a.v) / 30) : 1, a && a.x, a && a.y + 0.6, a && a.z);
+      A.hold('traffic-b', 'eng_idle', b ? 0.6 : 0, b ? 0.9 + Math.min(0.5, Math.abs(b.v) / 30) : 1, b && b.x, b && b.y + 0.6, b && b.z);
       A.hold('siren', 'siren_loop', s ? 1 : 0, 1, s && s.x, s && s.y + 1.5, s && s.z);
       A.hold('fire', 'fire_loop', f ? 1 : 0, 1, f && f.x, f && f.y + 1, f && f.z);
     }
+    // the police autogyro
+    A.hold('heli', 'heli_loop', H && H.on ? 1 : 0, 1, H && H.x, H && H.y, H && H.z);
     // airliners: a fly-by recording as each one passes within ~220 m low and fast
     const T = AF.airTraffic;
     if (T && T.visible) for (const fl of T.flights) {
@@ -405,24 +435,68 @@ try {
       if (d < 220 && was >= 220 && (fl.phase === 'takeoff' || fl.phase === 'climb' || fl.phase === 'arrival' || fl.phase === 'go-around' || fl.phase === 'rollout')) A.play('jet_pass', { x: p.x, y: p.y, z: p.z });
       VT.flights.set(fl, d);
     }
-    // footsteps
-    if (mode === 'walk' && AF.player && AF.PL.walk) {
-      const sp = AF.PL.walk.speed || 0, body = AF.player.body;
-      if (sp > 1.2 && body && body.onGround) {
-        VT.stepT -= dt * sp;
-        if (VT.stepT <= 0) { VT.stepT = sp > 7 ? 2.6 : 2.0; VT.stepSide ^= 1; A.play(surface(), { vol: sp > 7 ? 1.25 : 1, rate: 0.92 + Math.random() * 0.16 }); }
-      } else VT.stepT = 0.4;
+  };
+  // 4 Hz: water and machines near the listener (positional loops: they pan and fade with distance on their own)
+  const FALLS = { pts: null }, LAP = { x: 0, y: 0, z: 0, d: 0 }, FOUNTAINS = [P.parkFeatures.fountain, [-41, -44]], WATERS0 = [P.lake];
+  // the nearest point on an elliptical shoreline, kept in LAP when closer than LAP.d
+  const shore = (x, z, cx, cz, rx, rz, wy) => {
+    const ex = (x - cx) / rx, ez = (z - cz) / rz, e = Math.hypot(ex, ez); if (e < 0.01) return;
+    const px = cx + ex / e * rx, pz = cz + ez / e * rz, d = Math.hypot(px - x, pz - z);
+    if (d < LAP.d) { LAP.d = d; LAP.x = px; LAP.y = wy; LAP.z = pz; }
+  };
+  const env = () => {
+    const x = LS.x, y = LS.y, z = LS.z, O = AF.outland, ZOO = P.west.zoo;
+    // brooks + rivers: the zoo's Solace Brook follows the listener along its bed; outland rivers by distance to the bank
+    let sv = 0, sx = null, sz = 0;
+    if (ZOO.brookZ && x > -664 && x < -450 && Math.abs(z + 153) < 45) { sx = AF.clamp(x, -650, -458); sz = ZOO.brookZ(sx); sv = 1; }
+    else if (O && O.riverInfo) { const R = O.riverInfo(x, z); if (R.d < R.hw + 45) sv = (1 - AF.smooth(R.hw, R.hw + 45, R.d)) * (1 - AF.smooth(6, 45, y - R.y)); }
+    A.hold('stream', 'stream_loop', sv, 1, sx, 0, sz);
+    // falling water: every steep river reach (where 49-outland draws white water) and the zoo's spring grotto
+    if (!FALLS.pts && O && O.rivers && O.rivers.length) {
+      FALLS.pts = [{ x: -459.5, y: 1.5, z: -153, v: 0.35, ref: 4 }];
+      for (const R of O.rivers) for (let i = 1; i < R.pts.length; i++) {
+        const a = R.pts[i - 1], b = R.pts[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        if ((R.levels[i - 1] - R.levels[i]) / L <= 0.2) continue;
+        const fx = (a[0] + b[0]) / 2, fz = (a[1] + b[1]) / 2;
+        if (!FALLS.pts.some((f) => Math.hypot(f.x - fx, f.z - fz) < 20)) FALLS.pts.push({ x: fx, y: (R.levels[i - 1] + R.levels[i]) / 2, z: fz, v: 1, ref: 20 });
+      }
     }
+    let fb = null, fbd = 1e9;
+    for (const f of FALLS.pts || []) { const d = Math.hypot(f.x - x, f.z - z); if (d < f.ref * 9 && d < fbd) { fbd = d; fb = f; } }
+    const fh = A.hold('falls', 'falls_loop', fb ? fb.v : 0, 1, fb && fb.x, fb && fb.y, fb && fb.z); if (fh && fb) fh.ref = fb.ref;
+    // fountains: the park's and the civic plaza's
+    let fo = null, fod = 60; for (const f of FOUNTAINS) { const d = Math.hypot(f[0] - x, f[1] - z); if (d < fod) { fod = d; fo = f; } }
+    A.hold('fountain', 'fountain_loop', fo ? 1 : 0, 1, fo && fo[0], 1.5, fo && fo[1]);
+    // lake shores: the nearest point on the nearest shoreline within ~30 m
+    LAP.d = 30;
+    for (const w of (O && O.waters) || WATERS0) shore(x, z, w.cx, w.cz, w.rx, w.rz, w.waterY);
+    shore(x, z, P.pond.cx, P.pond.cz, P.pond.r, P.pond.r, 0.25);
+    A.hold('lap', 'lap_loop', LAP.d < 30 ? 1 : 0, 1, LAP.x, LAP.y, LAP.z);
+    // farm machines working the fields (each kind's nearest), the streetcar, the harbour ferry going by
+    const FM = AF.farms, now = AF.clock.t; let cb = null, cd = 100, tb = null, td = 80;
+    if (FM && FM.movers) for (const m of FM.movers) {
+      if (m.at == null || now - m.at > 1) continue;
+      const d = Math.hypot(m.x - x, m.z - z);
+      if (m.kind === 'combine') { if (d < cd) { cd = d; cb = m; } } else if (d < td) { td = d; tb = m; }
+    }
+    A.hold('combine', 'combine_loop', cb ? 1 : 0, 1, cb && cb.x, cb && cb.y + 2, cb && cb.z);
+    A.hold('tractor', 'tractor_loop', tb ? 1 : 0, 1, tb && tb.x, tb && tb.y + 1.5, tb && tb.z);
+    const TR = AF.train; let tq = null, tqd = 90;
+    if (TR && TR.defs) for (const dd of TR.defs) { const o = dd.obj && dd.obj.position; if (!o) continue; const d = Math.hypot(o.x - x, o.z - z); if (d < tqd) { tqd = d; tq = o; } }
+    const tsp = TR ? Math.abs(TR.speed || 0) : 0;
+    A.hold('tram', 'tram_loop', tq ? 0.25 + Math.min(0.75, tsp / 9) : 0, 0.85 + Math.min(0.35, tsp / 30), tq && tq.x, tq && tq.y + 1, tq && tq.z);
+    const FY = AF.harbour && AF.harbour.ferry, fm = FY && FY.mesh && FY.mesh.position, fyd = fm ? Math.hypot(fm.x - x, fm.z - z) : 1e9;
+    A.hold('ferry-pass', 'boat_loop', fm && fyd < 120 && AF.mode !== 'ferry-ride' ? 0.8 : 0, 0.85, fm && fm.x, 1, fm && fm.z);
   };
 
-  // ---------------------------------------------------------------- tick (positional loops 15 Hz, beds + sprinkles 4 Hz)
+  // ---------------------------------------------------------------- tick (positional loops 15 Hz, beds + sprinkles + water 4 Hz)
   let slowT = 0, fastT = 0, reapT = 0;
   AF.onTick('audio', 965, (dt) => {
     if (!ctx || !A.on || ctx.state !== 'running' || !AF.ready) return;
     listen(dt);
     moves(dt);
-    if ((fastT += dt) >= 1 / 15) { fastT = 0; for (const l of loops) if (!l.owned) l.tick(); for (const h of named.values()) h.tick(); }
-    if ((slowT += dt) >= 0.25) { const s = slowT; slowT = 0; weigh(); bedTick(); sprinkle(s); }
+    if ((fastT += dt) >= 1 / 15) { fastT = 0; scan(); for (const l of loops) if (!l.owned) l.tick(); for (const h of named.values()) h.tick(); }
+    if ((slowT += dt) >= 0.25) { const s = slowT; slowT = 0; weigh(); bedTick(s); sprinkle(s); env(); }
     if ((reapT += dt) > 20) { reapT = 0; reap(); }
   });
 

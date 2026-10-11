@@ -1369,6 +1369,7 @@ try {
       let vd = (id * 7 + (id >> 3)) % nd; if (CR.V[vd].kid && r() < 0.5) vd = (vd + 1) % nd;
       const g = { id, gww, vd, vn: nn > 0 ? nd + (id * 3 + (id >> 2)) % nn : vd, lat: -0.55 + r() * 1.1, s: 0.88 + r() * 0.24, width: 0.88 + r() * 0.25, grp: null, fol: null,
         eve: Math.abs(mx) < 35 && mz > 4 && mz < 165, stamp: 0, d2: 0, tl: null, tlGen: -1, slot: null, v: 1.2, nodes: null };
+      const ZW = PL.west && PL.west.zoo; if (ZW && mx > ZW.x0 && mx < ZW.x1 && mz > ZW.z0 && mz < ZW.z1) g.zoo = true;   // visitors keep the zoo's hours
       // company: one in twelve walks as a couple / parent and child / friends / arm in arm; a wheelchair user every ~45
       if (id % 12 === 0 && SP.coupleM !== undefined) {
         switch ((id / 12) % 6) {
@@ -1443,6 +1444,7 @@ try {
   CR.evalWalker = evalWalker;
   // who is out at this hour (by the shared clock): everyone by day, fewer late, extra strollers on Grand in the evening
   const activeAt = (g, h, nightW) => {
+    if (g.zoo) { const Z = PL.west && PL.west.zoo; if (Z && Z.isOpen && !Z.isOpen(h)) return false; }
     if (g.gww) return nightW && !(h >= 23 || h < 5);
     const f = h < 5 || h >= 23 ? 0.45 : nightW ? (g.eve ? 0.8 : 0.6) : h < 8 ? 0.75 : 1;
     return f >= 1 || AF.whash(g.id, 31) < f;
@@ -1578,6 +1580,7 @@ try {
     if (s.vendor) return true;   // kiosk + carnival staff never leave their counter
     const id = (s.building || '') + ' ' + (s.kind || ''), q = hash(s);
     if (spotsTaken.has(s) || (CR.benchTaken && CR.benchTaken.has(s))) return false;
+    if (/^zoo/.test(s.building || '')) { const Z = PL.west && PL.west.zoo; if (Z && Z.isOpen && !Z.isOpen(h)) return false; if (/counter|work/.test(s.kind)) return q < 0.95; }
     if (/school/.test(id)) return h >= 8 && h < 15.2 && q < 0.85;
     if (/bank|trust/.test(id)) return h >= 9 && h < 15.5 ? q < 0.85 : /work/.test(s.kind) && h < 18 && q < 0.4;
     if (/heron|rosewood|roseland|ballroom|club|bar|anchor|dance/.test(id)) return h >= 20 || h < 2 ? q < 0.95 : q < 0.45;

@@ -516,6 +516,7 @@ AF.onTick('farm-machines', 333, (dt) => {
     const i = mover.seg, f = (mover.s - cum[i]) / Math.max(1e-4, cum[i + 1] - cum[i]), x0 = p[i * 3], z0 = p[i * 3 + 2], x1 = p[i * 3 + 3], z1 = p[i * 3 + 5];
     mover.yaw += AF.angDiff(mover.yaw, Math.atan2(x1 - x0, z1 - z0)) * Math.min(1, dt * 2.5);
     const px = x0 + (x1 - x0) * f, py = p[i * 3 + 1] + (p[i * 3 + 4] - p[i * 3 + 1]) * f - 0.05, pz = z0 + (z1 - z0) * f;
+    mover.x = px; mover.y = py; mover.z = pz; mover.at = AF.clock.t;   // 75-audio's engine sound
     moverSphere.center.set(px, py + 2, pz); moverSphere.radius = 6; if (!moverFrustum.intersectsSphere(moverSphere)) continue;
     nearest = Math.min(nearest, (px - cp.x) ** 2 + (pz - cp.z) ** 2);
     const e = batch.mesh.instanceMatrix.array, o = batch.n++ * 16, c = Math.cos(mover.yaw), s = Math.sin(mover.yaw);

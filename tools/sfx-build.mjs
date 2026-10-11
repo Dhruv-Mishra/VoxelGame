@@ -1,5 +1,6 @@
 // Fetch + compress the game's sounds into assets/sfx/*.mp3 (CC0 / public-domain sources only; credits -> assets/sfx/CREDITS.txt).
-// `node tools/sfx-build.mjs [--only=id,id] [--force] [--list]`. Needs ffmpeg (with libmp3lame + libflite) and curl on PATH.
+// `node tools/sfx-build.mjs [--only=id,id] [--force] [--reencode] [--list]`. Needs ffmpeg (with libmp3lame + libflite) and curl on PATH.
+// --force searches Freesound again; --reencode rebuilds every output from the cached picks + downloads (encoder / level changes).
 // Sources: Kenney audio packs (CC0), Freesound previews of CC0-licensed sounds (licence checked on each sound page), and lines
 // spoken by ffmpeg's built-in flite synthesiser (PA announcements, crew radio). Loops are cut with an equal-power crossfade so the
 // end flows into the start; the game trims MP3 encoder padding at load time.
@@ -10,7 +11,7 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace
 const TMP = path.join(ROOT, 'tools/tmp-sfx'), RAW = path.join(TMP, 'raw'), KEN = path.join(TMP, 'kenney'), OUT = path.join(ROOT, 'assets/sfx');
 for (const d of [TMP, RAW, KEN, OUT]) fs.mkdirSync(d, { recursive: true });
 const arg = (k) => { const a = process.argv.find((s) => s.startsWith('--' + k + '=')); return a ? a.slice(k.length + 3) : null; };
-const ONLY = arg('only') ? new Set(arg('only').split(',')) : null, FORCE = process.argv.includes('--force');
+const ONLY = arg('only') ? new Set(arg('only').split(',')) : null, FORCE = process.argv.includes('--force'), REENC = process.argv.includes('--reencode');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sh = (cmd, args, o = {}) => execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20, ...o }).toString();
@@ -84,8 +85,10 @@ async function fsPick(id, queries, d, o) {
 // ---------------------------------------------------------------- the list
 // ['id', 'fs', query | [queries], [minDur, maxDur], opts] | ['id', 'kn', 'pack/name', opts] | ['id', 'tts', text, opts]
 // opts: loop (s) = seamless loop of that length · max (s) = cut + fade · off (s) = start offset · rate (Hz) · kbps · af = extra filter
-//       gain (dB) · skip = take the nth result · voice / fx ('pa' | 'radio' | 'megaphone') for tts
-const ONE = { rate: 44100, kbps: 64 }, BED = { rate: 32000, kbps: 48 };
+//       gain (dB) · skip = take the nth result · same = reuse another id's pick · voice / fx ('pa' | 'radio' | 'megaphone') for tts
+// Mono MP3 throughout (Safari-safe). One-shots 32 kHz / 48 kbps; loops + beds 24 kHz / 40 kbps (steady noise-like material, the
+// longest files); voice lines 16 kHz / 24 kbps (band-passed to ~3.6 kHz anyway).
+const ONE = { rate: 32000, kbps: 48 }, BED = { rate: 24000, kbps: 40 }, VOICE = ['-ac', '1', '-ar', '16000', '-c:a', 'libmp3lame', '-b:a', '24k'];
 const LIST = [
   // weapons + fights
   ['gun_rev', 'fs', ['revolver shot', 'pistol shot'], [0.3, 4], { max: 1.6, want: /magnum revolver gunshot|revolver.*gunshot/i }],
@@ -121,7 +124,7 @@ const LIST = [
   ['door_car', 'fs', ['car door close', 'car door slam'], [0.2, 2], { max: 0.9 }],
   ['bike_bell', 'fs', ['bicycle bell', 'bike bell'], [0.2, 2], { max: 1.2 }],
   ['prop_loop', 'fs', ['propeller engine loop', 'airplane cockpit engine', 'propeller plane engine'], [3, 120], { loop: 2.6, ...BED }],
-  ['jet_pass', 'fs', ['airplane flyby', 'airplane passing', 'plane flyover'], [3, 25], { max: 12 }],
+  ['jet_pass', 'fs', ['airplane flyby', 'airplane passing', 'plane flyover'], [3, 25], { max: 9 }],
   ['boat_loop', 'fs', ['boat engine', 'outboard motor', 'motorboat'], [4, 120], { loop: 3, ...BED }],
   ['jetski_loop', 'fs', ['jet ski', 'jetski', 'outboard motor'], [3, 120], { loop: 3, ...BED, skip: 0 }],
   ['ship_horn', 'fs', ['ship horn', 'boat horn', 'foghorn'], [1, 9], { max: 5.5, want: /cruise|ship horn/i }],
@@ -130,19 +133,31 @@ const LIST = [
   ['wind_loop', 'fs', ['wind rushing', 'wind howling', 'strong wind'], [5, 120], { loop: 6, ...BED }],
   ['splash', 'fs', ['water splash', 'splash'], [0.3, 3], { max: 1.6 }],
   ['chute', 'fs', ['parachute open', 'cloth flap', 'flag flapping'], [0.3, 4], { max: 1.2 }],
-  // ambience beds
-  ['amb_city', 'fs', ['city ambience traffic', 'city street ambience'], [20, 600], { loop: 16, off: 4, ...BED, want: /street|traffic/i, not: /subway|saw|surround|fantasy/i }],
-  ['amb_crowd', 'fs', ['crowd walla', 'crowd murmur', 'people talking crowd'], [10, 600], { loop: 12, off: 3, ...BED }],
-  ['amb_park', 'fs', ['birds park ambience', 'birdsong park'], [20, 600], { loop: 16, off: 3, ...BED }],
-  ['amb_sea', 'fs', ['ocean waves', 'sea waves beach'], [20, 600], { loop: 16, off: 4, ...BED }],
-  ['amb_harbour', 'fs', ['harbor seagulls', 'harbour ambience', 'port ambience seagulls'], [10, 600], { loop: 14, off: 3, ...BED }],
-  ['amb_wind', 'fs', ['wind field ambience', 'wind meadow', 'wind ambience'], [10, 600], { loop: 14, off: 3, ...BED }],
-  ['amb_night', 'fs', ['crickets night', 'night crickets'], [10, 600], { loop: 12, off: 3, ...BED }],
-  ['amb_forest', 'fs', ['forest birds ambience', 'forest ambience birds'], [20, 600], { loop: 16, off: 4, ...BED, want: /bird|forest/i }],
-  ['amb_carnival', 'fs', ['carousel music', 'fairground organ', 'calliope', 'music box'], [10, 600], { loop: 22, off: 2, ...BED }],
-  ['amb_casino', 'fs', ['casino ambience', 'slot machines casino'], [10, 600], { loop: 16, off: 3, ...BED }],
-  ['amb_airport', 'fs', ['airport terminal ambience', 'airport ambience'], [10, 600], { loop: 14, off: 3, ...BED }],
-  ['amb_room', 'fs', ['room tone', 'room tone interior'], [5, 600], { loop: 8, off: 1, ...BED }],
+  // rushing air (freefall + canopy share the wind family), running water, farm machines, the streetcar
+  ['fall_loop', 'fs', ['wind buffeting', 'wind tunnel', 'wind roar', 'wind noise microphone'], [3, 300], { loop: 4, ...BED, not: /music|voice|synth|whoosh|tree|forest|bird/i }],
+  ['canopy_loop', 'fs', ['flag flapping wind', 'tarp flapping wind', 'parachute flapping'], [3, 300], { loop: 3, ...BED, not: /music|voice|synth/i }],
+  ['stream_loop', 'fs', ['stream river water up close', 'brook babbling', 'creek water'], [10, 600], { loop: 10, off: 2, ...BED, want: /stream|brook|creek|river/i, not: /rain|music|synth|droplet/i }],
+  ['falls_loop', 'fs', ['waterfall'], [10, 600], { loop: 8, off: 2, ...BED, not: /drip|cave|music|synth/i }],
+  ['fountain_loop', 'fs', ['water fountain', 'fountain splashing'], [8, 600], { loop: 8, off: 2, ...BED, want: /fountain/i, not: /drinking|music/i }],
+  ['lap_loop', 'fs', ['water lapping shore', 'lake lapping', 'water lapping'], [8, 600], { loop: 10, off: 2, ...BED, not: /music|synth/i }],
+  ['step_water_0', 'fs', ['wading through water', 'walking through water', 'water footsteps', 'wading'], [2.5, 60], { max: 0.6, want: /wad|water|splash/i, not: /music|swim|sand/i }],
+  ['step_water_1', 'fs', ['wading through water', 'walking through water', 'water footsteps', 'wading'], [2.5, 60], { max: 0.6, off: 1.1, want: /wad|water|splash/i, not: /music|swim|sand/i, same: 'step_water_0' }],
+  ['tractor_loop', 'fs', ['tractor engine', 'diesel tractor', 'tractor idle'], [3, 300], { loop: 3, ...BED, want: /tractor/i, not: /toy|horn/i }],
+  ['combine_loop', 'fs', ['combine harvester', 'harvester'], [3, 600], { loop: 4, ...BED, want: /combine|harvest/i, not: /toy|music/i }],
+  ['tram_loop', 'fs', ['erilee int tram', 'tram interior'], [8, 600], { loop: 4, off: 6, ...BED, want: /tram|streetcar|trolley/i, not: /bell|announcement|passing|intersection|walla|stops|entering/i }],
+  // ambience beds: steady material short (10–12 s), event-rich material (birds, music) longer so repeats are not obvious
+  ['amb_city', 'fs', ['city ambience traffic', 'city street ambience'], [20, 600], { loop: 12, off: 4, ...BED, want: /street|traffic/i, not: /subway|saw|surround|fantasy/i }],
+  ['amb_crowd', 'fs', ['crowd walla', 'crowd murmur', 'people talking crowd'], [10, 600], { loop: 10, off: 3, ...BED }],
+  ['amb_park', 'fs', ['birds park ambience', 'birdsong park'], [20, 600], { loop: 14, off: 3, ...BED }],
+  ['amb_sea', 'fs', ['ocean waves', 'sea waves beach'], [20, 600], { loop: 12, off: 4, ...BED }],
+  ['amb_harbour', 'fs', ['harbor seagulls', 'harbour ambience', 'port ambience seagulls'], [10, 600], { loop: 12, off: 3, ...BED }],
+  ['amb_wind', 'fs', ['wind field ambience', 'wind meadow', 'wind ambience'], [10, 600], { loop: 10, off: 3, ...BED }],
+  ['amb_night', 'fs', ['crickets night', 'night crickets'], [10, 600], { loop: 10, off: 3, ...BED }],
+  ['amb_forest', 'fs', ['forest birds ambience', 'forest ambience birds'], [20, 600], { loop: 14, off: 4, ...BED, want: /bird|forest/i }],
+  ['amb_carnival', 'fs', ['carousel music', 'fairground organ', 'calliope', 'music box'], [10, 600], { loop: 20, off: 2, ...BED }],
+  ['amb_casino', 'fs', ['casino ambience', 'slot machines casino'], [10, 600], { loop: 12, off: 3, ...BED }],
+  ['amb_airport', 'fs', ['airport terminal ambience', 'airport ambience'], [10, 600], { loop: 12, off: 3, ...BED }],
+  ['amb_room', 'fs', ['room tone', 'room tone interior'], [5, 600], { loop: 6, off: 1, ...BED }],
   ['amb_jungle', 'fs', ['jungle ambience', 'tropical birds ambience', 'rainforest ambience'], [10, 600], { loop: 14, off: 3, ...BED, want: /daytime|bako|tropical|birds/i, not: /alien|sci-?fi|fantasy|planet/i }],
   ['amb_frogs', 'fs', ['frogs night', 'frogs pond'], [5, 600], { loop: 10, off: 2, ...BED, want: /frogs at night|frogs/i, not: /dog|donkey/i }],
   // animals
@@ -221,7 +236,7 @@ const maxDb = (f) => {
 const enc = (o) => ['-ac', '1', '-ar', String(o.rate || ONE.rate), '-c:a', 'libmp3lame', '-b:a', (o.kbps || ONE.kbps) + 'k'];
 function finish(src, id, o) {
   const out = path.join(OUT, id + '.mp3'), tmp = path.join(TMP, id + '.wav');
-  const len = dur(src), pre = [];
+  const len = dur(src), pre = ['highpass=f=35'];
   if (o.af) pre.push(o.af);
   if (o.loop) {
     const L = Math.min(o.loop, len - 0.2), X = Math.min(1.5, Math.max(0.2, L * 0.15)), off = Math.min(o.off ?? Math.min(1, len * 0.1), Math.max(0, len - L - X - 0.05));
@@ -232,9 +247,11 @@ function finish(src, id, o) {
     // loudness-matched beds (EBU R128 single pass is fine for steady ambience)
     ff(['-i', tmp, '-af', 'loudnorm=I=-21:TP=-2:LRA=9', ...enc(o), out]);
   } else {
-    const max = o.max || 6, chain = [...pre, 'aformat=channel_layouts=mono', 'silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.005', 'areverse', 'silenceremove=start_periods=1:start_threshold=-52dB', 'areverse', `atrim=0:${max}`];
+    const max = o.max || 6, chain = [...(o.off ? [`atrim=start=${o.off}`, 'asetpts=N/SR/TB'] : []), ...pre, 'aformat=channel_layouts=mono', 'silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.005', 'areverse', 'silenceremove=start_periods=1:start_threshold=-52dB', 'areverse', `atrim=0:${max}`];
     ff(['-i', src, '-af', chain.join(','), tmp]);
-    const L = dur(tmp), fade = Math.min(0.25, L * 0.2), v = maxDb(tmp), gain = -1 - v.max + (o.gain || 0);
+    // one loudness family: peaks at -1 dBFS, except long dense sounds (horns, jingles, calls) whose RMS is held to -14 dB.
+    // Short hits stay peak-normalised: a 50 ms footstep has a high RMS but sounds quiet (the ear integrates over ~200 ms).
+    const L = dur(tmp), fade = Math.min(0.25, L * 0.2), v = maxDb(tmp), gain = (L >= 0.5 ? Math.min(-1 - v.max, -14 - v.mean) : -1 - v.max) + (o.gain || 0);
     ff(['-i', tmp, '-af', `afade=t=out:st=${Math.max(0, L - fade).toFixed(3)}:d=${fade.toFixed(3)},volume=${gain.toFixed(2)}dB`, ...enc(o), out]);
   }
   fs.rmSync(tmp, { force: true });
@@ -248,12 +265,12 @@ function tts(id, text, o) {
   if (o.fx === 'pa') {
     if (!fs.existsSync(chime)) ff(['-f', 'lavfi', '-i', "aevalsrc=exprs='0.45*sin(2*PI*784*t)*exp(-2.6*t)*lt(t,0.55)+0.45*sin(2*PI*622*(t-0.5))*exp(-2.2*(t-0.5))*gte(t,0.5)':d=1.6:s=22050", chime]);
     fx = `[1:a]highpass=f=320,lowpass=f=3600,acompressor=threshold=-18dB:ratio=3,aecho=0.8:0.55:90|230:0.32|0.18,volume=1.6[v];[0:a][v]concat=n=2:v=0:a=1,apad=pad_dur=0.6[o]`;
-    ff(['-i', chime, '-i', voice, '-filter_complex', fx, '-map', '[o]', '-ac', '1', '-ar', '22050', '-c:a', 'libmp3lame', '-b:a', '32k', out]);
+    ff(['-i', chime, '-i', voice, '-filter_complex', fx, '-map', '[o]', ...VOICE, out]);
   } else if (o.fx === 'radio') {
     fx = `[0:a]highpass=f=480,lowpass=f=2900,acrusher=bits=10:mix=0.4,acompressor=threshold=-20dB:ratio=4,volume=1.8[v];anoisesrc=d=0.18:c=white:a=0.12:r=22050,highpass=f=900,lowpass=f=4000[n];[v][n]concat=n=2:v=0:a=1[o]`;
-    ff(['-i', voice, '-filter_complex', fx, '-map', '[o]', '-ac', '1', '-ar', '22050', '-c:a', 'libmp3lame', '-b:a', '32k', out]);
+    ff(['-i', voice, '-filter_complex', fx, '-map', '[o]', ...VOICE, out]);
   } else {
-    ff(['-i', voice, '-af', 'highpass=f=650,lowpass=f=3200,acrusher=bits=8:mix=0.25,aecho=0.7:0.4:60:0.3,volume=2', '-ac', '1', '-ar', '22050', '-c:a', 'libmp3lame', '-b:a', '32k', out]);
+    ff(['-i', voice, '-af', 'highpass=f=650,lowpass=f=3200,acrusher=bits=8:mix=0.25,aecho=0.7:0.4:60:0.3,volume=2', ...VOICE, out]);
   }
   fs.rmSync(tf, { force: true }); fs.rmSync(voice, { force: true });
   return out;
@@ -279,7 +296,7 @@ for (const [id, kind, src, a, b] of LIST) {
   if (ONLY && !ONLY.has(id)) { if (prev[id]) credits.push(prev[id]); continue; }
   const out = path.join(OUT, id + '.mp3');
   try {
-    if (fs.existsSync(out) && !FORCE && prev[id]) { credits.push(prev[id]); bytes += fs.statSync(out).size; continue; }
+    if (fs.existsSync(out) && !FORCE && !REENC && prev[id]) { credits.push(prev[id]); bytes += fs.statSync(out).size; continue; }
     let line;
     if (kind === 'kn') {
       const [pack, name] = src.split('/'); finish(kenFile(pack, name), id, Object.assign({}, ONE, a || {}));

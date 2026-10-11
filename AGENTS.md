@@ -14,8 +14,9 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   (`vercel.json`; `.vercelignore` ships only the HTML, `assets/` and config).
 - World map = baked images in `assets/` (`node tools/map-bake.mjs`, server running, `playwright` resolvable); re-bake after
   terrain / road / building edits.
-- Sounds = `assets/sfx/*.mp3` + `CREDITS.txt`, built by `node tools/sfx-build.mjs [--list] [--only=a,b] [--force]` (Freesound CC0
-  picks, Kenney packs, flite TTS for PA / radio lines; needs ffmpeg + flite; caches in `tools/tmp-sfx/`). Ids are wired in 75's `LIB`.
+- Sounds = `assets/sfx/*.mp3` + `CREDITS.txt`, built by `node tools/sfx-build.mjs [--list] [--only=a,b] [--force] [--reencode]` (Freesound CC0
+  picks, Kenney packs, flite TTS for PA / radio lines; needs ffmpeg + flite; caches in `tools/tmp-sfx/`; `--reencode` rebuilds every
+  file from the cached sources after an encoder / level change). Ids are wired in 75's `LIB`.
 - Co-op signaling = Cloudflare Worker + Durable Object in `signal/` (`npx wrangler@4 deploy` from `signal/`). Its URL is `SIGNAL` in
   `79-net.js`; game origins must match `ALLOWED_ORIGINS` in `signal/wrangler.toml`. Optional TURN: `wrangler secret put
   TURN_KEY_ID` / `TURN_KEY_API_TOKEN`. The build stamps `'%%BUILD_HASH%%'`; hosts reject guests on another build.
@@ -40,7 +41,9 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   02 voxels, region LOD, mesher workers · 03 renderer, tiers, LOD table, resolution · 04 `AF.Vehicle` base class ·
   60 atmosphere · 61 post (bloom, AO, grade, upscale) · 62 water · 63 sky.
 - World: 05 plan · 07 outland height/colour + tile mesher (workers) · 10 terrain/coast · 11 streets · 12 nature ·
-  13–43 districts · 44-farms/flora/island/sites/wayside · 45 friends colony · 46 zoo · 47 airfield · 48 sea ·
+  13–43 districts · 44-farms/flora/island/sites/wayside · 45 friends colony · 46 zoo (`ZOO.hours` 8–22, `AF.zoo.feed/feedAt/lure`) ·
+  46-zoo-visit (paw-print trails + arrows, fingerposts, trail board, ticket booth attendant, feeding stations, keepers on the
+  feeding schedule, closing time, passport stamps in `AF.save.zoo`) · 47 airfield · 48 sea ·
   48-liner (SS Solace Queen off the Pleasure Pier: walkable hull model + colliders, Grand Casino, Gilded Room, purser's cage +
   vault doors `AF.liner.openVault/openStaff`, Starlight Lounge, sun deck, gangway, pontoon; `AF.liner.where/tables/spots`) ·
   49 outland quadtree · 49-roads.
