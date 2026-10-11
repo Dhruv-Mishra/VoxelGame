@@ -14,6 +14,8 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   (`vercel.json`; `.vercelignore` ships only the HTML, `assets/` and config).
 - World map = baked images in `assets/` (`node tools/map-bake.mjs`, server running, `playwright` resolvable); re-bake after
   terrain / road / building edits.
+- Sounds = `assets/sfx/*.mp3` + `CREDITS.txt`, built by `node tools/sfx-build.mjs [--list] [--only=a,b] [--force]` (Freesound CC0
+  picks, Kenney packs, flite TTS for PA / radio lines; needs ffmpeg + flite; caches in `tools/tmp-sfx/`). Ids are wired in 75's `LIB`.
 - Co-op signaling = Cloudflare Worker + Durable Object in `signal/` (`npx wrangler@4 deploy` from `signal/`). Its URL is `SIGNAL` in
   `79-net.js`; game origins must match `ALLOWED_ORIGINS` in `signal/wrangler.toml`. Optional TURN: `wrangler secret put
   TURN_KEY_ID` / `TURN_KEY_API_TOKEN`. The build stamps `'%%BUILD_HASH%%'`; hosts reject guests on another build.
@@ -39,14 +41,19 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   60 atmosphere · 61 post (bloom, AO, grade, upscale) · 62 water · 63 sky.
 - World: 05 plan · 07 outland height/colour + tile mesher (workers) · 10 terrain/coast · 11 streets · 12 nature ·
   13–43 districts · 44-farms/flora/island/sites/wayside · 45 friends colony · 46 zoo · 47 airfield · 48 sea ·
+  48-liner (SS Solace Queen off the Pleasure Pier: walkable hull model + colliders, Grand Casino, Gilded Room, purser's cage +
+  vault doors `AF.liner.openVault/openStaff`, Starlight Lounge, sun deck, gangway, pontoon; `AF.liner.where/tables/spots`) ·
   49 outland quadtree · 49-roads.
 - Actors: 50 vehicles · 51 traffic · 52 planes · 53 air traffic · 54 path walkers · 55 pedestrians · 56 animals ·
   56-wild outland fauna · 57 friends (cast, dialogue).
 - Player/UI: 70 avatar + walk/aerial · 71 UI (title, HUD, menu, dialogue) · 72 touch · 74 map (`map.overlays`, `map.miniOverlays`) ·
-  75 extras (photo mode `P`, Solace Stars collectibles) · 98 tests · 99 boot.
+  75 extras (photo mode `P`, Solace Stars collectibles) · 75-audio (`AF.audio`: samples, loops, zone ambience beds, footsteps,
+  vehicles, PA; `play(id, {x,y,z})`, `hold(key, id, vol, rate, x, y, z)`) · 98 tests · 99 boot.
 - Gameplay: 76 core (`AF.G` tuning, `AF.save`, money, health/death, `AF.shop` sheet, `AF.fx` particles, `AF.sfx`, `AF.hud`,
   forget policy) · 77 combat (weapons, engaged peds, run-overs, police/wanted, autogyro, vehicle damage) · 78 jobs (jobs,
-  counters, Body Works / Motor Exchange zones, carnival games, carousel, wardrobe, Westgate boarding pass).
+  counters, Body Works / Motor Exchange zones, carnival games, carousel, wardrobe, Westgate check-in) · 78-casino (`AF.casino`:
+  slots, roulette, blackjack, craps, baccarat at the liner's tables) · 81 heist (`AF.heist`: "The Harbour Trust Job", a co-op
+  story mission from Vera at the Blue Heron — plane, island, mob ambush, jet skis, casino lift, night bank stealth, getaway).
 - Co-op: 79 net (`AF.net`: lobby, WebRTC links, reliable `send/on`, binary `fast/onFast`) · 80 coop (`AF.coop`: snapshots,
   remote avatars / vehicles / peds, `passenger` mode, hit forwarding, tags, lobby UI).
 
@@ -55,7 +62,9 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   outfits, a look per friend) is the only persisted game state; everything else is forgotten (runtime cars `car.temp` →
   `VV.forget` back to their kerb, engaged peds calm down past `G.pedForgetD`, wrecks after `G.wreckS`).
 - Peds stay bare crowd instances until touched: `w.agg` (77 `engage`) makes 55's crowd tick call `AF.combat.stepPed`;
-  `CB.release` returns them. Cops = 8 pooled walkers in the `cop` look. Kids / wheelchair users only ever flee.
+  `CB.release` returns them. Cops = 8 pooled walkers in the `cop` look; the mob = 8 pooled `goon` walkers (`CB.spawnGoon/goons/
+  clearGoons`: hostile without a wanted level, no heat). Kids / wheelchair users only ever flee. The player starts with bare fists
+  (weapon slot 0); a friend's signature melee and bought guns follow.
 - Vehicles: `car.hp` → `car.dmg` (instanced `carDmg` attribute in the car paint shader); impacts arrive via `VV.onImpact`.
   The player always sits in the vehicle (`AF.Vehicle.seat`, `VV.seatLocal`). Camera distance is `AF.view` (C cycles
   first person / near / far) for walk, chase cams and planes — no wheel zoom.
@@ -64,7 +73,10 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Keys: Q / click attack, Z / right mouse aim, wheel / 1–5 / X weapon (hold X = weapon wheel), R reload, C camera, J job. Touch (72):
   stick to the rim runs; one context cluster bottom-right (big primary + ≤ 3 secondaries chosen per mode / weapon, `AF.touchUI`) +
   CAM / JOB utilities; WPN tap = next weapon, hold = the wheel (`AF.combat.wheelOpen/wheelAim/wheelClose`).
-- Path walkers (54: airport, outland, island) react via `AF.walkers.near/knock/stagger/scare/isDown` (77 bumps, hits, run-overs, panic).
+- Path walkers (54: airport, outland, island, liner, heist guards) react via `AF.walkers.near/knock/stagger/scare/isDown` (77 bumps,
+  hits, run-overs, panic); `CB.onWalkerHit(a, kind)` returning true swallows a hit (the heist's takedowns).
+- Missions (81): steps with checkpoints; `AF.respawnAt()` (76) lets a mission wake a knocked-out player at its checkpoint.
+  Modal overlays (`AF.shop`, the casino panel `UI.state.casino`) count in `UI.modalOpen()`; Escape closes them.
 
 ## Co-op (79–80)
 - Star around the host (slot 0, guests 1–3) over WebRTC; the Worker only brokers the join. The host relays and stamps `from`;

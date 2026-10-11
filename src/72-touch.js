@@ -99,7 +99,7 @@ try {
       if (m === 'walk') {
         const gal = CB && CB.gallery, gun = CB && (gal || CB.gun());
         if (HUD && HUD.meterOn && HUD.meterOn()) act.push('stop');
-        else { act.push(gun ? 'fire' : 'hit', 'jump'); if (gun && !gal) act.push('aim'); if (!gal && hasGuns()) act.push('wpn'); }
+        else { act.push(gun ? 'fire' : 'hit', 'jump'); if (gun && !gal) act.push('aim'); if (!gal && (hasGuns() || (CB.owned && CB.owned().length > 1))) act.push('wpn'); }
       } else if (m === 'drive') act.push('brake', 'exit');
       else if (m === 'fly') { const pl = AF.planes && AF.planes.cur; act.push('thrU', 'thrD', 'fexit'); if (pl && pl.onGround) act.push('wbrake'); }
       else if (m === 'aerial') act.push('walk');
@@ -175,7 +175,7 @@ try {
       try {
         if (AF.mode !== 'walk') AF.setMode('walk', {});
         CB.slot = 0; sync(); const fists = act[0] === 'hit' && !act.includes('aim');
-        S.guns.revolver = true; CB.slot = 1; sync(); const gun = act[0] === 'fire' && act.includes('aim') && act.includes('wpn');
+        S.guns.revolver = true; CB.slot = CB.owned().indexOf('revolver'); sync(); const gun = act[0] === 'fire' && act.includes('aim') && act.includes('wpn');
         const max = act.length <= 4;
         return { ok: fists && gun && max && B.fire.classList.contains('s0'), info: `fists ${fists}, gun ${gun}, <=4 ${max}: ${act.join()}` };
       } finally { CB.slot = slot; if (!had) delete S.guns.revolver; if (was && was !== AF.mode) AF.setMode(was); sync(); }

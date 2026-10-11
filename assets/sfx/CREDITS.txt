@@ -1,0 +1,158 @@
+Port Solace sound credits. Every sound is CC0 / public domain or generated for this game; thank you to the authors.
+
+gun_rev: "357 Magnum Revolver Gunshot with Tail" by Shark_Anthony — CC0 — https://freesound.org/people/Shark_Anthony/sounds/683175/
+gun_shotgun: "Shotgun Shot" by LeMudCrab — CC0 — https://freesound.org/people/LeMudCrab/sounds/163455/
+gun_smg: "Single Pistol Gunshot 3.wav" by morganpurkis — CC0 — https://freesound.org/people/morganpurkis/sounds/385811/
+gun_rifle: "Rifle Gun Shot 02.wav" by LilMati — CC0 — https://freesound.org/people/LilMati/sounds/484036/
+gun_reload: "Machine gun reload" by SamsterBirdies — CC0 — https://freesound.org/people/SamsterBirdies/sounds/363168/
+gun_dry: "A rifle being dry fired once" by serøutōnin--deprivəd — CC0 — https://freesound.org/people/serøutōnin--deprivəd/sounds/725402/
+ricochet: "bullet ricochet.wav" by aust_paul — CC0 — https://freesound.org/people/aust_paul/sounds/30932/
+bullet_hit: "bullet zip and hit.wav" by TheLittleCrow — CC0 — https://freesound.org/people/TheLittleCrow/sounds/496509/
+punch_0: Kenney "impact" pack, impactPunch_medium_000 — CC0 (kenney.nl)
+punch_1: Kenney "impact" pack, impactPunch_medium_001 — CC0 (kenney.nl)
+punch_2: Kenney "impact" pack, impactPunch_heavy_002 — CC0 (kenney.nl)
+swing: "Swing Woosh" by Jofae — CC0 — https://freesound.org/people/Jofae/sounds/389590/
+grunt_m: "Voice_AdultMale_PainGrunts_09.wav" by MrFossy — CC0 — https://freesound.org/people/MrFossy/sounds/547209/
+grunt_f: "Ouch !" by Legnalegna55 — CC0 — https://freesound.org/people/Legnalegna55/sounds/547344/
+scream_f: "woman scream.wav" by starnezio — CC0 — https://freesound.org/people/starnezio/sounds/609973/
+scream_m: "Wounded man scream" by joseppujol — CC0 — https://freesound.org/people/joseppujol/sounds/221544/
+whistle: "police whistle nearby good detail and echo India.flac" by kyles — CC0 — https://freesound.org/people/kyles/sounds/451464/
+boom: "Explosion 1.wav" by Deganoth — CC0 — https://freesound.org/people/Deganoth/sounds/165911/
+boom_far: "Explosion 1.wav" by Deganoth — CC0 — https://freesound.org/people/Deganoth/sounds/165911/
+crash: "Car Crash" by squareal — CC0 — https://freesound.org/people/squareal/sounds/237375/
+crash_light: Kenney "impact" pack, impactMetal_heavy_001 — CC0 (kenney.nl)
+glass: Kenney "impact" pack, impactGlass_heavy_000 — CC0 (kenney.nl)
+fire_loop: "Fire Crackling 01.wav" by kingsrow — CC0 — https://freesound.org/people/kingsrow/sounds/181563/
+siren_loop: "Wail and Yelp.mp3" by WBJB1 — CC0 — https://freesound.org/people/WBJB1/sounds/223824/
+alarm_loop: "fire alarm bell" by msx2plus — CC0 — https://freesound.org/people/msx2plus/sounds/678345/
+heli_loop: "Helicopter Rotor Loop.flac" by qubodup — CC0 — https://freesound.org/people/qubodup/sounds/187681/
+eng_idle: "car idle" by seth-m — CC0 — https://freesound.org/people/seth-m/sounds/269771/
+eng_run: "Sedan engine loop" by Dmitry_mansurev64 — CC0 — https://freesound.org/people/Dmitry_mansurev64/sounds/748027/
+eng_start: "Car Start" by snakebarney — CC0 — https://freesound.org/people/snakebarney/sounds/138099/
+horn: "Mini Klaxon Horn "Ahooga" sound" by Mastersoundboy2005 — CC0 — https://freesound.org/people/Mastersoundboy2005/sounds/719876/
+skid: "Tires Squeaking.aif" by RutgerMuller — CC0 — https://freesound.org/people/RutgerMuller/sounds/104026/
+door_car: "Car_Door_Closing_Dull_04" by BlondPanda — CC0 — https://freesound.org/people/BlondPanda/sounds/778421/
+bike_bell: "Bike Bell.wav" by bsumusictech — CC0 — https://freesound.org/people/bsumusictech/sounds/81875/
+prop_loop: "Prop Plane" by Mozfoo — CC0 — https://freesound.org/people/Mozfoo/sounds/440163/
+jet_pass: "Airplane Flyby" by oscaraudiogeek — CC0 — https://freesound.org/people/oscaraudiogeek/sounds/431206/
+boat_loop: "River boat with outboard engine (bow breaking through water)" by nomadas — CC0 — https://freesound.org/people/nomadas/sounds/690162/
+jetski_loop: "Jetski.wav" by wjauch — CC0 — https://freesound.org/people/wjauch/sounds/212441/
+ship_horn: "ship horn very close" by tierrafilm@gmail.com — CC0 — https://freesound.org/people/tierrafilm@gmail.com/sounds/420716/
+tram_bell: "11-3 Tram bell" by 16HPanskaWillheimova_Sara — CC0 — https://freesound.org/people/16HPanskaWillheimova_Sara/sounds/497561/
+train_whistle: "Steam Whistle.mp3" by Bidone — CC0 — https://freesound.org/people/Bidone/sounds/71778/
+wind_loop: "WIND, Wind through Wheatfield.wav" by Uganda — CC0 — https://freesound.org/people/Uganda/sounds/38976/
+splash: "Water Splash" by qubodup — CC0 — https://freesound.org/people/qubodup/sounds/737234/
+chute: "Paracaídas.wav" by sbaneat — CC0 — https://freesound.org/people/sbaneat/sounds/393056/
+amb_city: "Ciudad de Mexico DF Colonia Roma Busy Street traffic urban city ambience Ed Larez VSNR" by visionear — CC0 — https://freesound.org/people/visionear/sounds/723607/
+amb_crowd: "AMBLM ext day people crowd walla berlin kulturforum international german english summer" by LudwigMueller — CC0 — https://freesound.org/people/LudwigMueller/sounds/459161/
+amb_park: "Bird Park Ambience " by nick121087 — CC0 — https://freesound.org/people/nick121087/sounds/234315/
+amb_sea: "Ocean_coast_04_092025_0659AM" by YevgVerh — CC0 — https://freesound.org/people/YevgVerh/sounds/827530/
+amb_harbour: "harbour, seagulls-48k.wav" by Further_Roman — CC0 — https://freesound.org/people/Further_Roman/sounds/208074/
+amb_wind: "Field ambience 01.wav" by szelestamas — CC0 — https://freesound.org/people/szelestamas/sounds/620099/
+amb_night: "Crickets At Night - Raw sound" by Defelozedd94 — CC0 — https://freesound.org/people/Defelozedd94/sounds/522299/
+amb_forest: "Birds In Forest (Scotland)" by BurghRecords — CC0 — https://freesound.org/people/BurghRecords/sounds/490846/
+amb_carnival: "Carousel/Merry-go-round (48/24)" by neilraouf — CC0 — https://freesound.org/people/neilraouf/sounds/484512/
+amb_casino: "G16-05-Casino Ambience.wav" by craigsmith — CC0 — https://freesound.org/people/craigsmith/sounds/438129/
+amb_airport: "Airport 02" by LilMati — CC0 — https://freesound.org/people/LilMati/sounds/376200/
+amb_room: "House Room Tone" by aleclubin — CC0 — https://freesound.org/people/aleclubin/sounds/641306/
+amb_jungle: "Bako National Park, Borneo Island, Rain Forest Ambience daytime 01.10.2013 Roland R-26 OMNI Mics.wav" by gladkiy — CC0 — https://freesound.org/people/gladkiy/sounds/333225/
+amb_frogs: "Frogs at Night - Lots of Them.wav" by Traviow — CC0 — https://freesound.org/people/Traviow/sounds/687212/
+an_lion: "lion.wav" by SGAK — CC0 — https://freesound.org/people/SGAK/sounds/467762/
+an_tiger: "Tiger roar female" by eZZin — CC0 — https://freesound.org/people/eZZin/sounds/811790/
+an_elephant: "Elephant Trumpets Growls.flac" by D.jones — CC0 — https://freesound.org/people/D.jones/sounds/527845/
+an_monkey: "monkey scream.wav" by saraonsins — CC0 — https://freesound.org/people/saraonsins/sounds/219816/
+an_gorilla: "Gorillaschrei.wav" by J0ck0 — CC0 — https://freesound.org/people/J0ck0/sounds/397054/
+an_flamingo: "A squeaking goose" by antique98 — CC0 — https://freesound.org/people/antique98/sounds/160686/
+an_hippo: "Hippopotamus Sounds" by cmp1 — CC0 — https://freesound.org/people/cmp1/sounds/759858/
+an_penguin: "Penguin Squeak" by Breviceps — CC0 — https://freesound.org/people/Breviceps/sounds/705839/
+an_bear: "Bear Angry Growl" by celldroid — CC0 — https://freesound.org/people/celldroid/sounds/763026/
+an_sheep: "sheep 3.mp3" by esperar — CC0 — https://freesound.org/people/esperar/sounds/171149/
+an_cow: "Cow Moo 2" by invertedturtle — CC0 — https://freesound.org/people/invertedturtle/sounds/546479/
+an_horse: "horse neigh shortened.wav" by shadoWisp — CC0 — https://freesound.org/people/shadoWisp/sounds/269571/
+an_dog: "Single Dog Bark" by kwahmah_02 — CC0 — https://freesound.org/people/kwahmah_02/sounds/277058/
+an_duck: "quack.wav" by Reitanna — CC0 — https://freesound.org/people/Reitanna/sounds/242664/
+an_pigeon: "creatures-pigeon.wav" by MinigunFiend — CC0 — https://freesound.org/people/MinigunFiend/sounds/175217/
+an_hawk: "red-tailed-hawk-flying-away.wav" by 1888software — CC0 — https://freesound.org/people/1888software/sounds/575525/
+an_gull: "Seagull trill and whine.wav" by nigelcoop — CC0 — https://freesound.org/people/nigelcoop/sounds/75195/
+an_owl: "owl.wav" by Anthousai — CC0 — https://freesound.org/people/Anthousai/sounds/398734/
+an_crow: "Crow Caw" by Jofae — CC0 — https://freesound.org/people/Jofae/sounds/361470/
+an_rooster: "Rooster crow" by jsbarrett — CC0 — https://freesound.org/people/jsbarrett/sounds/200339/
+cheer: "Small crowd cheering" by misjoc — CC0 — https://freesound.org/people/misjoc/sounds/400590/
+cash: "Cash Register Purchase" by Zott820 — CC0 — https://freesound.org/people/Zott820/sounds/209578/
+coins: Kenney "rpg" pack, handleCoins — CC0 (kenney.nl)
+coins_2: Kenney "rpg" pack, handleCoins2 — CC0 (kenney.nl)
+door_open: Kenney "rpg" pack, doorOpen_1 — CC0 (kenney.nl)
+door_close: Kenney "rpg" pack, doorClose_1 — CC0 (kenney.nl)
+money: "banknote-counter.wav" by madvedj — CC0 — https://freesound.org/people/madvedj/sounds/178097/
+drill_loop: "drill.wav" by j1987 — CC0 — https://freesound.org/people/j1987/sounds/95562/
+torch_loop: "S10-07 Acetylene torch; light; then steady hiss.wav" by craigsmith — CC0 — https://freesound.org/people/craigsmith/sounds/676007/
+vault: "vault" by lezaarth — CC0 — https://freesound.org/people/lezaarth/sounds/445100/
+safe_dial: "Bank Vault Combination Lock Sound - V6" by Pixeliota — CC0 — https://freesound.org/people/Pixeliota/sounds/678254/
+latch: Kenney "rpg" pack, metalLatch — CC0 (kenney.nl)
+click_metal: Kenney "rpg" pack, metalClick — CC0 (kenney.nl)
+cloth: Kenney "rpg" pack, cloth1 — CC0 (kenney.nl)
+zip_bag: Kenney "rpg" pack, clothBelt — CC0 (kenney.nl)
+phone: "Telephone Ring (old German W48)" by meisterleise — CC0 — https://freesound.org/people/meisterleise/sounds/332073/
+step_concrete_0: Kenney "impact" pack, footstep_concrete_000 — CC0 (kenney.nl)
+step_concrete_1: Kenney "impact" pack, footstep_concrete_001 — CC0 (kenney.nl)
+step_concrete_2: Kenney "impact" pack, footstep_concrete_002 — CC0 (kenney.nl)
+step_grass_0: Kenney "impact" pack, footstep_grass_000 — CC0 (kenney.nl)
+step_grass_1: Kenney "impact" pack, footstep_grass_001 — CC0 (kenney.nl)
+step_grass_2: Kenney "impact" pack, footstep_grass_002 — CC0 (kenney.nl)
+step_wood_0: Kenney "impact" pack, footstep_wood_000 — CC0 (kenney.nl)
+step_wood_1: Kenney "impact" pack, footstep_wood_001 — CC0 (kenney.nl)
+step_wood_2: Kenney "impact" pack, footstep_wood_002 — CC0 (kenney.nl)
+step_carpet_0: Kenney "impact" pack, footstep_carpet_000 — CC0 (kenney.nl)
+step_carpet_1: Kenney "impact" pack, footstep_carpet_001 — CC0 (kenney.nl)
+slot_spin: Kenney "casino" pack, card-fan-1 — CC0 (kenney.nl)
+slot_win: "slot machine payout.wav" by jack126guy — CC0 — https://freesound.org/people/jack126guy/sounds/361346/
+roulette: "Roulette Wheel Spin Loop 1_1" by Joao_Janz — CC0 — https://freesound.org/people/Joao_Janz/sounds/482663/
+card_deal: Kenney "casino" pack, card-slide-1 — CC0 (kenney.nl)
+card_place: Kenney "casino" pack, card-place-1 — CC0 (kenney.nl)
+card_shuffle: Kenney "casino" pack, card-shuffle — CC0 (kenney.nl)
+chips: Kenney "casino" pack, chips-stack-1 — CC0 (kenney.nl)
+chips_2: Kenney "casino" pack, chips-collide-2 — CC0 (kenney.nl)
+dice_throw: Kenney "casino" pack, dice-throw-1 — CC0 (kenney.nl)
+dice_shake: Kenney "casino" pack, dice-shake-1 — CC0 (kenney.nl)
+ui_click: Kenney "interface" pack, click_002 — CC0 (kenney.nl)
+ui_deny: Kenney "interface" pack, error_004 — CC0 (kenney.nl)
+ui_ding: Kenney "interface" pack, confirmation_002 — CC0 (kenney.nl)
+ui_check: Kenney "interface" pack, confirmation_004 — CC0 (kenney.nl)
+ui_open: Kenney "interface" pack, maximize_006 — CC0 (kenney.nl)
+ui_alert: Kenney "interface" pack, glitch_002 — CC0 (kenney.nl)
+jg_start: Kenney "jingles" pack, jingles_SAX03 — CC0 (kenney.nl)
+jg_pass: Kenney "jingles" pack, jingles_SAX00 — CC0 (kenney.nl)
+jg_fail: Kenney "jingles" pack, jingles_SAX10 — CC0 (kenney.nl)
+jg_win: Kenney "jingles" pack, jingles_STEEL02 — CC0 (kenney.nl)
+jg_spot: Kenney "jingles" pack, jingles_HIT05 — CC0 (kenney.nl)
+v_complete: Kenney "voice" pack, mission_completed — CC0 (kenney.nl)
+v_failed: Kenney "voice" pack, mission_failed — CC0 (kenney.nl)
+v_go: Kenney "voice" pack, war_go_go_go — CC0 (kenney.nl)
+v_cover: Kenney "voice" pack, war_cover_me — CC0 (kenney.nl)
+v_lookout: Kenney "voice" pack, war_look_out — CC0 (kenney.nl)
+v_fire: Kenney "voice" pack, war_fire_in_the_hole — CC0 (kenney.nl)
+v_reload: Kenney "voice" pack, war_reloading — CC0 (kenney.nl)
+v_hurry: Kenney "voice" pack, hurry_up — CC0 (kenney.nl)
+v_objective: Kenney "voice" pack, objective_achieved — CC0 (kenney.nl)
+pa_air_1: spoken by the flite synthesiser (ffmpeg) — generated for this game
+pa_air_2: spoken by the flite synthesiser (ffmpeg) — generated for this game
+pa_air_3: spoken by the flite synthesiser (ffmpeg) — generated for this game
+pa_ferry: spoken by the flite synthesiser (ffmpeg) — generated for this game
+pa_ship_1: spoken by the flite synthesiser (ffmpeg) — generated for this game
+pa_ship_2: spoken by the flite synthesiser (ffmpeg) — generated for this game
+pa_station: spoken by the flite synthesiser (ffmpeg) — generated for this game
+pa_bank: spoken by the flite synthesiser (ffmpeg) — generated for this game
+pa_carnival: spoken by the flite synthesiser (ffmpeg) — generated for this game
+mega_police: spoken by the flite synthesiser (ffmpeg) — generated for this game
+mega_stop: spoken by the flite synthesiser (ffmpeg) — generated for this game
+r_copy: spoken by the flite synthesiser (ffmpeg) — generated for this game
+r_clear: spoken by the flite synthesiser (ffmpeg) — generated for this game
+r_guard: spoken by the flite synthesiser (ffmpeg) — generated for this game
+r_spotted: spoken by the flite synthesiser (ffmpeg) — generated for this game
+r_vault: spoken by the flite synthesiser (ffmpeg) — generated for this game
+r_cops: spoken by the flite synthesiser (ffmpeg) — generated for this game
+r_plane: spoken by the flite synthesiser (ffmpeg) — generated for this game
+r_jump: spoken by the flite synthesiser (ffmpeg) — generated for this game
+r_boat: spoken by the flite synthesiser (ffmpeg) — generated for this game
+r_good: spoken by the flite synthesiser (ffmpeg) — generated for this game
+r_checkpoint: spoken by the flite synthesiser (ffmpeg) — generated for this game

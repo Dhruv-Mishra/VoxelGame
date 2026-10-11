@@ -3,8 +3,12 @@ try {
 // ===== 03-render: renderer, scene, camera, baseline lights, loop, debug handle  (OWNER: coordinator) =====
 {
   const cv = document.getElementById('cv');
-  // phones keep MSAA: resolving on tile-based GPUs is nearly free and it beats rendering more pixels (PERF.md §6)
-  const R = AF.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: AF.SHOT || AF.TEST, powerPreference: AF.MOBILE ? 'default' : 'high-performance' });
+  // phones keep MSAA: resolving on tile-based GPUs is nearly free and it beats rendering more pixels (PERF.md §6). With the lite
+  // upscaler (61-post) the MSAA lives in its render target, so the 2x canvas skips a second, full-size multisampled framebuffer.
+  const liteAA = AF.MOBILE && !AF.SHOT && !AF.Q.has('noupscale') && !AF.Q.has('nopost');
+  const R = AF.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: !liteAA, preserveDrawingBuffer: AF.SHOT || AF.TEST, powerPreference: AF.MOBILE ? 'default' : 'high-performance' });
+  // Safari runs WebGL in its GPU process: each program-log query is a synchronous round trip
+  R.debug.checkShaderErrors = !AF.IOS || AF.TEST || AF.DBG;
   // base pixel ratio in CSS px: the menu's Resolution (AF.GFX.res 0.75/0.9/1) or the tier default (Low 0.8 · Laptop/Balanced 1 · High 1.25),
   // never above devicePixelRatio. Below 1 the browser upscales the canvas (soft + shimmering edges), so Balanced renders at 1 CSS px.
   // ?shot renders at 1 (or ?dpr=N)
@@ -17,11 +21,12 @@ try {
     return Math.min(dpr, G.res > 0 ? G.res : G.tier === 'low' ? 0.8 : G.tier === 'high' ? 1 : 1.25);
   };
   R.setPixelRatio(AF.basePR());
-  // render vs display resolution: the scene + post chain render at AF.renderPR() (base x dynamic scale); while AF.upscaleOn (61-post)
-  // the canvas keeps the display's resolution (<= 2x CSS px; phones <= 2x the render) and the last pass upscales + sharpens instead
-  // of the browser's bilinear stretch. Everything that changes the resolution calls AF.applyPR().
+  // render vs display resolution: the scene + post chain render at AF.renderPR() (the menu's fixed target height, never adjusted at
+  // run time: every change reallocates the canvas + targets); while AF.upscaleOn (61-post) the canvas keeps the display's resolution
+  // (<= 2x CSS px; phones <= 2x the render) and the last pass upscales + sharpens instead of the browser's bilinear stretch.
+  // Everything that changes the resolution calls AF.applyPR().
   AF.upscaleOn = false;
-  AF.renderPR = () => AF.basePR() * AF.GFX.scale;
+  AF.renderPR = () => AF.basePR();
   AF.outputPR = () => { const r = AF.renderPR(), d = Math.min(devicePixelRatio || 1, 2); return AF.upscaleOn ? Math.max(r, AF.MOBILE ? Math.min(d, r * 2) : d) : r; };
   AF.applyPR = () => { const pr = AF.outputPR(); if (Math.abs(R.getPixelRatio() - pr) > 1e-3) R.setPixelRatio(pr); if (AF.resize) AF.resize(); };
   R.outputColorSpace = THREE.SRGBColorSpace;
@@ -120,7 +125,9 @@ try {
     R.setSize(w, h, !AF.SHOT); cam.aspect = w / h; cam.updateProjectionMatrix();
     AF.emit('resize', w, h);
   };
-  addEventListener('resize', AF.resize); AF.resize();
+  // phones: Safari's toolbar slides and the keyboard fire bursts of resize events, and each one reallocates the canvas + targets
+  let resizeT = 0;
+  addEventListener('resize', AF.MOBILE ? () => { clearTimeout(resizeT); resizeT = setTimeout(AF.resize, 180); } : AF.resize); AF.resize();
 
   // render: post part may replace AF.renderFrame
   AF.renderFrame = () => R.render(S, cam);
@@ -380,14 +387,14 @@ try {
   // tree LOD distances. Loading runs AF.LOD.prefetch (01-stream) farther out than these display ranges.
   // Full-fidelity ranges (lod, regLod, outland, flora mid/near) are 2.5x the Sep 2026 table (outland meshing runs on workers).
   const TIER = {
-    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, dynMin: 0.95, ao: 12, lights: 8, pools: 24, regLod: 375, farLod: 560, lod: 175, propCull: 700, outland: 2.0, flora: [175, 450, 960] },
-    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, dynMin: 0.9, ao: 6, lights: 4, pools: 16, regLod: 238, farLod: 360, lod: 112, propCull: 300, outland: 1.75, flora: [162, 400, 880] },
-    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, dynMin: 0.85, ao: 0, lights: 2, pools: 8, regLod: 200, farLod: 300, lod: 88, propCull: 240, outland: 1.2, flora: [112, 262, 720] },
-    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, dynMin: 0.8, ao: 0, lights: 2, pools: 0, regLod: 162, farLod: 245, lod: 80, propCull: 200, outland: 0.95, flora: [70, 200, 480] },
-    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, dynMin: 1.0, lod: 500, ao: 16, lights: 12, pools: 24, regLod: 550, farLod: 825, propCull: 2000, outland: 2.5, flora: [225, 600, 1400] },
+    ultra: { near: 4096, far: 2048, farR: 380, env: 1.0, pat: 1, win: 1, ao: 12, lights: 8, pools: 24, regLod: 375, farLod: 560, lod: 175, propCull: 700, outland: 2.0, flora: [175, 450, 960] },
+    high: { near: 2048, far: 2048, farR: 340, env: 0.85, pat: 1, win: 1, ao: 6, lights: 4, pools: 16, regLod: 238, farLod: 360, lod: 112, propCull: 300, outland: 1.75, flora: [162, 400, 880] },
+    lite: { near: 2048, far: 1536, farR: 320, env: 0.85, pat: 1, win: 1, ao: 0, lights: 2, pools: 8, regLod: 200, farLod: 300, lod: 88, propCull: 240, outland: 1.2, flora: [112, 262, 720] },
+    low: { near: 1024, far: 1024, farR: 300, env: 0.0, pat: 0, win: 0, ao: 0, lights: 2, pools: 0, regLod: 162, farLod: 245, lod: 80, propCull: 200, outland: 0.95, flora: [70, 200, 480] },
+    cinema: { near: 4096, far: 4096, farR: 420, env: 1.0, pat: 1, win: 1, lod: 500, ao: 16, lights: 12, pools: 24, regLod: 550, farLod: 825, propCull: 2000, outland: 2.5, flora: [225, 600, 1400] },
   };
   AF.gfx.TIER = TIER;
-  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 125, farLod: 190, lod: 100, propCull: 180, dynMin: 0.55 };
+  const mobileTier = { ...TIER.low, far: 0, env: 0, lights: 0, pools: 6, regLod: 125, farLod: 190, lod: 100, propCull: 180 };
   if (AF.MOBILE) TIER.low = mobileTier;
   const cur = AF.gfx.tierCfg = () => AF.MOBILE ? mobileTier : G.cinema ? TIER.cinema : G.lite && G.tier === 'high' ? TIER.lite : (TIER[G.tier] || TIER.ultra);
   const texSeen = new WeakSet();
@@ -404,7 +411,7 @@ try {
   };
   AF.gfx.sharpenTextures = sharpenTextures;
   const applyTier = () => {
-    if (AF.MOBILE) { G.tier = 'low'; G.cinema = false; G.auto = false; G.scale = Math.min(1, G.scale); }
+    if (AF.MOBILE) { G.tier = 'low'; G.cinema = false; G.auto = false; }
     const T = cur(), sun = AF.sun, view = AF.lodScale || 1;
     AF.LOD_DIST = (T.lod || 110) * view;
     AF.REGION_LOD = (T.regLod || 130) * view;
@@ -415,7 +422,6 @@ try {
     if (AF.gfx.pools) AF.gfx.pools.max = T.pools;
     if (AF.atmos && AF.atmos.setLights) AF.atmos.setLights(T.lights);
     AF.shadowDirty = true;
-    if (G.cinema) G.scale = 1;
     if (AF.ready) AF.applyPR(); else R.setPixelRatio(AF.outputPR());
     if (AF.ready) { try { sharpenTextures(); } catch (e) { AF.warnOnce('aniso', e); } }
     const nearSize = AF.shadowQ === 'low' ? Math.min(T.near, 1024) : T.near;
@@ -437,27 +443,19 @@ try {
     AF.applyPR();
   };
   // ---------------------------------------------------------------- auto tier (only while G.auto: no saved/forced choice; never in ?shot / ?test)
-  // Down one step after 3 s of frames 32 % over the frame target (the fps cap interval, 16.7 ms uncapped); never up.
-  // Phones: adaptive resolution (0.8..1 of the base pixel ratio, checked every 4 s) holds the 30 fps target.
+  // Down one step after 3 s of frames 32 % over the frame target (the fps cap interval, 16.7 ms uncapped); never up. The render
+  // resolution itself never moves at run time (no dynamic resolution: each change reallocated the canvas and every target).
   {
     const LADDER = ['low', 'lite', 'high', 'ultra'];
     const target = () => (AF.fpsCap > 0 ? 1000 / AF.fpsCap : 16.7);
-    let ema = target(), slowT = 0, adjT = 0, grace = 2;
+    let ema = target(), slowT = 0, grace = 2;
     G.onChange(() => { ema = target(); slowT = 0; grace = 2; });
     AF.onTick('gfx-adapt', 960, (dt) => {
-      if (AF.SHOT || AF.TEST || !AF.ready || AF.paused || document.hidden || G.cinema) return;   // cinema: fixed full resolution, never downgrade
+      if (!G.auto || AF.SHOT || AF.TEST || !AF.ready || AF.paused || document.hidden || G.cinema) return;   // cinema: never downgrade
       const ms = dt * 1000; if (ms <= 0 || ms > 250) return;
       if (grace > 0) { grace -= dt; return; }                 // tier switches reallocate targets and recompile: ignore that hitch
       const tg = target();
-      ema += (ms - ema) * 0.08; adjT += dt;
-      // dynamic resolution (phones by default, ?dynres on desktop): every change reallocates the canvas, so it moves rarely
-      const dyn = AF.MOBILE || AF.Q.has('dynres');
-      if (dyn && adjT > (AF.MOBILE ? 4 : 1)) {
-        adjT = 0; const T = cur(); let s = G.scale;
-        if (ema > tg * 1.14) s = Math.max(T.dynMin, s - (AF.MOBILE ? 0.1 : 0.05)); else if (ema < tg * 1.04) s = Math.min(1, s + 0.05);
-        if (Math.abs(s - G.scale) > 1e-3) { G.scale = s; AF.applyPR(); }
-      }
-      if (!G.auto) return;
+      ema += (ms - ema) * 0.08;
       const i = LADDER.indexOf(G.name);
       if (ema > tg * 1.32) slowT += dt; else slowT = Math.max(0, slowT - dt);
       if (slowT > 3 && i > 0) { G.set(LADDER[i - 1], 'slow frames'); return; }
@@ -606,7 +604,7 @@ try {
     console.log('[af] r1 auto surfaces: ' + n + ' palette entries, tier ' + G.tier + ', gpu ' + (AF.gfx.gpu || '?'));
   });
   // expose for tests / debugging
-  AF.gfx.stats = () => ({ tier: G.name, lod: AF.LOD_DIST, pr: R.getPixelRatio(), render: R.domElement.width + 'x' + R.domElement.height, scale: G.scale, res: G.res, near: AF.sun.shadow.mapSize.x, nearR: AF.shadowNear.r, far: AF.gfx.far && { on: AF.gfx.far.on, size: AF.gfx.far.size, R: AF.gfx.far.R, renders: AF.gfx.far.renders, ms: AF.gfx.far.ms }, env: AF.gfx.env && { src: AF.gfx.env.src, n: AF.gfx.env.n, ms: AF.gfx.env.ms }, farLod: AF.world.farStats, autoSurf: AF.PAL.autoCount });
+  AF.gfx.stats = () => ({ tier: G.name, lod: AF.LOD_DIST, pr: R.getPixelRatio(), render: R.domElement.width + 'x' + R.domElement.height, res: G.res, near: AF.sun.shadow.mapSize.x, nearR: AF.shadowNear.r, far: AF.gfx.far && { on: AF.gfx.far.on, size: AF.gfx.far.size, R: AF.gfx.far.R, renders: AF.gfx.far.renders, ms: AF.gfx.far.ms }, env: AF.gfx.env && { src: AF.gfx.env.src, n: AF.gfx.env.n, ms: AF.gfx.env.ms }, farLod: AF.world.farStats, autoSurf: AF.PAL.autoCount });
   AF.test('renderer: fps cap, idle streaming and dynamic near plane stay wired (PERF.md)', () => {
     const near = AF.hooks.tick.some((x) => x.name === 'cam-near'), idle = AF.hooks.idle.some((x) => x.name === 'region-stream');
     return { ok: near && idle && [0, 30, 60].includes(AF.fpsCap) && AF.camera.near >= 0.1 - 1e-6, info: 'cap ' + AF.fpsCap + ', near ' + AF.camera.near.toFixed(2) + ', idle hooks ' + AF.hooks.idle.length };

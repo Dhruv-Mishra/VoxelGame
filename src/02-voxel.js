@@ -513,6 +513,7 @@ AF.mat = {};
     // PATTERNS: id 1..18, uv metres in the face plane (x along, y up/ z), fw = metres per pixel.
     // returns rgb multiplier on albedo (1 = unchanged) ; afRough = additive roughness tweak
     float afRough = 0.0;
+    #ifndef AF_LEAN
     vec3 afPattern(float id, vec2 uv, float fw, vec3 alb){
       afRough = 0.0;
       float kFine = 1.0 - smoothstep(0.006, 0.032, fw);    // mortar lines, grain
@@ -666,6 +667,7 @@ AF.mat = {};
         return vec3(1.0 + sp * 0.1 * kFine) * mix(1.0, 1.35, band * kMid);
       }
     }
+    #endif
   `;
   const colCode = `
     float afSpecAO = 1.0; float afRoughAdd = 0.0; float afWinMask = 0.0; vec3 afWinEmit = vec3(0.0); float afPatOn = 0.0;
@@ -683,6 +685,7 @@ AF.mat = {};
       vec3 patMul = vec3(1.0);
       float pv = floor(vMat.z + 0.5);
       bool side = vNI < 1.5 || vNI > 3.5;
+      #ifndef AF_LEAN
       float pid = side ? mod(pv, 32.0) : floor(pv / 32.0);
       if (pid > 0.5 && uPatK > 0.0) {
         vec3 fp = fwidth(vAfOP);
@@ -696,6 +699,7 @@ AF.mat = {};
           edgeK *= 1.0 - 0.6 * uPatK;
         }
       }
+      #endif
       vec2 e2 = min(f, 1.0 - f) / max(fw, vec2(1e-4));
       float edge = 1.0 - smoothstep(0.6, 1.8, min(e2.x, e2.y));
       float hl = (1.0 - smoothstep(0.5, 1.6, f.x / max(fw.x,1e-4))) * 0.5 + (1.0 - smoothstep(0.5, 1.6, (1.0 - f.y) / max(fw.y,1e-4))) * 0.5;
@@ -706,6 +710,7 @@ AF.mat = {};
       diffuseColor.rgb *= vAlb * ao * shade * patMul;
       afSpecAO = mix(1.0, ao * ao, uSpecOcc);
       // R1: facade-only windows -> fake rooms behind the glass (interior mapping in world space)
+      #ifndef AF_LEAN
       if (vMat.w > 0.5 && uWinK > 0.0 && side) {
         vec3 N = vNI < 0.5 ? vec3(1.,0.,0.) : vNI < 1.5 ? vec3(-1.,0.,0.) : vNI < 4.5 ? vec3(0.,0.,1.) : vec3(0.,0.,-1.);
         vec3 T = abs(N.x) > 0.5 ? vec3(0.0, 0.0, N.x) : vec3(-N.z, 0.0, 0.0);
@@ -814,6 +819,7 @@ AF.mat = {};
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.25, uWinK);
         afRoughAdd -= 0.3 * uWinK;
       }
+      #endif
     }
   `;
   const emiCode = `
@@ -857,6 +863,9 @@ AF.mat = {};
   const shadowFns = `
     #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
     float afFarShadow() {
+      #ifdef AF_LEAN
+      return 1.0;
+      #else
       if (uFarOn < 0.5) return 1.0;
       vec3 c = vFarSC.xyz / vFarSC.w;
       float e = min(min(c.x, 1.0 - c.x), min(c.y, 1.0 - c.y));
@@ -870,6 +879,7 @@ AF.mat = {};
       float s11 = step(c.z, unpackRGBAToDepth(texture2D(uFarMap, uv + ts)));
       float s = mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
       return mix(1.0, s, smoothstep(0.0, 0.04, e));
+      #endif
     }
     float afSunShadow( sampler2D map, vec2 size, float bias, float radius, vec4 sc ) {
       vec3 c = sc.xyz / sc.w;
@@ -887,17 +897,26 @@ AF.mat = {};
       }
       if (wN < 0.999) sF = afFarShadow();
       float sh = mix(sF, sN, wN);
+      #ifndef AF_LEAN
       if (uCloudK > 0.001) {     // cloud layer at y 420, projected along the sun
         vec3 sd = normalize(uSunW);
         vec2 cp = (vAfWP.xz + sd.xz * ((420.0 - vAfWP.y) / max(sd.y, 0.08))) * uCloudScale + uCloudOff;
         float cn = afVN(cp) * 0.65 + afVN(cp * 2.3 + 7.1) * 0.35;
         sh *= 1.0 - uCloudK * smoothstep(0.5, 0.72, cn);
       }
+      #endif
       return sh;
     }
     #endif
   `;
   AF.voxelShader = { vsHead, nrmCode, palCode, fsHead, colCode, emiCode, wpCode, shadowFns };
+  // phones: patterns, fake-room windows, the far cascade and cloud shadows are off for good (tier 'low' is fixed there), so they are
+  // compiled out instead of branched over: smaller programs link much faster (ANGLE-Metal on iOS) and hold fewer registers.
+  const LEAN = AF.MOBILE && !AF.Q.has('fullshader') ? '#define AF_LEAN\n' : '';
+  // point lights: three runs the full GGX for every light on every pixel; out of a light's range its colour is exactly 0
+  const LFB = THREE.ShaderChunk.lights_fragment_begin.split('getShadow( directionalShadowMap[ i ]').join('afSunShadow( directionalShadowMap[ i ]');
+  const lfbAt = LFB.indexOf('getPointLightInfo( pointLight'), lfbRe = lfbAt < 0 ? -1 : LFB.indexOf('RE_Direct( directLight', lfbAt);
+  const LIGHTS_BEGIN = lfbRe < 0 ? LFB : LFB.slice(0, lfbRe) + 'if ( directLight.visible ) ' + LFB.slice(lfbRe);
   const patch = (mat, key) => {
     mat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, U);
@@ -905,13 +924,13 @@ AF.mat = {};
         .replace('#include <beginnormal_vertex>', nrmCode)
         .replace('#include <color_vertex>', '#include <color_vertex>\n' + palCode)
         .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n' + wpCode);
-      sh.fragmentShader = fsHead + sh.fragmentShader
+      sh.fragmentShader = LEAN + fsHead + sh.fragmentShader
         .replace('#include <color_fragment>', '#include <color_fragment>\n' + colCode)
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' + roughCode)
         .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n' + metalCode)
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + emiCode)
         .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + shadowFns)
-        .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.split('getShadow( directionalShadowMap[ i ]').join('afSunShadow( directionalShadowMap[ i ]'))
+        .replace('#include <lights_fragment_begin>', LIGHTS_BEGIN)
         .replace('#include <lights_fragment_maps>', THREE.ShaderChunk.lights_fragment_maps
           .replace('iblIrradiance += getIBLIrradiance( geometryNormal );', 'iblIrradiance += getIBLIrradiance( geometryNormal ) * uEnvDiffuse;')
           + '\n radiance *= afSpecAO * mix(1.0, 0.3, smoothstep(0.45, 0.9, material.roughness));\n');

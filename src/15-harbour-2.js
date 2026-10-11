@@ -691,62 +691,7 @@ try {
     L.hbShowMs = Math.round(performance.now() - t0);
   });
 
-  // ------------------------------------------------------------ ROUND 2: the liner SS SOLACE QUEEN at anchor in the west roads
-  //   (x -280..-170, z ~305, clear of the ferry + puttering-boat loops): black hull, red boot-top, 4 white tiers, 3 raked buff
-  //   funnels with black tops (smoke), 2 masts, lifeboats, rows of portholes that light at night, dressed overall, whistle.
-  AF.onBuild('harbour-liner', 307, () => {
-    const c = (hex, o = {}) => AF.col(hex, Object.assign({ jitter: 0.3, edge: 0.6 }, o));
-    const blk = c(0x1c1e22, { jitter: 0.2 }), boot = c(0xa8302a), wht = c(0xf4f0e6, { jitter: 0.15 }), deck = c(0xb89a70), buff = c(0xe0b870), fblk = c(0x1a1a1c);
-    const port = AF.col(0x2a3440, { emit: 0xffd08a, emitK: 1.8, mode: 'night', jitter: 0.1, edge: 0.1 }), win = AF.col(0x34404c, { emit: 0xffc47a, emitK: 1.5, mode: 'night', jitter: 0.1, edge: 0.1 });
-    const boatC = c(0xf6f2ea), mastC = c(0xd8c8a0), goldC = c(0xd8a83a, { metal: 0.8, rough: 0.3 });
-    const NL = 220, NB = 32, cx = NB / 2 + 1, HH = 26, m = new AF.Model(NB + 2, 100, NL);
-    for (let z = 0; z < NL; z++) {
-      const t = z / (NL - 1), bow = t > 0.8 ? 1 - (t - 0.8) / 0.2 : 1, stern = t < 0.06 ? 0.7 + t * 5 : 1;
-      const half = NB / 2 * Math.pow(Math.max(0.03, bow), 0.55) * stern, sheer = HH + Math.round(t > 0.85 ? (t - 0.85) * 30 : 0);
-      for (let y = 0; y < sheer; y++) {
-        const hw = half * (0.75 + 0.25 * Math.min(1, y / 8));
-        for (let x = Math.floor(cx - hw); x < Math.ceil(cx + hw); x++) {
-          const edge = x <= cx - hw + 1 || x >= cx + hw - 1 || y === 0; if (!edge && y < sheer - 1) continue;
-          let col = y < 8 ? boot : (y === sheer - 1 && !edge) ? deck : blk;
-          if (edge && y >= sheer - 2) col = wht;
-          if (edge && (y === 15 || y === 19) && z % 3 === 0 && t > 0.08 && t < 0.86) col = port;
-          m.set(x, y, z, col);
-        }
-      }
-    }
-    // superstructure tiers
-    const tiers = [[26, 34, 40, 170, 2], [34, 42, 50, 160, 3], [42, 50, 62, 148, 4], [50, 56, 120, 146, 6]];
-    for (const [y0, y1, z0, z1, ins] of tiers) {
-      m.box(ins, y0, z0, NB + 2 - ins, y1, z1, wht); m.box(ins - 1, y1 - 1, z0 - 1, NB + 3 - ins, y1, z1 + 1, deck);
-      for (let z = z0 + 2; z < z1 - 2; z += 2) { const w = (z >> 1) % 7 === 0 ? port : win; m.set(ins, y0 + 3, z, w); m.set(NB + 1 - ins, y0 + 3, z, w); }
-      for (let z = z0; z < z1; z += 4) { m.set(ins - 1, y1, z, wht); m.set(NB + 2 - ins, y1, z, wht); }
-    }
-    m.box(4, 50, 140, NB - 2, 58, 150, wht); m.box(3, 53, 149, NB - 1, 56, 151, c(0x2a3440, { jitter: 0.1 }));   // bridge
-    // lifeboats on davits along the boat deck
-    for (let z = 66; z < 142; z += 12) for (const sx of [1, NB - 1]) { m.box(sx, 44, z, sx + 3, 47, z + 9, boatC); m.box(sx, 44, z, sx + 3, 45, z + 9, boot); }
-    // three raked funnels (buff, black tops)
-    for (const fz of [70, 96, 122]) for (let y = 56; y < 90; y++) { const rk = Math.round((y - 56) * 0.25); m.box(cx - 5, y, fz - 7 - rk, cx + 5, y + 1, fz + 7 - rk, y > 84 ? fblk : buff); }
-    // masts + a stay line + cargo hatches fore and aft
-    m.box(cx - 1, 26, 186, cx + 1, 92, 188, mastC); m.box(cx - 1, 26, 22, cx + 1, 84, 24, mastC); m.box(cx - 8, 76, 186, cx + 8, 77, 188, mastC);
-    for (const hz of [176, 30]) m.box(cx - 7, 26, hz - 6, cx + 7, 28, hz + 6, c(0x4a5a4a));
-    const tm = AF.textModel('SOLACE QUEEN', goldC, { pad: 0 });
-    for (let i = 0; i < tm.w; i++) for (let j = 0; j < 7; j++) if (tm.get(i, j, 0)) { const z = NL - 26 - tm.w + i; const t = z / (NL - 1), hw = NB / 2 * Math.pow(Math.max(0.03, t > 0.8 ? 1 - (t - 0.8) / 0.2 : 1), 0.55); m.set(Math.floor(cx - hw), 17 + j, z, goldC); m.set(Math.ceil(cx + hw) - 1, 17 + j, NL - 1 - (z - (NL - 26 - tm.w)) - 26 - (NL - 26 - tm.w) + (NL - 26 - tm.w), goldC); }
-    const VS = 0.5, liner = AF.modelMesh(m, { vs: VS, anchor: [0.5, 0, 0.5] });
-    liner.position.set(-225, SEA_Y - 3.6, 306); liner.rotation.y = Math.PI / 2; liner.castShadow = true; AF.scene.add(liner);
-    const lib = LIB();
-    if (AF.makeBunting) { const P3 = [[0, 16.2, 55], [0, 46, 38], [0, 45, 12.5], [0, 45, -0.5], [0, 45, -13.5], [0, 42, -44], [0, 13.5, -54.5]]; for (let i = 0; i < P3.length - 1; i++) AF.makeBunting(P3[i], P3[i + 1], { shape: 'signal', parent: liner, spacing: 1.1, size: 0.9 }); }
-    if (AF.makeFlag) AF.makeFlag({ parent: liner, x: 0, y: 16.5, z: -54.6, w: 3.2, h: 2.0, design: 'harbour', vane: false, yaw: -Math.PI / 2 });
-    const smk = lib.smoke ? [0, 1, 2].map(() => lib.smoke(5, 0xd8d4cc, 3.4, 9)) : [];
-    const funW = [70, 96, 122].map((fz) => (fz - NL / 2) * VS - 8.5 * 0.25 * VS * 4);
-    dyn.push({ x: -225, z: 306, r: 700, update(dt, t) {
-      liner.position.y = SEA_Y - 3.6 + Math.sin(t * 0.35) * 0.06; liner.rotation.z = Math.sin(t * 0.27) * 0.004;
-      for (let i = 0; i < smk.length; i++) smk[i].update(dt, t + i * 1.7, -225 + funW[i], SEA_Y - 3.6 + 45.5, 306, 0.45);
-    } });
-    HR.ships.push({ name: 'Solace Queen', mesh: liner, x: -225, z: 306, len: 110 });
-    AF.addLabel('SS Solace Queen', -225, 306, 'place');
-    if (AF.water2 && AF.water2.cands) for (const dx of [-40, -20, 0, 20, 40]) AF.water2.cands.push({ x: -225 + dx, y: 6, z: 297, color: 0xffd08a, intensity: 0.9 });
-    L.liner = liner;
-  });
+  // the liner SS SOLACE QUEEN (walkable decks + the Grand Casino) is built by 48-liner.js
   // ------------------------------------------------------------ ROUND 2: a navy-grey cruiser, the HARBOUR DAYS guardship, dressed overall
   //   for HARBOUR DAYS at anchor south-west of the liner (-305, 366, bow west): raked bow, 2 twin turrets fore + 1 aft, a stepped
   //   bridge tower, tripod mast, 2 funnels, a rainbow of signal flags stem -> mast -> funnels -> stern.

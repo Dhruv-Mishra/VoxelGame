@@ -1251,6 +1251,8 @@ try {
     sp('teenM2', man({ age: 'teen', set: { top: { style: 'shirt', col: 0xf3f0e6, short: true }, bottom: { style: 'pants', col: 0x45464b, cuff: true }, hat: 'newsboy', hatCol: 0x6a6258, hatCol2: 0x4a4238, skirt: null, apron: null, propR: null } }));
     // the beat cop (77-combat's police pool): navy tunic, peaked cap, a revolver in the right hand
     sp('cop', man({ set: { top: { style: 'suit', col: 0x1f2a44, tie: 0x141418, cuffs: true }, bottom: { style: 'pants', col: 0x1f2a44 }, hat: 'conductor', hatCol: 0x1f2a44, hatCol2: 0x141418, skirt: null, apron: null, propR: null, moustache: true } }), { cop: true });
+    // the mob (81-heist via 77's CB.spawnGoon): charcoal pinstripe, red tie, black fedora — drawn with the police frames
+    sp('goon', man({ set: { top: { style: 'suit', col: 0x2a2a30, tie: 0xb02a2a, cuffs: true }, bottom: { style: 'pants', col: 0x2a2a30 }, hat: 'fedora', hatCol: 0x141418, hatCol2: 0xb02a2a, skirt: null, apron: null, propR: null } }), { cop: true });
     for (const L of out) { if (L.skirt === null) delete L.skirt; if (!L.bottom) L.bottom = { style: 'pants', col: 0x45464b }; if (L.skirt && L.bottom.style !== 'skirt' && !L.skirt.open) L.bottom = { style: 'skirt', col: L.skirt.col }; }
     return out;
   }
@@ -1523,6 +1525,8 @@ try {
     const SP = CR.SP || {};
     // the police pool (77-combat): 8 inactive walkers in the cop look, woken with an .agg when the wanted level calls for them
     if (SP.cop !== undefined) for (let i = 0; i < 8; i++) W.push({ id: CR.NW + i, gid: -1, v: SP.cop, vd: SP.cop, vn: SP.cop, cop: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk' });
+    // the mob pool (77 CB.spawnGoon): same life cycle as the police, hostile without a wanted level
+    if (SP.goon !== undefined) for (let i = 0; i < 8; i++) W.push({ id: W.length, gid: -1, v: SP.goon, vd: SP.goon, vn: SP.goon, goon: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk' });
     // co-op proxy pool (80-coop): another player's engaged peds and police, drawn like the crowd
     for (let i = 0; i < 16; i++) W.push({ id: W.length, gid: -1, v: 0, vd: 0, vn: 0, net: true, act: false, agg: null, lat: 0, s: 1, width: 1, ph: 0, age: 0, x: 0, y: 0, z: 0, yaw: 0, talk: 0, state: 'walk', nf: 'p', lie: false });
     CR.night = AF.time.hours >= 19.2 || AF.time.hours < 5;
@@ -1646,7 +1650,7 @@ try {
         }
         const wasDown = w.agg.st === 'down';
         if (CB) CB.release(w);
-        if (w.cop) continue;
+        if (w.cop || w.goon) continue;
         // back into the shared crowd: walk back to its stroll, or (knocked down / chased far off) leave the scene for a while
         if (w.gid >= 0) {
           evalWalker(GW[w.gid], t, EP);
@@ -1654,7 +1658,7 @@ try {
           w.ret = true; w.lag = 0;
         } else if (!w.lead) { w.gid = -1; w.act = false; continue; }
       }
-      if (w.cop) continue;
+      if (w.cop || w.goon) continue;
       if (!w.act) continue;
       const ddx = w.x - C.x, ddz = w.z - C.z, near = ddx * ddx + ddz * ddz <= FAR2;
       if (w.lead) stepWalker(w, dt);

@@ -384,7 +384,7 @@ try {
     LITE.on = true; AF.upscaleOn = true; AF.applyPR();
     AF.renderFrame = () => {
       const pr = AF.renderPR(), cam = AF.camera;
-      if (!LITE.on || R.getPixelRatio() <= pr * 1.02) { R.render(S, cam); return; }   // nothing to upscale
+      if (!LITE.on) { R.render(S, cam); return; }   // the canvas has no MSAA of its own: even at 1:1 the target supplies it
       R.getSize(size);
       const w = Math.max(1, Math.round(size.x * pr)), h = Math.max(1, Math.round(size.y * pr));
       if (rt.width !== w || rt.height !== h) rt.setSize(w, h);

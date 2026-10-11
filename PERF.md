@@ -17,20 +17,27 @@ compare draws and GPU ms.
 
 ## 2. Frame pacing (locked)
 - `AF.fpsCap` 30 default (menu 30/60/Max, `portSolace.fps`). Skipped rAF callbacks run idle work (`AF.onIdle(name, fn(ms))`,
-  ≤ 60 % of an interval, max 10 ms desktop / 6 ms phone). Auto-tier and dynamic resolution compare against the cap interval.
+  ≤ 60 % of an interval, max 10 ms desktop / 6 ms phone). Auto-tier compares against the cap interval.
 - Sun shadows refresh on a time cadence (≈30 Hz High/Balanced, ≈15 Hz lower) but every frame while the subject moves.
   Shadows setting Off/Low/High (`AF.gfx.setShadows`, `portSolace.shadows`); Low = near map only, 4-tap compare; phones default Off.
 - Simulation uses `dt` (≤ 0.1 s); nothing assumes 60 Hz.
 
 ## 3. Renderer (locked)
-- **Resolution / upscaling**: the scene renders at `AF.renderPR()` (= `basePR` × tier/dynres scale; menu target height,
-  default 720p, 480p on phones, `portSolace.resH`). When the post chain runs, the canvas stays at `AF.outputPR()` (display res,
+- **Resolution / upscaling**: the scene renders at `AF.renderPR()` (= `basePR`: the menu target height, default 720p, 480p on
+  phones, `portSolace.resH`) and stays there. There is **no dynamic resolution** (removed: every scale step reallocated the
+  render targets and invalidated cached passes, which cost more than it saved, worst on iOS); auto-tier may still change the tier
+  once on a sustained miss. Phone resizes (Safari toolbar) are debounced 180 ms. When the post chain runs, the canvas stays at `AF.outputPR()` (display res,
   ≤ 2×) and the final `UPSCALE` pass (61-post) does Catmull-Rom 9-tap upsampling + contrast-adaptive sharpening; `?noupscale` /
   `?shot` turn it off. Change resolution only through `AF.applyPR()`. Point sprites size by `renderPR`.
 - **Phones** (`AF.MOBILE`) skip the post chain but not the upscaler (`AF.post.lite`): the scene renders into an MSAA RGBA8 target
   flagged `isXRRenderTarget` (three r160 then applies tone mapping + sRGB in the materials, the same programs as the screen) and one
   `UPSCALE` pass draws it to a canvas of ≤ 2× the render height (single-pass upscale + sharpen, the Snapdragon GSR 1 / FSR 1 idea
-  without textureGather). Any error falls back to direct rendering.
+  without textureGather). Any error falls back to direct rendering. With the upscaler on, the canvas itself is created without
+  MSAA (the MSAA target already resolves the scene; a second multisampled 2× canvas was pure bandwidth).
+- **Lean phone shader** (`AF_LEAN`, 02-voxel, `AF.MOBILE` unless `?fullshader`): the voxel program drops the procedural surface
+  patterns, fake-room windows, the far shadow cascade and cloud shadows at compile time; point lights skip the GGX term beyond
+  their range everywhere. iOS (ANGLE-on-Metal) compiles and links slowly and every GL call is an IPC hop to the GPU process, so
+  `checkShaderErrors` is off on iOS outside `?test`, and fewer/leaner programs matter more than raw ALU.
 - Instanced voxel meshes use `AF.mat.voxelInst` / `voxelInstC` + `AF.mat.depthInst` (sharing `AF.mat.voxel` made three
   re-derive programs ~75× per pass). `inst-ranges` uploads only `[0, count)` of instanced buffers.
 - Dynamic near plane (`cam-near`): 0.1 m on foot/driving, up to 6 m when high. Never hard-code `camera.near`.
@@ -87,6 +94,12 @@ compare draws and GPU ms.
 - Gameplay (`76–78`): FX = 2 Points draws (glow additive, smoke dithered opaque), hidden while empty (programs compiled at
   `preloaded`); job marker (2 draws), autogyro (2) and squad cars exist only while in use; police / run-over checks at 15 Hz within
   60 m, the wanted scan skipped while nobody is on duty. A driver seated in a closed car casts no shadow.
+- The liner (`48`): one hull mesh (+ its glass) and one InstancedMesh per furniture kind (1/8 m), the furniture drawn only within
+  140 m of the ship; its ~66 passengers, dealers and dancers are path walkers (shared draws). The heist (`81`) adds a gate, two key
+  boxes, a hatch and four bags (hidden outside the mission); its guards are path walkers, the mob reuses 55's pooled `goon` walkers.
+- Audio (`75`): one AudioContext; samples (`assets/sfx`, MP3 ≤ 64 kbps) decode on first use, the core set at unlock; ≤ 32 voices
+  (20 on phones); loops fade by distance and are reaped after 120 s unused; the context suspends while the page is hidden.
+  Ambience beds are weighted by zone in a 4 Hz tick; nothing allocates per frame.
 
 ## 8. Content rules (locked)
 1. Static → voxels (`W.fill`) or `AF.placeStatic`; outland → `AF.outland.addProp`.

@@ -112,6 +112,7 @@ try {
     show(meterEl, true); AF.PL.busy = true;
   };
   HUD.meterOn = () => MT.on;
+  HUD.meterCancel = () => { if (!MT.on) return; MT.on = false; show(meterEl, false); AF.PL.busy = false; };
   const meterStop = () => { if (!MT.on || MT.t < 0.15) return; MT.on = false; show(meterEl, false); AF.PL.busy = false; const v = MT.v; if (MT.done) MT.done(v, v >= MT.zone[0] && v <= MT.zone[1]); };
   meterEl.addEventListener('pointerdown', (e) => { e.preventDefault(); meterStop(); });
 
@@ -148,9 +149,11 @@ try {
     const fee = Math.min(G.deathFeeMax, Math.round(S.money * G.deathFee));
     H.v = H.max; H.dead = false; H.last = -99;
     AF.emit('respawn');
-    const s = AF.PLAN.spawn, go = () => AF.setMode('walk', { x: s.x, y: s.y, z: s.z, yaw: s.yaw, snap: true });
-    if (AF.stream && AF.stream.travel) AF.stream.travel({ label: 'home', go }); else go();
+    // a mission can bring you round at its last checkpoint instead of at home (81-heist)
+    const alt = AF.respawnAt && AF.respawnAt(), s = alt || AF.PLAN.spawn, go = () => { AF.setMode('walk', { x: s.x, y: s.y, z: s.z, yaw: s.yaw, snap: true }); if (alt && alt.go) alt.go(); };
+    if (AF.stream && AF.stream.travel) AF.stream.travel({ label: alt ? alt.label : 'home', go }); else go();
     if (fee) AF.money.add(-fee);
+    if (alt) return;
     AF.emit('toast', fee ? `You wake up at home, sore. The doctor's bill: ${cash(fee)}.` : 'You wake up at home, sore but in one piece.');
   };
   AF.modes.dead = {
@@ -264,19 +267,20 @@ try {
   const SHK = { a: 0 };
   AF.shake = (a, x, z) => { const p = AF.camera.position, d = x == null ? 0 : Math.hypot(x - p.x, z - p.z); SHK.a = Math.max(SHK.a, a / (1 + d * 0.06)); };
 
-  // ---------------------------------------------------------------- AF.sfx: synthesised sounds (no files, nothing until first input)
-  const SFX = AF.sfx = { on: (() => { try { return localStorage.getItem('portSolace.sound') !== '0'; } catch (e) { return true; } })() };
+  // ---------------------------------------------------------------- AF.sfx: game sounds — recorded samples (75-audio), synthesised fallbacks
+  // until a sample has loaded (or if assets/sfx is missing). Same context, same Sound setting.
+  const AU = AF.audio;
+  const SFX = AF.sfx = { get on() { return AU ? AU.on : true; } };
   let ac = null, noise = null, out = null, siren = null;
   const audio = () => {
     if (ac || !SFX.on) return ac;
     try {
-      ac = new (window.AudioContext || window.webkitAudioContext)(); out = ac.createGain(); out.gain.value = 0.32; out.connect(ac.destination);
+      const b = AU && AU.bus('sfx'); if (!b) return null;
+      ac = AU.ctx; out = ac.createGain(); out.gain.value = 0.36; out.connect(b);
       const n = ac.sampleRate; noise = ac.createBuffer(1, n, n); const d = noise.getChannelData(0); for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
     } catch (e) { ac = null; }
     return ac;
   };
-  const wake = () => { const c = audio(); if (c && c.state === 'suspended') c.resume(); };
-  addEventListener('pointerdown', wake, true); addEventListener('keydown', wake, true);
   const env = (g, t, d, peak) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + d); };
   const hiss = (t, d, f0, f1, peak) => { const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = noise; f.type = 'lowpass'; f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + d); env(g, t, d, peak); s.connect(f).connect(g).connect(out); s.start(t, Math.random() * 0.5); s.stop(t + d + 0.05); };
   const tone = (t, d, f0, f1, peak, type = 'sine') => { const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + d); env(g, t, d, peak); o.connect(g).connect(out); o.start(t); o.stop(t + d + 0.05); };
@@ -292,28 +296,32 @@ try {
     deny: (t) => tone(t, 0.16, 180, 140, 0.2, 'square'), hurt: (t) => tone(t, 0.18, 260, 120, 0.3, 'triangle'),
     ding: (t) => { tone(t, 0.9, 1568, 1560, 0.3); tone(t, 0.9, 2093, 2090, 0.14); }, click: (t) => tone(t, 0.04, 900, 880, 0.2, 'square'),
   };
+  PLAY.smg = PLAY.shot;
+  // synth kind -> recorded sample (75-audio); explosions far off use the muffled take
+  const SAMPLE = { shot: 'rev', smg: 'smg', shotgun: 'shotgun', rifle: 'rifle', punch: 'punch', swing: 'swing', boom: 'boom', crash: 'crash', cash: 'cash', deny: 'ui_deny', ding: 'ui_ding', click: 'ui_click', hurt: 'grunt_m' };
   SFX.play = (kind, x, z) => {
+    let id = SAMPLE[kind];
+    if (id && AU && AU.ctxOk()) {
+      if (id === 'boom' && x != null && Math.hypot(x - AF.camera.position.x, z - AF.camera.position.z) > 70) id = 'boom_far';
+      if (id === 'grunt_m') { const L = AF.friends && AF.friends.current && AF.friends.current.look; if (L && L.female) id = 'grunt_f'; }
+      if (AU.ready(id)) { AU.play(id, x != null ? { x, z } : undefined); return; }
+      AU.need(id);
+    }
     const c = audio(); if (!c || c.state !== 'running' || !PLAY[kind]) return;
     let k = 1; if (x != null) { const p = AF.camera.position; k = 1 / (1 + Math.hypot(x - p.x, z - p.z) * 0.045); if (k < 0.04) return; }
     PLAY[kind](c.currentTime, k);
   };
-  // two-tone police siren while a squad car is near (77 calls it every tick)
+  // two-tone police siren while a squad car is near (77 calls it every tick); the recorded wail (75-audio) takes over once loaded
   SFX.siren = (k) => {
     const c = audio(); if (!c || c.state !== 'running') return;
+    if (AU && AU.ready('siren_loop')) k = 0;
     if (k > 0.02 && !siren) { const o = c.createOscillator(), f = c.createBiquadFilter(), g = c.createGain(); o.type = 'sawtooth'; f.type = 'lowpass'; f.frequency.value = 1400; g.gain.value = 0; o.connect(f).connect(g).connect(out); o.start(); siren = { o, g, next: 0, hi: false }; }
     if (!siren) return;
     siren.g.gain.setTargetAtTime(k * 0.07, c.currentTime, 0.2);
     if (c.currentTime > siren.next) { siren.hi = !siren.hi; siren.o.frequency.setTargetAtTime(siren.hi ? 960 : 720, c.currentTime, 0.04); siren.next = c.currentTime + 0.55; }
     if (k <= 0.02 && siren.g.gain.value < 0.002) { siren.o.stop(); siren = null; }
   };
-  SFX.set = (on) => { SFX.on = on; try { localStorage.setItem('portSolace.sound', on ? '1' : '0'); } catch (e) { /* storage blocked */ } if (!on && ac) { ac.close(); ac = null; siren = null; } };
-  AF.on('ready', () => {   // a Sound row in the pause menu
-    const stack = document.querySelector('#m-menu .stack'); if (!stack) return;
-    const row = document.createElement('div'); row.className = 'row'; row.innerHTML = '<label>Sound</label><div class="seg"><button data-s="1">On</button><button data-s="0">Off</button></div>';
-    const sync = () => row.querySelectorAll('button').forEach((b) => b.classList.toggle('on', (b.dataset.s === '1') === SFX.on));
-    row.addEventListener('click', (e) => { const b = e.target.closest('[data-s]'); if (b) { SFX.set(b.dataset.s === '1'); sync(); } e.stopPropagation(); });
-    stack.parentNode.insertBefore(row, stack); sync();
-  });
+  SFX.set = (on) => { if (AU) AU.setOn(on); if (!on) siren = null; };
 
   // ---------------------------------------------------------------- build + ticks
   AF.onBuild('game-fx', 870, () => { FX.glow = new Pool(AF.MOBILE ? 256 : 512, true); FX.smoke = new Pool(AF.MOBILE ? 160 : 320, false); });

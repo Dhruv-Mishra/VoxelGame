@@ -8,11 +8,11 @@ try {
 //   hardware), outfitters (tailors / hatters) + the wardrobe at home, Body Works + fuel stations (drive in: repair, respray — a
 //   respray out of police sight clears the wanted level), the Motor Exchange (sells cars, one per G.price.sellCooldown s).
 // Carnival: high striker, Skee-Ball, claw, love tester, fortunes, shooting gallery (the ducks), carousel ride, photo booth.
-// Westgate: a boarding pass from check-in is needed to pass security and to take a plane up.
+// Westgate: anyone may walk airside and take a plane up; security only turns back a drawn gun.
 {
   const PI = Math.PI, G = AF.G, S = AF.save, VV = AF.vehicles, I = AF.input, FX = AF.fx, SFX = AF.sfx, HUD = AF.hud, L = AF.land;
   const cash = AF.cash, toast = (t) => AF.emit('toast', t);
-  const J = AF.jobs = { cur: null, ticket: false, shops: [], zones: [] };
+  const J = AF.jobs = { cur: null, shops: [], zones: [] };
   const focus = () => AF.mode === 'drive' && VV.player ? VV.player : AF.player;
   const speedNow = () => AF.mode === 'drive' && VV.player ? Math.abs(VV.player.v) : (AF.PL.walk.speed || 0);
 
@@ -333,12 +333,7 @@ try {
     }
     // the wardrobe in every friend's front room
     for (const c of AF.friends.cast) { const h = AF.friends.homeOf(c.id); if (h) counter(h.spawn.x + Math.cos(h.spawn.yaw) * 1.4, h.spawn.y, h.spawn.z - Math.sin(h.spawn.yaw) * 1.4, 'Wardrobe', wardrobe, { kind: 'home', can: () => AF.friends.current === c, prio: 0.6 }); }
-    // Westgate: boarding passes at check-in; security turns back anyone without one (or armed); planes need one to take off
-    counter(-534, 0.5, 47.6, 'Buy a boarding pass \u00b7 ' + cash(G.price.ticket), () => sheet('Westgate Check-in', 'One pass covers one flight', () => [{ name: 'Boarding pass', desc: J.ticket ? 'You have one \u2014 go through security' : 'Any departure, any plane on the apron', price: G.price.ticket, off: J.ticket, tag: J.ticket ? 'Got it' : null, act: () => AF.shop.buy(G.price.ticket, 'a pass', () => { J.ticket = true; toast('Boarding pass in hand. Security is straight ahead.'); }) }]), { kind: 'ticket' });
-    for (const pl of (AF.planes && AF.planes.list) || []) {
-      const it = pl.interact; if (!it || pl.x > -300 || pl.x < -700 || pl.z > 150) continue;
-      const act = it.act; it.act = () => { if (!J.ticket) { toast('Ground crew: \u201cBoarding pass, please.\u201d Buy one at check-in in the terminal.'); return; } J.ticket = false; act(); };
-    }
+    counter(-534, 0.5, 47.6, 'Westgate check-in', () => AF.emit('dialogue', { name: 'Mabel', role: 'Check-in agent', lines: ['No bags? Then you are all set, dear.', 'The planes on the apron are free to take up \u2014 just mind the airliners on the taxiway.'] }), { kind: 'ticket' });
     if (AF.ui.map) {
       const map = AF.ui.map, ICON = { food: '#e9a35a', guns: '#e05a4a', wear: '#b68ae0', game: '#f3c84b', ticket: '#7ab8e8', paint: '#f2c24a', sell: '#7cd6a8' };
       const draw = (g, to, mini) => {
@@ -352,13 +347,12 @@ try {
       (map.miniOverlays || (map.miniOverlays = [])).push((g, to) => draw(g, to, true));
     }
   });
-  let secT = 0, trespass = false;
+  let secT = 0;
   const airport = (dt) => {
-    const p = AF.player; if (AF.mode !== 'walk' || p.x > -350 || p.x < -620 || p.z < 20 || p.z > 140) { trespass = false; return; }
-    if (p.x > -494 && p.x < -479 && p.z > 56.5 && p.z < 61.5 && (!J.ticket || AF.combat.gun())) {
-      p.teleport(p.x, p.y, 55.2, PI); if ((secT -= dt) <= 0) { secT = 3; toast(J.ticket ? 'Security: \u201cNo firearms past this point. Holster it.\u201d' : 'Security: \u201cBoarding pass, please.\u201d Check-in is behind you.'); }
+    const p = AF.player; if (AF.mode !== 'walk' || p.x > -350 || p.x < -620 || p.z < 20 || p.z > 140) return;
+    if (p.x > -494 && p.x < -479 && p.z > 56.5 && p.z < 61.5 && AF.combat.gun()) {
+      p.teleport(p.x, p.y, 55.2, PI); if ((secT -= dt) <= 0) { secT = 3; toast('Security: \u201cNo firearms past this point. Holster it.\u201d'); }
     } else secT -= dt;
-    if (p.z > 64 && !J.ticket && !trespass) { trespass = true; AF.combat.crime(G.heat.trespass); toast('Security! You\u2019re airside without a pass.'); }
   };
 
   // ---------------------------------------------------------------- tick
@@ -386,7 +380,7 @@ try {
     J.cur.end('test'); S.money = m0; AF.saveNow();
     return { ok: paid && !J.cur && MK.y < -900, info: `paid ${paid}, legs ${job.legs}` };
   });
-  AF.test('jobs: counters + drive-in zones exist (food, guns, outfits, garages, boarding pass)', () => {
+  AF.test('jobs: counters + drive-in zones exist (food, guns, outfits, garages, check-in)', () => {
     const k = new Set(J.shops.map((s) => s.kind)), z = new Set(J.zones.map((s) => s.kind));
     return { ok: k.has('food') && k.has('ticket') && k.has('game') && k.has('home') && z.has('paint') && z.has('sell'), info: [...k].join(',') + ' | zones ' + [...z].join(',') + ' | ' + J.shops.length + ' counters' };
   });

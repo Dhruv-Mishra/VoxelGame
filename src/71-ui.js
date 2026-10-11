@@ -210,7 +210,7 @@ try {
   // ------------------------------------------------------------------ state + public api
   const S = UI.state = { title: true, map: false, help: false, menu: false, dlg: null, bannerB: null, bannerT: 0, hudT: -9, hud: null, toasts: [], pick: null };
   UI.titleOpen = () => S.title;
-  UI.modalOpen = () => S.map || S.help || S.menu || S.title || !!S.shop;
+  UI.modalOpen = () => S.map || S.help || S.menu || S.title || !!S.shop || !!S.casino;
   UI.dialogueOpen = () => !!S.dlg;
   const show = (el, on, disp = 'block') => { const v = on ? disp : 'none'; if (el.style.display !== v) el.style.display = v; };
   const text = (el, value) => { value = String(value); if (el.textContent !== value) el.textContent = value; };
@@ -484,7 +484,8 @@ try {
   AF.on('pointerunlock', (intentional) => { if (!intentional && !S.title && !UI.modalOpen() && !S.dlg) toggleMenu(true); });
   AF.on('escape', () => {
     if (S.title) return;
-    if (S.shop) AF.shop.close();
+    if (S.casino) AF.casino.close();
+    else if (S.shop) AF.shop.close();
     else if (S.map || S.help) { toggleMap(false); toggleHelp(false); }
     else if (S.dlg) closeDlg();
     else toggleMenu(true);

@@ -16,6 +16,9 @@ try {
 {
   const PI = Math.PI, G = AF.G, S = AF.save, I = AF.input, VV = AF.vehicles, H = AF.health, FX = AF.fx, SFX = AF.sfx, UI = AF.ui;
   const CR = () => AF.peopleKit && AF.peopleKit.crowd;
+  const AU = (id, o) => AF.audio && AF.audio.play(id, o);
+  let screamT = 0;
+  const scream = (w, female) => { if (AF.clock.t < screamT) return; screamT = AF.clock.t + 1.2 + Math.random() * 1.5; AU(female ? 'scream_f' : 'scream_m', { x: w.x, y: w.y + 1.5, z: w.z }); };
   const lookOf = (w) => CR().V[w.v];
   const exempt = (w) => { const V = lookOf(w); return V.kid || V.chair; };
   const V3 = () => new THREE.Vector3(), MZ = V3(), DIR = V3(), TMP = V3();
@@ -31,7 +34,7 @@ try {
   const GUNS = AF.GUNS = {
     revolver: { name: '.38 Revolver', dmg: 24, rate: 0.42, mag: 6, reload: 1.6, range: 70, spread: 0.018, pellets: 1, price: 350, pack: 12, packPrice: 15, snd: 'shot', model: [6, 0] },
     shotgun: { name: 'Pump Shotgun', dmg: 13, rate: 0.95, mag: 6, reload: 2.4, range: 28, spread: 0.075, pellets: 7, price: 900, pack: 8, packPrice: 28, snd: 'shotgun', two: true, model: [13, 6] },
-    tommy: { name: 'Tommy Gun', dmg: 12, rate: 0.085, mag: 50, reload: 2.6, range: 55, spread: 0.04, pellets: 1, auto: true, price: 2600, pack: 50, packPrice: 70, snd: 'shot', two: true, model: [10, 5] },
+    tommy: { name: 'Tommy Gun', dmg: 12, rate: 0.085, mag: 50, reload: 2.6, range: 55, spread: 0.04, pellets: 1, auto: true, price: 2600, pack: 50, packPrice: 70, snd: 'smg', two: true, model: [10, 5] },
     rifle: { name: 'Hunting Rifle', dmg: 75, rate: 1.2, mag: 5, reload: 2.2, range: 140, spread: 0.003, pellets: 1, zoom: 22, price: 1700, pack: 10, packPrice: 35, snd: 'rifle', two: true, model: [16, 7] },
   };
   const GUN_IDS = Object.keys(GUNS);
@@ -63,11 +66,14 @@ try {
 
   // ---------------------------------------------------------------- state
   const CB = AF.combat = { slot: 0, aimToggle: false, cd: 0, swing: 0, swingDur: 0.3, side: 0, hitAt: -1, reloadT: 0, mag: S.mag || (S.mag = {}), heat: 0, stars: 0, seenT: 0, engaged: 0, recoil: 0, flinch: 0, held: null, heldId: null, gallery: null };
-  const OWNED = [null];
-  const owned = () => { OWNED.length = 1; for (const id of GUN_IDS) if (S.guns[id]) OWNED.push(id); return OWNED; };
-  const cur = () => { const o = owned(); if (CB.slot >= o.length) CB.slot = 0; return o[CB.slot]; };
-  const melee = () => { const f = AF.friends && AF.friends.current; return (f && MELEE[f.id]) || FISTS; };
-  CB.gun = cur; CB.GUNS = GUNS; CB.melee = melee; CB.heldGeo = heldGeo; CB.pvp = false;
+  const OWNED = [null], MELEE_ID = '@melee';
+  const sig = () => { const f = AF.friends && AF.friends.current; return f && MELEE[f.id]; };
+  // slot 0 = bare fists (every spawn starts there), then the friend's signature melee, then the guns bought
+  const owned = () => { OWNED.length = 1; if (sig()) OWNED.push(MELEE_ID); for (const id of GUN_IDS) if (S.guns[id]) OWNED.push(id); return OWNED; };
+  const slotId = () => { const o = owned(); if (CB.slot >= o.length) CB.slot = 0; return o[CB.slot]; };
+  const cur = () => { const id = slotId(); return id && id !== MELEE_ID ? id : null; };
+  const melee = () => (slotId() === MELEE_ID && sig()) || FISTS;
+  CB.gun = cur; CB.GUNS = GUNS; CB.melee = melee; CB.heldGeo = heldGeo; CB.pvp = false; CB.owned = owned;
   CB.give = (id) => { S.guns[id] = true; S.ammo[id] = (S.ammo[id] || 0) + GUNS[id].pack; CB.mag[id] = CB.mag[id] || 0; AF.saveSoon(); };
   const select = (slot) => { const o = owned(); CB.slot = ((slot % o.length) + o.length) % o.length; CB.reloadT = 0; attachHeld(); SFX.play('click'); chipT = 2.5; };
   CB.select = select;
@@ -103,12 +109,12 @@ try {
   const wheelEl = document.createElement('div'); wheelEl.id = 'h-wheel'; wheelEl.innerHTML = '<div class="ctr"><b></b><span></span></div>'; uiRoot.appendChild(wheelEl);
   const chip = document.createElement('div'); chip.id = 'h-wpn'; chip.className = 'hud';
   if (hRight) hRight.insertBefore(chip, document.getElementById('h-btns')); else uiRoot.appendChild(chip);
-  const slotInfo = (id) => id ? { k: id, name: GUNS[id].name, ammo: (CB.reloadT > 0 && CB.reloadG === id ? '\u21bb' : CB.mag[id] || 0) + ' / ' + (S.ammo[id] || 0), out: !(CB.mag[id] > 0) && !(S.ammo[id] > 0) }
-    : { k: melee()[4] ? 'melee' : 'fists', name: melee()[0], ammo: '', out: false };
+  const slotInfo = (id) => GUNS[id] ? { k: id, name: GUNS[id].name, ammo: (CB.reloadT > 0 && CB.reloadG === id ? '\u21bb' : CB.mag[id] || 0) + ' / ' + (S.ammo[id] || 0), out: !(CB.mag[id] > 0) && !(S.ammo[id] > 0) }
+    : id === MELEE_ID && sig() ? { k: 'melee', name: sig()[0], ammo: '', out: false } : { k: 'fists', name: FISTS[0], ammo: '', out: false };
   let chipT = 0, chipKey = '', firedT = 9;
   const WH = CB.wheel = { open: false, pick: 0, vx: 0, vy: 0, key: '', items: [] };
   const wheelBuild = () => {
-    const o = owned(), n = o.length, key = o.join() + '|' + melee()[0];
+    const o = owned(), n = o.length, key = o.join() + '|' + (sig() || FISTS)[0];
     if (key === WH.key) return;
     WH.key = key; for (const e of WH.items) e.remove(); WH.items.length = 0;
     o.forEach((id, i) => {
@@ -144,7 +150,7 @@ try {
     const on = chipT > 0 || WH.open || (AF.mode === 'walk' && (!!AF.PL.aim || CB.reloadT > 0 || (g && firedT < 2.5)));
     chip.classList.toggle('on', on);
     if (!on) return;
-    const f = CB.gallery ? { k: 'rifle', name: 'Gallery rifle', ammo: String(CB.gallery.shots), out: false } : slotInfo(g), key = f.k + f.name + f.ammo + f.out;
+    const f = CB.gallery ? { k: 'rifle', name: 'Gallery rifle', ammo: String(CB.gallery.shots), out: false } : slotInfo(slotId()), key = f.k + f.name + f.ammo + f.out;
     if (key !== chipKey) { chipKey = key; chip.innerHTML = (f.ammo ? `<b class="${f.out ? 'out' : ''}">${f.ammo}</b>` : `<i>${f.name}</i>`) + wIcon(f.k); }
   };
   const attachHeld = () => {
@@ -158,6 +164,7 @@ try {
   };
   AF.on('look', () => { CB.held = null; attachHeld(); });
   AF.on('friend', () => { CB.slot = 0; attachHeld(); });
+  AF.on('respawn', () => { CB.slot = 0; CB.aimToggle = false; attachHeld(); });
 
   // ---------------------------------------------------------------- wanted level
   const starsOf = (h) => { let n = 0; for (const t of G.stars) if (h >= t) n++; return n; };
@@ -186,11 +193,12 @@ try {
     w.agg = { kind, hp: G.pedHp, st: 'go', t: 0, cd: 0.5 + Math.random(), f: 'p', lie: false, dy: 0, lead: w.lead || null, vx: 0, vz: 0, swing: 0, hitDone: false, aimT: 0, side: w.id & 1 ? 1 : -1, gy: w.y, gyT: 0, reported: false };
     w.lead = null; w.talk = 0;
     if (cause === 'hit') say(w, kind === 'flee' ? FLEE_LINES[w.id % 4] : FIGHT_LINES[w.id % 4]);
+    if (kind === 'flee' && (cause === 'hit' || cause === 'panic' || cause === 'car') && Math.random() < 0.5) scream(w, !!V.L.female);
     return w.agg;
   };
   CB.release = (w) => {
     const A = w.agg; if (!A) return;
-    if (w.cop) w.act = false; else CB.engaged = Math.max(0, CB.engaged - 1);
+    if (w.cop || w.goon) w.act = false; else CB.engaged = Math.max(0, CB.engaged - 1);
     w.lead = A.lead && A.lead.act && !A.lead.agg ? A.lead : null; w.agg = null; w.moving = false;
   };
   const down = (w, ko, fx, fz, v) => {
@@ -208,16 +216,17 @@ try {
     A.hp -= dmg; A.cd = Math.max(A.cd, 0.35); w.x += fx * 0.15; w.z += fz * 0.15;
     if (A.kind === 'flee' && kind === 'melee' && Math.random() < 0.3 && lookOf(w).im.work) A.kind = 'brawl';
     FX.burst('hit', w.x, w.y + 1.3, w.z, 1);
+    if (Math.random() < 0.6) AU(lookOf(w).L.female ? 'grunt_f' : 'grunt_m', { x: w.x, y: w.y + 1.5, z: w.z });
     const fell = A.hp <= 0;
     if (fell) down(w, kind === 'melee' && A.hp > -15 ? 'ko' : null, fx, fz, kind === 'car' || kind === 'boom' ? 6 : 1.5);
-    if (!innocent && (!A.reported || fell)) { A.reported = true; CB.crime(w.cop ? (fell ? G.heat.copKill : G.heat.copHit) : fell ? (A.ko ? G.heat.ko : G.heat.kill) : G.heat.assault); }
+    if (!innocent && !w.goon && (!A.reported || fell)) { A.reported = true; CB.crime(w.cop ? (fell ? G.heat.copKill : G.heat.copHit) : fell ? (A.ko ? G.heat.ko : G.heat.kill) : G.heat.assault); }
   };
   // a hit sent by the player who shot one of this client's peds: no crime here, and the ped turns on that player
   CB.netHitPed = (w, dmg, kind, fx, fz, from) => { if (!w || !w.act || w.net) return; hitPed(w, dmg, kind, fx, fz, true); if (w.agg) w.agg.tgt = from; };
   const flat = (w) => w.lie || (w.agg && w.agg.lie);
   const panic = (x, z, r) => {
     const C = CR();
-    if (C) for (const w of C.walkers) if (w.act && !w.agg && !w.cop && !w.net && (w.x - x) ** 2 + (w.z - z) ** 2 < r * r) { const A = engage(w, 'panic'); if (!A) break; }
+    if (C) for (const w of C.walkers) if (w.act && !w.agg && !w.cop && !w.goon && !w.net && (w.x - x) ** 2 + (w.z - z) ** 2 < r * r) { const A = engage(w, 'panic'); if (!A) break; }
     scareWalkers(x, z, r);
   };
   CB.panic = panic;
@@ -226,6 +235,7 @@ try {
   const scareWalkers = (x, z, r) => { const WK = AF.walkers; if (WK && WK.near) for (const a of WK.near(x, z, r)) WK.scare(a, 6 + Math.random() * 4); };
   const hitWalker = (a, dmg, kind, fx, fz, innocent) => {
     const WK = AF.walkers; if (WK.isDown(a)) return;
+    if (CB.onWalkerHit && CB.onWalkerHit(a, kind, fx, fz)) return;
     FX.burst('hit', a.x, a.y + 1.3, a.z, 1);
     a.hp = (a.hp ?? G.pedHp) - dmg;
     const fell = kind !== 'melee' || a.hp <= 0;
@@ -366,12 +376,12 @@ try {
     const g = cur(); if (!g || CB.reloadT > 0) return;
     const W = GUNS[g], need = W.mag - (CB.mag[g] || 0), have = S.ammo[g] || 0;
     if (need <= 0 || have <= 0) return;
-    CB.reloadT = W.reload; CB.reloadG = g;
+    CB.reloadT = W.reload; CB.reloadG = g; AU('reload');
   };
   let emptyT = 0;
   const fire = (g) => {
     const W = GUNS[g], gal = CB.gallery;
-    if (!gal && !(CB.mag[g] > 0)) { if ((S.ammo[g] || 0) > 0) reload(); else { SFX.play('click'); CB.cd = 0.3; if (AF.clock.t - emptyT > 4) { emptyT = AF.clock.t; AF.emit('toast', 'Out of ammo \u2014 a gun counter sells more.'); } } return; }
+    if (!gal && !(CB.mag[g] > 0)) { if ((S.ammo[g] || 0) > 0) reload(); else { if (!AU('dry')) SFX.play('click'); CB.cd = 0.3; if (AF.clock.t - emptyT > 4) { emptyT = AF.clock.t; AF.emit('toast', 'Out of ammo \u2014 a gun counter sells more.'); } } return; }
     if (gal) { if (gal.shots <= 0) return; gal.shots--; } else { CB.mag[g]--; AF.saveSoon(); }
     CB.cd = W.rate; CB.recoil = 1;
     const p = AF.player, cam = AF.camera;
@@ -399,7 +409,7 @@ try {
       else if (h.kind === 'heli') { heliHit(W.dmg); FX.burst('spark', h.x, h.y, h.z, 3, { spread: 4 }); any = true; }
       else if (h.kind === 'peer') { if (CB.hitPeer) CB.hitPeer(h.obj, W.dmg, 'gun', TMP.x, TMP.z); if (h.obj.heli) FX.burst('spark', h.x, h.y, h.z, 3, { spread: 4 }); else FX.burst('hit', h.x, h.y, h.z, 1); any = true; }
       else if (h.kind === 'duck') { gal.hit(h.obj); any = true; }
-      else if (h.kind === 'world') FX.burst('dust', h.x - TMP.x * 0.1, h.y - TMP.y * 0.1, h.z - TMP.z * 0.1, 2);
+      else if (h.kind === 'world') { FX.burst('dust', h.x - TMP.x * 0.1, h.y - TMP.y * 0.1, h.z - TMP.z * 0.1, 2); if (k === 0) AU(Math.random() < 0.3 ? 'ricochet' : 'bullet_hit', { x: h.x, y: h.y, z: h.z }); }
     }
     if (any) AF.hud.hitMark();
     FX.burst('flash', MZ.x + DIR.x * 0.25, MZ.y + DIR.y * 0.25, MZ.z + DIR.z * 0.25, 1, { size: W.pellets > 1 ? 0.9 : 0.6 });
@@ -570,8 +580,19 @@ try {
     const P = at || spawnPoint(28, 44); if (!P) return false;
     w.x = P.x; w.y = P.y; w.z = P.z; w.yaw = Math.atan2(pl().x - P.x, pl().z - P.z); w.act = true; w.ph = 0;
     w.agg = { kind: CB.stars >= 2 || cur() ? 'gun' : 'brawl', hp: G.copHp, st: 'go', t: 0, cd: 1.5, f: 'p', lie: false, dy: 0, lead: null, vx: 0, vz: 0, swing: 0, hitDone: false, aimT: 0, side: w.id & 1 ? 1 : -1, gy: P.y, gyT: 0, reported: false };
+    if (AF.clock.t > (CB.whistleT || 0)) { CB.whistleT = AF.clock.t + 8; AU('whistle', { x: w.x, y: w.y + 1.6, z: w.z }); }
     return true;
   };
+  // the mob (81-heist): up to 8 pooled goons in pinstripes; they fight the local player (or o.tgt, a co-op slot) and cost no heat
+  CB.spawnGoon = (x, y, z, o = {}) => {
+    const C = CR(); if (!C) return null;
+    const w = C.walkers.find((q) => q.goon && !q.act); if (!w) return null;
+    w.x = x; w.y = y; w.z = z; w.yaw = o.yaw ?? Math.atan2(pl().x - x, pl().z - z); w.act = true; w.ph = 0;
+    w.agg = { kind: o.kind || 'gun', hp: o.hp || G.copHp, st: 'go', t: 0, cd: 1.2 + Math.random() * 1.5, f: 'p', lie: false, dy: 0, lead: null, vx: 0, vz: 0, swing: 0, hitDone: false, aimT: 0, side: w.id & 1 ? 1 : -1, gy: y, gyT: 0, reported: true, tgt: o.tgt };
+    return w;
+  };
+  CB.goons = () => { const C = CR(); return C ? C.walkers.filter((q) => q.goon && q.act) : []; };
+  CB.clearGoons = () => { const C = CR(); if (C) for (const w of C.walkers) if (w.goon && w.act) { w.agg = null; w.act = false; } };
   const spawnSquad = () => {
     const P = target(), VP = AF.PLAN;
     for (let i = 0; i < 8; i++) {
@@ -658,6 +679,7 @@ try {
     for (let i = SQUADS.length - 1; i >= 0; i--) {
       const c = SQUADS[i]; if (!c.squad || c.dead || c.player || c.active === false) { SQUADS.splice(i, 1); continue; }
       const d = Math.hypot(c.x - T.x, c.z - T.z); if (d < 40) seen = true; sirenK = Math.max(sirenK, 1 / (1 + d / 40));
+      if (d < 45 && AF.clock.t > (CB.megaT || 0)) { CB.megaT = AF.clock.t + 14 + Math.random() * 8; AU(T.car ? 'mega_stop' : 'mega_police', { x: c.x, y: c.y + 1.5, z: c.z }); }
     }
     if (HELI.on && !HELI.fall && CB.stars >= 3 && !(AF.buildingAt && AF.buildingAt(T.x, T.y + 1, T.z))) seen = true;
     SFX.siren(CB.stars ? sirenK : 0);

@@ -20,7 +20,7 @@ try {
   const JP = ['legL', 'legR', 'armL', 'armL', 'armR', 'armR', 'armR', 'chest', 'chest', 'head', 'head'], JA = ['x', 'x', 'x', 'z', 'x', 'y', 'z', 'x', 'y', 'x', 'y'], NJ = JP.length;
   const HELD = [null, 'keyboard', 'bag', 'dumbbell', 'mic', 'bat', 'pan', 'cutlass', 'guitar', 'revolver', 'shotgun', 'tommy', 'rifle'];
   const FRAMES = ['a', 'p', 'b', 'sit', 'work', 'phone', 'chat', 'look', 'hail', 'runA', 'runB'], WF = ['a', 'p', 'b', 'p'];
-  const SND = [null, 'shot', 'shotgun', 'shot', 'rifle'];
+  const SND = [null, 'shot', 'shotgun', 'smg', 'rifle'];
   const VK_CAR = 1, VK_PLANE = 2, VK_SKI = 3;
   const AK = { carousel: 1, wheel: 2, coaster: 3, train: 4, ferry: 5 };
   const COLORS = ['#ffd24a', '#5ad1ff', '#ff7ab8', '#9dff7a'];

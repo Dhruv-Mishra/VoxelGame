@@ -348,7 +348,7 @@ try {
   });
   AF.onBuild('airfield-staff',826,()=>{
     const spawn=(id,name,role,x,y,z,lines)=>AF.npc.spawn({id,name,role,x,y,z,visual:false,look:{},greet:[lines[0]],lines:[lines]});
-    A.staff=[spawn('airport-security','Officer Reed','Airport security',-488.5,0.5,58.7,['Boarding pass, please... you are all clear.','Enjoy your flight. The apron door is beyond the lounge.']),spawn('airport-checkin','Mabel','Check-in agent',-534,0.5,49.5,['Welcome to Westgate. I can check that bag for you.','Departures through the checkpoint, gates straight ahead.']),spawn('airport-crew','Otto','Ground crew',-566,0.25,92,['The Sky Cub is ready for you.','Keep clear of the taxiway when an airliner arrives.'])];
+    A.staff=[spawn('airport-security','Officer Reed','Airport security',-488.5,0.5,58.7,['Go right through... just keep any firearms holstered.','Enjoy your flight. The apron door is beyond the lounge.']),spawn('airport-checkin','Mabel','Check-in agent',-534,0.5,49.5,['Welcome to Westgate. I can check that bag for you.','Departures through the checkpoint, gates straight ahead.']),spawn('airport-crew','Otto','Ground crew',-566,0.25,92,['The Sky Cub is ready for you.','Keep clear of the taxiway when an airliner arrives.'])];
   });
   AF.onTick('airfield-boarding',304,()=>{
     const camera=AF.camera.position;

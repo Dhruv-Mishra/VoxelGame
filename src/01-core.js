@@ -17,8 +17,8 @@ AF.ready = false;
 // frames and tries one step up after 20 s at the display rate. 'lite' = the 'high' tier (tier stays 'high') minus AO, god rays and MSAA
 // (FXAA instead) with shorter LOD ranges: read AF.GFX.lite / AF.GFX.name. AF.GFX.res = render scale in CSS px (0 = tier default).
 AF.GFX = {
-  tier: 'ultra', cinema: false, lite: false, res: 0, forced: false, auto: true, scale: 1, _subs: [],
-  // ROUND 2: 'cinema' = the ultra tier + capture quality (native DPR up to 2, no dynamic-resolution drops, no auto-downgrade,
+  tier: 'ultra', cinema: false, lite: false, res: 0, forced: false, auto: true, _subs: [],
+  // ROUND 2: 'cinema' = the ultra tier + capture quality (native DPR up to 2, no auto-downgrade,
   // props at full detail to 200 m, 4096 far shadow, 16-sample AO, anisotropic textures). tier stays 'ultra' so every
   // `tier === 'ultra'` check elsewhere keeps working; read AF.GFX.cinema (or AF.GFX.name) for the extra quality.
   get name() { return this.cinema ? 'cinema' : this.lite && this.tier === 'high' ? 'lite' : this.tier; },

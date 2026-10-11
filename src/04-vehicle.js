@@ -122,7 +122,9 @@ try {
     for (const r of RINGS) {
       if (r > maxR) break;
       for (let a = 0; a < 16; a++) {
-        const px = x + Math.sin(a / 16 * Math.PI * 2) * r, pz = z + Math.cos(a / 16 * Math.PI * 2) * r, gy = AF.surfaceBelow(px, pz, top, 12);
+        const px = x + Math.sin(a / 16 * Math.PI * 2) * r, pz = z + Math.cos(a / 16 * Math.PI * 2) * r;
+        if (Vehicle.noLand && Vehicle.noLand(px, pz)) continue;   // e.g. the liner's hull: never hop off through it
+        const gy = AF.surfaceBelow(px, pz, top, 12);
         if (Number.isFinite(gy) && gy > minY && !AF.boxBlocked(px, gy + 0.3, pz, 0.3, 1.5)) { SPOT.x = px; SPOT.y = gy; SPOT.z = pz; SPOT.r = r; found = true; break; }
       }
       if (found) return SPOT;
