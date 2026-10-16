@@ -16,19 +16,10 @@ try {
   const focus = () => AF.mode === 'drive' && VV.player ? VV.player : AF.player;
   const speedNow = () => AF.mode === 'drive' && VV.player ? Math.abs(VV.player.v) : (AF.PL.walk.speed || 0);
 
-  // ---------------------------------------------------------------- the target marker (glowing post + spinning gem; parked far below when unused)
-  const MK = { post: null, gem: null, x: 0, y: -999, z: 0 };
-  J.mark = (x, y, z) => { MK.x = x; MK.y = y; MK.z = z; MK.post.position.set(x, y, z); MK.post.visible = y > -900; if (AF.ui.map) AF.ui.map.revision++; };
+  // ---------------------------------------------------------------- the target: the mission kit's primary blip (73: map, minimap, world marker)
+  const MK = { x: 0, y: -999, z: 0 };
+  J.mark = (x, y, z) => { MK.x = x; MK.y = y; MK.z = z; if (!AF.mission) return; if (y > -900) AF.mission.blip('job', { x, y, z, primary: true, marker: true, r: 2.4, label: '' }); else AF.mission.unblip('job'); };
   J.unmark = () => J.mark(0, -999, 0);
-  AF.onBuild('jobs-marker', 880, () => {
-    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 2.3, 0.5), fog: false });
-    const pg = new THREE.BoxGeometry(0.16, 22, 0.16); pg.translate(0, 11, 0);
-    MK.post = new THREE.Mesh(pg, mat); MK.gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.6, 0), mat);
-    MK.post.add(MK.gem); MK.gem.position.y = 3; MK.post.name = 'job-marker';
-    for (const m of [MK.post, MK.gem]) { m.castShadow = false; m.frustumCulled = false; }
-    AF.scene.add(MK.post); J.unmark();
-  });
-  AF.on('preloaded', () => { MK.post.visible = true; AF.stream.compileAhead(MK.post).then(() => { MK.post.visible = MK.y > -900; }); });
 
   // ---------------------------------------------------------------- places: city doors near a road, kerb points beside them
   let DOORS = null;
@@ -155,7 +146,15 @@ try {
   const counter = (x, y, z, label, open, o = {}) => { const it = AF.addInteract({ x, y: y + 1, z, r: o.r || 2.6, label, prio: o.prio ?? 0.4, can: () => AF.mode === 'walk' && (!o.can || o.can()), act: open }); J.shops.push({ x, z, kind: o.kind || 'shop', it }); return it; };
   // food: heals; the kiosks + wayside markets sell a few things, a grocer or diner the whole menu
   const FOOD = [['Apple', 2, 8], ['Coffee & doughnut', 4, 15], ['Sandwich', 6, 28], ['Blue-plate dinner', 12, 60], ['First-aid tin', 30, 100]];
-  const eat = (name, price, heal) => ({ name, desc: '+' + heal + ' health', price, off: AF.health.v >= AF.health.max, act: () => AF.shop.buy(price, name, () => { AF.health.heal(heal); toast('Mm \u2014 ' + name.toLowerCase() + '. +' + heal + ' health.'); }) });
+  // food: eaten on the spot while you're hurt, otherwise it goes in the bag (76-inventory) for later
+  const eat = (name, price, heal) => {
+    const hurt = AF.health.v < AF.health.max, INV = AF.inv, full = !!INV && INV.count(INV.slug(name)) >= 9;
+    return { name, desc: '+' + heal + ' health \u00b7 ' + (hurt || !INV ? 'eat it now' : full ? 'your bag is full of these' : 'into your bag'), price, off: !hurt && (!INV || full),
+      act: () => AF.shop.buy(price, name, () => {
+        if (hurt || !INV) { AF.health.heal(heal); toast('Mm \u2014 ' + name.toLowerCase() + '. +' + heal + ' health.'); }
+        else { INV.add({ name, heal }); toast({ text: name + ' is in your bag \u2014 ' + (AF.touch ? 'tap BAG' : 'press I') + ' to eat it later.', kind: 'inv', icon: 'inv' }); }
+      }) };
+  };
   const foodShop = (title, menu) => () => sheet(title, 'Food & first aid', () => menu.map((f) => eat(...f)));
   // guns
   const gunShop = (title) => () => sheet(title, 'Firearms & ammunition \u2014 keep it legal, friend', (tab) => {
@@ -340,7 +339,6 @@ try {
         g.save();
         for (const s of J.shops) { if (!ICON[s.kind] || (mini && s.kind === 'game')) continue; const p = to(s.x, s.z); g.fillStyle = ICON[s.kind]; g.beginPath(); g.arc(p.x, p.y, mini ? 4 : 3.5, 0, PI * 2); g.fill(); }
         for (const Z of J.zones) { const p = to(Z.x, Z.z); g.fillStyle = ICON[Z.kind]; g.fillRect(p.x - 4, p.y - 4, 8, 8); }
-        if (MK.y > -900) { const p = to(MK.x, MK.z); g.strokeStyle = '#1d1d20'; g.lineWidth = 2; g.fillStyle = '#ffd24a'; g.beginPath(); g.arc(p.x, p.y, mini ? 7 : 6, 0, PI * 2); g.fill(); g.stroke(); }
         g.restore();
       };
       (map.overlays || (map.overlays = [])).push((g) => draw(g, map.worldToScreen, false));
@@ -360,7 +358,6 @@ try {
     if (!AF.ready) return;
     if (I.hit('KeyJ') && !(AF.ui.modalOpen() || AF.health.dead)) J.toggle();
     if (J.cur) J.cur.update(dt);
-    if (MK.post && MK.y > -900) { MK.gem.position.y = 3 + Math.sin(t * 2.4) * 0.3; MK.gem.rotation.y += dt * 2; }
     galleryTick(dt); airport(dt);
     // drive-in zones
     const car = AF.mode === 'drive' && VV.player;

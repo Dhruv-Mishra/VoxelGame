@@ -144,7 +144,7 @@ try {
   }
 
   // ------------------------------------------------------------ species
-  const SPEC = {
+  const SPEC = K.SPEC = {
     dalmatian: { len: 10, bw: 4, bh: 4, lh: 5, lw: 1, hs: [4, 4, 4], col: 0xf4f1ea, pattern: (x, y, z) => ((x * 7 + y * 13 + z * 5) % 6 === 0 ? 0x1d1b1a : null), headPattern: (x, y, z) => ((x * 5 + y * 3 + z * 7) % 7 === 0 ? 0x1d1b1a : null), snout: { w: 2, h: 2, d: 2 }, nose: true, ears: 'floppy', earCol: 0x2a2624, tail: { len: 5, col: 0xf4f1ea, up: 2.3 }, collar: 0xc8322e },
     golden: { len: 10, bw: 4, bh: 4, lh: 5, lw: 1, hs: [4, 4, 4], col: 0xd8a45a, belly: 0xe8c48a, snout: { w: 2, h: 2, d: 2, col: 0xe0b06a }, nose: true, ears: 'floppy', earCol: 0xb8843a, tail: { len: 5, col: 0xd8a45a, up: 2.0 }, collar: 0x3a70c0 },
     beagle: { len: 9, bw: 4, bh: 4, lh: 4, lw: 1, hs: [4, 4, 4], col: 0xf1ede2, pattern: (x, y, z) => (y >= 2 && z > 2 && z < 7 ? 0x2a2420 : y >= 1 && (z <= 2 || z >= 7) ? 0xa86a3a : null), headCol: 0xa86a3a, blaze: 0xf1ede2, snout: { w: 2, h: 2, d: 2, col: 0xf1ede2 }, nose: true, ears: 'floppy', earCol: 0x6a4424, tail: { len: 4, col: 0xf1ede2, up: 2.5, tip: 0xffffff }, collar: 0xc8322e },
@@ -363,6 +363,7 @@ try {
       add({ type: 'murmur', root: im, off, N, t: 0 });
     }
     K._kit = kit;
+    K.makeQuad = makeQuad; K.catGeo = catGeo; K.tailGeo = tailGeo; K.VS = VS;   // 58-pets builds its own breeds from the same kit
     K.stats = { animals: animals.length, ms: Math.round(performance.now() - t0), ducks: ducks.length };
     console.log('[af] animals', JSON.stringify(K.stats));
   });

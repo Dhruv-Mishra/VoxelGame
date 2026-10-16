@@ -44,52 +44,50 @@ try {
   AF.cash = cash;
   const st = document.createElement('style');
   st.textContent = `
-  #ui #h-stat{width:112px;padding:0 2px;display:grid;grid-template-columns:minmax(0,1fr);gap:5px;position:relative;box-sizing:border-box;text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.5)}
-  #ui #h-stat .hp{height:3px;border-radius:3px;background:rgba(0,0,0,.35);overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.08)}
-  #ui #h-stat .hp i{display:block;height:100%;border-radius:3px;background:#e8665a;transition:width .25s}
-  #ui #h-stat .hp.low i{background:#ff4a3a;animation:gPulse 1s infinite}
-  #ui #h-stat .r{display:flex;justify-content:space-between;align-items:center;gap:4px;min-width:0}
-  #ui #h-stat .m{font-weight:600;font-size:14px;color:#b4f0c2;font-variant-numeric:tabular-nums}
-  #ui #h-stat .st{font-size:11px;letter-spacing:.5px;color:rgba(255,255,255,.22);white-space:nowrap;overflow:hidden}
-  #ui #h-stat .st b{color:#ffd24a;font-weight:400} #ui #h-stat .st.ev b{animation:gPulse .7s infinite} #ui #h-stat .st.none{display:none}
-  #ui #h-stat .gain{position:absolute;right:calc(100% + 8px);top:18px;font-weight:600;font-size:13px;white-space:nowrap;opacity:0;transition:opacity .3s,transform .9s;pointer-events:none;text-shadow:0 1px 4px #000}
-  #ui #h-stat .gain.on{opacity:1;transform:translateY(-8px)} #ui #h-stat .gain.neg{color:#ff9a8a} #ui #h-stat .gain.pos{color:#a6e8b4}
-  #ui #h-job{position:absolute;left:max(16px,env(safe-area-inset-left));top:calc(max(16px,env(safe-area-inset-top)) + 50px);padding:7px 12px;border-radius:12px;max-width:min(330px,46vw);font-size:12px;display:none}
-  #ui #h-job b{color:var(--accent);font-weight:600;margin-right:6px} #ui #h-job span{color:var(--dim);margin-left:8px;font-variant-numeric:tabular-nums}
+  #ui #h-stat{display:flex;flex-direction:column;align-items:flex-end;gap:0;position:relative}
+  #ui #h-stat .m{font:700 26px/1.05 var(--font);color:#fff;font-variant-numeric:tabular-nums;letter-spacing:.4px}
+  #ui #h-stat .st{font-size:19px;letter-spacing:3px;line-height:1.1;color:rgba(255,255,255,.3);white-space:nowrap}
+  #ui #h-stat .st b{color:var(--gold);font-weight:400} #ui #h-stat .st.ev b{animation:gPulse .7s infinite} #ui #h-stat .st.none{display:none}
+  #ui #h-stat .gain{font:700 17px var(--font);white-space:nowrap;opacity:0;transform:translateY(-4px);transition:opacity .3s,transform .5s;pointer-events:none;height:0;overflow:visible}
+  #ui #h-stat .gain.on{opacity:1;transform:none;height:auto} #ui #h-stat .gain.neg{color:#ff8a7a} #ui #h-stat .gain.pos{color:#7ddc8a}
+  #ui #h-hp{height:7px;border-radius:2px;background:rgba(6,8,12,.72);box-shadow:0 0 0 1px rgba(0,0,0,.5);overflow:hidden}
+  #ui #h-hp i{display:block;height:100%;width:100%;background:linear-gradient(#86e293,#4cae5a);transition:width .25s}
+  #ui #h-hp.low i{background:#e2524a;animation:gPulse 1s infinite}
+  #ui #h-job{display:none!important}
   #ui #h-cross{position:absolute;left:50%;top:50%;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;border:1.5px solid rgba(255,255,255,.75);display:none;pointer-events:none;box-shadow:0 0 3px rgba(0,0,0,.6);transition:border-color .1s,transform .1s}
   #ui #h-cross:after{content:'';position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px;border-radius:50%;background:#fff}
   #ui #h-cross.hit{border-color:#ff6a5a;transform:scale(1.25)}
   #ui #h-hurt{position:absolute;inset:0;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 52%,rgba(170,16,16,.6) 100%);transition:opacity .35s}
-  #ui #h-dead{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:6px;pointer-events:none;background:radial-gradient(ellipse at center,rgba(30,8,8,.15),rgba(30,0,0,.6));animation:uiIn .6s ease}
-  #ui #h-dead h1{margin:0;font:400 54px Limelight,Georgia,serif;color:#f6e6d4;letter-spacing:3px;text-shadow:0 2px 14px #000}
-  #ui #h-dead div{color:var(--dim);font-size:13px}
-  #ui #h-meter{position:absolute;left:50%;bottom:24%;transform:translateX(-50%);width:min(340px,72vw);padding:10px 14px 12px;border-radius:16px;display:none;text-align:center;font-size:13px}
+  #ui #h-dead{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:0;pointer-events:none;background:radial-gradient(ellipse at center,rgba(30,8,8,.15),rgba(30,0,0,.6));animation:uiIn .6s ease}
+  #ui #h-dead h1{margin:0;padding:14px 0 6px;width:100%;text-align:center;font:400 54px Limelight,Georgia,serif;color:#ff6a5a;letter-spacing:4px;text-shadow:0 2px 14px #000;background:linear-gradient(90deg,rgba(0,0,0,0),rgba(0,0,0,.6) 22%,rgba(0,0,0,.6) 78%,rgba(0,0,0,0))}
+  #ui #h-dead div{color:#e6e9eb;font-size:13px;letter-spacing:2px;text-transform:uppercase;padding:0 0 14px;width:100%;text-align:center;background:linear-gradient(90deg,rgba(0,0,0,0),rgba(0,0,0,.6) 22%,rgba(0,0,0,.6) 78%,rgba(0,0,0,0))}
+  #ui #h-meter{position:absolute;left:50%;bottom:24%;transform:translateX(-50%);width:min(340px,72vw);padding:10px 14px 12px;border-radius:4px;display:none;text-align:center;font-size:13px;background:var(--hud);box-shadow:0 4px 18px rgba(0,0,0,.35)}
   #ui #h-meter small{display:block;color:var(--dim);font-size:11px;margin-top:2px}
-  #ui #h-meter .bar{position:relative;height:12px;border-radius:12px;background:rgba(255,255,255,.1);margin-top:9px;overflow:hidden}
-  #ui #h-meter .z{position:absolute;top:0;bottom:0;background:rgba(120,230,170,.5);border-radius:12px}
+  #ui #h-meter .bar{position:relative;height:12px;border-radius:3px;background:rgba(255,255,255,.1);margin-top:9px;overflow:hidden}
+  #ui #h-meter .z{position:absolute;top:0;bottom:0;background:rgba(120,230,170,.5);border-radius:3px}
   #ui #h-meter .n{position:absolute;top:0;bottom:0;width:4px;margin-left:-2px;border-radius:3px;background:#fff;box-shadow:0 0 6px #fff}
-  #ui #m-shop>.panel{width:min(460px,100%);border-radius:18px;display:flex;flex-direction:column}
-  #ui #m-shop h2{margin-bottom:4px} #ui #m-shop .sub{display:flex;justify-content:space-between;color:var(--dim);font-size:12px;margin-bottom:12px}
-  #ui #m-shop .sub b{color:#a6e8b4;font-weight:600} #ui #m-shop .tabs{margin-bottom:10px;flex-wrap:wrap;border-radius:10px} #ui #m-shop .tabs:empty{display:none}
-  #ui #m-shop .items{display:grid;gap:6px;flex:0 1 auto;min-height:0;max-height:min(54vh,430px);overflow:auto;padding-right:2px}
+  #ui #m-shop>.panel{width:min(480px,100%);display:flex;flex-direction:column}
+  #ui #m-shop h2{margin-bottom:6px} #ui #m-shop .sub{display:flex;justify-content:space-between;color:var(--dim);font-size:12px;margin-bottom:12px}
+  #ui #m-shop .sub b{color:#7ddc8a;font-weight:700;font-size:15px} #ui #m-shop .tabs{margin-bottom:10px;flex-wrap:wrap} #ui #m-shop .tabs:empty{display:none}
+  #ui #m-shop .items{display:grid;gap:4px;flex:0 1 auto;min-height:0;max-height:min(54vh,430px);overflow:auto;padding-right:2px}
   @media (max-height:520px){#ui #m-shop>.panel{padding:12px 14px} #ui #m-shop h2{font-size:16px;margin-bottom:0} #ui #m-shop .sub{margin-bottom:8px} #ui #m-shop .tabs{margin-bottom:6px} #ui #m-shop .items{max-height:none} #ui #m-shop .it{padding:7px 10px} #ui #m-shop .stack{margin-top:8px}}
-  #ui #m-shop .it{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;text-align:left;padding:9px 12px;border-radius:12px;background:rgba(255,255,255,.05);transition:background .15s}
-  #ui #m-shop .it:hover:not([disabled]){background:rgba(255,255,255,.11)} #ui #m-shop .it[disabled]{opacity:.42;cursor:default}
+  #ui #m-shop .it{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;text-align:left;padding:9px 12px;border-radius:3px;background:rgba(255,255,255,.04);border-left:3px solid transparent;transition:background .15s,border-color .15s}
+  #ui #m-shop .it:hover:not([disabled]){background:rgba(255,255,255,.1);border-left-color:var(--gold)} #ui #m-shop .it[disabled]{opacity:.42;cursor:default}
   #ui #m-shop .it i{width:14px;height:14px;border-radius:50%;border:1px solid rgba(255,255,255,.35)} #ui #m-shop .it i.no{visibility:hidden;width:0;margin-right:-10px}
   #ui #m-shop .it small{display:block;color:var(--dim);font-size:11px;margin-top:1px}
-  #ui #m-shop .it em{font-style:normal;font-weight:600;color:#a6e8b4;white-space:nowrap} #ui #m-shop .it em.t{color:var(--dim);font-weight:500}
-  #ui.touch #h-stat{width:84px;gap:4px} #ui.touch #h-stat .m{font-size:12px}
-  #ui.touch #h-job{max-width:min(220px,40vw);font-size:11px;padding:6px 10px}
-  @media (orientation:portrait){#ui.touch #h-job{top:auto;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 178px);max-width:calc(100% - 32px)}}
-  #ui.photo #h-job,#ui.photo #h-cross,#ui.photo #h-meter,#ui.mapping #h-cross,#ui.mapping #h-meter{display:none!important}
+  #ui #m-shop .it em{font-style:normal;font-weight:700;color:#7ddc8a;white-space:nowrap} #ui #m-shop .it em.t{color:var(--dim);font-weight:500}
+  #ui.touch #h-stat .m{font-size:19px} #ui.touch #h-stat .st{font-size:14px}
+  #ui.touch #h-hp{height:5px}
+  #ui.photo #h-cross,#ui.photo #h-meter,#ui.mapping #h-cross,#ui.mapping #h-meter,#ui.cine #h-cross{display:none!important}
   @keyframes gPulse{50%{opacity:.35}}`;
   document.head.appendChild(st);
 
-  // ---------------------------------------------------------------- HUD (under the minimap, GTA-style: health, cash, wanted, weapon)
-  const right = document.getElementById('h-right'), mini = document.getElementById('h-mini');
-  const stat = h('div', 'hud', `<div class="hp"><i></i></div><div class="r"><span class="m"></span><span class="st"></span></div><div class="gain"></div>`); stat.id = 'h-stat';
-  right.insertBefore(stat, mini.nextSibling);
-  const hpBar = stat.querySelector('.hp'), hpFill = hpBar.firstChild, mEl = stat.querySelector('.m'), starEl = stat.querySelector('.st'), gainEl = stat.querySelector('.gain');
+  // ---------------------------------------------------------------- HUD (GTA-style: cash + wanted stars top right, health under the minimap)
+  const right = document.getElementById('h-right'), mm = document.getElementById('h-mm');
+  const stat = h('div', 'hud', `<div class="m"></div><div class="st"></div><div class="gain"></div>`); stat.id = 'h-stat';
+  right.insertBefore(stat, right.firstChild);
+  const hpBar = h('div', '', '<i></i>', mm); hpBar.id = 'h-hp';
+  const hpFill = hpBar.firstChild, mEl = stat.querySelector('.m'), starEl = stat.querySelector('.st'), gainEl = stat.querySelector('.gain');
   const job = h('div', 'panel hud', ''); job.id = 'h-job';
   const cross = h('div', '', ''); cross.id = 'h-cross';
   const hurtEl = h('div', '', ''); hurtEl.id = 'h-hurt';
@@ -356,8 +354,13 @@ try {
       text(mEl, cash(S.money));
       const CB = AF.combat, n = CB ? CB.stars : 0, sh = '<b>' + '\u2605'.repeat(n) + '</b>' + '\u2605'.repeat(5 - n);
       if (starEl._h !== sh) { starEl.innerHTML = sh; starEl._h = sh; starEl.classList.toggle('none', !n); } starEl.classList.toggle('ev', !!(CB && n && CB.seenT > 1));
-      const J = HUD.job, jl = J ? `<b>${esc(J.title)}</b>${esc(J.line)}${J.t != null ? '<span>' + Math.max(0, Math.ceil(J.t)) + 's</span>' : ''}${J.pay ? '<span>' + cash(J.pay) + '</span>' : ''}` : '';
-      if (job._h !== jl) { job.innerHTML = jl; job._h = jl; } show(job, !!J);
+      // the job line (78-jobs, the gallery, the heist) is the objective line + timer bars (73-mission)
+      const J = HUD.job, MI = AF.mission;
+      if (MI) {
+        MI.objective(J ? J.line : null, J ? J.title : null);
+        MI.bar('job-t', J && J.t != null ? { label: 'Time', value: MI.time(J.t), hot: J.t < 10 } : null);
+        MI.bar('job-pay', J && J.pay ? { label: 'Earned', value: cash(J.pay), ok: true } : null);
+      }
     }
     // forget policy: runtime cars far from the player return to the pool
     if ((reapT += dt) >= 1) {

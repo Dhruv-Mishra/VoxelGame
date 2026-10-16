@@ -41,19 +41,26 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   02 voxels, region LOD, mesher workers · 03 renderer, tiers, LOD table, resolution · 04 `AF.Vehicle` base class ·
   60 atmosphere · 61 post (bloom, AO, grade, upscale) · 62 water · 63 sky.
 - World: 05 plan · 07 outland height/colour + tile mesher (workers) · 10 terrain/coast · 11 streets · 12 nature ·
-  13–43 districts · 44-farms/flora/island/sites/wayside · 45 friends colony · 46 zoo (`ZOO.hours` 8–22, `AF.zoo.feed/feedAt/lure`) ·
+  13–43 districts · 44-farms/flora/island/sites/wayside · 44-key (Corsair Key: Silas's island east of Serena — airstrip, hangar,
+  villa, jetty, lighthouse, a flyable Cub; built from Serena's cached kit; the heist's finale) · 45 friends colony (its road joins
+  the highway, 49-roads) · 46 zoo (`ZOO.hours` 8–22, `AF.zoo.feed/feedAt/lure`) ·
+  46-zoo-tree (Treetop Trail annex: Great Banyan, treehouse deck, boardwalk ramps, rope bridge, lookout — static voxels, no draws) ·
   46-zoo-visit (paw-print trails + arrows, fingerposts, trail board, ticket booth attendant, feeding stations, keepers on the
   feeding schedule, closing time, passport stamps in `AF.save.zoo`) · 47 airfield · 48 sea ·
   48-liner (SS Solace Queen off the Pleasure Pier: walkable hull model + colliders, Grand Casino, Gilded Room, purser's cage +
   vault doors `AF.liner.openVault/openStaff`, Starlight Lounge, sun deck, gangway, pontoon; `AF.liner.where/tables/spots`) ·
   49 outland quadtree · 49-roads.
 - Actors: 50 vehicles · 51 traffic · 52 planes · 53 air traffic · 54 path walkers · 55 pedestrians · 56 animals ·
-  56-wild outland fauna · 57 friends (cast, dialogue).
-- Player/UI: 70 avatar + walk/aerial · 71 UI (title, HUD, menu, dialogue) · 72 touch · 74 map (`map.overlays`, `map.miniOverlays`) ·
+  56-wild outland fauna · 57 friends (cast, dialogue) · 58 pets (`AF.pets`: Paws & Claws store on Friends Lane, a following pet per
+  friend in `AF.save.pets`; Hunar starts with Coco the toy poodle).
+- Player/UI: 70 avatar + walk/aerial · 71 UI (title, minimal HUD, stacked toasts, menu, dialogue) · 72 touch ·
+  73 mission kit (`AF.mission`: `blip/unblip` map + minimap blips with world markers (one instanced draw), `objective`, `bar`,
+  `shard` big-message cards, `cut` cutscene player) · 74 map (`map.overlays`, `map.miniOverlays`) ·
   75 extras (photo mode `P`, Solace Stars collectibles) · 75-audio (`AF.audio`: samples, loops, zone ambience beds, footsteps,
   vehicles, PA; `play(id, {x,y,z})`, `hold(key, id, vol, rate, x, y, z)`) · 98 tests · 99 boot.
 - Gameplay: 76 core (`AF.G` tuning, `AF.save`, money, health/death, `AF.shop` sheet, `AF.fx` particles, `AF.sfx`, `AF.hud`,
-  forget policy) · 77 combat (weapons, engaged peds, run-overs, police/wanted, autogyro, vehicle damage) · 78 jobs (jobs,
+  forget policy) · 76-inventory (`AF.inv`: the bag on I / BAG — snacks, pet treats, `AF.inv.extra` rows lent by missions;
+  `AF.save.inv`) · 77 combat (weapons, engaged peds, run-overs, police/wanted, autogyro, vehicle damage) · 78 jobs (jobs,
   counters, Body Works / Motor Exchange zones, carnival games, carousel, wardrobe, Westgate check-in) · 78-casino (`AF.casino`:
   slots, roulette, blackjack, craps, baccarat at the liner's tables) · 81 heist (`AF.heist`: "The Harbour Trust Job", a co-op
   story mission from Vera at the Blue Heron — plane, island, mob ambush, jet skis, casino lift, night bank stealth, getaway).
@@ -79,6 +86,9 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Path walkers (54: airport, outland, island, liner, heist guards) react via `AF.walkers.near/knock/stagger/scare/isDown` (77 bumps,
   hits, run-overs, panic); `CB.onWalkerHit(a, kind)` returning true swallows a hit (the heist's takedowns).
 - Missions (81): steps with checkpoints; `AF.respawnAt()` (76) lets a mission wake a knocked-out player at its checkpoint.
+  The heist is host-authoritative (`heist` net ops; guests send `done`/`fail`/`retry`); it needs a crew of two to start but every
+  step has a solo way through if a partner drops. `node tools/coop-heist.js` (server running, playwright resolvable, optional
+  `CHROME=`) plays it end to end with two real clients: lockstep, the two-key step, fail → shared checkpoint, retry, payout.
   Modal overlays (`AF.shop`, the casino panel `UI.state.casino`) count in `UI.modalOpen()`; Escape closes them.
 
 ## Co-op (79–80)

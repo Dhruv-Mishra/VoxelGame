@@ -99,16 +99,16 @@ try {
   #ui #h-wheel .it.on{color:var(--accent);transform:translate(var(--x),var(--y)) scale(1.18)}
   #ui #h-wheel .ctr{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;width:46%}
   #ui #h-wheel .ctr b{display:block;font-size:13px;font-weight:600;color:var(--ink)} #ui #h-wheel .ctr span{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
-  #ui #h-wpn{display:flex;align-items:center;gap:7px;justify-content:flex-end;font-size:12px;color:var(--ink);text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.5);opacity:0;transition:opacity .25s;max-width:150px}
-  #ui #h-wpn.on{opacity:1} #ui #h-wpn svg{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
-  #ui #h-wpn i{font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink);opacity:.85} #ui #h-wpn b{font-weight:600;font-variant-numeric:tabular-nums} #ui #h-wpn b.out{color:#ff8a7a}
+  #ui #h-wpn{display:flex;align-items:center;gap:8px;justify-content:flex-end;font-size:13px;color:var(--ink);text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.5);opacity:0;transition:opacity .25s;max-width:220px;margin-top:2px}
+  #ui #h-wpn.on{opacity:1} #ui #h-wpn svg{width:26px;height:26px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
+  #ui #h-wpn i{font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink);opacity:.85} #ui #h-wpn b{font-weight:700;font-size:15px;font-variant-numeric:tabular-nums} #ui #h-wpn b.out{color:#ff8a7a}
   #ui.photo #h-wheel,#ui.mapping #h-wheel,#ui.titling #h-wheel{display:none!important}
   @keyframes wIn{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}`;
   document.head.appendChild(wcss);
   const uiRoot = document.getElementById('ui'), hRight = document.getElementById('h-right');
   const wheelEl = document.createElement('div'); wheelEl.id = 'h-wheel'; wheelEl.innerHTML = '<div class="ctr"><b></b><span></span></div>'; uiRoot.appendChild(wheelEl);
   const chip = document.createElement('div'); chip.id = 'h-wpn'; chip.className = 'hud';
-  if (hRight) hRight.insertBefore(chip, document.getElementById('h-btns')); else uiRoot.appendChild(chip);
+  if (hRight) hRight.appendChild(chip); else uiRoot.appendChild(chip);
   const slotInfo = (id) => GUNS[id] ? { k: id, name: GUNS[id].name, ammo: (CB.reloadT > 0 && CB.reloadG === id ? '\u21bb' : CB.mag[id] || 0) + ' / ' + (S.ammo[id] || 0), out: !(CB.mag[id] > 0) && !(S.ammo[id] > 0) }
     : id === MELEE_ID && sig() ? { k: 'melee', name: sig()[0], ammo: '', out: false } : { k: 'fists', name: FISTS[0], ammo: '', out: false };
   let chipT = 0, chipKey = '', firedT = 9;

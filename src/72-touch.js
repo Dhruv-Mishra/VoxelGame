@@ -23,9 +23,8 @@ try {
       #ui .tc-util .tc{position:static;width:42px;height:42px;display:none} #ui .tc-util .tc.u{display:flex} #ui .tc-util .tc svg{width:18px;height:18px}
       #ui .tc.on,#ui .tc:active{background:var(--accent);color:#112723}
       #ui.titling .tc-btns,#ui.titling .tc-util,#ui.titling .tc-stick,#ui.photo .tc-btns,#ui.photo .tc-util{display:none!important}
-      #ui.touch #h-clock{padding:5px 11px;min-width:0} #ui.touch #h-clock .t{font-size:15px} #ui.touch #h-clock .p{font-size:11px;max-width:150px}
-      #ui.touch #h-mini{width:84px;height:84px} #ui.touch .round{width:34px;height:34px;font-size:14px} #ui.touch #h-right{gap:6px}
-      #ui.touch #h-prompt{font-size:12px;padding:7px 12px 7px 7px}`;
+      #ui.touch .round{width:32px;height:32px;font-size:14px}
+      #ui.touch #h-prompt{font-size:13px;padding:8px 12px 8px 8px}`;
     document.head.appendChild(st);
     const stick = document.createElement('div'); stick.className = 'tc-stick'; stick.innerHTML = '<i></i>'; root.appendChild(stick);
     const knob = stick.firstChild;
@@ -39,6 +38,7 @@ try {
       gun: '<path d="M4 12h11l3-3h2v6h-2l-3-3M7 12v4h3"/>', cam: '<rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13.5" r="3.5"/><path d="M9 7l1.5-3h3L15 7"/>',
       job: '<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V5h6v3M3 13h18"/>', plus: '<path d="M12 5v14M5 12h14"/>', minus: '<path d="M5 12h14"/>',
       walk: '<circle cx="12" cy="4.5" r="2"/><path d="M12 7v7M12 14l-3 6M12 14l3 6M8 10h8"/>', chute: '<path d="M3 11a9 7 0 0 1 18 0zM4 11l8 8 8-8M12 11v8"/>',
+      bag: '<path d="M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2"/>',
     };
     // id: [icon, label, key, kind ('tap' one-frame press | 'hold' while touched | 'thr' throttle), aria]
     const DEF = {
@@ -47,9 +47,9 @@ try {
       brake: [P.stop, 'BRAKE', 'Space', 'hold', 'Brake'], exit: [P.exit, 'EXIT', 'KeyE', 'tap', 'Get out'], fexit: [P.exit, 'EXIT', 'KeyF', 'tap', 'Get out of the plane'],
       thrU: [P.plus, 'THR', 'thr+', 'thr', 'Increase throttle'], thrD: [P.minus, 'THR', 'thr-', 'thr', 'Decrease throttle'], wbrake: [P.stop, 'BRAKE', 'KeyB', 'hold', 'Wheel brakes'],
       walk: [P.walk, 'WALK', 'Tab', 'tap', 'Walk'], chute: [P.chute, 'CHUTE', 'Space', 'tap', 'Deploy parachute'],
-      cam: [P.cam, 'CAM', 'KeyC', 'tap', 'Camera view'], job: [P.job, 'JOB', 'KeyJ', 'tap', 'Job'],
+      cam: [P.cam, 'CAM', 'KeyC', 'tap', 'Camera view'], job: [P.job, 'JOB', 'KeyJ', 'tap', 'Job'], bag: [P.bag, 'BAG', 'KeyI', 'tap', 'Bag'],
     };
-    const UTIL = new Set(['cam', 'job']), B = {};
+    const UTIL = new Set(['cam', 'job', 'bag']), B = {};
     for (const id in DEF) {
       const [icon, label, key, kind, aria] = DEF[id];
       const b = document.createElement('button'); b.className = 'tc pe'; b.innerHTML = ic(icon, label); b.setAttribute('aria-label', aria);
@@ -107,6 +107,7 @@ try {
       else if (RIDES.has(m)) act.push('exit');
       if (CAM_MODES.has(m)) use.push('cam');
       if (J && (J.cur || m === 'walk' || (m === 'drive' && AF.vehicles.player && JOB_CAR(AF.vehicles.player.type)))) use.push('job');
+      if (m === 'walk' && AF.inv) use.push('bag');
     };
     let key = '';
     const sync = () => {

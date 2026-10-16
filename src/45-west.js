@@ -755,6 +755,19 @@ try {
   };
 
   // ------------------------------------------------------------ BUILD
+  // Friends Lane climbs its last 50 m to the grid edge (5 %), where the Colony Road (07-outland) takes it up to the Ring Road; the
+  // banks either side blend back into the hillside (after the streets are painted flat at 150)
+  AF.onBuild('west-colony-road', 151, () => {
+    const rise = (z) => (z >= -250 ? 0 : (-250 - z) / 50 * 2.5);
+    W.eachCol(-394, -300, -346, -248, (bx, bz, i, x, z) => {
+      const hr = Math.round(rise(z) * 4); if (hr <= 0) return;
+      if (x >= -377 && x < -367) { W.H[i] = hr; return; }
+      if (x >= -380 && x < -364) { W.H[i] = hr + 1; return; }
+      const k = x < -380 ? AF.smooth(0, 12, -380 - x) : AF.smooth(0, 18, x + 364);
+      W.H[i] = Math.round(AF.lerp(hr + 1, W.H[i], k));
+    });
+    W.tDirty = true;
+  });
   AF.onBuild('west-colony', 310, () => {
     const t0 = performance.now();
     let fi = 0;

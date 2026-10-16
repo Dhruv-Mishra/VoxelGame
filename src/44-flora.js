@@ -136,6 +136,16 @@ function* generate(){
   else if(height<24){if(rnd<0.24)F.add('palm',px,pz,{scale:size+0.1,biome:'island'});else if(rnd<0.4)F.add('elm-green',px,pz,{scale:size,biome:'island'});else if(rnd<0.62)F.add(rnd<0.5?'shrub':'shrub-berry',px,pz,{scale:0.7+size*0.4,biome:'island'});}
   else if(rnd<0.1)F.add('dry-bush',px,pz,{scale:0.6+size*0.3,biome:'island'});else if(rnd<0.16)F.add('rock',px,pz,{scale:0.5+size,biome:'island'});
  }
+ // Corsair Key: palms along the beach and the lowland, broadleaves and berry shrubs on the hill; never on the strip or the pads
+ const key=AF.PLAN.world.key;
+ if(key)for(let x=key.cx-key.rx*1.1;x<key.cx+key.rx*1.1;x+=7)for(let z=key.cz-key.rz*1.1;z<key.cz+key.rz*1.1;z+=7){
+  yield;
+  const px=x+(hash(x,z+5)-0.5)*5,pz=z+(hash(x+9,z)-0.5)*5,height=O.h(px,pz),ks=key.airstrip;
+  if(height<1.6||Math.abs(pz-ks.z)<ks.w/2+10&&px>ks.x0-20&&px<ks.x1+20||blocked(px,pz))continue;
+  const rnd=hash(x+53,z),size=0.7+hash(x,z+31)*0.45;
+  if(height<5){if(rnd<0.34)F.add('palm',px,pz,{scale:size,biome:'island'});else if(rnd<0.42)F.add('shrub',px,pz,{scale:0.6+size*0.3,biome:'island'});}
+  else if(rnd<0.2)F.add('palm',px,pz,{scale:size+0.1,biome:'island'});else if(rnd<0.34)F.add('elm-green',px,pz,{scale:size,biome:'island'});else if(rnd<0.5)F.add('shrub-berry',px,pz,{scale:0.7+size*0.4,biome:'island'});
+ }
  F.stats.generated=true;
 }
 function put(batch,entry){

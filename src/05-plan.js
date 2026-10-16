@@ -32,9 +32,10 @@ AF.PLAN = (() => {
     { name: 'Terminal Avenue', a: [160, -240], b: [160, 160], w: 20, tram: true },       // tram, east side (Union Terminal)
     { name: 'Anchor Street', a: [240, -240], b: [240, 0] },                               // stops at Meridian: Union Terminal + rail yard fill x 173..300, z 10..72
     { name: 'Anchor Street', a: [240, 80], b: [240, 160] },
-    // THE WEST SIDE (new land x < -300): Westgate Road links Wren St to New Friends Colony, the zoo and the airfield
+    // THE WEST SIDE (new land x < -300): Westgate Road links Wren St to New Friends Colony, the zoo and the airfield; Friends Lane runs
+    // on north past the pet store to the grid edge, where the Colony Road climbs to the Ring Road
     { name: 'Westgate Road', a: [-660, 0], b: [-240, 0], w: 14 },
-    { name: 'Friends Lane', a: [-372, -226], b: [-372, 0] },
+    { name: 'Friends Lane', a: [-372, -300], b: [-372, 0] },
     { name: 'Airfield Road', a: [-470, 0], b: [-470, 36] },
     // EASTPORT (43-east.js, x 300..460): the avenues carry on east over the Solace River; two new N-S streets (the rail corridor
     // z 0..80 is left clear for the Coastline Limited, so they stop at Meridian and start again at Bay)
@@ -185,6 +186,8 @@ AF.PLAN = (() => {
     { id: 'w-colony-w', owner: 'west', rect: [-432, -226, -380, -8] },
     { id: 'w-colony-e', owner: 'west', rect: [-364, -226, -306, -8] },
     { id: 'w-zoo', owner: 'west', rect: [-652, -292, -446, -12] },
+    { id: 'w-zoo-annex', owner: 'west', rect: [-448, -298, -394, -232] },    // the Treetop Trail (46-zoo-tree)
+    { id: 'w-pets', owner: 'west', rect: [-362, -258, -334, -230] },         // Paws & Claws pet store (58-pets)
     { id: 'w-airfield', owner: 'west', rect: [-652, 10, -306, 206] },
     // EASTPORT (42-fill builds these strips: one street face, stepped back ranges toward the river / the alley)
     { id: 'fill-e1', owner: 'residential', fill: true, strip: 'e', rect: [294, -232, 312, -170] },
@@ -215,6 +218,12 @@ AF.PLAN = (() => {
       resort: { x: -170, z: 640, r: 45, y: 3 },
       ferry: { cityPier: [0,260], islandPier: [-20,424], path: [[0,277],[-20,405]], dwell: 25, crossing: 40 },
       landing: { x: -20, z: 478, r: 20, y: 2, pier: { x0: -24, x1: -16, z0: 420, z1: 478 } } },
+    // CORSAIR KEY (44-key): Silas Crane's private island, 300 m east of Serena Isle — a short airstrip, a hangar, a villa on the
+    // hill, a jetty and a lighthouse. The heist's finale lands here.
+    key: { name: 'Corsair Key', cx: 560, cz: 692, rx: 130, rz: 76,
+      hill: { x: 515, z: 726, r: 48, y: 15 },
+      airstrip: { x0: 465, x1: 655, z: 676, w: 20, y: 2 },
+      hangar: { x: 610, z: 698, y: 2 }, villa: { x: 512, z: 726, y: 13 }, dock: { x: 676, z: 712, y: 2 } },
     roads: [
       { name: 'Coast Road', w: 10, surface: 'asphalt', points: [[-660, 0], [-820, -10], [-1000, -40]], heights: [0, 5, 10] },
       { name: 'Eastwood Road', w: 10, surface: 'asphalt', joinsRing: true, points: [[460, 0], [700, -40], [965, -142]], heights: [0, 10, 19] },   // T into the ring's side (Eastwood Loop runs straight on into the ring)
@@ -238,13 +247,16 @@ AF.PLAN = (() => {
       { name: 'Westmoor Link', w: 10, surface: 'asphalt', fork: true, points: [[-880, -300], [-884, -230], [-890, -160], [-896, -90], [-905, -24]] },
       { name: 'Jungle Highway', w: 10, surface: 'asphalt', fork: true, points: [[700, -400], [688, -310], [700, -220], [730, -160], [750, -130]] },
       { name: 'Summit Link', w: 8, surface: 'gravel', fork: true, points: [[490, -445], [470, -520], [445, -600]] },
+      // New Friends Colony -> the Ring Road: Friends Lane leaves the grid at its north end and the Colony Road climbs the hills behind
+      // the zoo to join the ring west of it (profiled at build like every fork)
+      { name: 'Colony Road', w: 10, surface: 'asphalt', fork: true, points: [[-690, -382], [-640, -366], [-580, -354], [-520, -346], [-460, -338], [-415, -326], [-388, -312], [-375, -304], [-372, -300]] },
     ],
   };
   P.west = {
     lane: -372,
     // 12 plots, 6 each side of Friends Lane, 35 m frontage. side -1 = west side (door faces east), +1 = east side (door faces west)
     plots: [],
-    zoo: { x0: -650, z0: -290, x1: -448, z1: -16, gate: [-548, -14] },
+    zoo: { x0: -650, z0: -290, x1: -448, z1: -16, gate: [-548, -14], annex: [-448, -296, -394, -232] },
     // runway = R1 (arrivals, land eastbound), runway2 = R2 (departures, take off eastbound); stands = AI airliner stands (bridge index)
     air: { x0: -650, z0: 12, x1: -308, z1: 204, runway: { x0: -640, x1: -326, z: 152, w: 24 }, runway2: { x0: -640, x1: -326, z: 188, w: 22 }, taxiZ: 124, westX: -626, apron: [-600, 72, -330, 112], terminal: [-548, 44, -434, 70], tower: [-424, 50], hangars: [[-632, 40, -598, 96], [-590, 40, -556, 96]],
       stands: [{ x: -450, bridge: 0, max: 1.05 }, { x: -360, bridge: 1, max: 1.05 }, { x: -325, max: 0.9 }] },

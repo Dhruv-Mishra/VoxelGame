@@ -235,7 +235,7 @@ AF.onBuild('outland-traffic', 661, () => {
   const types = ['sedan', 'pickup', 'coupe', 'wagon', 'stream', 'convertible'].filter((id) => VV.TYPES.some((type) => type.id === id));
   const outside = (road) => { let first = 0, last = road.points.length - 1; while (first < last && W.col(road.points[first][0], road.points[first][1]) >= 0) first++; while (last > first && W.col(road.points[last][0], road.points[last][1]) >= 0) last--; return [Math.min(first + 2, last), last]; };
   RD.routes = []; RD.routeRoads = [];
-  for (const [name, count, radius] of [['Solace Ring Road', 4, 1e9], ['Eastwood Road', 4, 700], ['Coast Road', 3, 700], ['West Coast Drive', 2, 600], ['Eastwood Loop', 1, 450], ['Westmoor Link', 2, 600], ['Jungle Highway', 1, 500]]) {
+  for (const [name, count, radius] of [['Solace Ring Road', 4, 1e9], ['Eastwood Road', 4, 700], ['Coast Road', 3, 700], ['West Coast Drive', 2, 600], ['Eastwood Loop', 1, 450], ['Westmoor Link', 2, 600], ['Jungle Highway', 1, 500], ['Colony Road', 1, 450]]) {
     const road = P.roads.find((entry) => entry.name === name); if (!road || road.points.length < 4) continue;
     const [from, to] = outside(road); if (to - from < 4) continue;
     RD.routes.push(VV.addRoute(name + ' traffic', lanes(road, from, to, 2.6), { count, types, activeRadius: radius, yAt: (x, z) => O.roadYOn(road, x, z) })); RD.routeRoads.push(road);

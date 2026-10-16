@@ -9,7 +9,7 @@ try {
   root.appendChild(el);
   for (const button of el.querySelectorAll('.map-tools button')) button.innerHTML = UI.icon(button.dataset.a);
   const style = document.createElement('style'); style.textContent = `
-    #ui #m-map{position:absolute;inset:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));display:none;background:var(--bg2);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+    #ui #m-map{position:absolute;z-index:10;inset:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));display:none;background:var(--bg2);border:1px solid var(--line);border-radius:6px;overflow:hidden}
     #ui #m-map.open{display:flex;flex-direction:column} #ui #m-map header{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;gap:12px;flex-shrink:0}
     #ui #m-map header b{font-size:16px;font-weight:600} #ui #m-map header span{color:var(--dim);font-size:12px;margin-left:12px}
     #ui .map-tools{display:flex;gap:6px} #ui .map-tools button{width:36px;height:36px;border-radius:8px;font-size:22px;line-height:1;transition:background .16s}
@@ -81,6 +81,7 @@ try {
   const entries = [], hits = [], boxes = [], areas = [
     { name: 'Solace Range', x: -400, z: -790, category: 'area', min: 0 }, { name: 'Westmoor', x: -1020, z: -180, category: 'area', min: 0 },
     { name: 'Eastwood', x: 820, z: -360, category: 'area', min: 0 }, { name: island.name, x: island.cx, z: island.cz, category: 'area', min: 0 },
+    { name: P.world.key.name, x: P.world.key.cx, z: P.world.key.cz + 4, category: 'area', min: 0 },
     { name: 'Port Solace', x: -90, z: -30, category: 'area', min: 0 }, { name: 'Lake Tamsin', x: P.world.lake.cx, z: P.world.lake.cz, category: 'nature', min: 0 }
   ];
   const syncLabels = () => {

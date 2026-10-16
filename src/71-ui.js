@@ -55,68 +55,94 @@ try {
     #ui #t-title .modal>:not(.stage){grid-column:2;justify-self:center}
     #ui #t-title .q{grid-row:1} #ui #t-title .n{grid-row:2;font-size:22px} #ui #t-title .tg{grid-row:3} #ui #t-title .d{grid-row:4;font-size:13px;min-height:0} #ui #t-title .dots{grid-row:5;margin:4px 0} #ui #t-title .go{grid-row:6;padding:11px 22px;font-size:15px}
   }
-  #ui.titling .hud{display:none!important}
-  #ui.mapping .hud,#ui.mapping #h-toasts,#ui.mapping #h-banner,#ui.mapping .bubble,#ui.mapping #h-dlg{display:none!important}
-  #ui #h-clock{position:absolute;left:max(18px,env(safe-area-inset-left));top:max(16px,env(safe-area-inset-top));display:flex;align-items:baseline;gap:10px;max-width:calc(100% - 156px);text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.5)}
-  #ui #h-clock .t{font-size:17px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
-  #ui #h-clock .t small{font-size:10px;color:var(--ink);opacity:.8;margin-left:3px;font-weight:500}
-  #ui #h-clock .p{font-size:12px;color:var(--ink);opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;min-width:0}
-  #ui #h-right{position:absolute;right:max(14px,env(safe-area-inset-right));top:max(14px,env(safe-area-inset-top));display:flex;flex-direction:column;align-items:flex-end;gap:8px}
-  #ui #h-mini{width:112px;height:112px;border-radius:50%;overflow:hidden;position:relative;padding:0;cursor:pointer;border:1px solid rgba(255,255,255,.28);box-shadow:0 2px 12px rgba(0,0,0,.35);backdrop-filter:none;-webkit-backdrop-filter:none}
-  #ui.touch #h-mini{width:112px;height:112px}
+  #ui.titling .hud,#ui.cine .hud,#ui.cine #h-toasts{display:none!important}
+  #ui.mapping .hud,#ui.mapping #h-toasts,#ui.mapping .bubble,#ui.mapping #h-dlg{display:none!important}
+  /* the HUD (GTA-style, minimal): minimap + health bottom-left with the notification feed above it, help text top-left, cash /
+     wanted / weapon top-right, objective + subtitles bottom-centre, timer bars / speed / location bottom-right */
+  #ui .hd{background:var(--hud);border-radius:3px;box-shadow:0 2px 10px rgba(0,0,0,.28)}
+  #ui #h-mm{position:absolute;left:max(18px,env(safe-area-inset-left));bottom:max(16px,env(safe-area-inset-bottom));width:236px;display:flex;flex-direction:column;gap:5px}
+  #ui #h-mini{position:relative;width:100%;height:150px;border-radius:5px;overflow:hidden;padding:0;cursor:pointer;border:2px solid rgba(6,8,12,.85);box-shadow:0 3px 16px rgba(0,0,0,.42);box-sizing:border-box}
   #ui #h-mini canvas{width:100%;height:100%;display:block}
-  #ui #h-mini .n{position:absolute;left:50%;top:4px;transform:translateX(-50%);font:700 10px var(--font);color:#213b37}
-  #ui .round{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px}
-  #ui #h-btns{display:flex;gap:6px}
-  #ui #h-btns .round{background:rgba(14,16,20,.32);border-color:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;opacity:.7;transition:opacity .15s,background .15s}
-  #ui #h-btns .round:hover{opacity:1;background:rgba(14,16,20,.6)}
-  #ui #h-prompt{position:absolute;left:50%;bottom:max(56px,calc(env(safe-area-inset-bottom) + 56px));transform:translateX(-50%);padding:6px 12px 6px 6px;display:none;max-width:calc(100% - 32px);font-size:13px;align-items:center;gap:8px}
-  #ui #h-prompt b{display:grid;place-items:center;min-width:22px;height:22px;border-radius:5px;background:rgba(255,255,255,.1);color:var(--accent);font-weight:600}
-  #ui.touch #h-prompt{bottom:auto;top:60%;max-width:60%}
-  #ui #h-toasts{position:absolute;left:50%;top:max(14px,env(safe-area-inset-top));transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;width:min(520px,62vw);pointer-events:none}
-  @media (max-width:900px){#ui #h-toasts{width:min(420px,46vw)}}
-  #ui #h-toasts .panel{padding:6px 12px;font-size:12px;text-align:center;animation:uiIn .18s ease;transition:opacity .18s}
+  #ui #h-mini .n{position:absolute;left:50%;top:4px;transform:translateX(-50%);width:16px;height:16px;border-radius:50%;background:rgba(6,8,12,.78);display:grid;place-items:center;font:700 9px var(--font);color:#fff}
+  #ui #h-btns{position:absolute;left:calc(100% + 6px);bottom:11px;display:flex;flex-direction:column;gap:5px}
+  #ui .round{width:30px;height:30px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:15px}
+  #ui #h-btns .round{background:var(--hud);border:0;opacity:.72;transition:opacity .15s;backdrop-filter:none;-webkit-backdrop-filter:none} #ui #h-btns .round:hover{opacity:1}
+  #ui #h-right{position:absolute;right:max(20px,env(safe-area-inset-right));top:max(14px,env(safe-area-inset-top));display:flex;flex-direction:column;align-items:flex-end;gap:3px;text-shadow:0 1px 2px rgba(0,0,0,.95),0 0 8px rgba(0,0,0,.5)}
+  #ui #h-tl{position:absolute;left:max(18px,env(safe-area-inset-left));top:max(16px,env(safe-area-inset-top));display:flex;flex-direction:column;align-items:flex-start;gap:6px;max-width:min(400px,calc(100% - 300px))}
+  #ui #h-prompt{padding:9px 14px 9px 10px;display:none;font-size:14px;align-items:center;gap:10px;color:#fff;cursor:pointer}
+  #ui #h-prompt b,#ui .key{display:inline-grid;place-items:center;min-width:24px;height:24px;padding:0 6px;box-sizing:border-box;border-radius:4px;background:#f2f4f5;color:#111;font:700 12px var(--font);box-shadow:0 1px 0 rgba(0,0,0,.4)}
+  #ui #h-hint{padding:8px 12px;font-size:12px;line-height:1.45;color:#e6e9eb;display:none}
+  #ui #h-hint.help{font-size:13.5px;color:#fff;padding:10px 14px}
+  #ui #h-toasts{position:absolute;left:max(18px,env(safe-area-inset-left));bottom:calc(max(16px,env(safe-area-inset-bottom)) + 172px);width:300px;display:flex;flex-direction:column;justify-content:flex-end;gap:5px;pointer-events:none}
+  #ui .nt{position:relative;display:flex;gap:9px;align-items:flex-start;padding:8px 12px 9px 13px;background:var(--hud);border-radius:3px;color:#f2f4f5;font-size:13px;line-height:1.35;box-shadow:0 2px 10px rgba(0,0,0,.3);animation:ntIn .24s cubic-bezier(.2,.8,.3,1);transition:opacity .3s,transform .3s;--nc:#9cc8ff}
+  #ui .nt:before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:3px 0 0 3px;background:var(--nc)}
+  #ui .nt .ic{flex:none;width:30px;height:30px;border-radius:4px;overflow:hidden;display:grid;place-items:center;background:rgba(255,255,255,.07);color:var(--nc)}
+  #ui .nt .ic svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round} #ui .nt .ic.pt svg{width:100%;height:100%}
+  #ui .nt .tx{min-width:0;overflow-wrap:anywhere} #ui .nt .tx b{display:block;font-size:10.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--nc);margin-bottom:1px;font-weight:700}
+  #ui .nt .x{position:absolute;right:7px;top:5px;font-size:10px;color:var(--gold);font-weight:700}
+  #ui .nt.out{opacity:0;transform:translateX(-14px)} #ui .nt.bump{animation:ntBump .3s}
+  #ui .nt.k-ok,#ui .nt.k-money{--nc:#7ddc8a} #ui .nt.k-warn,#ui .nt.k-mission{--nc:#f5c542} #ui .nt.k-bad{--nc:#ff7a6a} #ui .nt.k-radio{--nc:#8bd8c3} #ui .nt.k-pet{--nc:#ff9ad2} #ui .nt.k-inv{--nc:#c9a7ff}
+  @keyframes ntIn{from{opacity:0;transform:translateX(-26px)}to{opacity:1;transform:none}}
+  @keyframes ntBump{50%{transform:scale(1.03)}}
   @keyframes uiIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-  #ui #h-hint{position:absolute;left:50%;bottom:max(16px,env(safe-area-inset-bottom));transform:translateX(-50%);padding:5px 12px;font-size:11px;color:var(--dim);display:none;max-width:calc(100% - 32px);text-align:center}
-  #ui #h-speed{position:absolute;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));padding:8px 12px;display:none;text-align:right;min-width:88px}
-  #ui.touch #h-speed{display:none!important}
+  #ui #h-br{position:absolute;right:max(20px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:flex-end;gap:7px;max-width:46vw}
+  #ui #h-clock{display:flex;flex-direction:column;align-items:flex-end;gap:0;text-align:right;text-shadow:0 1px 2px rgba(0,0,0,.95),0 0 10px rgba(0,0,0,.55);transition:opacity .8s;max-width:100%}
+  #ui #h-clock .p{font-size:19px;font-weight:700;letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  #ui #h-clock .k{font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:var(--gold);min-height:13px}
+  #ui #h-clock .t{font-size:13px;font-weight:600;opacity:.9;font-variant-numeric:tabular-nums;white-space:nowrap}
+  #ui #h-clock .t small{font-size:10px;margin-left:2px} #ui #h-clock .st{font-size:11px;color:var(--gold);opacity:.85}
+  #ui #h-clock.dim{opacity:.5}
+  #ui #h-speed{padding:7px 12px;display:none;text-align:right;min-width:96px}
+  #ui #h-speed .v{font-size:24px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums} #ui #h-speed .v small{font-size:11px;color:var(--dim);margin-left:4px;font-weight:500}
+  #ui #h-speed .s{font-size:11px;color:var(--dim);margin-top:3px;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #ui #h-speed .bar{height:3px;border-radius:3px;background:rgba(255,255,255,.12);margin-top:5px;overflow:hidden} #ui #h-speed .bar i{display:block;height:100%;background:var(--gold)}
   #ui #h-rot{display:none;position:absolute;inset:0;z-index:30;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--bg2);color:var(--ink);font-size:15px}
   #ui #h-rot svg{width:64px;height:64px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;animation:uiRot 2.4s ease-in-out infinite}
   @keyframes uiRot{0%,20%{transform:rotate(0)}50%,80%{transform:rotate(-90deg)}100%{transform:rotate(0)}}
   @media (orientation:portrait){#ui.touch:not(.titling):not(.portraitok):not(.mapping) #h-rot{display:flex}}
-  #ui #h-speed .v{font-size:24px;font-weight:600;line-height:1} #ui #h-speed .v small{font-size:11px;color:var(--dim);margin-left:4px;font-weight:500}
-  #ui #h-speed .s{font-size:12px;color:var(--dim);margin-top:4px}
-  #ui #h-speed .bar{height:3px;border-radius:3px;background:rgba(255,255,255,.12);margin-top:6px;overflow:hidden} #ui #h-speed .bar i{display:block;height:100%;background:var(--accent)}
-  #ui #h-banner{position:absolute;left:50%;top:20%;transform:translateX(-50%);text-align:center;opacity:0;transition:opacity .18s;pointer-events:none;text-shadow:0 1px 5px #000;max-width:70%}
-  #ui #h-banner.show{opacity:1} #ui #h-banner .k{font-size:10px;color:var(--dim)} #ui #h-banner .n{font-size:20px;font-weight:500;color:var(--ink)}
-  #ui #h-dlg{position:absolute;left:50%;bottom:max(22px,env(safe-area-inset-bottom));transform:translateX(-50%);width:min(540px,calc(100% - 32px));box-sizing:border-box;padding:12px 16px 24px 68px;display:none;min-height:74px;cursor:pointer}
-  #ui #h-dlg .face{position:absolute;left:12px;top:12px;width:42px;height:42px;border-radius:50%;overflow:hidden;background:rgba(255,255,255,.08)}
+  #ui #h-banner{display:none}
+  #ui #h-dlg{position:absolute;left:50%;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 64px);transform:translateX(-50%);width:min(660px,calc(100% - 560px));min-width:min(420px,calc(100% - 32px));box-sizing:border-box;padding:10px 18px 20px 64px;display:none;min-height:62px;cursor:pointer;text-align:left;
+    background:linear-gradient(90deg,rgba(4,6,10,0),rgba(4,6,10,.62) 12%,rgba(4,6,10,.62) 88%,rgba(4,6,10,0));text-shadow:0 1px 2px #000}
+  #ui #h-dlg .face{position:absolute;left:18px;top:11px;width:38px;height:38px;border-radius:50%;overflow:hidden;background:rgba(255,255,255,.08);box-shadow:0 0 0 2px rgba(255,255,255,.12)}
   #ui #h-dlg .face svg{width:100%;height:100%}
-  #ui #h-dlg .nm{font-weight:600;color:var(--accent)} #ui #h-dlg .rl{font-size:11px;color:var(--dim);margin-left:6px}
-  #ui #h-dlg .ln{font-size:14px;margin-top:4px;min-height:20px}
-  #ui #h-dlg .more{position:absolute;right:14px;bottom:6px;font-size:11px;color:var(--dim)}
-  #ui .bubble{position:absolute;left:0;top:0;transform:translate(-50%,-100%);padding:6px 10px;border-radius:10px;background:var(--bg2);color:var(--ink);font-size:12px;max-width:240px;text-align:center;border:1px solid var(--line);pointer-events:none}
-  #ui .bubble b{display:block;font-size:10px;color:var(--accent);margin-bottom:2px}
-  #ui .sheet{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(4,10,16,.42);padding:16px}
+  #ui #h-dlg .nm{font-weight:700;color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase} #ui #h-dlg .rl{font-size:11px;color:var(--dim);margin-left:6px}
+  #ui #h-dlg .ln{font-size:15px;margin-top:2px;min-height:20px;color:#fff}
+  #ui #h-dlg .more{position:absolute;right:20px;bottom:4px;font-size:10px;color:var(--dim);letter-spacing:.5px}
+  #ui .bubble{position:absolute;left:0;top:0;transform:translate(-50%,-100%);padding:6px 10px;border-radius:4px;background:var(--hud);color:var(--ink);font-size:12px;max-width:240px;text-align:center;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+  #ui .bubble b{display:block;font-size:10px;color:var(--gold);margin-bottom:2px;letter-spacing:.6px;text-transform:uppercase}
+  #ui .sheet{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,rgba(4,8,12,.35),rgba(2,4,8,.72));padding:16px;z-index:10}
+  #ui.paused .hud,#ui.paused #h-toasts,#ui.paused #h-shard{display:none!important}
   #ui .sheet.open{display:flex}
-  #ui .sheet>.panel{background:var(--bg2);width:min(440px,100%);max-height:100%;overflow:auto;padding:18px 20px;border-radius:16px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent;animation:uiIn .14s ease}
+  #ui .sheet>.panel{background:rgba(9,11,15,.95);width:min(460px,100%);max-height:100%;overflow:auto;padding:18px 22px 20px;border-radius:6px;border:1px solid rgba(255,255,255,.07);scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent;animation:uiIn .14s ease;box-shadow:0 24px 60px rgba(0,0,0,.5)}
   #ui .sheet>.panel::-webkit-scrollbar{width:6px} #ui .sheet>.panel::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:6px} #ui .sheet>.panel::-webkit-scrollbar-track{background:transparent}
-  #ui .sheet h2{margin:0 0 6px;font-size:13px;font-weight:600;letter-spacing:2px;color:var(--dim)}
-  #ui .sheet h4{margin:14px 0 0;font:600 10px var(--font);letter-spacing:1.4px;text-transform:uppercase;color:var(--accent);opacity:.75}
-  #ui .row{display:flex;align-items:center;gap:12px;padding:6px 0}
-  #ui .row label{flex:1;color:var(--ink);opacity:.82}
+  #ui .sheet h2{margin:0 0 10px;padding-bottom:8px;font:400 22px/1.1 Limelight,Georgia,serif;letter-spacing:1px;color:#fff;border-bottom:2px solid var(--gold)}
+  #ui .sheet h4{margin:16px 0 2px;font:700 10px var(--font);letter-spacing:1.6px;text-transform:uppercase;color:var(--gold);opacity:.9}
+  #ui .row{display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+  #ui .row label{flex:1;color:var(--ink);opacity:.86}
   #ui .row label small{color:var(--dim);margin-left:4px}
-  #ui .seg{display:flex;background:rgba(255,255,255,.05);border-radius:8px;padding:2px}
-  #ui .seg button{padding:5px 9px;border-radius:6px;font-size:12px;color:var(--dim);transition:color .12s,background .12s} #ui .seg button.on{background:rgba(255,255,255,.1);color:var(--accent)}
-  #ui input[type=range]{flex:1.2;min-width:0;accent-color:var(--accent);height:4px}
+  #ui .seg{display:flex;background:rgba(255,255,255,.05);border-radius:4px;padding:2px}
+  #ui .seg button{padding:5px 9px;border-radius:3px;font-size:12px;color:var(--dim);transition:color .12s,background .12s} #ui .seg button.on{background:rgba(255,255,255,.12);color:#fff}
+  #ui input[type=range]{flex:1.2;min-width:0;accent-color:var(--gold);height:4px}
   #ui .stack{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:16px} #ui .stack .primary{grid-column:1/-1;padding:10px 14px}
-  #ui #m-help>.panel{width:min(560px,100%)}
+  #ui #m-help>.panel{width:min(600px,100%)}
   #ui #m-help .cols{display:grid;grid-template-columns:1fr 1fr;gap:4px 22px}
-  #ui #m-help h3{margin:10px 0 6px;font-size:12px;font-weight:500;color:var(--accent)}
+  #ui #m-help h3{margin:10px 0 6px;font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--gold)}
   #ui #m-help .k{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:2px 0}
   @media (max-width:520px){#ui #m-help .cols{grid-template-columns:1fr}}
-  @media(max-width:480px){#ui #t-title h1{font-size:30px}#ui #h-clock{flex-direction:column;align-items:flex-start;gap:0}#ui .row{flex-wrap:wrap}#ui .sheet{padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}}
-  @media(max-width:520px) and (orientation:portrait){#ui #h-toasts{left:max(16px,env(safe-area-inset-left));transform:none;align-items:flex-start;top:calc(max(16px,env(safe-area-inset-top)) + 92px);width:calc(100% - 156px)} #ui #h-toasts .panel{text-align:left}}
+  @media(max-width:480px){#ui #t-title h1{font-size:30px}#ui .row{flex-wrap:wrap}#ui .sheet{padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}}
+  @media (max-width:900px){#ui #h-dlg{width:min(620px,calc(100% - 32px))}}
+  /* phones + tablets: the stick lives bottom-left and the action cluster bottom-right, so the map + feed go top-left */
+  #ui.touch #h-mm{top:max(10px,env(safe-area-inset-top));bottom:auto;left:max(12px,env(safe-area-inset-left));width:150px}
+  #ui.touch #h-mini{height:96px}
+  #ui.touch #h-btns{top:0;bottom:auto;flex-direction:row}
+  #ui.touch #h-toasts{top:calc(max(10px,env(safe-area-inset-top)) + 114px);bottom:auto;left:max(12px,env(safe-area-inset-left));width:min(290px,42vw)}
+  #ui.touch #h-tl{left:auto;right:calc(max(14px,env(safe-area-inset-right)) + 170px);top:auto;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 92px);align-items:flex-end;max-width:40vw}
+  #ui.touch #h-hint{display:none!important}
+  #ui.touch #h-br{top:calc(max(10px,env(safe-area-inset-top)) + 78px);bottom:auto;right:max(14px,env(safe-area-inset-right))}
+  #ui.touch #h-speed{display:none!important}
+  #ui.touch #h-clock .p{font-size:14px} #ui.touch #h-clock .t{font-size:11px}
+  #ui.touch #h-dlg{bottom:calc(max(12px,env(safe-area-inset-bottom)) + 56px);width:min(520px,calc(100% - 300px));min-width:0;padding:8px 14px 18px 56px}
+  @media (orientation:portrait) and (max-width:620px){#ui.touch #h-toasts{width:calc(100% - 24px)} #ui.touch #h-dlg{width:calc(100% - 24px);bottom:200px} #ui.touch #h-tl{right:14px;bottom:200px;max-width:70vw}}
   `;
   const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
   try { const fl = document.createElement('link'); fl.rel = 'stylesheet'; fl.href = 'https://fonts.googleapis.com/css2?family=Limelight&display=swap'; document.head.appendChild(fl); } catch (e) {}
@@ -155,10 +181,10 @@ try {
     <div class="stage"><button class="arr l" aria-label="Previous character">&#8249;</button><button class="arr r" aria-label="Next character">&#8250;</button><div class="cnt"></div></div>
     <div class="n"></div><div class="tg"></div><div class="d"></div><div class="dots"></div>
     <button class="btn primary go"><span class="ic">&#9654;</span><span class="lb">Let's Play</span></button></div>`); title.id = 't-title';
-  const clock = h('div', 'hud', `<div class="t"><span class="tm">4:30</span><small class="ap">PM</small></div><div class="p">Port Solace</div>`); clock.id = 'h-clock';
-  const right = h('div', 'hud', `<div id="h-mini" class="panel pe"><canvas width="220" height="220"></canvas><div class="n">N</div></div><div id="h-btns">${TOUCH ? '<button class="panel round pe" data-k="full" title="Fullscreen">&#x26F6;</button>' : '<button class="panel round pe" data-k="map" title="Map (M)">&#x1F5FA;</button>'}<button class="panel round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); right.id = 'h-right';
-  for (const button of right.querySelectorAll('button')) { button.innerHTML = UI.icon(button.dataset.k); button.setAttribute('aria-label', button.title); }
-  const miniButton = right.querySelector('#h-mini'); miniButton.setAttribute('role', 'button'); miniButton.setAttribute('aria-label', 'Open world map'); miniButton.tabIndex = 0;
+  const mm = h('div', 'hud', `<div id="h-mini" class="pe"><canvas width="354" height="225"></canvas><div class="n">N</div></div><div id="h-btns">${TOUCH ? '<button class="round pe" data-k="full" title="Fullscreen">&#x26F6;</button>' : '<button class="round pe" data-k="map" title="Map (M)">&#x1F5FA;</button>'}<button class="round pe" data-k="menu" title="Menu (Esc)">&#9776;</button></div>`); mm.id = 'h-mm';
+  const right = h('div', 'hud', ''); right.id = 'h-right';
+  for (const button of mm.querySelectorAll('button')) { button.innerHTML = UI.icon(button.dataset.k); button.setAttribute('aria-label', button.title); }
+  const miniButton = mm.querySelector('#h-mini'); miniButton.setAttribute('role', 'button'); miniButton.setAttribute('aria-label', 'Open world map'); miniButton.tabIndex = 0;
   miniButton.addEventListener('keydown', event => { if (event.code === 'Enter' || event.code === 'Space') { event.preventDefault(); UI.toggleMap(true); } });
   // phones: fullscreen + landscape lock from the Play tap (a user gesture); iOS Safari has neither API, so portrait gets a rotate hint
   const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
@@ -174,14 +200,18 @@ try {
   UI.fullscreen = goFull;
   const rot = h('div', 'pe', `<svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M4 14a8 8 0 0 0 6 6M20 10a8 8 0 0 0-6-6"/></svg><div>Turn your phone sideways</div><button class="btn">Play in portrait</button>`); rot.id = 'h-rot';
   rot.querySelector('button').addEventListener('click', () => root.classList.add('portraitok'));
-  const prompt = h('div', 'panel hud pe', ''); prompt.id = 'h-prompt';
+  const tl = h('div', 'hud', ''); tl.id = 'h-tl';
+  const prompt = h('div', 'hd pe', '', tl); prompt.id = 'h-prompt';
+  const hint = h('div', 'hd', '', tl); hint.id = 'h-hint';
   const toasts = h('div', '', ''); toasts.id = 'h-toasts';
-  const hint = h('div', 'panel hud', ''); hint.id = 'h-hint';
-  const speed = h('div', 'panel hud', `<div class="v"><span>0</span><small>mph</small></div><div class="s"></div><div class="bar hide"><i></i></div>`); speed.id = 'h-speed';
+  const br = h('div', 'hud', ''); br.id = 'h-br';
+  const bars = h('div', '', '', br); bars.id = 'h-bars';
+  const speed = h('div', 'hd', `<div class="v"><span>0</span><small>mph</small></div><div class="s"></div><div class="bar hide"><i></i></div>`, br); speed.id = 'h-speed';
+  const clock = h('div', '', `<div class="k"></div><div class="p">Port Solace</div><div class="t"><span class="tm">4:30</span><small class="ap">PM</small></div>`, br); clock.id = 'h-clock';
   const banner = h('div', '', `<div class="k"></div><div class="n"></div>`); banner.id = 'h-banner';
-  const dlg = h('div', 'panel pe', `<div class="face"></div><div><span class="nm"></span><span class="rl"></span></div><div class="ln"></div><div class="more">${TOUCH ? 'tap' : 'E / click'} to continue</div>`); dlg.id = 'h-dlg';
+  const dlg = h('div', 'pe', `<div class="face"></div><div><span class="nm"></span><span class="rl"></span></div><div class="ln"></div><div class="more">${TOUCH ? 'tap' : 'E / click'} to continue</div>`); dlg.id = 'h-dlg';
   const bubbleEl = h('div', 'bubble', ''); bubbleEl.style.display = 'none';
-  const menu = h('div', 'sheet pe', `<div class="panel"><h2>PAUSED</h2>
+  const menu = h('div', 'sheet pe', `<div class="panel"><h2>Paused</h2>
     <h4>Display</h4>
     <div class="row"><label>Graphics</label><div class="seg" data-k="gfx"><button data-v="low">Low</button><button data-v="lite" title="Default: Balanced without AO, god rays and MSAA">Standard</button><button data-v="high">Balanced</button><button data-v="ultra">High</button></div></div>
     <div class="row"><label>Resolution <small class="rv"></small></label><input data-k="resH" type="range" min="360" max="2160" step="60" title="Render height in device pixels (default 720p, 480p on phones)"></div>
@@ -199,33 +229,60 @@ try {
     <div class="stack"><button class="btn primary" data-k="resume">Resume</button><button class="btn" data-k="map">Map</button><button class="btn" data-k="help">Controls</button><button class="btn" data-k="switch">Switch friend</button></div></div>`); menu.id = 'm-menu';
   const help = h('div', 'sheet pe', ''); help.id = 'm-help';
   const K = (k, d) => `<div class="k"><span>${d}</span><span>${k.split('+').map((x) => '<kbd>' + x + '</kbd>').join(' ')}</span></div>`;
-  help.innerHTML = `<div class="panel"><h2>CONTROLS</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>push the stick to its edge</span></div><div class="k"><span>Camera \u00b7 job</span><span>small buttons</span></div></div>
-    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Main action</span><span>big button (HIT, FIRE, BRAKE, THR\u2026)</span></div><div class="k"><span>More</span><span>buttons around it change with what you do</span></div><div class="k"><span>Weapon wheel</span><span>hold WPN, slide, lift</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>top right</span></div></div></div>`
-    : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('C', 'Camera: first person / near / far')}${K('Tab', 'Aerial view')}</div>
+  help.innerHTML = `<div class="panel"><h2>Controls</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>push the stick to its edge</span></div><div class="k"><span>Camera \u00b7 job \u00b7 bag</span><span>small buttons</span></div></div>
+    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Main action</span><span>big button (HIT, FIRE, BRAKE, THR\u2026)</span></div><div class="k"><span>More</span><span>buttons around it change with what you do</span></div><div class="k"><span>Weapon wheel</span><span>hold WPN, slide, lift</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>beside the minimap</span></div></div></div>`
+    : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('I', 'Bag: snacks, pet treats, job items')}${K('C', 'Camera: first person / near / far')}${K('Tab', 'Aerial view')}</div>
     <div><h3>Fighting</h3>${K('Click+Q', 'Attack / shoot')}${K('Right-drag+Z', 'Aim (hold / toggle)')}${K('Wheel+1-5+X', 'Switch weapon')}${K('Hold X', 'Weapon wheel')}${K('R', 'Reload')}<h3>Work</h3>${K('J', 'Start / quit a job (taxi, bus, van, fire engine, on foot: courier)')}</div>
-    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('F', 'Get out (on the ground)')}</div>
-    <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}<h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}</div></div>`}
+    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('F', 'Get out (on the ground) \u00b7 bail out (high)')}</div>
+    <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}<h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}${K('Space', 'Skip a cutscene')}</div></div>`}
     <div class="stack"><button class="btn primary" data-k="closehelp">Got it</button></div></div>`;
 
   // ------------------------------------------------------------------ state + public api
   const S = UI.state = { title: true, map: false, help: false, menu: false, dlg: null, bannerB: null, bannerT: 0, hudT: -9, hud: null, toasts: [], pick: null };
   UI.titleOpen = () => S.title;
-  UI.modalOpen = () => S.map || S.help || S.menu || S.title || !!S.shop || !!S.casino;
+  UI.modalOpen = () => S.map || S.help || S.menu || S.title || !!S.shop || !!S.casino || !!S.inv;
   UI.dialogueOpen = () => !!S.dlg;
   const show = (el, on, disp = 'block') => { const v = on ? disp : 'none'; if (el.style.display !== v) el.style.display = v; };
   const text = (el, value) => { value = String(value); if (el.textContent !== value) el.textContent = value; };
-  const clockTime = clock.querySelector('.tm'), clockAP = clock.querySelector('.ap'), clockPlace = clock.querySelector('.p'), speedValue = speed.querySelector('.v span'), speedName = speed.querySelector('.s'), speedBar = speed.querySelector('.bar');
-  UI.toast = (text, ms) => {
-    if (!text) return;
-    const t = h('div', 'panel', esc(text), toasts);
-    S.toasts.push({ el: t, until: performance.now() + (ms || AF.clamp(2200 + String(text).length * 40, 2600, 7000)) });
-    while (S.toasts.length > 2) S.toasts.shift().el.remove();
+  const clockTime = clock.querySelector('.tm'), clockAP = clock.querySelector('.ap'), clockPlace = clock.querySelector('.p'), clockKind = clock.querySelector('.k'), speedValue = speed.querySelector('.v span'), speedName = speed.querySelector('.s'), speedBar = speed.querySelector('.bar');
+  // ---- the notification feed (GTA's: above the minimap, newest at the bottom, max 4). notify(text | { title, text, kind, look,
+  // icon, ms, key }): kinds info | ok | warn | bad | money | mission | radio | pet | inv. A repeat of a visible one refreshes it (×n).
+  // "Name: “words”" strings become a message from that person (portrait when it's a friend or someone who passes a look).
+  const NI = { info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>', ok: '<path d="m5 12 5 5 9-10"/>', warn: '<path d="M12 4 2.5 20h19L12 4zM12 10v4M12 17v.5"/>', bad: '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>',
+    money: '<path d="M12 3v18M16.5 7.5c-1-1.4-2.6-2-4.5-2-2.5 0-4.4 1.3-4.4 3.2 0 4.6 9.4 2.4 9.4 7.1 0 2-2 3.2-4.6 3.2-2 0-3.8-.8-4.9-2.3"/>', mission: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+    radio: '<path d="M4 5h16v11H9l-5 4z"/>', pet: '<circle cx="7" cy="10" r="2"/><circle cx="12" cy="7" r="2"/><circle cx="17" cy="10" r="2"/><path d="M8 17c0-3 2-5 4-5s4 2 4 5c0 2-2 2.5-4 2.5S8 19 8 17z"/>', inv: '<path d="M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2"/>' };
+  const RADIO = /^([A-Z][\w .'\u2019-]{0,28}):\s*[\u201c"](.+)[\u201d"]$/;
+  UI.notify = (o, ms) => {
+    if (!o) return;
+    if (typeof o !== 'object') o = { text: String(o) };
+    let title = o.title || '', body = String(o.text || ''), kind = o.kind || '', look = o.look || null;
+    const m = !title && RADIO.exec(body);
+    if (m) { title = m[1]; body = m[2]; kind = kind || 'radio'; }
+    if (!kind) kind = /^\$|\+\$|\$\d/.test(body) ? 'money' : /^(Not enough|No |Too |Can.t|You can.t|Wait)/.test(body) ? 'warn' : 'info';
+    if (kind === 'radio' && !look) { const fr = AF.friends && AF.friends.byId[title.toLowerCase()]; if (fr) look = fr.look; else if (UI.lookOf) look = UI.lookOf(title); }
+    const key = o.key || title + '|' + body, now = performance.now(), life = o.ms || ms || AF.clamp(2600 + body.length * 45, 3200, 8500);
+    const same = S.toasts.find((t) => t.key === key && !t.gone);
+    if (same) { same.until = now + life; same.n++; same.x.textContent = '\u00d7' + same.n; same.el.classList.remove('bump'); void same.el.offsetWidth; same.el.classList.add('bump'); return; }
+    const icon = look ? '<div class="ic pt">' + UI.portrait(look) + '</div>' : '<div class="ic"><svg viewBox="0 0 24 24">' + (NI[o.icon] || NI[kind] || NI.info) + '</svg></div>';
+    const el = h('div', 'nt k-' + kind, icon + '<div class="tx">' + (title ? '<b>' + esc(title) + '</b>' : '') + esc(body) + '</div><span class="x"></span>', toasts);
+    S.toasts.push({ el, x: el.lastChild, key, until: now + life, n: 1, gone: false });
+    let live = 0; for (let i = S.toasts.length - 1; i >= 0; i--) { const t = S.toasts[i]; if (t.gone) continue; if (++live > 4) { t.gone = true; t.until = 0; t.el.classList.add('out'); } }
+    if (AF.audio && AF.audio.ctxOk && AF.audio.ctxOk() && (kind === 'bad' || kind === 'mission' || kind === 'pet')) AF.audio.play(kind === 'bad' ? 'ui_alert' : 'ui_open', { vol: 0.3 });
   };
-  AF.on('toast', (text) => UI.toast(text));
-  AF.on('hint', (text) => { hint.textContent = text || ''; show(hint, !!text && !TOUCH); });
+  UI.toast = UI.notify;
+  AF.on('toast', (t) => UI.notify(t));
   AF.toast = (msg) => AF.emit('toast', msg);
-  const KIND = { shop: 'Shop', civic: 'Civic building', home: 'Residence', house: 'Home', station: 'Station', church: 'Chapel', school: 'School', diner: 'Diner', cinema: 'Picture house', hotel: 'Hotel', zoo: 'Zoo', airport: 'Airfield' };
-  UI.banner = (name, kind) => { banner.querySelector('.k').textContent = kind ? (KIND[kind] || String(kind).replace(/[-_]/g, ' ')) : 'Now entering'; banner.querySelector('.n').textContent = name; banner.classList.add('show'); S.bannerT = performance.now() + 2800; };
+  // ---- help text (top-left): the 'hint' event is the controls line of the current mode; UI.help(text, ms) a timed tutorial tip
+  const HP = { hint: '', tip: '', until: 0 };
+  const helpPaint = () => { const tip = HP.tip && performance.now() < HP.until; const v = tip ? HP.tip : TOUCH ? '' : HP.hint; if (hint._v !== v) { hint._v = v; hint.innerHTML = v; hint.classList.toggle('help', !!tip); } show(hint, !!v); };
+  const keyed = (s) => esc(s).replace(/\[([^\]]{1,12})\]/g, '<span class="key">$1</span>');
+  AF.on('hint', (t) => { HP.hint = t ? esc(t) : ''; helpPaint(); });
+  UI.help = (t, ms = 6000) => { HP.tip = t ? keyed(t) : ''; HP.until = performance.now() + ms; helpPaint(); };
+  // ---- location (bottom-right): building or area name, a kind line, the time; it dims after a few seconds unless it changes
+  const KIND = { shop: 'Shop', civic: 'Civic building', home: 'Residence', house: 'Home', station: 'Station', church: 'Chapel', school: 'School', diner: 'Diner', cinema: 'Picture house', hotel: 'Hotel', zoo: 'Zoo', airport: 'Airfield', club: 'Club', pets: 'Pet store' };
+  const LOC = { place: '', kind: '', t: 0 };
+  const locate = (place, kind) => { if (place === LOC.place && kind === LOC.kind) return; LOC.place = place; LOC.kind = kind; LOC.t = performance.now(); text(clockPlace, place); text(clockKind, kind); clock.classList.remove('dim'); };
+  UI.banner = (name, kind) => locate(name, kind ? (KIND[kind] || String(kind).replace(/[-_]/g, ' ')) : '');
   AF.on('hud', (d) => { if (!d || (d.speed == null && d.kmh == null)) { S.hudT = -9; return; } S.hudT = AF.clock.t; S.hud = d; });
 
   // ------------------------------------------------------------------ dialogue (typewriter; E / click / tap to continue)
@@ -413,8 +470,8 @@ try {
     AF.input.requestLock();
     AF.friends.play(S.pick);
     const c = AF.friends.current;
-    UI.toast(`Welcome home, ${c.name}! Your friends live along Friends Lane \u2014 go say hi.`, 5200);
-    setTimeout(() => UI.toast(TOUCH ? 'Tap a prompt to talk, or to get into a car, a bike or a plane.' : 'Walk up to anyone \u2014 or any car \u2014 and press E. M for the map, Esc for the menu.', 5400), 5600);
+    UI.notify({ title: 'Port Solace', text: `Welcome home, ${c.name}! Your friends live along Friends Lane \u2014 go say hi.`, kind: 'ok', ms: 6000 });
+    setTimeout(() => UI.help(TOUCH ? 'Tap a prompt to talk, or to get into a car, a bike or a plane.' : 'Walk up to anyone \u2014 or any car \u2014 and press [E]. [M] map \u00b7 [I] bag \u00b7 [Esc] menu', 9000), 1200);
   };
   tDots.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) select(b.dataset.id); });
   title.querySelector('.arr.l').addEventListener('click', () => step(-1));
@@ -478,14 +535,15 @@ try {
     menu.querySelectorAll('[data-k=fps] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === AF.fpsCap));
   };
   const exitLock = () => AF.input.releaseLock();
-  const toggleMenu = (on, resume = true) => { S.menu = on ?? !S.menu; if (S.menu) { syncMenu(); S.help = false; if (S.map) UI.toggleMap(false, false); help.classList.remove('open'); exitLock(); } menu.classList.toggle('open', S.menu); if (!S.menu && resume) AF.input.requestLock(); };
-  const toggleHelp = (on) => { S.help = on ?? !S.help; help.classList.toggle('open', S.help); if (S.help) { if (S.map) UI.toggleMap(false, false); S.menu = false; menu.classList.remove('open'); exitLock(); } else AF.input.requestLock(); };
+  const toggleMenu = (on, resume = true) => { S.menu = on ?? !S.menu; if (S.menu) { syncMenu(); S.help = false; if (S.map) UI.toggleMap(false, false); help.classList.remove('open'); exitLock(); } menu.classList.toggle('open', S.menu); root.classList.toggle('paused', S.menu || S.help); if (!S.menu && resume) AF.input.requestLock(); };
+  const toggleHelp = (on) => { S.help = on ?? !S.help; help.classList.toggle('open', S.help); if (S.help) { if (S.map) UI.toggleMap(false, false); S.menu = false; menu.classList.remove('open'); exitLock(); } else AF.input.requestLock(); root.classList.toggle('paused', S.menu || S.help); };
   UI.resume = () => { if (S.menu) toggleMenu(false); };
   AF.on('pointerunlock', (intentional) => { if (!intentional && !S.title && !UI.modalOpen() && !S.dlg) toggleMenu(true); });
   AF.on('escape', () => {
     if (S.title) return;
     if (S.casino) AF.casino.close();
     else if (S.shop) AF.shop.close();
+    else if (S.inv && AF.inv) AF.inv.close();
     else if (S.map || S.help) { toggleMap(false); toggleHelp(false); }
     else if (S.dlg) closeDlg();
     else toggleMenu(true);
@@ -516,7 +574,7 @@ try {
   menu.querySelector('[data-k=lod]').addEventListener('change', (e) => { AF.gfx.setView(e.target.value); syncMenu(); });
   menu.querySelector('[data-k=lod]').addEventListener('input', (e) => text(menu.querySelector('.lv'), '\u00d7' + (+e.target.value).toFixed(1)));
   help.addEventListener('click', (e) => { if (e.target === help || e.target.closest('[data-k=closehelp]')) toggleHelp(false); });
-  right.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); else if (b.dataset.k === 'full') goFull(!isFull()); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
+  mm.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); else if (b.dataset.k === 'full') goFull(!isFull()); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
   prompt.addEventListener('click', () => AF.input.tap(AF.mode==='ferry-ride'?'Space':'KeyE'));
 
   const focus = () => AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes && AF.planes.cur ? AF.planes.cur : AF.player;
@@ -530,11 +588,14 @@ try {
   const fmt = (hrs) => { const hh = Math.floor(hrs) % 24, mm = Math.floor((hrs - Math.floor(hrs)) * 60); return [((hh + 11) % 12) + 1 + ':' + String(mm).padStart(2, '0'), hh < 12 ? 'AM' : 'PM']; };
   const placeName = () => {
     const pl = focus(); if (!pl) return '';
-    const lot = AF.PLAN.lotAt(pl.x, pl.z), id = lot && lot.id;
-    if (id === 'w-zoo') return 'Solace Zoo'; if (id === 'w-airfield') return 'Westgate Airfield';
+    const lot = AF.PLAN.lotAt(pl.x, pl.z), id = lot && lot.id, K2 = AF.PLAN.world.key;
+    if (id === 'w-zoo' || id === 'w-zoo-annex') return 'Solace Zoo'; if (id === 'w-airfield') return 'Westgate Airfield';
+    if (K2 && Math.abs(pl.x - K2.cx) < K2.rx * 1.3 && Math.abs(pl.z - K2.cz) < K2.rz * 1.3) return K2.name;
     if (pl.z > 300) return 'Serena Isle'; if (pl.z < -300) return 'Solace Range'; if (pl.x < -660) return 'Westmoor'; if (pl.x > 460) return 'Eastwood';
     const nr = AF.PLAN.nearestRoad(pl.x, pl.z); return nr.road && nr.d < 12 ? nr.road.name : pl.x < -300 ? 'The West Side' : 'Port Solace';
   };
+  const district = (x, z) => { const K2 = AF.PLAN.world.key; if (K2 && Math.abs(x - K2.cx) < K2.rx * 1.3 && Math.abs(z - K2.cz) < K2.rz * 1.3) return 'Private island';
+    return x < -300 ? (z < -10 && x > -446 ? 'New Friends Colony' : 'The West Side') : x > 300 ? 'Eastport' : z > 160 ? 'The Harbour' : z < -160 ? 'Park Side' : x > 0 && z < 0 ? 'Downtown' : x < -120 ? 'Old Town' : 'Port Solace'; };
   AF.onTick('ui', 950, (dt) => {
     frameN++;
     const I = AF.input;
@@ -560,17 +621,18 @@ try {
     if (it && (prompt._target !== it || prompt._label !== it.label)) { prompt._target = it; prompt._label = it.label; const lab = `<b>${TOUCH ? '&#9995;' : AF.mode==='ferry-ride'?'Space':'E'}</b>` + esc(it.label || 'Use'); if (prompt._l !== lab) { prompt.innerHTML = lab; prompt._l = lab; } }
     show(prompt, !!it, 'flex');
     const now = performance.now();
-    for (let i = S.toasts.length - 1; i >= 0; i--) { const o = S.toasts[i]; if (now > o.until) { if (o.el.style.opacity !== '0') o.el.style.opacity = '0'; if (now > o.until + 200) { o.el.remove(); S.toasts.splice(i, 1); } } }
+    for (let i = S.toasts.length - 1; i >= 0; i--) { const o = S.toasts[i]; if (now > o.until) { if (!o.gone) { o.gone = true; o.el.classList.add('out'); o.until = now; } else if (now > o.until + 320) { o.el.remove(); S.toasts.splice(i, 1); } } }
+    if (HP.tip && now > HP.until) { HP.tip = ''; helpPaint(); }
     if (frameN % 10 === 0 && !S.title) {
       let b = null;
       if (AF.mode === 'walk' && AF.player) b = AF.buildingAt(AF.player.x, AF.player.y + 1, AF.player.z);
-      if (b !== S.bannerB) { S.bannerB = b; if (b && b.name && b.label !== false) UI.banner(b.name, b.kind); }
+      if (b !== S.bannerB) S.bannerB = b;
       const [t, ap] = fmt(AF.time.hours); text(clockTime, t); text(clockAP, ap);
-      const place = b && b.name && b.label !== false ? b.name : placeName();
-      text(clockPlace, place);
+      const inside = b && b.name && b.label !== false, f = focus();
+      if (inside) UI.banner(b.name, b.kind); else locate(placeName(), f ? district(f.x, f.z) : '');
+      if (!clock.classList.contains('dim') && now - LOC.t > 7000) clock.classList.add('dim');
       if (S.menu) syncMenu();
     }
-    if (S.bannerT && now > S.bannerT) { banner.classList.remove('show'); S.bannerT = 0; }
     const d = (AF.mode === 'drive' || AF.mode === 'fly'||AF.mode==='ferry-ride') && AF.clock.t - S.hudT < 1.0 ? S.hud : null;
     show(speed, !!d);
     if (d && frameN % 3 === 0) {

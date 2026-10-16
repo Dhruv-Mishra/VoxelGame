@@ -46,10 +46,24 @@ function islandE(x, z) {
     + Math.exp(-(((x + 115) / 42) ** 2 + ((z - 718) / 25) ** 2)) * 0.14
     - Math.exp(-(((x - 120) / 55) ** 2 + ((z - 660) / 18) ** 2)) * 0.13;
 }
+// Corsair Key (05-plan world.key): a low island with one rounded hill, levelled at its airstrip
+function keyE(x, z) {
+  const k = P.key, dx = (x - k.cx) / k.rx, dz = (z - k.cz) / k.rz;
+  return Math.hypot(dx, dz) + (noise(x * 0.02 + 40, z * 0.02 - 9) - 0.5) * 0.14 + Math.exp(-(((x - 645) / 34) ** 2 + ((z - 742) / 20) ** 2)) * 0.1;
+}
+function keyH(x, z) {
+  const k = P.key; if (!k || Math.abs(x - k.cx) > k.rx * 1.4 || Math.abs(z - k.cz) > k.rz * 1.4) return -4;
+  const radius = keyE(x, z); if (radius > 1.18) return -4;
+  let height = -4 + smooth(1.18, 0.84, radius) * 7.5;
+  const hill = k.hill, d = Math.hypot(x - hill.x, z - hill.z);
+  height += Math.max(0, 1 - d / hill.r) ** 1.4 * hill.y + (noise(x * 0.05 + 3, z * 0.05) - 0.5) * 1.2 * smooth(0.95, 0.7, radius);
+  const strip = k.airstrip, stripD = Math.hypot(Math.max(strip.x0 - x, 0, x - strip.x1), Math.max(Math.abs(z - strip.z) - strip.w / 2, 0));
+  return AF.lerp(strip.y, height, smooth(0, 14, stripD));
+}
 function raw(x, z) {
   if (z > 300) {
-    const isle = P.island, radius = islandE(x, z);
-    if (radius > 1.18) return -4;
+    const isle = P.island, radius = islandE(x, z), key = keyH(x, z);
+    if (radius > 1.18) return key;
     let height = -4 + smooth(1.18, 0.82, radius) * 9;
     const cone = isle.cone, distance = Math.hypot(x - cone.x, z - cone.z);
     height += Math.max(0, 1 - distance / cone.r) ** 1.3 * 50 - (1 - smooth(4, cone.craterR, distance)) * 14;
@@ -61,7 +75,7 @@ function raw(x, z) {
     height = AF.lerp(resort.y, height, smooth(resort.r, resort.r + 18, Math.hypot(x - resort.x, z - resort.z)));
     const landing = isle.landing;
     height = AF.lerp(landing.y, height, smooth(landing.r, landing.r + 10, Math.hypot(x - landing.x, z - landing.z)));
-    return height;
+    return Math.max(height, key);
   }
   const coast = O.coastZ(x), westInland = x - O.coastX(z), eastInland = O.coastX(z, true) - x, inland = Math.min(coast - z, westInland, eastInland);
   if (inland < -32) return -4;
@@ -224,6 +238,16 @@ function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
   } else if (pad.face && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) return (x - pad.x) * pad.face[0] + (z - pad.z) * pad.face[1] > -1 ? 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3) : [23, 15, 45][tone];
   else if (pad.pave && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) return 53;
   if (z > 300) {
+    // Corsair Key: asphalt strip, sand, a grassy hill with jungle patches
+    const k = P.key;
+    if (k && Math.abs(x - k.cx) < k.rx * 1.3 && Math.abs(z - k.cz) < k.rz * 1.3) {
+      const ks = k.airstrip;
+      if (x >= ks.x0 && x <= ks.x1 && Math.abs(z - ks.z) < ks.w / 2) return 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3);
+      if (height < 0.4) return 50;
+      if (keyE(x, z) > 0.86 || height < 2.1) return [47, 48, 49][tone];
+      if (slope > 0.9) return [20, 51, 8][tone];
+      return height > 8 ? [40, 1, 23][tone] : [16, 1, 15][tone];
+    }
     // Serena Isle: asphalt strip, wet sand at the waterline, warm beaches, tropical lowland, jungle flanks, a basalt cone and red crater rim
     const isle = P.island, strip = isle.airstrip;
     if (x >= strip.x0 && x <= strip.x1 && Math.abs(z - strip.z) < strip.w / 2) return 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3);
