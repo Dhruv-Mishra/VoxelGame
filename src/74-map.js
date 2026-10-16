@@ -87,9 +87,10 @@ try {
   const syncLabels = () => {
     entries.length = 0; for (const area of areas) entries.push(area);
     for (const view of P.views) entries.push({ name: view.name, x: view.target[0], z: view.target[2], category: 'view', min: 1.5, view });
+    const byName = new Map(); for (const item of AF.buildings) if (item.name && !byName.has(item.name)) byName.set(item.name, item);
     for (const label of AF.labels) {
       if (label.kind === 'street') continue;
-      const building = label.kind === 'building' ? AF.buildings.find(item => item.name === label.name) : null;
+      const building = label.kind === 'building' ? byName.get(label.name) || null : null;
       const category = /station|airport|airfield|terminal|ferry|pier|stop/i.test(label.name) ? 'transport' : /lake|park|wood|farm|garden|mount|falls|zoo|trail|beach/i.test(label.name) ? 'nature' : 'place';
       entries.push({ name: label.name, x: label.x, z: label.z, category, min: building ? 5 : 2.6, building });
     }

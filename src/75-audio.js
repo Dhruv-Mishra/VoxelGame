@@ -380,7 +380,7 @@ try {
     // rushing air: freefall roars, the open canopy flaps, an open cockpit hisses (one wind family, crossfaded by speed)
     const sky = mode === 'skydive', fp = AF.view && AF.view.fp && AF.view.fp();
     if (sky && VT.prevMode !== 'skydive') { VT.fallT = 0; VT.chute = false; }
-    if (sky) { VT.fallT += dt; const rig = VT.rig || (VT.rig = AF.scene.getObjectByName('parachute')); if (rig && rig.visible && !VT.chute) { VT.chute = true; A.play('chute'); } }
+    if (sky) { VT.fallT += dt; const rig = VT.rig || (VT.rig = AF.scene.getObjectByName('parachute') || null); if (rig && rig.visible && !VT.chute) { VT.chute = true; A.play('chute'); } }
     else VT.chute = false;
     const fall = sky && !VT.chute, canopy = sky && VT.chute;
     A.hold('wind', 'wind_loop', mode === 'fly' ? AF.smooth(12, 50, LS.speed) * (fp ? 1 : 0.7) : canopy ? 0.25 + AF.smooth(4, 12, LS.speed) * 0.3 : fall ? 0.3 : 0, 0.8 + AF.smooth(20, 60, LS.speed) * 0.4);
@@ -438,6 +438,17 @@ try {
   };
   // 4 Hz: water and machines near the listener (positional loops: they pan and fade with distance on their own)
   const FALLS = { pts: null }, LAP = { x: 0, y: 0, z: 0, d: 0 }, FOUNTAINS = [P.parkFeatures.fountain, [-41, -44]], WATERS0 = [P.lake];
+  // built once behind the loader (the lazy first build scanned every river point mid-game)
+  const buildFalls = (O) => {
+    FALLS.pts = [{ x: -459.5, y: 1.5, z: -153, v: 0.35, ref: 4 }];
+    for (const R of O.rivers) for (let i = 1; i < R.pts.length; i++) {
+      const a = R.pts[i - 1], b = R.pts[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      if ((R.levels[i - 1] - R.levels[i]) / L <= 0.2) continue;
+      const fx = (a[0] + b[0]) / 2, fz = (a[1] + b[1]) / 2;
+      if (!FALLS.pts.some((f) => Math.hypot(f.x - fx, f.z - fz) < 20)) FALLS.pts.push({ x: fx, y: (R.levels[i - 1] + R.levels[i]) / 2, z: fz, v: 1, ref: 20 });
+    }
+  };
+  AF.on('preloaded', () => { const O = AF.outland; if (!FALLS.pts && O && O.rivers && O.rivers.length) try { buildFalls(O); } catch (e) { AF.warnOnce('audio falls', e); } });
   // the nearest point on an elliptical shoreline, kept in LAP when closer than LAP.d
   const shore = (x, z, cx, cz, rx, rz, wy) => {
     const ex = (x - cx) / rx, ez = (z - cz) / rz, e = Math.hypot(ex, ez); if (e < 0.01) return;
@@ -452,15 +463,7 @@ try {
     else if (O && O.riverInfo) { const R = O.riverInfo(x, z); if (R.d < R.hw + 45) sv = (1 - AF.smooth(R.hw, R.hw + 45, R.d)) * (1 - AF.smooth(6, 45, y - R.y)); }
     A.hold('stream', 'stream_loop', sv, 1, sx, 0, sz);
     // falling water: every steep river reach (where 49-outland draws white water) and the zoo's spring grotto
-    if (!FALLS.pts && O && O.rivers && O.rivers.length) {
-      FALLS.pts = [{ x: -459.5, y: 1.5, z: -153, v: 0.35, ref: 4 }];
-      for (const R of O.rivers) for (let i = 1; i < R.pts.length; i++) {
-        const a = R.pts[i - 1], b = R.pts[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-        if ((R.levels[i - 1] - R.levels[i]) / L <= 0.2) continue;
-        const fx = (a[0] + b[0]) / 2, fz = (a[1] + b[1]) / 2;
-        if (!FALLS.pts.some((f) => Math.hypot(f.x - fx, f.z - fz) < 20)) FALLS.pts.push({ x: fx, y: (R.levels[i - 1] + R.levels[i]) / 2, z: fz, v: 1, ref: 20 });
-      }
-    }
+    if (!FALLS.pts && O && O.rivers && O.rivers.length) buildFalls(O);
     let fb = null, fbd = 1e9;
     for (const f of FALLS.pts || []) { const d = Math.hypot(f.x - x, f.z - z); if (d < f.ref * 9 && d < fbd) { fbd = d; fb = f; } }
     const fh = A.hold('falls', 'falls_loop', fb ? fb.v : 0, 1, fb && fb.x, fb && fb.y, fb && fb.z); if (fh && fb) fh.ref = fb.ref;

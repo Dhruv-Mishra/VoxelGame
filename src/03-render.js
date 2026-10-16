@@ -191,6 +191,27 @@ try {
   const smRender = R.shadowMap.render.bind(R.shadowMap);
   R.shadowMap.render = (lights, scene, camera) => { if (scene !== S) return smRender(lights, scene, camera); shadowView.layers.mask = camera.layers.mask | 2; return smRender(lights, scene, shadowView); };
   const lastSF = { x: 0, z: 0 };
+  // world matrices once per frame, before the scene renders, for visible subtrees only (PERF.md §3): three's own pass also walked
+  // every hidden pool / template / far avatar (~4 700 objects recomposed each render, ~1 ms on a fast desktop, 4 ms on a laptop).
+  // A hidden subtree is marked stale when its parent moved and catches up the frame it is shown. Objects whose matrixWorld is read
+  // while hidden (park pose batches) set userData.liveMatrix. Direct obj.updateMatrixWorld() calls keep three's semantics.
+  S.matrixWorldAutoUpdate = false;
+  const O3 = THREE.Object3D.prototype.updateMatrixWorld;
+  const updWorld = (o, force) => {
+    if (o.matrixAutoUpdate) o.updateMatrix();
+    if (o.matrixWorldNeedsUpdate || force) {
+      if (o.parent === null) o.matrixWorld.copy(o.matrix); else o.matrixWorld.multiplyMatrices(o.parent.matrixWorld, o.matrix);
+      o.matrixWorldNeedsUpdate = false; force = true;
+    }
+    const ch = o.children;
+    for (let i = 0, n = ch.length; i < n; i++) {
+      const c = ch[i];
+      if (!c.visible && !c.userData.liveMatrix) { if (force) c.matrixWorldNeedsUpdate = true; continue; }
+      if (c.matrixWorldAutoUpdate !== true && !force) continue;
+      if (c.updateMatrixWorld !== O3) c.updateMatrixWorld(force); else updWorld(c, force);
+    }
+  };
+  AF.updateWorld = () => updWorld(S, false);
   const frame = (rdt) => {
     if (graphicsReset) return;
     // AF.timeScale 0 freezes the world (photo mode); AF.clock.real keeps the wall-clock step for cameras
@@ -209,9 +230,10 @@ try {
     const sf = AF.shadowFocus, moved = Math.abs(sf.x - lastSF.x) + Math.abs(sf.z - lastSF.z) > 0.05 && AF.mode !== 'aerial' && AF.mode !== 'cine';
     lastSF.x = sf.x; lastSF.z = sf.z;
     if (AF.shadowQ !== 'off' && (moved || AF.clock.frame % every === 0 || AF.shadowDirty)) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
-    // behind the loader veil (AF.stream settle) only every 6th frame renders (keeps uploads incremental); the rest goes to streaming
-    const veiled = AF.stream.settling && AF.clock.frame % 6 !== 0;
-    if (!veiled) try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
+    // behind the loader veil (AF.stream settle) only every 6th frame renders (keeps uploads incremental); the rest goes to streaming.
+    // AF.stream.hold: nothing renders while the driver links programs in parallel (01-stream warm)
+    const veiled = AF.stream.hold > 0 || (AF.stream.settling && AF.clock.frame % 6 !== 0);
+    if (!veiled) try { updWorld(S, false); AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
   };
   AF.frame = frame;
@@ -270,7 +292,7 @@ try {
   AF.step = (n = 1, dt = 1 / 60) => { const was = AF.paused, ws = AF.clock.stepping; AF.paused = true; AF.clock.stepping = true; try { for (let i = 0; i < n; i++) frame(dt); } finally { AF.paused = was; AF.clock.stepping = ws; } return AF.clock.frame; };
   AF.pause = () => { AF.paused = true; };
   AF.resume = () => { AF.paused = graphicsReset; };
-  AF.capture = () => { AF.renderFrame(); return cv.toDataURL('image/png'); };
+  AF.capture = () => { updWorld(S, false); AF.renderFrame(); return cv.toDataURL('image/png'); };
 
   // yield between boot stages (setTimeout is clamped to 1 s in hidden tabs)
   AF.yield = () => new Promise((res) => { if (document.hidden) { const mc = new MessageChannel(); mc.port1.onmessage = () => res(); mc.port2.postMessage(0); } else setTimeout(res, 0); });
@@ -449,16 +471,16 @@ try {
     const LADDER = ['low', 'lite', 'high', 'ultra'];
     const target = () => (AF.fpsCap > 0 ? 1000 / AF.fpsCap : 16.7);
     let ema = target(), slowT = 0, grace = 2;
-    G.onChange(() => { ema = target(); slowT = 0; grace = 2; });
+    G.onChange(() => { ema = target(); slowT = 0; grace = Math.max(grace, 2); });
     AF.onTick('gfx-adapt', 960, (dt) => {
-      if (!G.auto || AF.SHOT || AF.TEST || !AF.ready || AF.paused || document.hidden || G.cinema) return;   // cinema: never downgrade
+      if (!G.auto || AF.SHOT || AF.TEST || !AF.ready || AF.paused || document.hidden || G.cinema || AF.stream.traveling || AF.stream.loading) return;   // cinema: never downgrade
       const ms = dt * 1000; if (ms <= 0 || ms > 250) return;
       if (grace > 0) { grace -= dt; return; }                 // tier switches reallocate targets and recompile: ignore that hitch
       const tg = target();
       ema += (ms - ema) * 0.08;
       const i = LADDER.indexOf(G.name);
       if (ema > tg * 1.32) slowT += dt; else slowT = Math.max(0, slowT - dt);
-      if (slowT > 3 && i > 0) { G.set(LADDER[i - 1], 'slow frames'); return; }
+      if (slowT > 3 && i > 0) { slowT = 0; grace = 30; const to = LADDER[i - 1]; AF.stream.regfx(() => G.set(to, 'slow frames')); return; }
     });
   }
 
@@ -551,19 +573,33 @@ try {
       if (su) { fbU.uZen.value.copy(su.uZen.value); fbU.uHor.value.copy(su.uHor.value); fbU.uGnd.value.copy(su.uGnd.value); fbU.uSunDir.value.copy(su.uSunDir.value); fbU.uSunCol.value.copy(su.uSunCol.value); fbU.uSunK.value = su.uSunK.value; }
       else { fbU.uSunDir.value.copy(AF.time.sunDir); fbU.uSunK.value = 1 - (AF.time.night || 0); }
     };
+    // two cube-UV targets used in turn (fromScene allocated a new ~6 MB half-float target every refresh and the old one was
+    // disposed: a GPU allocation + first-use stall every ~20 s of play)
+    const slots = [null, null]; let slot = 0;
     E.update = () => {
       if (!E.on) return;
       const t0 = performance.now();
-      if (!pmrem) { pmrem = new THREE.PMREMGenerator(R); }
+      if (!pmrem) {
+        pmrem = new THREE.PMREMGenerator(R);
+        const alloc = pmrem._allocateTargets.bind(pmrem);
+        pmrem._allocateTargets = () => { slot ^= 1; if (!slots[slot]) slots[slot] = alloc(); return slots[slot]; };
+      }
       const sky = AF.sky && AF.sky.envScene;
       let src = fbScene; E.src = 'fallback';
       if (sky && sky.isScene) { src = sky; E.src = 'sky'; } else pull();
+      // three r160's fromScene draws a fresh MeshBasicMaterial background box each call and disposes it, so its program was
+      // relinked on every refresh (a synchronous link every ~20 s). An identical material that never goes away keeps the program
+      // cached; its box sits far beyond the cube camera's far plane, so it draws nothing.
+      if (!src.userData.pmremKeep) {
+        const keep = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ side: THREE.BackSide, depthWrite: false, depthTest: false }));
+        keep.position.set(0, -1e6, 0); keep.frustumCulled = false; keep.renderOrder = -1e9; keep.name = 'pmrem-keep'; src.add(keep); src.userData.pmremKeep = keep;
+      }
       const prevRT = R.getRenderTarget();
       const rt = pmrem.fromScene(src, 0, 0.1, 5000);
       R.setRenderTarget(prevRT);
       const old = E.rt; E.rt = rt;
       for (const m of [AF.mat.voxel, AF.mat.glass, AF.mat.voxelInst, AF.mat.voxelInstC]) { if (!m) continue; const had = !!m.envMap; m.envMap = rt.texture; if (!had) m.needsUpdate = true; }
-      if (old) old.dispose();
+      if (old && old !== slots[0] && old !== slots[1]) old.dispose();
       E.n++; E.ms = Math.round((performance.now() - t0) * 10) / 10;
     };
     let lastH = -99, acc = 0;
@@ -624,8 +660,9 @@ try {
   AF.test('renderer: mobile GPU budgets stay bounded', () => {
     if (!AF.MOBILE) return { ok: true, info: 'desktop profile' };
     const cfg = cur(), context = R.getContext().getContextAttributes();
-    const ok = R.getPixelRatio() <= Math.min(devicePixelRatio || 1, 1) + 1e-3 && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools <= 6 && AF.LOD_DIST === mobileTier.lod * AF.lodScale && AF.REGION_LOD === mobileTier.regLod * AF.lodScale && AF.LOD.outland === mobileTier.outland * AF.lodScale && (!AF.atmos.pool || AF.atmos.pool.length === 0);
-    return { ok, info: 'pr ' + R.getPixelRatio() + ', msaa ' + context.antialias + ', near ' + sunSize() + ', direct renderer, no far/env/AO/point lights, ' + cfg.pools + ' shader pools' };
+    // the canvas may be up to 2x (PERF.md §3: the phone upscaler draws the 480p scene to a <= 2x canvas); the scene itself renders at renderPR
+    const ok = R.getPixelRatio() <= Math.min(devicePixelRatio || 1, AF.upscaleOn ? 2 : 1) + 1e-3 && AF.renderPR() <= R.getPixelRatio() + 1e-3 && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools <= 6 && AF.LOD_DIST === mobileTier.lod * AF.lodScale && AF.REGION_LOD === mobileTier.regLod * AF.lodScale && AF.LOD.outland === mobileTier.outland * AF.lodScale && (!AF.atmos.pool || AF.atmos.pool.length === 0);
+    return { ok, info: 'pr ' + R.getPixelRatio() + ' (render ' + AF.renderPR().toFixed(2) + '), msaa ' + context.antialias + ', near ' + sunSize() + ', direct renderer, no far/env/AO/point lights, ' + cfg.pools + ' shader pools' };
   });
   function sunSize() { return AF.sun.shadow.mapSize.x; }
 }

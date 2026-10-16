@@ -213,15 +213,26 @@ O.h = (x, z) => {
   }
   return height;
 };
+// LRU of 16 m tiles (2 KB each): 128 tiles (~180 m square) thrashed as soon as the wild herds within 260 m, the vehicles and the
+// ambience all sampled the ground. A tile is only filled (1 024 heights, ~1 ms) once it has been asked for a few times; until then
+// a miss samples just its own cell (the same point the tile would hold, so the answer is identical).
+const TILE_CAP = AF.MOBILE ? 1024 : 2048, TILE_MISSES = 6, misses = new Map();
 O.hB = (bx, bz) => {
   const x = W.xOf(bx), z = W.zOf(bz), tx = Math.floor(x / 16), tz = Math.floor(z / 16), key = tx * 100000 + tz;
+  const ix = clamp(Math.floor((x - tx * 16) * 2), 0, 31), iz = clamp(Math.floor((z - tz * 16) * 2), 0, 31);
   let tile = tiles.get(key);
   if (!tile) {
+    const n = (misses.get(key) || 0) + 1;
+    if (n < TILE_MISSES || !O.edgeReady) {
+      if (O.edgeReady) { misses.set(key, n); if (misses.size > 8192) misses.clear(); }
+      return Math.round(O.h(tx * 16 + ix * 0.5 + 0.25, tz * 16 + iz * 0.5 + 0.25) * 4);
+    }
+    misses.delete(key);
     tile = new Int16Array(1024);
-    for (let ix = 0; ix < 32; ix++) for (let iz = 0; iz < 32; iz++) tile[ix * 32 + iz] = Math.round(O.h(tx * 16 + ix * 0.5 + 0.25, tz * 16 + iz * 0.5 + 0.25) * 4);
-    if (O.edgeReady) { tiles.set(key, tile); if (tiles.size > 128) tiles.delete(tiles.keys().next().value); }
+    for (let jx = 0; jx < 32; jx++) for (let jz = 0; jz < 32; jz++) tile[jx * 32 + jz] = Math.round(O.h(tx * 16 + jx * 0.5 + 0.25, tz * 16 + jz * 0.5 + 0.25) * 4);
+    tiles.set(key, tile); if (tiles.size > TILE_CAP) tiles.delete(tiles.keys().next().value);
   } else { tiles.delete(key); tiles.set(key, tile); }
-  return tile[clamp(Math.floor((x - tx * 16) * 2), 0, 31) * 32 + clamp(Math.floor((z - tz * 16) * 2), 0, 31)];
+  return tile[ix * 32 + iz];
 };
 O.groundY = (x, z) => O.hB(W.bx(x), W.bz(z)) * 0.25;
 function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {

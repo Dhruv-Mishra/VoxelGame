@@ -493,15 +493,19 @@ try {
       [[410, 40, 230], [388, 0, 60], [352, 26, 220], [388, 0, 0], 11],            // the Solace River through Eastport
       [[-230, 150, 330], [20, 12, -30], [120, 170, 320], [20, 12, -30], 12],     // the whole island
     ];
-    const CV = { i: 0, t: 0, p: new THREE.Vector3(), q: new THREE.Vector3() };
+    const CV = { i: 0, t: 0, p: new THREE.Vector3(), q: new THREE.Vector3(), focus: { x: 0, z: 0 } };
     const ease = (k) => k * k * (3 - 2 * k);
+    // the last seconds of a shot stream the next one (AF.stream.focus), so the cut shows meshes already built and uploaded
+    // instead of hitching on a burst of first draws
+    const unfocus = () => { if (AF.stream.focus === CV.focus) AF.stream.focus = null; };
     AF.modes.cine = {
       enter() { CV.t = 0; },
-      exit() { fadeEl.style.opacity = 0; },
+      exit() { fadeEl.style.opacity = 0; unfocus(); },
       update(dt) {
         let s = SHOTS[CV.i];
         CV.t += Math.min(dt, 0.1);
-        if (CV.t > s[4]) { CV.i = (CV.i + 1) % SHOTS.length; CV.t = 0; s = SHOTS[CV.i]; }
+        if (CV.t > s[4]) { CV.i = (CV.i + 1) % SHOTS.length; CV.t = 0; s = SHOTS[CV.i]; unfocus(); }
+        if (CV.t > s[4] - 4.5 && AF.preloaded && !AF.stream.loading) { const n = SHOTS[(CV.i + 1) % SHOTS.length]; CV.focus.x = n[0][0] * 0.6 + n[1][0] * 0.4; CV.focus.z = n[0][2] * 0.6 + n[1][2] * 0.4; AF.stream.focus = CV.focus; }
         const fade = CV.t < 0.35 || CV.t > s[4] - 0.45 ? '1' : '0'; if (fadeEl.style.opacity !== fade) fadeEl.style.opacity = fade;
         const k = ease(Math.min(1, CV.t / s[4]));
         CV.p.set(s[0][0] + (s[2][0] - s[0][0]) * k, s[0][1] + (s[2][1] - s[0][1]) * k, s[0][2] + (s[2][2] - s[0][2]) * k);
@@ -552,14 +556,14 @@ try {
     if (e.target === menu) { toggleMenu(false); return; }
     const b = e.target.closest('button'); if (!b) return;
     const seg = b.parentElement && b.parentElement.dataset.k;
-    if (seg === 'gfx') { G.auto = false; G.set(b.dataset.v, 'menu'); try { localStorage.setItem('portSolace.gfx', b.dataset.v); } catch (er) {} }
+    if (seg === 'gfx') { const v = b.dataset.v; G.auto = false; AF.stream.regfx(() => G.set(v, 'menu')).then(() => { if (S.menu) syncMenu(); }); try { localStorage.setItem('portSolace.gfx', v); } catch (er) {} }
     else if (seg === 'res') {
       G.res = +b.dataset.v; try { localStorage.setItem('portSolace.res', b.dataset.v); } catch (er) {}
       AF.applyPR();
     }
     else if (seg === 'clock') AF.time.set({ paused: b.dataset.v === 'stop' });
     else if (seg === 'fps') AF.setFpsCap(b.dataset.v);
-    else if (seg === 'shadows') AF.gfx.setShadows(b.dataset.v);
+    else if (seg === 'shadows') { const v = b.dataset.v; AF.stream.regfx(() => AF.gfx.setShadows(v)).then(() => { if (S.menu) syncMenu(); }); }
     else if (b.dataset.k === 'resume') toggleMenu(false);
     else if (b.dataset.k === 'map') { toggleMenu(false, false); toggleMap(true); }
     else if (b.dataset.k === 'help') { toggleMenu(false, false); toggleHelp(true); }

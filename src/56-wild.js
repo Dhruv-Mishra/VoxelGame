@@ -16,7 +16,7 @@ function species(id, m, vs, cap, opts = {}) {
 function* spots(step, test) { for (let x = O.play.x0 + 40; x < O.play.x1 - 40; x += step) for (let z = O.play.z0 + 40; z < 260; z += step) { const px = x + (AF.hash2(x, z) - 0.5) * step * 0.6, pz = z + (AF.hash2(z, x) - 0.5) * step * 0.6; if (AF.W.col(px, pz) < 0 && test(px, pz)) yield [px, pz]; } }
 const dry = (x, z) => O.waterY(x, z) === null && O.roadDistance(x, z) > 12 && !O.pads.some((pad) => Math.abs(x - pad.x) < pad.rx + 6 && Math.abs(z - pad.z) < pad.rz + 6);
 function herd(kind, x, z, n, r) {
-  const h = { kind, x, z, r, members: [], active: false, acc: 0 };
+  const h = { kind, x, z, r, members: [], active: false, acc: 0, fresh: true };
   for (let index = 0; index < n; index++) {
     const a = AF.hash2(x + index, z) * Math.PI * 2, d = r * Math.sqrt(AF.hash2(z + index, x));
     let mx = x + Math.cos(a) * d, mz = z + Math.sin(a) * d;
@@ -91,10 +91,13 @@ AF.onTick('wild', 334, (dt, t) => {
   if (!AF.ready || !WD.herds.length) return;
   const start = performance.now(), cam = AF.camera.position, player = AF.mode === 'walk' && AF.player ? AF.player : null;
   for (const id in SPECIES) SPECIES[id].write = 0;
-  let active = 0;
+  let active = 0, wakes = 0;
   for (const h of WD.herds) {
     const S = SPECIES[h.kind], reach = S.fly ? 700 : 260, dx = h.x - cam.x, dz = h.z - cam.z;
-    h.active = dx * dx + dz * dz < reach * reach; if (!h.active) continue;
+    h.active = dx * dx + dz * dz < reach * reach; if (!h.active) { h.fresh = true; continue; }
+    // a teleport wakes dozens of herds at once and each first step picks two spots per animal: at most 4 wake per frame
+    // (a herd still waiting is not drawn yet; it wakes at the edge of the 260 m reach, so nobody sees it pop)
+    if (h.fresh) { if (wakes >= 4) continue; wakes++; h.fresh = false; h.acc = PERIOD; }
     h.acc += dt; if (h.acc >= PERIOD) { step(h, Math.min(h.acc, 0.3), cam, player, t); h.acc = 0; }
     for (const a of h.members) {
       if (S.write >= S.cap) break;

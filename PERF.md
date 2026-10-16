@@ -43,11 +43,35 @@ compare draws and GPU ms.
 - Dynamic near plane (`cam-near`): 0.1 m on foot/driving, up to 6 m when high. Never hard-code `camera.near`.
 - No coplanar opaque surfaces (lift ≥ 0.02 m or `polygonOffset`). Position-keyed shader hashes sample a few cm behind the face.
 - Post chain: bloom + AO (tier-gated) + grade + upscale. No tilt-shift/DOF (removed). Phones use the lite path above.
+- **World matrices** (03 `updWorld`): `scene.matrixWorldAutoUpdate` is off; the frame updates world matrices once, before it
+  renders, for visible subtrees only (three's own pass recomposed every hidden pool, template and far avatar on every render:
+  ~4 700 objects, ~1 ms desktop / ~4 ms laptop). A hidden subtree whose parent moved is marked stale and catches up the frame it is
+  shown. Code that reads `matrixWorld` of a hidden object sets `userData.liveMatrix` (13-park pose batches) or calls
+  `updateWorldMatrix` itself; direct `obj.updateMatrixWorld()` calls keep three's semantics.
+
+## 3b. No freezes in play (locked)
+Measured with `tools/hitch-probe.js` + `tools/play-scenario.js` (title, run, steal + drive, guns, 4-star chase, map, bag, night,
+travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
+- **No shader program links during play.** Every link stalls the frame (100-300 ms on ANGLE / D3D11 even on a fast GPU, seconds on
+  laptops). The boot preload and every travel compile with `compileAsync` while `AF.stream.hold` stops rendering (a frame drawn
+  mid-link would block on every unfinished program). Objects that appear later go through `AF.stream.compileAhead(obj)`, which
+  compiles both light-pool variants, and stay hidden until it resolves.
+- **Graphics changes that swap programs** (tier, shadows; menu or auto-tier) run through `AF.stream.regfx(apply)`: veil, apply,
+  parallel compile, reveal. Auto-tier never fires during a travel.
+- **Env reflections** (03 `env-refresh`, every ~20 s with the sky): the PMREM writes into two cube-UV targets used in turn (no
+  allocation), and a persistent `pmrem-keep` mesh in the env scene keeps three r160's per-call background-box program cached (it
+  relinked on every refresh before).
+- **Teleports / first visits** stay cheap: `O.hB` answers a cold 16 m tile with the single exact sample and fills the tile (1 024
+  heights) only after 6 misses (LRU 2 048 tiles desktop / 1 024 phones); outland quadtree nodes cache the ground under their
+  nearest point (camera + look-ahead); LRU eviction is one sorted pass; wild herds wake at most 4 a frame; one-time scans
+  (audio waterfalls) run at `preloaded`. After a teleport the first 6 frames cost ~20 ms total (was 120-300 ms).
+- Per-frame code allocates nothing (8.3); periodic selections (chimney smoke, light pool) use fixed top-K arrays.
 
 ## 4. LOD transitions (locked)
 - Every LOD swap of voxel-material meshes is a dithered 0.3 s cross-fade (`AF.world.fade`, `fadeIn`/`fadeOut` variants).
   Never write `.visible` on such meshes while `owner.fadeE` is set — use `FADE.swap`. During `AF.stream.loading` swaps are instant.
-- Fade programs are precompiled (`AF.world.fade.warm()`, via `AF.stream.compileAhead`) so the first swap never hitches.
+- Fade programs are precompiled (`AF.world.fade.warm()`, via `AF.stream.compileAhead`, both light-pool variants) so the first swap
+  never hitches, by day or by night.
 - View-aware thresholds (02 `prop-lod`: `viewAim` / `inView` / `leadAt`): on-screen regions, props and clusters keep their detail
   a band longer (×1.25 regions + props, ×1.15 clusters / prop cull) and, with the camera moving, upgrade 1.5 s of travel (≤ 90 m)
   earlier ahead; out of view the plain distances apply. Driving the length of Grand Avenue at 25 m/s: in-view swaps under 120 m
@@ -61,7 +85,8 @@ compare draws and GPU ms.
 - Boot preload (`AF.stream.preload`, not in `?test`): gen systems, opening view, then `AF.stream.warm()` compiles every program
   with `compileAsync` (parallel link) against the post scene target. While `AF.stream.settling`, the renderer draws only every
   6th frame behind the veil. `AF.preloaded` / `preloaded` event mark the end.
-- Travel: `AF.stream.travel({ label, go })` — veil, move, pump all systems until `near()` is empty, warm, reveal.
+- Travel: `AF.stream.travel({ label, go })` — veil, move, pump all systems until `near()` is empty, warm, reveal. The title
+  cinematic sets `AF.stream.focus` on the next shot 4.5 s before each cut, so cuts never land on unbuilt, never-drawn meshes.
 - City regions: 0.25 m full → 0.5 m coarse beyond `regLod` → 1 m cluster copy beyond `farLod`. Pending clusters reveal per
   region (partial reveal; `meshRegionG` keeps `hid: cl.lvl === 1 && !cl.part`).
 - **Mesher workers** (02-voxel `AF.world.workers`): the greedy pass runs on 1–4 Web Workers (2 on phones, `hardwareConcurrency − 2`),
@@ -143,5 +168,8 @@ compare draws and GPU ms.
 - `node tools/serve.mjs 8765`; `node tools/build.mjs --check`. Baseline: `git show HEAD:output.html > tools/output-base.html`.
 - Playwright (MCP run_code with `filename`): `test-run.js` (`?test`), `boot-time.js`, `perf-areas.js` (per-pose ms/draws/tris),
   `perf-run.js` (base vs current), `session.js` + `perf-list.js` / `perf-break.js` / `cpu-prof.js` / `gpu-prof.js` /
-  `tick-survey.js` / `lod-check.js`, `stream-fly.js` / `city-fly.js` / `outland-drive.js` / `stream-test.js` (streaming hitches).
+  `tick-survey.js` / `lod-check.js`, `stream-fly.js` / `city-fly.js` / `outland-drive.js` / `stream-test.js` (streaming hitches),
+  `hitch-probe.js` (every rAF gap > 60 ms with its top hooks / GL calls, every runtime program link with its stack, worst single
+  call per hook; `globalThis.__psExtraSrc` = `play-scenario.js` source + `__psScenario = 'play'`, `__psThrottle = 4` for a laptop,
+  `__psTrace` for a browser-wide trace). Long runs exceed the MCP timeout: start them un-awaited and stash the result on `page`.
   Harnesses that boot their own page close other browser contexts.

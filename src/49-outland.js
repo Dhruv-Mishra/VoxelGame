@@ -10,12 +10,22 @@ const terrainBuf = O.terrainBuf;
 R.scratchBytes = terrainBuf.p.byteLength + terrainBuf.uv.byteLength + terrainBuf.pal.byteLength + terrainBuf.an.byteLength + terrainBuf.idx.byteLength;
 function node(x, z, level, parent) {
   const size = 32 * 2 ** level;
-  const entry = { x, z, level, size, parent, children: null, meshes: [], ins: [], outs: [], rim: new Float32Array(260), ready: false, split: false, busy: false, fadeE: null, used: stamp, bytes: 0, queued: false, dirty: false };
+  const entry = { x, z, level, size, parent, children: null, meshes: [], ins: [], outs: [], rim: new Float32Array(260), ready: false, split: false, busy: false, fadeE: null, used: stamp, bytes: 0, queued: false, dirty: false, hx: 1e9, hz: 1e9, hh: 0, hx2: 1e9, hz2: 1e9, hh2: 0, hk: 0 };
   entry.finish = () => { entry.busy = false; };
   nodes.push(entry); return entry;
 }
+// the ground under the nearest point of a tile, cached per tile for the camera and the look-ahead (scans asked the height
+// function for every node several times a pass: ~25 k calls a second while loading)
+function groundNear(entry, x, z) {
+  const cx = AF.clamp(x, entry.x, entry.x + entry.size), cz = AF.clamp(z, entry.z, entry.z + entry.size);
+  if (Math.abs(cx - entry.hx) + Math.abs(cz - entry.hz) < 4) return entry.hh;
+  if (Math.abs(cx - entry.hx2) + Math.abs(cz - entry.hz2) < 4) return entry.hh2;
+  const h = O.h(cx, cz);
+  if ((entry.hk ^= 1)) { entry.hx = cx; entry.hz = cz; entry.hh = h; } else { entry.hx2 = cx; entry.hz2 = cz; entry.hh2 = h; }
+  return h;
+}
 function distance(entry, x, y, z) {
-  return Math.hypot(Math.max(entry.x - x, 0, x - entry.x - entry.size), Math.max(entry.z - z, 0, z - entry.z - entry.size), Math.max(0, y - O.h(AF.clamp(x, entry.x, entry.x + entry.size), AF.clamp(z, entry.z, entry.z + entry.size)) - 25) * 0.65);
+  return Math.hypot(Math.max(entry.x - x, 0, x - entry.x - entry.size), Math.max(entry.z - z, 0, z - entry.z - entry.size), Math.max(0, y - groundNear(entry, x, z) - 25) * 0.65);
 }
 // a worker result (07-outland O.meshTileArrays, transferred buffers) as geometry: no copies, bounds precomputed
 function geometryFrom(pre) {
@@ -268,11 +278,19 @@ function scan() {
   for (const e of queue) e.score = score(e, cp);
   let kept = 0;
   for (const entry of nodes) if (entry.ready) kept++;
-  while (kept > R.maxNodes || R.bytes > R.maxBytes) {
-    let oldest = null;
-    for (const entry of nodes) if (entry.parent && !entry.parent.split && !frozen(entry.parent) && entry.ready && entry !== current && (!oldest || entry.used < oldest.used)) oldest = entry;
-    if (!oldest || !dispose(oldest)) break;
-    kept = 0; for (const entry of nodes) if (entry.ready) kept++;
+  // least recently used first; one sorted pass (rescanning every node per eviction cost tens of ms after a teleport)
+  if (kept > R.maxNodes || R.bytes > R.maxBytes) {
+    const cand = [];
+    for (const entry of nodes) if (entry.parent && !entry.parent.split && !frozen(entry.parent) && entry.ready && entry !== current) cand.push(entry);
+    cand.sort((a, b) => a.used - b.used);
+    const readyIn = (e) => { let n = e.ready ? 1 : 0; if (e.children) for (const child of e.children) n += readyIn(child); return n; };
+    for (const entry of cand) {
+      if (kept <= R.maxNodes && R.bytes <= R.maxBytes) break;
+      if (!entry.ready || frozen(entry.parent)) continue;
+      const n = readyIn(entry);
+      if (!dispose(entry)) break;
+      kept -= n;
+    }
   }
   R.active = kept;
 }

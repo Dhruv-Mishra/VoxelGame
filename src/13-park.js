@@ -43,7 +43,7 @@ try {
   const movers = [];
   const moving = (object, kind) => {
     movers.push({ geometry: object.geometry, material: object.material, matrix: object.matrixWorld, object, kind, visible: true, shadow: false });
-    object.visible = false; object.castShadow = false; object.frustumCulled = false; return object;
+    object.visible = false; object.castShadow = false; object.frustumCulled = false; object.userData.liveMatrix = true; return object;
   };
   const parkTick = (name, order, fn) => {
     let frame = 0, elapsed = 0, hidden = true;
@@ -154,7 +154,7 @@ try {
         }
         group.mesh.count = visible ? 1 : 0; group.mesh.castShadow = shadows && shadow;
         const material = group.mesh.material, source = group.material;
-        if (material.envMap !== source.envMap) { material.envMap = source.envMap; material.needsUpdate = true; AF.stream.compileAhead(group.mesh); }
+        if (material.envMap !== source.envMap) { const was = !!material.envMap; material.envMap = source.envMap; if (was !== !!source.envMap) { material.needsUpdate = true; AF.stream.compileAhead(group.mesh); } }
         material.envMapIntensity = source.envMapIntensity;
       }
       texture.needsUpdate = true;
@@ -1177,7 +1177,7 @@ try {
           for (let index = 0; index < normals.length; index++) { const normal = normals[index] % 8; normals[index] = normals[index] - normal + map[normal]; }
           farGeometry.push(geometry);
         }
-        object.visible = false; object.castShadow = false; object.frustumCulled = false;
+        object.visible = false; object.castShadow = false; object.frustumCulled = false; object.userData.liveMatrix = true;
       });
       const geometry = BGU.mergeGeometries(farGeometry, false);
       const far = { geometry, material: AF.mat.voxel, kind: 'pose', matrix: person.root.matrixWorld, visible: false };

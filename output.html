@@ -468,7 +468,7 @@ try {
 // AF.stream.travel({ label, go }): veil, go() (moves the camera / sets the mode), stream + compile until the view is complete, reveal
 {
   const ST = AF.stream = {
-    systems: [], loading: 0, focus: null, traveling: false, LOOK: 2.5, PREFETCH: 1.3,
+    systems: [], loading: 0, hold: 0, focus: null, traveling: false, LOOK: 2.5, PREFETCH: 1.3,
     ahead: { x: 0, z: 0, vx: 0, vz: 0, px: 0, pz: 0, init: false },
     stats: { preloadMs: 0, genMs: 0, settleMs: 0, warmMs: 0, travels: 0, travelMs: 0, waitingOn: '', timeouts: 0 },
   };
@@ -522,7 +522,12 @@ try {
     };
     const jobs = [compile()];
     if (pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; jobs.push(compile()); for (const l of pool) l.visible = v; }
-    await Promise.all(jobs); await ST.nextFrame();
+    // nothing renders while the driver links (behind the veil): a frame drawn now would block on every unfinished program,
+    // turning the parallel compile back into one long synchronous stall. Capped in case a driver never reports completion.
+    ST.hold++;
+    try { await Promise.race([Promise.all(jobs), new Promise((resolve) => setTimeout(resolve, AF.MOBILE ? 15000 : 10000))]); }
+    finally { ST.hold--; }
+    await ST.nextFrame();
     const proxies = [], tri = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)), seen = new Set();
     AF.scene.traverse((o) => {
       const d = o.customDepthMaterial; if (!d || warmed.has(d)) return;
@@ -537,15 +542,21 @@ try {
   // one object (and its children) compiled ahead of its first draw without stalling a frame: compileAsync uses
   // KHR_parallel_shader_compile, against the scene's lights and the post chain's scene target (the programs the frame will use).
   // three prepares one object per material per call, so callers pass each object that needs its own variant separately.
+  // Both light variants (the night pool shown / hidden changes every program) are compiled: a fade or a park mesh first drawn
+  // after dusk otherwise linked its program synchronously (100-200 ms on ANGLE / D3D11).
   ST.compileAhead = (root) => {
-    const R = AF.renderer, P = AF.post, prev = R.getRenderTarget();
+    const R = AF.renderer, P = AF.post, prev = R.getRenderTarget(), pool = (AF.atmos && AF.atmos.pool) || [], jobs = [];
+    const once = () => {
+      if (R.compileAsync) { jobs.push(R.compileAsync(root, AF.camera, AF.scene).catch((e) => AF.warnOnce('compile ahead', e))); return; }
+      R.compile(root, AF.camera, AF.scene);
+    };
     try {
       R.setRenderTarget(P && P.enabled && P.sceneRT ? P.sceneRT : null);
-      if (R.compileAsync) return R.compileAsync(root, AF.camera, AF.scene).catch((e) => AF.warnOnce('compile ahead', e));
-      R.compile(root, AF.camera, AF.scene);
+      once();
+      if (pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; try { once(); } finally { for (const l of pool) l.visible = v; } }
     } catch (e) { AF.warnOnce('compile ahead', e); }
     finally { R.setRenderTarget(prev); }
-    return Promise.resolve();
+    return Promise.all(jobs);
   };
 
   // wait until no system misses anything near the view (3 calm frames), at most maxMs
@@ -596,14 +607,16 @@ try {
     el.classList.toggle('done', !on); el.style.pointerEvents = on ? 'auto' : 'none';
     return new Promise((resolve) => setTimeout(resolve, on ? 220 : 0));
   };
-  ST.travel = async ({ label: where = '', go, maxMs = 15000 } = {}) => {
+  ST.travel = async ({ label: where = '', text = '', go, maxMs = 15000, warmFirst = false } = {}) => {
     if (ST.traveling || !AF.ready || AF.TEST) { if (go) go(); return; }
     ST.traveling = true; ST.stats.travels++;
     const t0 = performance.now();
     try {
-      await veil(true, where ? 'Travelling to ' + where : 'Travelling…');
-      AF.loader(0, 'setting off…');
+      await veil(true, text || (where ? 'Travelling to ' + where : 'Travelling…'));
+      AF.loader(0, warmFirst ? 'warming up the shaders…' : 'setting off…');
       if (go) go();
+      // a graphics change swaps programs: compile them in parallel before anything draws with them
+      if (warmFirst) await ST.warm();
       ST.loading++;
       try { await settle(maxMs, (f, n) => AF.loader(0.05 + 0.85 * f, label(n))); }
       finally { ST.loading--; }
@@ -614,6 +627,16 @@ try {
     } finally {
       AF.input.down.clear(); veil(false); ST.traveling = false; ST.stats.travelMs = Math.round(performance.now() - t0);
     }
+  };
+  // graphics changes that swap shader programs (tier, shadows): applied behind the veil and compiled in parallel. Applied in place
+  // they recompiled every program synchronously on the next frame (seconds on a laptop: the auto-tier step-down hit exactly the
+  // machines least able to afford it). The world holds still meanwhile (a step-down can come mid-drive or mid-chase, and nobody
+  // should crash or be shot behind the loader); fixed-step sims catch up the paused seconds afterwards.
+  ST.regfx = (apply) => {
+    if (!AF.ready || AF.TEST || AF.SHOT || ST.traveling) { apply(); return Promise.resolve(); }
+    const ts = AF.timeScale; AF.timeScale = 0; AF.input.down.clear();
+    return ST.travel({ text: 'Tuning the graphics…', go: apply, warmFirst: true, maxMs: 4000 })
+      .finally(() => { if (AF.timeScale === 0) AF.timeScale = ts; });
   };
 }
 } catch (e) { AF.partError('01-stream.js', e); }
@@ -3266,6 +3289,27 @@ try {
   const smRender = R.shadowMap.render.bind(R.shadowMap);
   R.shadowMap.render = (lights, scene, camera) => { if (scene !== S) return smRender(lights, scene, camera); shadowView.layers.mask = camera.layers.mask | 2; return smRender(lights, scene, shadowView); };
   const lastSF = { x: 0, z: 0 };
+  // world matrices once per frame, before the scene renders, for visible subtrees only (PERF.md §3): three's own pass also walked
+  // every hidden pool / template / far avatar (~4 700 objects recomposed each render, ~1 ms on a fast desktop, 4 ms on a laptop).
+  // A hidden subtree is marked stale when its parent moved and catches up the frame it is shown. Objects whose matrixWorld is read
+  // while hidden (park pose batches) set userData.liveMatrix. Direct obj.updateMatrixWorld() calls keep three's semantics.
+  S.matrixWorldAutoUpdate = false;
+  const O3 = THREE.Object3D.prototype.updateMatrixWorld;
+  const updWorld = (o, force) => {
+    if (o.matrixAutoUpdate) o.updateMatrix();
+    if (o.matrixWorldNeedsUpdate || force) {
+      if (o.parent === null) o.matrixWorld.copy(o.matrix); else o.matrixWorld.multiplyMatrices(o.parent.matrixWorld, o.matrix);
+      o.matrixWorldNeedsUpdate = false; force = true;
+    }
+    const ch = o.children;
+    for (let i = 0, n = ch.length; i < n; i++) {
+      const c = ch[i];
+      if (!c.visible && !c.userData.liveMatrix) { if (force) c.matrixWorldNeedsUpdate = true; continue; }
+      if (c.matrixWorldAutoUpdate !== true && !force) continue;
+      if (c.updateMatrixWorld !== O3) c.updateMatrixWorld(force); else updWorld(c, force);
+    }
+  };
+  AF.updateWorld = () => updWorld(S, false);
   const frame = (rdt) => {
     if (graphicsReset) return;
     // AF.timeScale 0 freezes the world (photo mode); AF.clock.real keeps the wall-clock step for cameras
@@ -3284,9 +3328,10 @@ try {
     const sf = AF.shadowFocus, moved = Math.abs(sf.x - lastSF.x) + Math.abs(sf.z - lastSF.z) > 0.05 && AF.mode !== 'aerial' && AF.mode !== 'cine';
     lastSF.x = sf.x; lastSF.z = sf.z;
     if (AF.shadowQ !== 'off' && (moved || AF.clock.frame % every === 0 || AF.shadowDirty)) { R.shadowMap.needsUpdate = true; AF.shadowDirty = false; }
-    // behind the loader veil (AF.stream settle) only every 6th frame renders (keeps uploads incremental); the rest goes to streaming
-    const veiled = AF.stream.settling && AF.clock.frame % 6 !== 0;
-    if (!veiled) try { AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
+    // behind the loader veil (AF.stream settle) only every 6th frame renders (keeps uploads incremental); the rest goes to streaming.
+    // AF.stream.hold: nothing renders while the driver links programs in parallel (01-stream warm)
+    const veiled = AF.stream.hold > 0 || (AF.stream.settling && AF.clock.frame % 6 !== 0);
+    if (!veiled) try { updWorld(S, false); AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
   };
   AF.frame = frame;
@@ -3345,7 +3390,7 @@ try {
   AF.step = (n = 1, dt = 1 / 60) => { const was = AF.paused, ws = AF.clock.stepping; AF.paused = true; AF.clock.stepping = true; try { for (let i = 0; i < n; i++) frame(dt); } finally { AF.paused = was; AF.clock.stepping = ws; } return AF.clock.frame; };
   AF.pause = () => { AF.paused = true; };
   AF.resume = () => { AF.paused = graphicsReset; };
-  AF.capture = () => { AF.renderFrame(); return cv.toDataURL('image/png'); };
+  AF.capture = () => { updWorld(S, false); AF.renderFrame(); return cv.toDataURL('image/png'); };
 
   // yield between boot stages (setTimeout is clamped to 1 s in hidden tabs)
   AF.yield = () => new Promise((res) => { if (document.hidden) { const mc = new MessageChannel(); mc.port1.onmessage = () => res(); mc.port2.postMessage(0); } else setTimeout(res, 0); });
@@ -3524,16 +3569,16 @@ try {
     const LADDER = ['low', 'lite', 'high', 'ultra'];
     const target = () => (AF.fpsCap > 0 ? 1000 / AF.fpsCap : 16.7);
     let ema = target(), slowT = 0, grace = 2;
-    G.onChange(() => { ema = target(); slowT = 0; grace = 2; });
+    G.onChange(() => { ema = target(); slowT = 0; grace = Math.max(grace, 2); });
     AF.onTick('gfx-adapt', 960, (dt) => {
-      if (!G.auto || AF.SHOT || AF.TEST || !AF.ready || AF.paused || document.hidden || G.cinema) return;   // cinema: never downgrade
+      if (!G.auto || AF.SHOT || AF.TEST || !AF.ready || AF.paused || document.hidden || G.cinema || AF.stream.traveling || AF.stream.loading) return;   // cinema: never downgrade
       const ms = dt * 1000; if (ms <= 0 || ms > 250) return;
       if (grace > 0) { grace -= dt; return; }                 // tier switches reallocate targets and recompile: ignore that hitch
       const tg = target();
       ema += (ms - ema) * 0.08;
       const i = LADDER.indexOf(G.name);
       if (ema > tg * 1.32) slowT += dt; else slowT = Math.max(0, slowT - dt);
-      if (slowT > 3 && i > 0) { G.set(LADDER[i - 1], 'slow frames'); return; }
+      if (slowT > 3 && i > 0) { slowT = 0; grace = 30; const to = LADDER[i - 1]; AF.stream.regfx(() => G.set(to, 'slow frames')); return; }
     });
   }
 
@@ -3626,19 +3671,33 @@ try {
       if (su) { fbU.uZen.value.copy(su.uZen.value); fbU.uHor.value.copy(su.uHor.value); fbU.uGnd.value.copy(su.uGnd.value); fbU.uSunDir.value.copy(su.uSunDir.value); fbU.uSunCol.value.copy(su.uSunCol.value); fbU.uSunK.value = su.uSunK.value; }
       else { fbU.uSunDir.value.copy(AF.time.sunDir); fbU.uSunK.value = 1 - (AF.time.night || 0); }
     };
+    // two cube-UV targets used in turn (fromScene allocated a new ~6 MB half-float target every refresh and the old one was
+    // disposed: a GPU allocation + first-use stall every ~20 s of play)
+    const slots = [null, null]; let slot = 0;
     E.update = () => {
       if (!E.on) return;
       const t0 = performance.now();
-      if (!pmrem) { pmrem = new THREE.PMREMGenerator(R); }
+      if (!pmrem) {
+        pmrem = new THREE.PMREMGenerator(R);
+        const alloc = pmrem._allocateTargets.bind(pmrem);
+        pmrem._allocateTargets = () => { slot ^= 1; if (!slots[slot]) slots[slot] = alloc(); return slots[slot]; };
+      }
       const sky = AF.sky && AF.sky.envScene;
       let src = fbScene; E.src = 'fallback';
       if (sky && sky.isScene) { src = sky; E.src = 'sky'; } else pull();
+      // three r160's fromScene draws a fresh MeshBasicMaterial background box each call and disposes it, so its program was
+      // relinked on every refresh (a synchronous link every ~20 s). An identical material that never goes away keeps the program
+      // cached; its box sits far beyond the cube camera's far plane, so it draws nothing.
+      if (!src.userData.pmremKeep) {
+        const keep = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ side: THREE.BackSide, depthWrite: false, depthTest: false }));
+        keep.position.set(0, -1e6, 0); keep.frustumCulled = false; keep.renderOrder = -1e9; keep.name = 'pmrem-keep'; src.add(keep); src.userData.pmremKeep = keep;
+      }
       const prevRT = R.getRenderTarget();
       const rt = pmrem.fromScene(src, 0, 0.1, 5000);
       R.setRenderTarget(prevRT);
       const old = E.rt; E.rt = rt;
       for (const m of [AF.mat.voxel, AF.mat.glass, AF.mat.voxelInst, AF.mat.voxelInstC]) { if (!m) continue; const had = !!m.envMap; m.envMap = rt.texture; if (!had) m.needsUpdate = true; }
-      if (old) old.dispose();
+      if (old && old !== slots[0] && old !== slots[1]) old.dispose();
       E.n++; E.ms = Math.round((performance.now() - t0) * 10) / 10;
     };
     let lastH = -99, acc = 0;
@@ -3699,8 +3758,9 @@ try {
   AF.test('renderer: mobile GPU budgets stay bounded', () => {
     if (!AF.MOBILE) return { ok: true, info: 'desktop profile' };
     const cfg = cur(), context = R.getContext().getContextAttributes();
-    const ok = R.getPixelRatio() <= Math.min(devicePixelRatio || 1, 1) + 1e-3 && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools <= 6 && AF.LOD_DIST === mobileTier.lod * AF.lodScale && AF.REGION_LOD === mobileTier.regLod * AF.lodScale && AF.LOD.outland === mobileTier.outland * AF.lodScale && (!AF.atmos.pool || AF.atmos.pool.length === 0);
-    return { ok, info: 'pr ' + R.getPixelRatio() + ', msaa ' + context.antialias + ', near ' + sunSize() + ', direct renderer, no far/env/AO/point lights, ' + cfg.pools + ' shader pools' };
+    // the canvas may be up to 2x (PERF.md §3: the phone upscaler draws the 480p scene to a <= 2x canvas); the scene itself renders at renderPR
+    const ok = R.getPixelRatio() <= Math.min(devicePixelRatio || 1, AF.upscaleOn ? 2 : 1) + 1e-3 && AF.renderPR() <= R.getPixelRatio() + 1e-3 && sunSize() <= 1024 && !G.auto && !G.cinema && G.tier === 'low' && !AF.gfx.far.rt && !AF.gfx.far.on && !AF.gfx.env.rt && !AF.gfx.env.on && !AF.gfx.aoPass && !AF.post.composer && cfg.lights === 0 && cfg.pools <= 6 && AF.LOD_DIST === mobileTier.lod * AF.lodScale && AF.REGION_LOD === mobileTier.regLod * AF.lodScale && AF.LOD.outland === mobileTier.outland * AF.lodScale && (!AF.atmos.pool || AF.atmos.pool.length === 0);
+    return { ok, info: 'pr ' + R.getPixelRatio() + ' (render ' + AF.renderPR().toFixed(2) + '), msaa ' + context.antialias + ', near ' + sunSize() + ', direct renderer, no far/env/AO/point lights, ' + cfg.pools + ' shader pools' };
   });
   function sunSize() { return AF.sun.shadow.mapSize.x; }
 }
@@ -4589,15 +4649,26 @@ O.h = (x, z) => {
   }
   return height;
 };
+// LRU of 16 m tiles (2 KB each): 128 tiles (~180 m square) thrashed as soon as the wild herds within 260 m, the vehicles and the
+// ambience all sampled the ground. A tile is only filled (1 024 heights, ~1 ms) once it has been asked for a few times; until then
+// a miss samples just its own cell (the same point the tile would hold, so the answer is identical).
+const TILE_CAP = AF.MOBILE ? 1024 : 2048, TILE_MISSES = 6, misses = new Map();
 O.hB = (bx, bz) => {
   const x = W.xOf(bx), z = W.zOf(bz), tx = Math.floor(x / 16), tz = Math.floor(z / 16), key = tx * 100000 + tz;
+  const ix = clamp(Math.floor((x - tx * 16) * 2), 0, 31), iz = clamp(Math.floor((z - tz * 16) * 2), 0, 31);
   let tile = tiles.get(key);
   if (!tile) {
+    const n = (misses.get(key) || 0) + 1;
+    if (n < TILE_MISSES || !O.edgeReady) {
+      if (O.edgeReady) { misses.set(key, n); if (misses.size > 8192) misses.clear(); }
+      return Math.round(O.h(tx * 16 + ix * 0.5 + 0.25, tz * 16 + iz * 0.5 + 0.25) * 4);
+    }
+    misses.delete(key);
     tile = new Int16Array(1024);
-    for (let ix = 0; ix < 32; ix++) for (let iz = 0; iz < 32; iz++) tile[ix * 32 + iz] = Math.round(O.h(tx * 16 + ix * 0.5 + 0.25, tz * 16 + iz * 0.5 + 0.25) * 4);
-    if (O.edgeReady) { tiles.set(key, tile); if (tiles.size > 128) tiles.delete(tiles.keys().next().value); }
+    for (let jx = 0; jx < 32; jx++) for (let jz = 0; jz < 32; jz++) tile[jx * 32 + jz] = Math.round(O.h(tx * 16 + jx * 0.5 + 0.25, tz * 16 + jz * 0.5 + 0.25) * 4);
+    tiles.set(key, tile); if (tiles.size > TILE_CAP) tiles.delete(tiles.keys().next().value);
   } else { tiles.delete(key); tiles.set(key, tile); }
-  return tile[clamp(Math.floor((x - tx * 16) * 2), 0, 31) * 32 + clamp(Math.floor((z - tz * 16) * 2), 0, 31)];
+  return tile[ix * 32 + iz];
 };
 O.groundY = (x, z) => O.hB(W.bx(x), W.bz(z)) * 0.25;
 function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
@@ -7609,7 +7680,7 @@ try {
   const movers = [];
   const moving = (object, kind) => {
     movers.push({ geometry: object.geometry, material: object.material, matrix: object.matrixWorld, object, kind, visible: true, shadow: false });
-    object.visible = false; object.castShadow = false; object.frustumCulled = false; return object;
+    object.visible = false; object.castShadow = false; object.frustumCulled = false; object.userData.liveMatrix = true; return object;
   };
   const parkTick = (name, order, fn) => {
     let frame = 0, elapsed = 0, hidden = true;
@@ -7720,7 +7791,7 @@ try {
         }
         group.mesh.count = visible ? 1 : 0; group.mesh.castShadow = shadows && shadow;
         const material = group.mesh.material, source = group.material;
-        if (material.envMap !== source.envMap) { material.envMap = source.envMap; material.needsUpdate = true; AF.stream.compileAhead(group.mesh); }
+        if (material.envMap !== source.envMap) { const was = !!material.envMap; material.envMap = source.envMap; if (was !== !!source.envMap) { material.needsUpdate = true; AF.stream.compileAhead(group.mesh); } }
         material.envMapIntensity = source.envMapIntensity;
       }
       texture.needsUpdate = true;
@@ -8743,7 +8814,7 @@ try {
           for (let index = 0; index < normals.length; index++) { const normal = normals[index] % 8; normals[index] = normals[index] - normal + map[normal]; }
           farGeometry.push(geometry);
         }
-        object.visible = false; object.castShadow = false; object.frustumCulled = false;
+        object.visible = false; object.castShadow = false; object.frustumCulled = false; object.userData.liveMatrix = true;
       });
       const geometry = BGU.mergeGeometries(farGeometry, false);
       const far = { geometry, material: AF.mat.voxel, kind: 'pose', matrix: person.root.matrixWorld, visible: false };
@@ -24820,12 +24891,22 @@ const terrainBuf = O.terrainBuf;
 R.scratchBytes = terrainBuf.p.byteLength + terrainBuf.uv.byteLength + terrainBuf.pal.byteLength + terrainBuf.an.byteLength + terrainBuf.idx.byteLength;
 function node(x, z, level, parent) {
   const size = 32 * 2 ** level;
-  const entry = { x, z, level, size, parent, children: null, meshes: [], ins: [], outs: [], rim: new Float32Array(260), ready: false, split: false, busy: false, fadeE: null, used: stamp, bytes: 0, queued: false, dirty: false };
+  const entry = { x, z, level, size, parent, children: null, meshes: [], ins: [], outs: [], rim: new Float32Array(260), ready: false, split: false, busy: false, fadeE: null, used: stamp, bytes: 0, queued: false, dirty: false, hx: 1e9, hz: 1e9, hh: 0, hx2: 1e9, hz2: 1e9, hh2: 0, hk: 0 };
   entry.finish = () => { entry.busy = false; };
   nodes.push(entry); return entry;
 }
+// the ground under the nearest point of a tile, cached per tile for the camera and the look-ahead (scans asked the height
+// function for every node several times a pass: ~25 k calls a second while loading)
+function groundNear(entry, x, z) {
+  const cx = AF.clamp(x, entry.x, entry.x + entry.size), cz = AF.clamp(z, entry.z, entry.z + entry.size);
+  if (Math.abs(cx - entry.hx) + Math.abs(cz - entry.hz) < 4) return entry.hh;
+  if (Math.abs(cx - entry.hx2) + Math.abs(cz - entry.hz2) < 4) return entry.hh2;
+  const h = O.h(cx, cz);
+  if ((entry.hk ^= 1)) { entry.hx = cx; entry.hz = cz; entry.hh = h; } else { entry.hx2 = cx; entry.hz2 = cz; entry.hh2 = h; }
+  return h;
+}
 function distance(entry, x, y, z) {
-  return Math.hypot(Math.max(entry.x - x, 0, x - entry.x - entry.size), Math.max(entry.z - z, 0, z - entry.z - entry.size), Math.max(0, y - O.h(AF.clamp(x, entry.x, entry.x + entry.size), AF.clamp(z, entry.z, entry.z + entry.size)) - 25) * 0.65);
+  return Math.hypot(Math.max(entry.x - x, 0, x - entry.x - entry.size), Math.max(entry.z - z, 0, z - entry.z - entry.size), Math.max(0, y - groundNear(entry, x, z) - 25) * 0.65);
 }
 // a worker result (07-outland O.meshTileArrays, transferred buffers) as geometry: no copies, bounds precomputed
 function geometryFrom(pre) {
@@ -25078,11 +25159,19 @@ function scan() {
   for (const e of queue) e.score = score(e, cp);
   let kept = 0;
   for (const entry of nodes) if (entry.ready) kept++;
-  while (kept > R.maxNodes || R.bytes > R.maxBytes) {
-    let oldest = null;
-    for (const entry of nodes) if (entry.parent && !entry.parent.split && !frozen(entry.parent) && entry.ready && entry !== current && (!oldest || entry.used < oldest.used)) oldest = entry;
-    if (!oldest || !dispose(oldest)) break;
-    kept = 0; for (const entry of nodes) if (entry.ready) kept++;
+  // least recently used first; one sorted pass (rescanning every node per eviction cost tens of ms after a teleport)
+  if (kept > R.maxNodes || R.bytes > R.maxBytes) {
+    const cand = [];
+    for (const entry of nodes) if (entry.parent && !entry.parent.split && !frozen(entry.parent) && entry.ready && entry !== current) cand.push(entry);
+    cand.sort((a, b) => a.used - b.used);
+    const readyIn = (e) => { let n = e.ready ? 1 : 0; if (e.children) for (const child of e.children) n += readyIn(child); return n; };
+    for (const entry of cand) {
+      if (kept <= R.maxNodes && R.bytes <= R.maxBytes) break;
+      if (!entry.ready || frozen(entry.parent)) continue;
+      const n = readyIn(entry);
+      if (!dispose(entry)) break;
+      kept -= n;
+    }
   }
   R.active = kept;
 }
@@ -30820,7 +30909,7 @@ function species(id, m, vs, cap, opts = {}) {
 function* spots(step, test) { for (let x = O.play.x0 + 40; x < O.play.x1 - 40; x += step) for (let z = O.play.z0 + 40; z < 260; z += step) { const px = x + (AF.hash2(x, z) - 0.5) * step * 0.6, pz = z + (AF.hash2(z, x) - 0.5) * step * 0.6; if (AF.W.col(px, pz) < 0 && test(px, pz)) yield [px, pz]; } }
 const dry = (x, z) => O.waterY(x, z) === null && O.roadDistance(x, z) > 12 && !O.pads.some((pad) => Math.abs(x - pad.x) < pad.rx + 6 && Math.abs(z - pad.z) < pad.rz + 6);
 function herd(kind, x, z, n, r) {
-  const h = { kind, x, z, r, members: [], active: false, acc: 0 };
+  const h = { kind, x, z, r, members: [], active: false, acc: 0, fresh: true };
   for (let index = 0; index < n; index++) {
     const a = AF.hash2(x + index, z) * Math.PI * 2, d = r * Math.sqrt(AF.hash2(z + index, x));
     let mx = x + Math.cos(a) * d, mz = z + Math.sin(a) * d;
@@ -30895,10 +30984,13 @@ AF.onTick('wild', 334, (dt, t) => {
   if (!AF.ready || !WD.herds.length) return;
   const start = performance.now(), cam = AF.camera.position, player = AF.mode === 'walk' && AF.player ? AF.player : null;
   for (const id in SPECIES) SPECIES[id].write = 0;
-  let active = 0;
+  let active = 0, wakes = 0;
   for (const h of WD.herds) {
     const S = SPECIES[h.kind], reach = S.fly ? 700 : 260, dx = h.x - cam.x, dz = h.z - cam.z;
-    h.active = dx * dx + dz * dz < reach * reach; if (!h.active) continue;
+    h.active = dx * dx + dz * dz < reach * reach; if (!h.active) { h.fresh = true; continue; }
+    // a teleport wakes dozens of herds at once and each first step picks two spots per animal: at most 4 wake per frame
+    // (a herd still waiting is not drawn yet; it wakes at the edge of the 260 m reach, so nobody sees it pop)
+    if (h.fresh) { if (wakes >= 4) continue; wakes++; h.fresh = false; h.acc = PERIOD; }
     h.acc += dt; if (h.acc >= PERIOD) { step(h, Math.min(h.acc, 0.3), cam, player, t); h.acc = 0; }
     for (const a of h.members) {
       if (S.write >= S.cap) break;
@@ -32178,11 +32270,20 @@ try {
   }
 
   const drawSize = new THREE.Vector2();
+  // the 14 nearest chimneys within 300 m, re-picked every 10 frames without allocating (map/filter/sort made garbage per chimney)
+  const SMK = 14, smkD = new Float64Array(SMK), smkL = [];
   function updateSmoke(dt, t) {
     const pts = A.smoke; if (!pts) return;
     if (frameN % 10 === 1 || !A.smokeSel || AF.SHOT) {
-      const ch = AF.chimneys || [];
-      A.smokeSel = ch.map((c) => ({ c, d: Math.hypot(c.x - camP.x, c.z - camP.z, (c.y - camP.y) * 0.5) })).filter((o) => o.d < 300).sort((a, b) => a.d - b.d).slice(0, 14).map((o) => o.c);
+      const ch = AF.chimneys || []; let cnt = 0;
+      for (let i = 0; i < ch.length; i++) {
+        const c = ch[i], d = Math.hypot(c.x - camP.x, c.z - camP.z, (c.y - camP.y) * 0.5);
+        if (d >= 300 || (cnt === SMK && d >= smkD[SMK - 1])) continue;
+        let j = cnt < SMK ? cnt++ : SMK - 1;
+        while (j > 0 && smkD[j - 1] > d) { smkD[j] = smkD[j - 1]; smkL[j] = smkL[j - 1]; j--; }
+        smkD[j] = d; smkL[j] = c;
+      }
+      smkL.length = cnt; A.smokeSel = smkL;
     }
     const sel = A.smokeSel, PER = 8, LIFE = 9, NMAX = 456;
     const G = pts.geometry, pa = G.attributes.position.array, sa = G.attributes.aSize.array, aa = G.attributes.aAlpha.array;
@@ -35206,15 +35307,19 @@ try {
       [[410, 40, 230], [388, 0, 60], [352, 26, 220], [388, 0, 0], 11],            // the Solace River through Eastport
       [[-230, 150, 330], [20, 12, -30], [120, 170, 320], [20, 12, -30], 12],     // the whole island
     ];
-    const CV = { i: 0, t: 0, p: new THREE.Vector3(), q: new THREE.Vector3() };
+    const CV = { i: 0, t: 0, p: new THREE.Vector3(), q: new THREE.Vector3(), focus: { x: 0, z: 0 } };
     const ease = (k) => k * k * (3 - 2 * k);
+    // the last seconds of a shot stream the next one (AF.stream.focus), so the cut shows meshes already built and uploaded
+    // instead of hitching on a burst of first draws
+    const unfocus = () => { if (AF.stream.focus === CV.focus) AF.stream.focus = null; };
     AF.modes.cine = {
       enter() { CV.t = 0; },
-      exit() { fadeEl.style.opacity = 0; },
+      exit() { fadeEl.style.opacity = 0; unfocus(); },
       update(dt) {
         let s = SHOTS[CV.i];
         CV.t += Math.min(dt, 0.1);
-        if (CV.t > s[4]) { CV.i = (CV.i + 1) % SHOTS.length; CV.t = 0; s = SHOTS[CV.i]; }
+        if (CV.t > s[4]) { CV.i = (CV.i + 1) % SHOTS.length; CV.t = 0; s = SHOTS[CV.i]; unfocus(); }
+        if (CV.t > s[4] - 4.5 && AF.preloaded && !AF.stream.loading) { const n = SHOTS[(CV.i + 1) % SHOTS.length]; CV.focus.x = n[0][0] * 0.6 + n[1][0] * 0.4; CV.focus.z = n[0][2] * 0.6 + n[1][2] * 0.4; AF.stream.focus = CV.focus; }
         const fade = CV.t < 0.35 || CV.t > s[4] - 0.45 ? '1' : '0'; if (fadeEl.style.opacity !== fade) fadeEl.style.opacity = fade;
         const k = ease(Math.min(1, CV.t / s[4]));
         CV.p.set(s[0][0] + (s[2][0] - s[0][0]) * k, s[0][1] + (s[2][1] - s[0][1]) * k, s[0][2] + (s[2][2] - s[0][2]) * k);
@@ -35265,14 +35370,14 @@ try {
     if (e.target === menu) { toggleMenu(false); return; }
     const b = e.target.closest('button'); if (!b) return;
     const seg = b.parentElement && b.parentElement.dataset.k;
-    if (seg === 'gfx') { G.auto = false; G.set(b.dataset.v, 'menu'); try { localStorage.setItem('portSolace.gfx', b.dataset.v); } catch (er) {} }
+    if (seg === 'gfx') { const v = b.dataset.v; G.auto = false; AF.stream.regfx(() => G.set(v, 'menu')).then(() => { if (S.menu) syncMenu(); }); try { localStorage.setItem('portSolace.gfx', v); } catch (er) {} }
     else if (seg === 'res') {
       G.res = +b.dataset.v; try { localStorage.setItem('portSolace.res', b.dataset.v); } catch (er) {}
       AF.applyPR();
     }
     else if (seg === 'clock') AF.time.set({ paused: b.dataset.v === 'stop' });
     else if (seg === 'fps') AF.setFpsCap(b.dataset.v);
-    else if (seg === 'shadows') AF.gfx.setShadows(b.dataset.v);
+    else if (seg === 'shadows') { const v = b.dataset.v; AF.stream.regfx(() => AF.gfx.setShadows(v)).then(() => { if (S.menu) syncMenu(); }); }
     else if (b.dataset.k === 'resume') toggleMenu(false);
     else if (b.dataset.k === 'map') { toggleMenu(false, false); toggleMap(true); }
     else if (b.dataset.k === 'help') { toggleMenu(false, false); toggleHelp(true); }
@@ -35944,9 +36049,10 @@ try {
   const syncLabels = () => {
     entries.length = 0; for (const area of areas) entries.push(area);
     for (const view of P.views) entries.push({ name: view.name, x: view.target[0], z: view.target[2], category: 'view', min: 1.5, view });
+    const byName = new Map(); for (const item of AF.buildings) if (item.name && !byName.has(item.name)) byName.set(item.name, item);
     for (const label of AF.labels) {
       if (label.kind === 'street') continue;
-      const building = label.kind === 'building' ? AF.buildings.find(item => item.name === label.name) : null;
+      const building = label.kind === 'building' ? byName.get(label.name) || null : null;
       const category = /station|airport|airfield|terminal|ferry|pier|stop/i.test(label.name) ? 'transport' : /lake|park|wood|farm|garden|mount|falls|zoo|trail|beach/i.test(label.name) ? 'nature' : 'place';
       entries.push({ name: label.name, x: label.x, z: label.z, category, min: building ? 5 : 2.6, building });
     }
@@ -36462,7 +36568,7 @@ try {
     // rushing air: freefall roars, the open canopy flaps, an open cockpit hisses (one wind family, crossfaded by speed)
     const sky = mode === 'skydive', fp = AF.view && AF.view.fp && AF.view.fp();
     if (sky && VT.prevMode !== 'skydive') { VT.fallT = 0; VT.chute = false; }
-    if (sky) { VT.fallT += dt; const rig = VT.rig || (VT.rig = AF.scene.getObjectByName('parachute')); if (rig && rig.visible && !VT.chute) { VT.chute = true; A.play('chute'); } }
+    if (sky) { VT.fallT += dt; const rig = VT.rig || (VT.rig = AF.scene.getObjectByName('parachute') || null); if (rig && rig.visible && !VT.chute) { VT.chute = true; A.play('chute'); } }
     else VT.chute = false;
     const fall = sky && !VT.chute, canopy = sky && VT.chute;
     A.hold('wind', 'wind_loop', mode === 'fly' ? AF.smooth(12, 50, LS.speed) * (fp ? 1 : 0.7) : canopy ? 0.25 + AF.smooth(4, 12, LS.speed) * 0.3 : fall ? 0.3 : 0, 0.8 + AF.smooth(20, 60, LS.speed) * 0.4);
@@ -36520,6 +36626,17 @@ try {
   };
   // 4 Hz: water and machines near the listener (positional loops: they pan and fade with distance on their own)
   const FALLS = { pts: null }, LAP = { x: 0, y: 0, z: 0, d: 0 }, FOUNTAINS = [P.parkFeatures.fountain, [-41, -44]], WATERS0 = [P.lake];
+  // built once behind the loader (the lazy first build scanned every river point mid-game)
+  const buildFalls = (O) => {
+    FALLS.pts = [{ x: -459.5, y: 1.5, z: -153, v: 0.35, ref: 4 }];
+    for (const R of O.rivers) for (let i = 1; i < R.pts.length; i++) {
+      const a = R.pts[i - 1], b = R.pts[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      if ((R.levels[i - 1] - R.levels[i]) / L <= 0.2) continue;
+      const fx = (a[0] + b[0]) / 2, fz = (a[1] + b[1]) / 2;
+      if (!FALLS.pts.some((f) => Math.hypot(f.x - fx, f.z - fz) < 20)) FALLS.pts.push({ x: fx, y: (R.levels[i - 1] + R.levels[i]) / 2, z: fz, v: 1, ref: 20 });
+    }
+  };
+  AF.on('preloaded', () => { const O = AF.outland; if (!FALLS.pts && O && O.rivers && O.rivers.length) try { buildFalls(O); } catch (e) { AF.warnOnce('audio falls', e); } });
   // the nearest point on an elliptical shoreline, kept in LAP when closer than LAP.d
   const shore = (x, z, cx, cz, rx, rz, wy) => {
     const ex = (x - cx) / rx, ez = (z - cz) / rz, e = Math.hypot(ex, ez); if (e < 0.01) return;
@@ -36534,15 +36651,7 @@ try {
     else if (O && O.riverInfo) { const R = O.riverInfo(x, z); if (R.d < R.hw + 45) sv = (1 - AF.smooth(R.hw, R.hw + 45, R.d)) * (1 - AF.smooth(6, 45, y - R.y)); }
     A.hold('stream', 'stream_loop', sv, 1, sx, 0, sz);
     // falling water: every steep river reach (where 49-outland draws white water) and the zoo's spring grotto
-    if (!FALLS.pts && O && O.rivers && O.rivers.length) {
-      FALLS.pts = [{ x: -459.5, y: 1.5, z: -153, v: 0.35, ref: 4 }];
-      for (const R of O.rivers) for (let i = 1; i < R.pts.length; i++) {
-        const a = R.pts[i - 1], b = R.pts[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-        if ((R.levels[i - 1] - R.levels[i]) / L <= 0.2) continue;
-        const fx = (a[0] + b[0]) / 2, fz = (a[1] + b[1]) / 2;
-        if (!FALLS.pts.some((f) => Math.hypot(f.x - fx, f.z - fz) < 20)) FALLS.pts.push({ x: fx, y: (R.levels[i - 1] + R.levels[i]) / 2, z: fz, v: 1, ref: 20 });
-      }
-    }
+    if (!FALLS.pts && O && O.rivers && O.rivers.length) buildFalls(O);
     let fb = null, fbd = 1e9;
     for (const f of FALLS.pts || []) { const d = Math.hypot(f.x - x, f.z - z); if (d < f.ref * 9 && d < fbd) { fbd = d; fb = f; } }
     const fh = A.hold('falls', 'falls_loop', fb ? fb.v : 0, 1, fb && fb.x, fb && fb.y, fb && fb.z); if (fh && fb) fh.ref = fb.ref;
@@ -37593,7 +37702,9 @@ try {
     if (A.kind === 'flee' && A.t > 8 && d > 40) return false;
     if (w.cop && !CB.stars && (d > 30 || A.t > 25)) return false;
     let sp = 0, hx = dx / d, hz = dz / d, face = Math.atan2(hx, hz), f = 'p';
-    if (A.kind === 'flee') { sp = 3.3 + (w.id % 3) * 0.3; hx = -hx; hz = -hz; f = 'run'; }
+    // the wanted level is gone: officers stand down at once (no shots, no swings) and stroll off until they are released
+    if (w.cop && !CB.stars) { sp = 1.3; hx = -hx; hz = -hz; f = 'walk'; A.aimT = 0; A.swing = 0; }
+    else if (A.kind === 'flee') { sp = 3.3 + (w.id % 3) * 0.3; hx = -hx; hz = -hz; f = 'run'; }
     else if (gunner(w)) {
       const want = w.cop ? 12 : 9;
       if (d > want + 6) { sp = 3.2; f = 'run'; }
@@ -37619,7 +37730,7 @@ try {
       w.x += mx; w.z += mz;
       if ((A.gyT -= dt) <= 0) { A.gyT = 0.25; A.gy = AF.surfaceBelow(w.x, w.z, w.y + 0.7, 2.5); }
       w.y += (A.gy - w.y) * Math.min(1, dt * 12); w.ph += dt * sp * 2.3 / w.s;
-      if (mx || mz) { const my = Math.atan2(mx, mz); if (A.kind === 'flee' || f === 'run') face = my; }
+      if (mx || mz) { const my = Math.atan2(mx, mz); if (A.kind === 'flee' || f === 'run' || (w.cop && !CB.stars)) face = my; }
     }
     if (f === 'run') f = sp > 0 ? (Math.floor(w.ph) & 1 ? 'runA' : 'runB') : 'p'; else if (f === 'walk') f = sp > 0 ? WALKF[Math.floor(w.ph) & 3] : 'p';
     w.yaw += AF.angDiff(w.yaw, face) * Math.min(1, dt * 10);
@@ -37932,6 +38043,13 @@ try {
       car.squad = null; car.parked = true; car.v = car.vx = car.vz = 0;
     }
   };
+  // the wanted level cleared mid-chase: a squad car brakes to a stop and parks (it used to keep coming and drop off officers)
+  const SQ_STOP = { up: false, down: false, left: 0, right: 0, brake: true, thr: 0 };
+  const standDown = (car, dt) => {
+    const n = Math.min(4, Math.ceil(dt * 60 - 0.01)) || 1; for (let i = 0; i < n; i++) VV.physics(car, dt / n, SQ_STOP);
+    VV.placeMesh(car); if (car.interact) car.sync();
+    if (Math.abs(car.v) < 0.5) { car.squad = null; car.parked = true; car.v = car.vx = car.vz = 0; }
+  };
   // the autogyro: circles the player from 3 stars, a searchlight pool at night, shoots from 4; can be shot down
   const HELI = CB.heli = { on: false, x: 0, y: 0, z: 0, yaw: 0, vx: 0, vz: 0, hp: 0, a: 0, cd: 2, fall: false, vy: 0, grp: null, rotor: null };
   const heliBuild = () => {
@@ -38058,7 +38176,7 @@ try {
     if (walk) { overlay(dt, g); bodyPush(dt); }
     // 15 Hz: run-overs, wanted level, police
     if ((slowT += dt) >= 1 / 15) { const t = slowT; slowT = 0; runOver(); wanted(t); }
-    for (const car of SQUADS) if (car.squad && !car.dead && !car.player) driveSquad(car, dt);
+    for (const car of SQUADS) if (car.squad && !car.dead && !car.player) { if (CB.stars) driveSquad(car, dt); else standDown(car, dt); }
     if (HELI.grp && (HELI.on || CB.stars >= 3)) heliStep(dt);
     carFx(dt);
   });
@@ -38093,6 +38211,21 @@ try {
     const cop = C.walkers.find((q) => q.cop && q.act), armed = !!cop && cop.agg.kind === 'gun';
     if (cop) CB.release(cop);
     clearWanted(); return { ok: two && spawned && armed && CB.stars === 0, info: `stars2 ${two}, spawned ${spawned}, armed ${armed}` };
+  });
+  AF.test('combat: officers stand down once the wanted level clears (no shots, they walk off)', () => {
+    const C = CR(), mode = AF.mode, hp = H.v, P = AF.player;
+    if (AF.modes.walk && mode !== 'walk') AF.setMode('walk');
+    CB.crime(G.stars[1] + 1);
+    const spawned = spawnCop(TMP.set(P.x + 6, P.y, P.z)), cop = C.walkers.find((q) => q.cop && q.act);
+    if (!spawned || !cop) { clearWanted(); return { ok: false, info: 'no cop' }; }
+    clearWanted(); cop.agg.cd = 0; cop.agg.aimT = 0;
+    const d0 = Math.hypot(cop.x - P.x, cop.z - P.z), onShot = CB.onShot; let alive = true, shots = 0;
+    CB.onShot = function () { shots++; };
+    try { for (let i = 0; i < 90 && alive; i++) alive = CB.stepPed(cop, 1 / 30) !== false; } finally { CB.onShot = onShot; }
+    const d1 = Math.hypot(cop.x - P.x, cop.z - P.z), unhurt = H.v === hp;
+    if (cop.agg) CB.release(cop); H.v = hp;
+    if (mode && mode !== AF.mode && AF.modes[mode]) AF.setMode(mode);
+    return { ok: !shots && unhurt && (d1 > d0 || !alive), info: `shots ${shots}, unhurt ${unhurt}, ${d0.toFixed(1)} -> ${d1.toFixed(1)} m, active ${alive}` };
   });
   AF.test('combat: airport passengers (path walkers) stagger, go down to a bullet and scatter at gunfire', () => {
     const WK = AF.walkers, path = WK.paths.find((p) => /^airport-/.test(p.name) && p.actors.filter((a) => !a.look.pose).length > 1);
@@ -38950,7 +39083,7 @@ try {
 //         me (host 0, guests 1..3), role 'off' | 'host' | 'guest', peers: slot -> { slot, name, friend, look, rtt, x, z }, live()
 // Rate tiers: snapshots between players more than 250 m apart go at 1/2 rate, beyond 500 m at 1/4 (only the map dot needs them).
 {
-  const N = AF.net = { role: 'off', me: 0, code: '', status: '', peers: new Map(), build: "2691392f0e31", rate: AF.MOBILE ? 15 : 20, ice: null,
+  const N = AF.net = { role: 'off', me: 0, code: '', status: '', peers: new Map(), build: "8d4380cc14c5", rate: AF.MOBILE ? 15 : 20, ice: null,
     stats: { up: 0, down: 0, upK: 0, downK: 0 }, hello: null, welcomeExtra: null, mine: { x: 0, z: 0 } };
   const ALPH = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
   // the deployed signaling Worker; ?signal=wss://... or localStorage 'portSolace.signal' override it, localhost uses tools/serve.mjs

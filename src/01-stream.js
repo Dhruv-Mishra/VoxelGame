@@ -10,7 +10,7 @@ try {
 // AF.stream.travel({ label, go }): veil, go() (moves the camera / sets the mode), stream + compile until the view is complete, reveal
 {
   const ST = AF.stream = {
-    systems: [], loading: 0, focus: null, traveling: false, LOOK: 2.5, PREFETCH: 1.3,
+    systems: [], loading: 0, hold: 0, focus: null, traveling: false, LOOK: 2.5, PREFETCH: 1.3,
     ahead: { x: 0, z: 0, vx: 0, vz: 0, px: 0, pz: 0, init: false },
     stats: { preloadMs: 0, genMs: 0, settleMs: 0, warmMs: 0, travels: 0, travelMs: 0, waitingOn: '', timeouts: 0 },
   };
@@ -64,7 +64,12 @@ try {
     };
     const jobs = [compile()];
     if (pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; jobs.push(compile()); for (const l of pool) l.visible = v; }
-    await Promise.all(jobs); await ST.nextFrame();
+    // nothing renders while the driver links (behind the veil): a frame drawn now would block on every unfinished program,
+    // turning the parallel compile back into one long synchronous stall. Capped in case a driver never reports completion.
+    ST.hold++;
+    try { await Promise.race([Promise.all(jobs), new Promise((resolve) => setTimeout(resolve, AF.MOBILE ? 15000 : 10000))]); }
+    finally { ST.hold--; }
+    await ST.nextFrame();
     const proxies = [], tri = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)), seen = new Set();
     AF.scene.traverse((o) => {
       const d = o.customDepthMaterial; if (!d || warmed.has(d)) return;
@@ -79,15 +84,21 @@ try {
   // one object (and its children) compiled ahead of its first draw without stalling a frame: compileAsync uses
   // KHR_parallel_shader_compile, against the scene's lights and the post chain's scene target (the programs the frame will use).
   // three prepares one object per material per call, so callers pass each object that needs its own variant separately.
+  // Both light variants (the night pool shown / hidden changes every program) are compiled: a fade or a park mesh first drawn
+  // after dusk otherwise linked its program synchronously (100-200 ms on ANGLE / D3D11).
   ST.compileAhead = (root) => {
-    const R = AF.renderer, P = AF.post, prev = R.getRenderTarget();
+    const R = AF.renderer, P = AF.post, prev = R.getRenderTarget(), pool = (AF.atmos && AF.atmos.pool) || [], jobs = [];
+    const once = () => {
+      if (R.compileAsync) { jobs.push(R.compileAsync(root, AF.camera, AF.scene).catch((e) => AF.warnOnce('compile ahead', e))); return; }
+      R.compile(root, AF.camera, AF.scene);
+    };
     try {
       R.setRenderTarget(P && P.enabled && P.sceneRT ? P.sceneRT : null);
-      if (R.compileAsync) return R.compileAsync(root, AF.camera, AF.scene).catch((e) => AF.warnOnce('compile ahead', e));
-      R.compile(root, AF.camera, AF.scene);
+      once();
+      if (pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; try { once(); } finally { for (const l of pool) l.visible = v; } }
     } catch (e) { AF.warnOnce('compile ahead', e); }
     finally { R.setRenderTarget(prev); }
-    return Promise.resolve();
+    return Promise.all(jobs);
   };
 
   // wait until no system misses anything near the view (3 calm frames), at most maxMs
@@ -138,14 +149,16 @@ try {
     el.classList.toggle('done', !on); el.style.pointerEvents = on ? 'auto' : 'none';
     return new Promise((resolve) => setTimeout(resolve, on ? 220 : 0));
   };
-  ST.travel = async ({ label: where = '', go, maxMs = 15000 } = {}) => {
+  ST.travel = async ({ label: where = '', text = '', go, maxMs = 15000, warmFirst = false } = {}) => {
     if (ST.traveling || !AF.ready || AF.TEST) { if (go) go(); return; }
     ST.traveling = true; ST.stats.travels++;
     const t0 = performance.now();
     try {
-      await veil(true, where ? 'Travelling to ' + where : 'Travelling…');
-      AF.loader(0, 'setting off…');
+      await veil(true, text || (where ? 'Travelling to ' + where : 'Travelling…'));
+      AF.loader(0, warmFirst ? 'warming up the shaders…' : 'setting off…');
       if (go) go();
+      // a graphics change swaps programs: compile them in parallel before anything draws with them
+      if (warmFirst) await ST.warm();
       ST.loading++;
       try { await settle(maxMs, (f, n) => AF.loader(0.05 + 0.85 * f, label(n))); }
       finally { ST.loading--; }
@@ -156,6 +169,16 @@ try {
     } finally {
       AF.input.down.clear(); veil(false); ST.traveling = false; ST.stats.travelMs = Math.round(performance.now() - t0);
     }
+  };
+  // graphics changes that swap shader programs (tier, shadows): applied behind the veil and compiled in parallel. Applied in place
+  // they recompiled every program synchronously on the next frame (seconds on a laptop: the auto-tier step-down hit exactly the
+  // machines least able to afford it). The world holds still meanwhile (a step-down can come mid-drive or mid-chase, and nobody
+  // should crash or be shot behind the loader); fixed-step sims catch up the paused seconds afterwards.
+  ST.regfx = (apply) => {
+    if (!AF.ready || AF.TEST || AF.SHOT || ST.traveling) { apply(); return Promise.resolve(); }
+    const ts = AF.timeScale; AF.timeScale = 0; AF.input.down.clear();
+    return ST.travel({ text: 'Tuning the graphics…', go: apply, warmFirst: true, maxMs: 4000 })
+      .finally(() => { if (AF.timeScale === 0) AF.timeScale = ts; });
   };
 }
 } catch (e) { AF.partError('01-stream.js', e); }

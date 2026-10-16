@@ -109,5 +109,10 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Title avatar turntable uses the main renderer (viewport + scissor); never add a second WebGLRenderer.
 - Pointer lock persists across modes; Escape releases + pauses and never exits vehicles (E/F do).
 - Streaming + boot preload are off in `?test/?shot/?near/?nostream`; harnesses measuring play wait for `__af.preloaded`.
+- No shader program may link during play (PERF.md §3b): graphics changes that swap programs go through `AF.stream.regfx(apply)`,
+  late objects through `AF.stream.compileAhead(obj)` (both light-pool variants) while hidden. `tools/hitch-probe.js` +
+  `tools/play-scenario.js` list every runtime link with its stack, and every long frame with its cause.
+- World matrices update once per frame for visible subtrees only (03 `updWorld`); a hidden object whose `matrixWorld` is read
+  sets `userData.liveMatrix = true` (or call `updateWorldMatrix` yourself).
 - One module script only (the original export ran the game twice).
 - `create_file` cannot overwrite; terminal tools may strip `cd` (use absolute paths). Playwright screenshot paths must be absolute.

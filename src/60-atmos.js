@@ -837,11 +837,20 @@ try {
   }
 
   const drawSize = new THREE.Vector2();
+  // the 14 nearest chimneys within 300 m, re-picked every 10 frames without allocating (map/filter/sort made garbage per chimney)
+  const SMK = 14, smkD = new Float64Array(SMK), smkL = [];
   function updateSmoke(dt, t) {
     const pts = A.smoke; if (!pts) return;
     if (frameN % 10 === 1 || !A.smokeSel || AF.SHOT) {
-      const ch = AF.chimneys || [];
-      A.smokeSel = ch.map((c) => ({ c, d: Math.hypot(c.x - camP.x, c.z - camP.z, (c.y - camP.y) * 0.5) })).filter((o) => o.d < 300).sort((a, b) => a.d - b.d).slice(0, 14).map((o) => o.c);
+      const ch = AF.chimneys || []; let cnt = 0;
+      for (let i = 0; i < ch.length; i++) {
+        const c = ch[i], d = Math.hypot(c.x - camP.x, c.z - camP.z, (c.y - camP.y) * 0.5);
+        if (d >= 300 || (cnt === SMK && d >= smkD[SMK - 1])) continue;
+        let j = cnt < SMK ? cnt++ : SMK - 1;
+        while (j > 0 && smkD[j - 1] > d) { smkD[j] = smkD[j - 1]; smkL[j] = smkL[j - 1]; j--; }
+        smkD[j] = d; smkL[j] = c;
+      }
+      smkL.length = cnt; A.smokeSel = smkL;
     }
     const sel = A.smokeSel, PER = 8, LIFE = 9, NMAX = 456;
     const G = pts.geometry, pa = G.attributes.position.array, sa = G.attributes.aSize.array, aa = G.attributes.aAlpha.array;

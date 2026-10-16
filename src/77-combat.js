@@ -283,7 +283,9 @@ try {
     if (A.kind === 'flee' && A.t > 8 && d > 40) return false;
     if (w.cop && !CB.stars && (d > 30 || A.t > 25)) return false;
     let sp = 0, hx = dx / d, hz = dz / d, face = Math.atan2(hx, hz), f = 'p';
-    if (A.kind === 'flee') { sp = 3.3 + (w.id % 3) * 0.3; hx = -hx; hz = -hz; f = 'run'; }
+    // the wanted level is gone: officers stand down at once (no shots, no swings) and stroll off until they are released
+    if (w.cop && !CB.stars) { sp = 1.3; hx = -hx; hz = -hz; f = 'walk'; A.aimT = 0; A.swing = 0; }
+    else if (A.kind === 'flee') { sp = 3.3 + (w.id % 3) * 0.3; hx = -hx; hz = -hz; f = 'run'; }
     else if (gunner(w)) {
       const want = w.cop ? 12 : 9;
       if (d > want + 6) { sp = 3.2; f = 'run'; }
@@ -309,7 +311,7 @@ try {
       w.x += mx; w.z += mz;
       if ((A.gyT -= dt) <= 0) { A.gyT = 0.25; A.gy = AF.surfaceBelow(w.x, w.z, w.y + 0.7, 2.5); }
       w.y += (A.gy - w.y) * Math.min(1, dt * 12); w.ph += dt * sp * 2.3 / w.s;
-      if (mx || mz) { const my = Math.atan2(mx, mz); if (A.kind === 'flee' || f === 'run') face = my; }
+      if (mx || mz) { const my = Math.atan2(mx, mz); if (A.kind === 'flee' || f === 'run' || (w.cop && !CB.stars)) face = my; }
     }
     if (f === 'run') f = sp > 0 ? (Math.floor(w.ph) & 1 ? 'runA' : 'runB') : 'p'; else if (f === 'walk') f = sp > 0 ? WALKF[Math.floor(w.ph) & 3] : 'p';
     w.yaw += AF.angDiff(w.yaw, face) * Math.min(1, dt * 10);
@@ -622,6 +624,13 @@ try {
       car.squad = null; car.parked = true; car.v = car.vx = car.vz = 0;
     }
   };
+  // the wanted level cleared mid-chase: a squad car brakes to a stop and parks (it used to keep coming and drop off officers)
+  const SQ_STOP = { up: false, down: false, left: 0, right: 0, brake: true, thr: 0 };
+  const standDown = (car, dt) => {
+    const n = Math.min(4, Math.ceil(dt * 60 - 0.01)) || 1; for (let i = 0; i < n; i++) VV.physics(car, dt / n, SQ_STOP);
+    VV.placeMesh(car); if (car.interact) car.sync();
+    if (Math.abs(car.v) < 0.5) { car.squad = null; car.parked = true; car.v = car.vx = car.vz = 0; }
+  };
   // the autogyro: circles the player from 3 stars, a searchlight pool at night, shoots from 4; can be shot down
   const HELI = CB.heli = { on: false, x: 0, y: 0, z: 0, yaw: 0, vx: 0, vz: 0, hp: 0, a: 0, cd: 2, fall: false, vy: 0, grp: null, rotor: null };
   const heliBuild = () => {
@@ -748,7 +757,7 @@ try {
     if (walk) { overlay(dt, g); bodyPush(dt); }
     // 15 Hz: run-overs, wanted level, police
     if ((slowT += dt) >= 1 / 15) { const t = slowT; slowT = 0; runOver(); wanted(t); }
-    for (const car of SQUADS) if (car.squad && !car.dead && !car.player) driveSquad(car, dt);
+    for (const car of SQUADS) if (car.squad && !car.dead && !car.player) { if (CB.stars) driveSquad(car, dt); else standDown(car, dt); }
     if (HELI.grp && (HELI.on || CB.stars >= 3)) heliStep(dt);
     carFx(dt);
   });
@@ -783,6 +792,21 @@ try {
     const cop = C.walkers.find((q) => q.cop && q.act), armed = !!cop && cop.agg.kind === 'gun';
     if (cop) CB.release(cop);
     clearWanted(); return { ok: two && spawned && armed && CB.stars === 0, info: `stars2 ${two}, spawned ${spawned}, armed ${armed}` };
+  });
+  AF.test('combat: officers stand down once the wanted level clears (no shots, they walk off)', () => {
+    const C = CR(), mode = AF.mode, hp = H.v, P = AF.player;
+    if (AF.modes.walk && mode !== 'walk') AF.setMode('walk');
+    CB.crime(G.stars[1] + 1);
+    const spawned = spawnCop(TMP.set(P.x + 6, P.y, P.z)), cop = C.walkers.find((q) => q.cop && q.act);
+    if (!spawned || !cop) { clearWanted(); return { ok: false, info: 'no cop' }; }
+    clearWanted(); cop.agg.cd = 0; cop.agg.aimT = 0;
+    const d0 = Math.hypot(cop.x - P.x, cop.z - P.z), onShot = CB.onShot; let alive = true, shots = 0;
+    CB.onShot = function () { shots++; };
+    try { for (let i = 0; i < 90 && alive; i++) alive = CB.stepPed(cop, 1 / 30) !== false; } finally { CB.onShot = onShot; }
+    const d1 = Math.hypot(cop.x - P.x, cop.z - P.z), unhurt = H.v === hp;
+    if (cop.agg) CB.release(cop); H.v = hp;
+    if (mode && mode !== AF.mode && AF.modes[mode]) AF.setMode(mode);
+    return { ok: !shots && unhurt && (d1 > d0 || !alive), info: `shots ${shots}, unhurt ${unhurt}, ${d0.toFixed(1)} -> ${d1.toFixed(1)} m, active ${alive}` };
   });
   AF.test('combat: airport passengers (path walkers) stagger, go down to a bullet and scatter at gunfire', () => {
     const WK = AF.walkers, path = WK.paths.find((p) => /^airport-/.test(p.name) && p.actors.filter((a) => !a.look.pose).length > 1);
