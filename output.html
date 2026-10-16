@@ -25217,7 +25217,7 @@ try {
     const [ax0, az0, ax1, az1] = A.apron;
     paint(ax0, az0, ax1, az1, (x, z) => conc[((Math.floor(x / 5) + Math.floor(z / 5)) & 1)]);
     paint(ax0, az1, ax1, A.taxiZ - 6, (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1]);
-    for (let x = -580; x <= -380; x += 40) paint(x - 0.25, az0 + 6, x + 0.25, az1, () => yellow);   // stand lines
+    for (const x of [-542, -514, -486, -405]) paint(x - 0.25, az0 + 6, x + 0.25, az1, () => yellow);   // stand lines (52-planes parks on them)
     for (const x of [-450, -360]) { paint(x - 0.25, 84, x + 0.25, 118, () => yellow); paint(x - 3, 92, x + 3, 92.5, () => yellow); }
     // ---- R2 (departures, 09R) south of R1, the west crossing taxiway to it, the taxiway's east / west extensions and remote stand 3
     const R2 = A.runway2, sz0 = R2.z - R2.w / 2, sz1 = R2.z + R2.w / 2, tarmac = (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1];
@@ -25576,13 +25576,13 @@ try {
       const look=AF.peopleKit.makeLook(col===0x26324e?'police':'ticket','m','adult',AF.rng(name.length*71));look.top.col=col;look.bottom.col=0x26324e;look.pose=pose;look.yaw=yaw;
       return AF.walkers.addPath('airport-staff-'+name,[[x,y,z]],{count:1,speed:0,activeRadius:230,looks:[look]});
     };
-    for(const [name,x,y,z,col] of [['security',-488.5,0.5,58.7,0x26324e],['lane2',-482,0.5,58.7,0x26324e],['checkin',-534,0.5,49.5,0x3f7f7c],['desk2',-529,0.5,49.5,0x3f7f7c],['cafe',-445,0.5,61.5,0xf3f0e6],['crew1',-566,0.25,92,0xff8a32],['crew2',-375,0.25,98,0xff8a32]])staff(name,x,y,z,col);
+    for(const [name,x,y,z,col] of [['security',-488.5,0.5,58.7,0x26324e],['lane2',-482,0.5,58.7,0x26324e],['checkin',-534,0.5,49.5,0x3f7f7c],['desk2',-529,0.5,49.5,0x3f7f7c],['cafe',-445,0.5,61.5,0xf3f0e6],['crew1',-550,0.25,88,0xff8a32],['crew2',-375,0.25,98,0xff8a32]])staff(name,x,y,z,col);
     staff('crewgate',A.crewGate.booth[0]+1.5,0.5,(A.crewGate.booth[1]+A.crewGate.booth[3])/2,0x26324e,'stand',-PI/2);
     A.marshallers=[staff('marshal1',-450,0.25,79,0xff8a32,'marshal',0),staff('marshal2',-360,0.25,79,0xff8a32,'marshal',0)];
   });
   AF.onBuild('airfield-staff',826,()=>{
     const spawn=(id,name,role,x,y,z,lines)=>AF.npc.spawn({id,name,role,x,y,z,visual:false,look:{},greet:[lines[0]],lines:[lines]});
-    A.staff=[spawn('airport-security','Officer Reed','Airport security',-488.5,0.5,58.7,['Go right through... just keep any firearms holstered.','The lounge is as far as passengers go. The apron is crew only \u2014 the crew gate is out by the hangars.']),spawn('airport-checkin','Mabel','Check-in agent',-534,0.5,49.5,['Welcome to Westgate. I can check that bag for you.','Departures through the checkpoint, gates straight ahead.']),spawn('airport-crew','Otto','Ground crew',-566,0.25,92,['The Sky Cub is ready for you.','Keep clear of the taxiway when an airliner arrives.'])];
+    A.staff=[spawn('airport-security','Officer Reed','Airport security',-488.5,0.5,58.7,['Go right through... just keep any firearms holstered.','The lounge is as far as passengers go. The apron is crew only \u2014 the crew gate is out by the hangars.']),spawn('airport-checkin','Mabel','Check-in agent',-534,0.5,49.5,['Welcome to Westgate. I can check that bag for you.','Departures through the checkpoint, gates straight ahead.']),spawn('airport-crew','Otto','Ground crew',-550,0.25,88,['The Sky Cub is ready for you.','Keep clear of the taxiway when an airliner arrives.'])];
   });
   AF.onTick('airfield-boarding',304,()=>{
     const camera=AF.camera.position;
@@ -29406,6 +29406,10 @@ try {
   const G0 = 9.8, BANK = 1.22, PMAX = 1.05;
   try { PL.invertPitch = localStorage.getItem('portSolace.invertPitch') === '1'; } catch (e) { PL.invertPitch = false; }
   const ground = (x, z) => { const g = AF.W.groundY(x, z); return z > 206 && g < -1 ? -1.25 : g; };
+  // the flyable sky: the whole world (Serena Isle, Corsair Key, the Queen) plus 1.5 km of open sea; past it a plane heading
+  // further out is swung back toward the middle of the map
+  const WB = AF.PLAN.world.bounds, SKY = 1500, WC = { x: (WB.x0 + WB.x1) / 2, z: (WB.z0 + WB.z1) / 2 };
+  const outside = (pl) => pl.x < WB.x0 - SKY || pl.x > WB.x1 + SKY || pl.z < WB.z0 - SKY || pl.z > WB.z1 + SKY;
   const crash = (pl, why) => {
     AF.emit('toast', why + ' The ground crew tows the ' + pl.name + ' back to the apron.');
     PL.reset(pl);
@@ -29509,7 +29513,7 @@ try {
       if (!pl.onGround && AF.solidAt(nx + fwd.x * pl.G.halfL, ny + (early ? 2.5 : 1), nz + fwd.z * pl.G.halfL)) { crash(pl, 'Crunch!'); return; }
       if (pl.onGround && Math.abs(pl.v) > 1 && AF.boxBlocked(nx + fwd.x * pl.G.halfL * Math.sign(pl.v), gy + 0.3, nz + fwd.z * pl.G.halfL * Math.sign(pl.v), 0.4, 1.2)) { pl.v = 0; }
       else { pl.x = nx; pl.z = nz; pl.y = pl.onGround ? gy : Math.min(900, ny); }
-      if (Math.abs(pl.x) > 2200 || Math.abs(pl.z) > 2200) { pl.yaw += PI; AF.emit('toast', 'Turning back toward Port Solace.'); }
+      if (outside(pl) && Math.sin(pl.yaw) * (pl.x - WC.x) + Math.cos(pl.yaw) * (pl.z - WC.z) > 0) { pl.yaw = Math.atan2(WC.x - pl.x, WC.z - pl.z); AF.emit('toast', 'Turning back toward Port Solace.'); }
       place(pl);
       if (pl.engine) { pl.spin += dt * (8 + pl.throttle * 60); for (const p of pl.props) p.rotation.z = pl.spin; }
       // ---- chase camera: angles (not position) are smoothed, so it trails the flight path without lag or jitter
@@ -29639,15 +29643,16 @@ try {
       pl.gam += (-0.18 - pl.gam) * Math.min(1, dt); pl.pitch = pl.gam; pl.roll *= Math.exp(-dt);
       const cg = Math.cos(pl.gam); pl.x += Math.sin(pl.yaw) * cg * pl.v * dt; pl.z += Math.cos(pl.yaw) * cg * pl.v * dt; pl.y += Math.sin(pl.gam) * pl.v * dt;
       if (pl.engine) { pl.spin += dt * 30; for (const p of pl.props) p.rotation.z = pl.spin; }
-      if (pl.y <= ground(pl.x, pl.z) + 0.5 || Math.abs(pl.x) > 2200 || Math.abs(pl.z) > 2200) { pl.ghost = false; PL.reset(pl); }
+      if (pl.y <= ground(pl.x, pl.z) + 0.5 || outside(pl)) { pl.ghost = false; PL.reset(pl); }
       else place(pl);
     }
   });
 
   // ---------------------------------------------------------------- the apron line-up + a sightseeing Cub circling the city
   AF.onBuild('planes', 640, () => {
-    const z = A.apron[1] + 22, yaw = PI;   // noses toward the taxiway
-    make('cub', -560, z, yaw); make('biplane', -520, z, yaw); make('racer', -480, z, yaw); make('airliner', -410, z - 2, yaw);
+    // the general-aviation line-up on its stand lines (47-airfield), clear of the hangars and the jet stands, noses toward the taxiway
+    const z = A.apron[1] + 20, yaw = 0;
+    make('cub', -542, z, yaw); make('biplane', -514, z, yaw); make('racer', -486, z, yaw); make('airliner', -405, z + 2, yaw);
     // the sightseer: no physics, a slow lazy loop over the whole map
     const G = planeGeo('biplane'), root = new THREE.Group(), body = AF.modelMesh(G.geo), prop = AF.modelMesh(G.pgeo);
     body.castShadow = false; root.add(body); prop.position.copy(G.props[0]); root.add(prop); root.rotation.order = 'YXZ'; AF.scene.add(root);
@@ -31353,7 +31358,7 @@ try {
     for (let i = 0; i < people.length; i++) {
       const p = people[i];
       const dc = Math.hypot(p.x - cam.x, p.z - cam.z);
-      const far = dc > 90, hide = dc > (AF.MOBILE ? 70 : 150);
+      const far = dc > 90, hide = dc > (AF.MOBILE ? 70 : 150) || !!(p.spot && p.spot.building && AF.closedAt && p.job.type === 'keeper' && AF.closedAt(p.spot.building));
       if (hide !== !p.root.visible) p.root.visible = !hide;
       if (dc < 140 && p.parts.torso.layers.mask !== 1) p.root.traverse((o) => { if (o.isMesh && o.layers.mask !== 1) o.layers.set(0); });   // workaround: AF.CULL never restores layer 31 (unsigned mask compare)
       p.visible = !hide;
@@ -37931,19 +37936,27 @@ try {
     pos(b);
     const f = AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes.cur ? AF.planes.cur : AF.player;
     const d = f ? Math.hypot(b.x - f.x, b.z - f.z) : 0, dt = d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1) + ' km';
-    V.set(b.x, (b.y ?? AF.W.groundY(b.x, b.z)) + (b.chev ?? 2.6) + 1.2, b.z).project(AF.camera);
-    const W2 = innerWidth, H2 = innerHeight, behind = V.z > 1, on = !behind && Math.abs(V.x) < 0.94 && Math.abs(V.y) < 0.9;
+    // camera space first: its x / y give the on-screen direction even when the target is behind the camera (where a projected
+    // point mirrors or blows up); in front, the projected point and the rim arrow then lie on one ray, so they meet at the rim
+    const cam = AF.camera;
+    V.set(b.x, (b.y ?? AF.W.groundY(b.x, b.z)) + (b.chev ?? 2.6) + 1.2, b.z).applyMatrix4(cam.matrixWorldInverse);
+    const cx = V.x, cy = V.y, cz = V.z, front = cz < -0.05;
+    V.applyMatrix4(cam.projectionMatrix);
+    const W2 = innerWidth, H2 = innerHeight, rx = W2 / 2 - 46, ry = H2 / 2 - 56;
+    const px = (V.x + 1) / 2 * W2, py = (1 - V.y) / 2 * H2, on = front && Math.abs(px - W2 / 2) < rx && Math.abs(py - H2 / 2) < ry;
     if (on) {
       if (edgeEl.style.display !== 'none') edgeEl.style.display = 'none';
-      const x = Math.round((V.x + 1) / 2 * W2), y = Math.round((1 - V.y) / 2 * H2) - 34, html = (b.label ? '<b>' + esc(b.label) + '</b>' : '') + dt;
+      const x = Math.round(px), y = Math.max(44, Math.round(py) - 34), html = (b.label ? '<b>' + esc(b.label) + '</b>' : '') + dt;
       if (distEl._h !== html) { distEl._h = html; distEl.innerHTML = html; }
       const tf = 'translate(' + x + 'px,' + y + 'px) translate(-50%,-100%)'; if (distEl._t !== tf) { distEl._t = tf; distEl.style.transform = tf; }
       if (distEl.style.display !== 'block') distEl.style.display = 'block';
       return;
     }
     if (distEl.style.display !== 'none') distEl.style.display = 'none';
-    let vx = V.x, vy = V.y; if (behind) { vx = -vx; vy = -vy; if (Math.abs(vy) < 0.2) vy = -0.6; }
-    const a = Math.atan2(-vy * H2, vx * W2), rx = W2 / 2 - 46, ry = H2 / 2 - 56, k = 1 / Math.max(Math.abs(Math.cos(a)) / rx, Math.abs(Math.sin(a)) / ry);
+    // screen direction (y down); the further behind the camera, the more it leans to the bottom edge ("turn around, this way"),
+    // growing from zero at the camera's side plane so the arrow never jumps
+    const dx = cx, dy = -cy + Math.max(0, cz) * 1.5 + 1e-6;
+    const a = Math.atan2(dy, dx), k = 1 / Math.max(Math.abs(Math.cos(a)) / rx, Math.abs(Math.sin(a)) / ry);
     const x = Math.round(W2 / 2 + Math.cos(a) * k), y = Math.round(H2 / 2 + Math.sin(a) * k), tf = 'translate(' + x + 'px,' + y + 'px)', rot = 'rotate(' + Math.round((a + PI / 2) * 180 / PI) + 'deg)';
     if (edgeEl._t !== tf) { edgeEl._t = tf; edgeEl.style.transform = tf; }
     if (edgeArrow._r !== rot) { edgeArrow._r = rot; edgeArrow.style.transform = rot; }
@@ -43137,7 +43150,7 @@ try {
 //         me (host 0, guests 1..3), role 'off' | 'host' | 'guest', peers: slot -> { slot, name, friend, look, rtt, x, z }, live()
 // Rate tiers: snapshots between players more than 250 m apart go at 1/2 rate, beyond 500 m at 1/4 (only the map dot needs them).
 {
-  const N = AF.net = { role: 'off', me: 0, code: '', status: '', peers: new Map(), build: "d2b8a117eb24", rate: AF.MOBILE ? 15 : 20, ice: null,
+  const N = AF.net = { role: 'off', me: 0, code: '', status: '', peers: new Map(), build: "bd54c9f483d6", rate: AF.MOBILE ? 15 : 20, ice: null,
     stats: { up: 0, down: 0, upK: 0, downK: 0 }, hello: null, welcomeExtra: null, mine: { x: 0, z: 0 } };
   const ALPH = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
   // the deployed signaling Worker; ?signal=wss://... or localStorage 'portSolace.signal' override it, localhost uses tools/serve.mjs
@@ -45683,8 +45696,8 @@ try {
 // ===== 81-heist-sets: the people, props and stealth zones of the Harbour Trust Job outside the bank (OWNER: game) =====
 // Built late (940) so the island, liner, zoo den and Corsair Key have published their spots (AF.island.heist, AF.liner.spots,
 // AF.den.spots, AF.key.spots); every lookup has a fallback so the job still runs if one of them is missing. 81-heist drives it all.
-//   shop   Kovac's tailor shop after closing: a padlocked night grille, a night watchman on a loop (window -> counter -> rail), the
-//          uniform rail behind the counter
+//   shop   Kovac's tailor shop after closing: a padlocked night grille, a night watchman on a loop (window -> counter -> rail), coat
+//          racks to hide behind, the uniform rail behind the counter (Kovac himself goes home: AF.closedAt)
 //   ezra   Ezra Quill, forger, in the back of Harbour Stationers
 //   gate   the Westgate crew gate: a booth, a barrier and its guard
 //   tunnel the Moretti smugglers' tunnel on Serena Isle: armed men on patrol, the arms cache
@@ -45778,6 +45791,22 @@ try {
     // the rail of finished uniforms
     { const m = new AF.Model(16, 16, 4), steel = col(0x8a8f96, { metal: 0.8 }), navy = col(0x1c2848), gold = col(0xd8b04a, { metal: 0.7 }); m.box(0, 0, 1, 1, 16, 3, steel); m.box(15, 0, 1, 16, 16, 3, steel); m.box(0, 15, 1, 16, 16, 3, steel);
       for (let k = 0; k < 5; k++) { m.box(2 + k * 2.6, 5, 0, 4 + k * 2.6, 15, 4, navy); m.box(2 + k * 2.6, 13, 0, 4 + k * 2.6, 14, 4, gold); } HS.props.rail = mesh(m, 1 / 8, [0.5, 0, 0.5], A.rail.x, A.rail.y, A.rail.z, PI / 2); HS.props.rail.visible = false; }
+    // coat racks packed with stock across the shop floor: 1.9 m screens the watchman can't see through, set clear of his loop, so
+    // there's a way from the door to the rail from cover to cover. Out only for the burglary (HS.racks); solid only then.
+    {
+      const steel = col(0x5a5e66, { metal: 0.8, rough: 0.4 }), cloth = [0x2a3550, 0x6a2a2a, 0x3a4a32, 0x8a7a60, 0x4a3a2a, 0x22222a, 0x7a6a8a, 0xd8d0c0].map((h) => col(h));
+      const m = new AF.Model(16, 15, 4);
+      m.box(0, 0, 0, 1, 15, 4, steel); m.box(15, 0, 0, 16, 15, 4, steel); m.box(0, 14, 1, 16, 15, 3, steel);
+      for (let x = 1, k = 0; x < 15; x += 2, k++) { const low = 2 + ((k * 5) % 4); m.box(x, low, 0, x + 2, 14, 4, cloth[k % cloth.length]); m.box(x, 13, 1, x + 2, 14, 3, cloth[(k + 3) % cloth.length]); }
+      // [x, z offset from the shop's corner, along x (else along z)]
+      const RACKS = [[3.0, 7.6, 1], [6.4, 9.0, 1], [9.0, 9.4, 0], [7.2, 4.5, 1], [1.8, 3.2, 0], [4.6, 2.4, 1]];
+      const racks = RACKS.map(([ox, oz, alongX]) => {
+        const x = tx + ox, z = tz + oz, hx = alongX ? 1 : 0.25, hz = alongX ? 0.25 : 1;
+        const o = mesh(m, 1 / 8, [0.5, 0, 0.5], x, ty, z, alongX ? 0 : PI / 2); o.visible = false;
+        return { o, c: AF.addCollider(x - hx, ty, z - hz, x + hx, ty + 1e-6, z + hz, 'heist-shop-rack') };
+      });
+      HS.racks = (on) => { for (const r of racks) { r.o.visible = !!on; r.c.y1 = ty + (on ? 1.9 : 1e-6); } };
+    }
     // ---------------------------------------------------------------- Ezra in the back of Harbour Stationers
     const st = AF.buildings.find((b) => b.id === 'bs-stationer');
     A.ezra = st ? { x: st.box[0] + 7.8, y: 0.5, z: st.box[2] + 10.5 } : { x: 45.8, y: 0.5, z: 98.5 };
@@ -46086,7 +46115,7 @@ try {
     { id: 'forger', cp: 1, tag: 'Ezra', line: 'Get pilot papers from {Ezra Quill} in the back of Harbour Stationers', mark: () => A.ezra, enter: (r) => { scene('ezra'); if (!r) radio('vera.shop2'); }, done: () => !!H.got.papers, mu: 'mu_plan' },
     { id: 'gate', tag: 'Crew gate', line: 'Show your papers at the {Westgate crew gate}', mark: () => A.gate, enter: (r) => { scene('gate'); if (!r) radio('vera.ezra'); }, done: () => !!H.got.cleared, mu: 'mu_plan' },
     { id: 'plane', tag: 'Plane', line: 'Take a {plane} from the apron \u2014 one flies, the others ride along', mark: () => planeAt(), enter: () => { resetPlanes(); }, done: () => flying(), mu: 'mu_plan' },
-    { id: 'fly', tag: 'Serena Isle', line: 'Fly 3 km south to {Serena Isle} and land on the airstrip', mark: () => A.strip, enter: (r) => { if (!r) { radio('tower.t1'); radio('vera.plane'); } }, done: () => onIsland() && (AF.mode === 'walk' || landed()), mu: 'mu_island' },
+    { id: 'fly', tag: 'Serena Isle', line: () => (RADAR.on ? 'Fly under the coast radar \u2014 hold the {green band} \u2014 to {Serena Isle}' : 'Fly 3 km south to {Serena Isle} and land on the airstrip'), mark: () => A.strip, enter: (r) => { if (!r) { radio('tower.t1'); radio('vera.plane'); } }, done: () => onIsland() && (AF.mode === 'walk' || landed()), mu: 'mu_island' },
     { id: 'kit', cp: 2, act: 'Act II \u00b7 Serena Isle', tag: 'Kit', line: 'Meet {Kit Morrow} on the terrace of Hotel Serena', mark: () => A.kit, enter: (r) => { scene('kit'); if (!r) radio('vera.kit'); }, done: () => near(A.kit, 5, 4), mu: 'mu_island', time: 11 },
     { id: 'kitcut', line: 'Kit Morrow', cut: () => cutKit(), enter: () => scene('kit'), mu: 'mu_island' },
     { id: 'tunnel', tag: 'Tunnel', line: 'Find the {smugglers\u2019 tunnel} on the volcano\u2019s flank', mark: () => A.tunnelEntry, enter: () => { scene('tunnel'); H.got.kitkey = true; }, done: () => near(A.tunnelEntry, 6, 6), mu: 'mu_tension' },
@@ -46238,7 +46267,7 @@ try {
     if (!HS || !HS.ready) return;
     const on = (k) => name === k;
     HS.show('watch', on('shop')); if (HS.props.rail) HS.props.rail.visible = on('shop');
-    if (HS.grille) HS.grille(on('shop') && !H.got.grille); HS.shopShut = on('shop');
+    if (HS.grille) HS.grille(on('shop') && !H.got.grille); HS.shopShut = on('shop'); if (HS.racks) HS.racks(on('shop'));
     HS.showNpc('ezra', on('ezra')); HS.showNpc('gate', on('gate') || on('ezra'));
     HS.showNpc('kit', on('kit'));
     for (const k in HS.walkers) if (/^(tunnel|post)/.test(k)) HS.show(k, on('tunnel'));
@@ -46750,6 +46779,40 @@ try {
   TB.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (tabletOk()) openCams(true); });
   document.body.appendChild(TB);
 
+  // ---------------------------------------------------------------- the flight south under the coast radar
+  // Between Westgate and Serena Isle the pilot keeps the plane inside a height band that keeps drifting (the gauge on the right).
+  // Outside it the radar builds a lock; a full lock gets Westgate to call the police, and the landing waits until they're lost.
+  const RD = document.createElement('div'); RD.id = 'heist-radar';
+  RD.innerHTML = '<i></i><b></b><span></span><small>RADAR</small>';
+  RD.style.cssText = 'position:fixed;right:max(24px,env(safe-area-inset-right));top:50%;width:26px;height:min(220px,38vh);transform:translateY(-50%);z-index:5;display:none;pointer-events:none;background:rgba(8,12,18,.6);border:1px solid rgba(255,255,255,.3);border-radius:3px;font:700 12px/1 system-ui,sans-serif;color:#fff;text-shadow:0 1px 2px #000';
+  const [rdBand, rdMark, rdAlt, rdTag] = RD.children;
+  rdBand.style.cssText = 'position:absolute;left:0;right:0;border-radius:2px;transition:background .2s';
+  rdMark.style.cssText = 'position:absolute;left:-7px;right:-7px;height:3px;margin-top:-1px;background:#fff;box-shadow:0 0 4px #000';
+  rdAlt.style.cssText = 'position:absolute;right:34px;margin-top:-7px;white-space:nowrap';
+  rdTag.style.cssText = 'position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%);font-size:9px;letter-spacing:.12em;opacity:.8';
+  document.body.appendChild(RD);
+  const RADAR = { on: false, k: 0, t: 0, lo: 0, hi: 0, off: 0, ping: 0 }, RTOP = 100;
+  const radarTick = (dt) => {
+    const pl = AF.mode === 'fly' && AF.planes ? AF.planes.cur : null;
+    const on = is('fly') && !!pl && !pl.onGround && !H.flag.radar && !H.failing && !MI.cut.on && !wanted() && dist(pl, A.plane) > 300 && dist(pl, A.strip) > 450;
+    if (on !== RADAR.on) {
+      RADAR.on = on; RD.style.display = on ? 'block' : 'none';
+      if (on && !H.flag.radarSaid) { H.flag.radarSaid = true; RADAR.k = RADAR.t = 0; note('Coast radar ahead \u2014 keep the plane inside the green band on the right. It keeps moving.', 'warn'); }
+    }
+    if (!on) return;
+    const t = RADAR.t += dt, c = AF.clamp(48 + 22 * Math.sin(t * 0.13) + 10 * Math.sin(t * 0.31 + 2), 24, 80);
+    RADAR.lo = c - 8; RADAR.hi = c + 8;
+    const alt = Math.max(0, pl.y - Math.max(0, AF.W.groundY(pl.x, pl.z)));
+    RADAR.off = alt < RADAR.lo ? RADAR.lo - alt : alt > RADAR.hi ? alt - RADAR.hi : 0;
+    RADAR.k = AF.clamp(RADAR.k + (RADAR.off ? 0.08 + RADAR.off * 0.01 : -0.1) * dt, 0, 1);
+    if (RADAR.off && (RADAR.ping -= dt) <= 0) { RADAR.ping = 1.1 - RADAR.k * 0.8; sfx('ui_click'); }
+    if (RADAR.k >= 1) { H.flag.radar = true; sfx('jg_spot'); const C = CB(); if (C) C.crime(80); note('Radar lock! Westgate called it in \u2014 lose the police before you land.', 'bad'); }
+    const Y = (v) => (100 - AF.clamp(v, 0, RTOP) / RTOP * 100).toFixed(1) + '%';
+    rdBand.style.top = Y(RADAR.hi); rdBand.style.bottom = (AF.clamp(RADAR.lo, 0, RTOP) / RTOP * 100).toFixed(1) + '%';
+    rdBand.style.background = RADAR.off ? 'rgba(255,90,74,.55)' : 'rgba(125,220,138,.6)';
+    rdMark.style.top = rdAlt.style.top = Y(alt); rdAlt.textContent = Math.round(alt) + ' m';
+  };
+
   // ---------------------------------------------------------------- the bag lends the crew's gear while the job is on
   if (AF.inv) AF.inv.extra.push(() => {
     if (!H.on) return null;
@@ -46835,6 +46898,7 @@ try {
     const n = H.bags.filter(Boolean).length;
     MI.bar('heist-bags', H.on && H.i >= IDX.night && H.i <= IDX.stash && (n || H.tr.n >= 6) ? { label: 'Cash bags', value: n + ' / 4', ok: n === 4 } : null);
     MI.bar('heist-wave', is('fight') && H.waves ? { label: 'Moretti\u2019s men', value: 'wave ' + Math.min(H.waves, WAVES.length) + ' / ' + WAVES.length, hot: true } : null);
+    MI.bar('heist-radar', RADAR.on ? { label: 'Radar lock', value: 'Fly ' + Math.round(RADAR.lo) + '\u2013' + Math.round(RADAR.hi) + ' m', pct: RADAR.k, hot: RADAR.off > 0, ok: !RADAR.off } : null);
   };
   let natT = 0, laserT = 0, drillNT = 0, warnT = 0;
   AF.onTick('heist', 425, (dt) => {
@@ -46843,6 +46907,7 @@ try {
     const mn = H.on ? '' : 'none'; if (MN.style.display !== mn) MN.style.display = mn;
     const tb = tabletOk() && crewN() < 2 ? '' : 'none'; if (TB.style.display !== tb) TB.style.display = tb;
     if (AF.quiet !== H.on) quiet(H.on);
+    radarTick(dt);
     if (!H.on) { if (muCur) music(); return; }
     H.t += dt;
     const s = ST[H.i]; if (!s) return;

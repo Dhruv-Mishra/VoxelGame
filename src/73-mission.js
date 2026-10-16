@@ -203,19 +203,27 @@ try {
     pos(b);
     const f = AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes.cur ? AF.planes.cur : AF.player;
     const d = f ? Math.hypot(b.x - f.x, b.z - f.z) : 0, dt = d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1) + ' km';
-    V.set(b.x, (b.y ?? AF.W.groundY(b.x, b.z)) + (b.chev ?? 2.6) + 1.2, b.z).project(AF.camera);
-    const W2 = innerWidth, H2 = innerHeight, behind = V.z > 1, on = !behind && Math.abs(V.x) < 0.94 && Math.abs(V.y) < 0.9;
+    // camera space first: its x / y give the on-screen direction even when the target is behind the camera (where a projected
+    // point mirrors or blows up); in front, the projected point and the rim arrow then lie on one ray, so they meet at the rim
+    const cam = AF.camera;
+    V.set(b.x, (b.y ?? AF.W.groundY(b.x, b.z)) + (b.chev ?? 2.6) + 1.2, b.z).applyMatrix4(cam.matrixWorldInverse);
+    const cx = V.x, cy = V.y, cz = V.z, front = cz < -0.05;
+    V.applyMatrix4(cam.projectionMatrix);
+    const W2 = innerWidth, H2 = innerHeight, rx = W2 / 2 - 46, ry = H2 / 2 - 56;
+    const px = (V.x + 1) / 2 * W2, py = (1 - V.y) / 2 * H2, on = front && Math.abs(px - W2 / 2) < rx && Math.abs(py - H2 / 2) < ry;
     if (on) {
       if (edgeEl.style.display !== 'none') edgeEl.style.display = 'none';
-      const x = Math.round((V.x + 1) / 2 * W2), y = Math.round((1 - V.y) / 2 * H2) - 34, html = (b.label ? '<b>' + esc(b.label) + '</b>' : '') + dt;
+      const x = Math.round(px), y = Math.max(44, Math.round(py) - 34), html = (b.label ? '<b>' + esc(b.label) + '</b>' : '') + dt;
       if (distEl._h !== html) { distEl._h = html; distEl.innerHTML = html; }
       const tf = 'translate(' + x + 'px,' + y + 'px) translate(-50%,-100%)'; if (distEl._t !== tf) { distEl._t = tf; distEl.style.transform = tf; }
       if (distEl.style.display !== 'block') distEl.style.display = 'block';
       return;
     }
     if (distEl.style.display !== 'none') distEl.style.display = 'none';
-    let vx = V.x, vy = V.y; if (behind) { vx = -vx; vy = -vy; if (Math.abs(vy) < 0.2) vy = -0.6; }
-    const a = Math.atan2(-vy * H2, vx * W2), rx = W2 / 2 - 46, ry = H2 / 2 - 56, k = 1 / Math.max(Math.abs(Math.cos(a)) / rx, Math.abs(Math.sin(a)) / ry);
+    // screen direction (y down); the further behind the camera, the more it leans to the bottom edge ("turn around, this way"),
+    // growing from zero at the camera's side plane so the arrow never jumps
+    const dx = cx, dy = -cy + Math.max(0, cz) * 1.5 + 1e-6;
+    const a = Math.atan2(dy, dx), k = 1 / Math.max(Math.abs(Math.cos(a)) / rx, Math.abs(Math.sin(a)) / ry);
     const x = Math.round(W2 / 2 + Math.cos(a) * k), y = Math.round(H2 / 2 + Math.sin(a) * k), tf = 'translate(' + x + 'px,' + y + 'px)', rot = 'rotate(' + Math.round((a + PI / 2) * 180 / PI) + 'deg)';
     if (edgeEl._t !== tf) { edgeEl._t = tf; edgeEl.style.transform = tf; }
     if (edgeArrow._r !== rot) { edgeArrow._r = rot; edgeArrow.style.transform = rot; }

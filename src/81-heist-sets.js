@@ -3,8 +3,8 @@ try {
 // ===== 81-heist-sets: the people, props and stealth zones of the Harbour Trust Job outside the bank (OWNER: game) =====
 // Built late (940) so the island, liner, zoo den and Corsair Key have published their spots (AF.island.heist, AF.liner.spots,
 // AF.den.spots, AF.key.spots); every lookup has a fallback so the job still runs if one of them is missing. 81-heist drives it all.
-//   shop   Kovac's tailor shop after closing: a padlocked night grille, a night watchman on a loop (window -> counter -> rail), the
-//          uniform rail behind the counter
+//   shop   Kovac's tailor shop after closing: a padlocked night grille, a night watchman on a loop (window -> counter -> rail), coat
+//          racks to hide behind, the uniform rail behind the counter (Kovac himself goes home: AF.closedAt)
 //   ezra   Ezra Quill, forger, in the back of Harbour Stationers
 //   gate   the Westgate crew gate: a booth, a barrier and its guard
 //   tunnel the Moretti smugglers' tunnel on Serena Isle: armed men on patrol, the arms cache
@@ -98,6 +98,22 @@ try {
     // the rail of finished uniforms
     { const m = new AF.Model(16, 16, 4), steel = col(0x8a8f96, { metal: 0.8 }), navy = col(0x1c2848), gold = col(0xd8b04a, { metal: 0.7 }); m.box(0, 0, 1, 1, 16, 3, steel); m.box(15, 0, 1, 16, 16, 3, steel); m.box(0, 15, 1, 16, 16, 3, steel);
       for (let k = 0; k < 5; k++) { m.box(2 + k * 2.6, 5, 0, 4 + k * 2.6, 15, 4, navy); m.box(2 + k * 2.6, 13, 0, 4 + k * 2.6, 14, 4, gold); } HS.props.rail = mesh(m, 1 / 8, [0.5, 0, 0.5], A.rail.x, A.rail.y, A.rail.z, PI / 2); HS.props.rail.visible = false; }
+    // coat racks packed with stock across the shop floor: 1.9 m screens the watchman can't see through, set clear of his loop, so
+    // there's a way from the door to the rail from cover to cover. Out only for the burglary (HS.racks); solid only then.
+    {
+      const steel = col(0x5a5e66, { metal: 0.8, rough: 0.4 }), cloth = [0x2a3550, 0x6a2a2a, 0x3a4a32, 0x8a7a60, 0x4a3a2a, 0x22222a, 0x7a6a8a, 0xd8d0c0].map((h) => col(h));
+      const m = new AF.Model(16, 15, 4);
+      m.box(0, 0, 0, 1, 15, 4, steel); m.box(15, 0, 0, 16, 15, 4, steel); m.box(0, 14, 1, 16, 15, 3, steel);
+      for (let x = 1, k = 0; x < 15; x += 2, k++) { const low = 2 + ((k * 5) % 4); m.box(x, low, 0, x + 2, 14, 4, cloth[k % cloth.length]); m.box(x, 13, 1, x + 2, 14, 3, cloth[(k + 3) % cloth.length]); }
+      // [x, z offset from the shop's corner, along x (else along z)]
+      const RACKS = [[3.0, 7.6, 1], [6.4, 9.0, 1], [9.0, 9.4, 0], [7.2, 4.5, 1], [1.8, 3.2, 0], [4.6, 2.4, 1]];
+      const racks = RACKS.map(([ox, oz, alongX]) => {
+        const x = tx + ox, z = tz + oz, hx = alongX ? 1 : 0.25, hz = alongX ? 0.25 : 1;
+        const o = mesh(m, 1 / 8, [0.5, 0, 0.5], x, ty, z, alongX ? 0 : PI / 2); o.visible = false;
+        return { o, c: AF.addCollider(x - hx, ty, z - hz, x + hx, ty + 1e-6, z + hz, 'heist-shop-rack') };
+      });
+      HS.racks = (on) => { for (const r of racks) { r.o.visible = !!on; r.c.y1 = ty + (on ? 1.9 : 1e-6); } };
+    }
     // ---------------------------------------------------------------- Ezra in the back of Harbour Stationers
     const st = AF.buildings.find((b) => b.id === 'bs-stationer');
     A.ezra = st ? { x: st.box[0] + 7.8, y: 0.5, z: st.box[2] + 10.5 } : { x: 45.8, y: 0.5, z: 98.5 };

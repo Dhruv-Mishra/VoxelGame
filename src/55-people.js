@@ -1078,7 +1078,7 @@ try {
     for (let i = 0; i < people.length; i++) {
       const p = people[i];
       const dc = Math.hypot(p.x - cam.x, p.z - cam.z);
-      const far = dc > 90, hide = dc > (AF.MOBILE ? 70 : 150);
+      const far = dc > 90, hide = dc > (AF.MOBILE ? 70 : 150) || !!(p.spot && p.spot.building && AF.closedAt && p.job.type === 'keeper' && AF.closedAt(p.spot.building));
       if (hide !== !p.root.visible) p.root.visible = !hide;
       if (dc < 140 && p.parts.torso.layers.mask !== 1) p.root.traverse((o) => { if (o.isMesh && o.layers.mask !== 1) o.layers.set(0); });   // workaround: AF.CULL never restores layer 31 (unsigned mask compare)
       p.visible = !hide;

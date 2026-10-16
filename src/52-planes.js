@@ -86,6 +86,10 @@ try {
   const G0 = 9.8, BANK = 1.22, PMAX = 1.05;
   try { PL.invertPitch = localStorage.getItem('portSolace.invertPitch') === '1'; } catch (e) { PL.invertPitch = false; }
   const ground = (x, z) => { const g = AF.W.groundY(x, z); return z > 206 && g < -1 ? -1.25 : g; };
+  // the flyable sky: the whole world (Serena Isle, Corsair Key, the Queen) plus 1.5 km of open sea; past it a plane heading
+  // further out is swung back toward the middle of the map
+  const WB = AF.PLAN.world.bounds, SKY = 1500, WC = { x: (WB.x0 + WB.x1) / 2, z: (WB.z0 + WB.z1) / 2 };
+  const outside = (pl) => pl.x < WB.x0 - SKY || pl.x > WB.x1 + SKY || pl.z < WB.z0 - SKY || pl.z > WB.z1 + SKY;
   const crash = (pl, why) => {
     AF.emit('toast', why + ' The ground crew tows the ' + pl.name + ' back to the apron.');
     PL.reset(pl);
@@ -189,7 +193,7 @@ try {
       if (!pl.onGround && AF.solidAt(nx + fwd.x * pl.G.halfL, ny + (early ? 2.5 : 1), nz + fwd.z * pl.G.halfL)) { crash(pl, 'Crunch!'); return; }
       if (pl.onGround && Math.abs(pl.v) > 1 && AF.boxBlocked(nx + fwd.x * pl.G.halfL * Math.sign(pl.v), gy + 0.3, nz + fwd.z * pl.G.halfL * Math.sign(pl.v), 0.4, 1.2)) { pl.v = 0; }
       else { pl.x = nx; pl.z = nz; pl.y = pl.onGround ? gy : Math.min(900, ny); }
-      if (Math.abs(pl.x) > 2200 || Math.abs(pl.z) > 2200) { pl.yaw += PI; AF.emit('toast', 'Turning back toward Port Solace.'); }
+      if (outside(pl) && Math.sin(pl.yaw) * (pl.x - WC.x) + Math.cos(pl.yaw) * (pl.z - WC.z) > 0) { pl.yaw = Math.atan2(WC.x - pl.x, WC.z - pl.z); AF.emit('toast', 'Turning back toward Port Solace.'); }
       place(pl);
       if (pl.engine) { pl.spin += dt * (8 + pl.throttle * 60); for (const p of pl.props) p.rotation.z = pl.spin; }
       // ---- chase camera: angles (not position) are smoothed, so it trails the flight path without lag or jitter
@@ -319,15 +323,16 @@ try {
       pl.gam += (-0.18 - pl.gam) * Math.min(1, dt); pl.pitch = pl.gam; pl.roll *= Math.exp(-dt);
       const cg = Math.cos(pl.gam); pl.x += Math.sin(pl.yaw) * cg * pl.v * dt; pl.z += Math.cos(pl.yaw) * cg * pl.v * dt; pl.y += Math.sin(pl.gam) * pl.v * dt;
       if (pl.engine) { pl.spin += dt * 30; for (const p of pl.props) p.rotation.z = pl.spin; }
-      if (pl.y <= ground(pl.x, pl.z) + 0.5 || Math.abs(pl.x) > 2200 || Math.abs(pl.z) > 2200) { pl.ghost = false; PL.reset(pl); }
+      if (pl.y <= ground(pl.x, pl.z) + 0.5 || outside(pl)) { pl.ghost = false; PL.reset(pl); }
       else place(pl);
     }
   });
 
   // ---------------------------------------------------------------- the apron line-up + a sightseeing Cub circling the city
   AF.onBuild('planes', 640, () => {
-    const z = A.apron[1] + 22, yaw = PI;   // noses toward the taxiway
-    make('cub', -560, z, yaw); make('biplane', -520, z, yaw); make('racer', -480, z, yaw); make('airliner', -410, z - 2, yaw);
+    // the general-aviation line-up on its stand lines (47-airfield), clear of the hangars and the jet stands, noses toward the taxiway
+    const z = A.apron[1] + 20, yaw = 0;
+    make('cub', -542, z, yaw); make('biplane', -514, z, yaw); make('racer', -486, z, yaw); make('airliner', -405, z + 2, yaw);
     // the sightseer: no physics, a slow lazy loop over the whole map
     const G = planeGeo('biplane'), root = new THREE.Group(), body = AF.modelMesh(G.geo), prop = AF.modelMesh(G.pgeo);
     body.castShadow = false; root.add(body); prop.position.copy(G.props[0]); root.add(prop); root.rotation.order = 'YXZ'; AF.scene.add(root);

@@ -203,7 +203,7 @@ try {
     { id: 'forger', cp: 1, tag: 'Ezra', line: 'Get pilot papers from {Ezra Quill} in the back of Harbour Stationers', mark: () => A.ezra, enter: (r) => { scene('ezra'); if (!r) radio('vera.shop2'); }, done: () => !!H.got.papers, mu: 'mu_plan' },
     { id: 'gate', tag: 'Crew gate', line: 'Show your papers at the {Westgate crew gate}', mark: () => A.gate, enter: (r) => { scene('gate'); if (!r) radio('vera.ezra'); }, done: () => !!H.got.cleared, mu: 'mu_plan' },
     { id: 'plane', tag: 'Plane', line: 'Take a {plane} from the apron \u2014 one flies, the others ride along', mark: () => planeAt(), enter: () => { resetPlanes(); }, done: () => flying(), mu: 'mu_plan' },
-    { id: 'fly', tag: 'Serena Isle', line: 'Fly 3 km south to {Serena Isle} and land on the airstrip', mark: () => A.strip, enter: (r) => { if (!r) { radio('tower.t1'); radio('vera.plane'); } }, done: () => onIsland() && (AF.mode === 'walk' || landed()), mu: 'mu_island' },
+    { id: 'fly', tag: 'Serena Isle', line: () => (RADAR.on ? 'Fly under the coast radar \u2014 hold the {green band} \u2014 to {Serena Isle}' : 'Fly 3 km south to {Serena Isle} and land on the airstrip'), mark: () => A.strip, enter: (r) => { if (!r) { radio('tower.t1'); radio('vera.plane'); } }, done: () => onIsland() && (AF.mode === 'walk' || landed()), mu: 'mu_island' },
     { id: 'kit', cp: 2, act: 'Act II \u00b7 Serena Isle', tag: 'Kit', line: 'Meet {Kit Morrow} on the terrace of Hotel Serena', mark: () => A.kit, enter: (r) => { scene('kit'); if (!r) radio('vera.kit'); }, done: () => near(A.kit, 5, 4), mu: 'mu_island', time: 11 },
     { id: 'kitcut', line: 'Kit Morrow', cut: () => cutKit(), enter: () => scene('kit'), mu: 'mu_island' },
     { id: 'tunnel', tag: 'Tunnel', line: 'Find the {smugglers\u2019 tunnel} on the volcano\u2019s flank', mark: () => A.tunnelEntry, enter: () => { scene('tunnel'); H.got.kitkey = true; }, done: () => near(A.tunnelEntry, 6, 6), mu: 'mu_tension' },
@@ -355,7 +355,7 @@ try {
     if (!HS || !HS.ready) return;
     const on = (k) => name === k;
     HS.show('watch', on('shop')); if (HS.props.rail) HS.props.rail.visible = on('shop');
-    if (HS.grille) HS.grille(on('shop') && !H.got.grille); HS.shopShut = on('shop');
+    if (HS.grille) HS.grille(on('shop') && !H.got.grille); HS.shopShut = on('shop'); if (HS.racks) HS.racks(on('shop'));
     HS.showNpc('ezra', on('ezra')); HS.showNpc('gate', on('gate') || on('ezra'));
     HS.showNpc('kit', on('kit'));
     for (const k in HS.walkers) if (/^(tunnel|post)/.test(k)) HS.show(k, on('tunnel'));
@@ -867,6 +867,40 @@ try {
   TB.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (tabletOk()) openCams(true); });
   document.body.appendChild(TB);
 
+  // ---------------------------------------------------------------- the flight south under the coast radar
+  // Between Westgate and Serena Isle the pilot keeps the plane inside a height band that keeps drifting (the gauge on the right).
+  // Outside it the radar builds a lock; a full lock gets Westgate to call the police, and the landing waits until they're lost.
+  const RD = document.createElement('div'); RD.id = 'heist-radar';
+  RD.innerHTML = '<i></i><b></b><span></span><small>RADAR</small>';
+  RD.style.cssText = 'position:fixed;right:max(24px,env(safe-area-inset-right));top:50%;width:26px;height:min(220px,38vh);transform:translateY(-50%);z-index:5;display:none;pointer-events:none;background:rgba(8,12,18,.6);border:1px solid rgba(255,255,255,.3);border-radius:3px;font:700 12px/1 system-ui,sans-serif;color:#fff;text-shadow:0 1px 2px #000';
+  const [rdBand, rdMark, rdAlt, rdTag] = RD.children;
+  rdBand.style.cssText = 'position:absolute;left:0;right:0;border-radius:2px;transition:background .2s';
+  rdMark.style.cssText = 'position:absolute;left:-7px;right:-7px;height:3px;margin-top:-1px;background:#fff;box-shadow:0 0 4px #000';
+  rdAlt.style.cssText = 'position:absolute;right:34px;margin-top:-7px;white-space:nowrap';
+  rdTag.style.cssText = 'position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%);font-size:9px;letter-spacing:.12em;opacity:.8';
+  document.body.appendChild(RD);
+  const RADAR = { on: false, k: 0, t: 0, lo: 0, hi: 0, off: 0, ping: 0 }, RTOP = 100;
+  const radarTick = (dt) => {
+    const pl = AF.mode === 'fly' && AF.planes ? AF.planes.cur : null;
+    const on = is('fly') && !!pl && !pl.onGround && !H.flag.radar && !H.failing && !MI.cut.on && !wanted() && dist(pl, A.plane) > 300 && dist(pl, A.strip) > 450;
+    if (on !== RADAR.on) {
+      RADAR.on = on; RD.style.display = on ? 'block' : 'none';
+      if (on && !H.flag.radarSaid) { H.flag.radarSaid = true; RADAR.k = RADAR.t = 0; note('Coast radar ahead \u2014 keep the plane inside the green band on the right. It keeps moving.', 'warn'); }
+    }
+    if (!on) return;
+    const t = RADAR.t += dt, c = AF.clamp(48 + 22 * Math.sin(t * 0.13) + 10 * Math.sin(t * 0.31 + 2), 24, 80);
+    RADAR.lo = c - 8; RADAR.hi = c + 8;
+    const alt = Math.max(0, pl.y - Math.max(0, AF.W.groundY(pl.x, pl.z)));
+    RADAR.off = alt < RADAR.lo ? RADAR.lo - alt : alt > RADAR.hi ? alt - RADAR.hi : 0;
+    RADAR.k = AF.clamp(RADAR.k + (RADAR.off ? 0.08 + RADAR.off * 0.01 : -0.1) * dt, 0, 1);
+    if (RADAR.off && (RADAR.ping -= dt) <= 0) { RADAR.ping = 1.1 - RADAR.k * 0.8; sfx('ui_click'); }
+    if (RADAR.k >= 1) { H.flag.radar = true; sfx('jg_spot'); const C = CB(); if (C) C.crime(80); note('Radar lock! Westgate called it in \u2014 lose the police before you land.', 'bad'); }
+    const Y = (v) => (100 - AF.clamp(v, 0, RTOP) / RTOP * 100).toFixed(1) + '%';
+    rdBand.style.top = Y(RADAR.hi); rdBand.style.bottom = (AF.clamp(RADAR.lo, 0, RTOP) / RTOP * 100).toFixed(1) + '%';
+    rdBand.style.background = RADAR.off ? 'rgba(255,90,74,.55)' : 'rgba(125,220,138,.6)';
+    rdMark.style.top = rdAlt.style.top = Y(alt); rdAlt.textContent = Math.round(alt) + ' m';
+  };
+
   // ---------------------------------------------------------------- the bag lends the crew's gear while the job is on
   if (AF.inv) AF.inv.extra.push(() => {
     if (!H.on) return null;
@@ -952,6 +986,7 @@ try {
     const n = H.bags.filter(Boolean).length;
     MI.bar('heist-bags', H.on && H.i >= IDX.night && H.i <= IDX.stash && (n || H.tr.n >= 6) ? { label: 'Cash bags', value: n + ' / 4', ok: n === 4 } : null);
     MI.bar('heist-wave', is('fight') && H.waves ? { label: 'Moretti\u2019s men', value: 'wave ' + Math.min(H.waves, WAVES.length) + ' / ' + WAVES.length, hot: true } : null);
+    MI.bar('heist-radar', RADAR.on ? { label: 'Radar lock', value: 'Fly ' + Math.round(RADAR.lo) + '\u2013' + Math.round(RADAR.hi) + ' m', pct: RADAR.k, hot: RADAR.off > 0, ok: !RADAR.off } : null);
   };
   let natT = 0, laserT = 0, drillNT = 0, warnT = 0;
   AF.onTick('heist', 425, (dt) => {
@@ -960,6 +995,7 @@ try {
     const mn = H.on ? '' : 'none'; if (MN.style.display !== mn) MN.style.display = mn;
     const tb = tabletOk() && crewN() < 2 ? '' : 'none'; if (TB.style.display !== tb) TB.style.display = tb;
     if (AF.quiet !== H.on) quiet(H.on);
+    radarTick(dt);
     if (!H.on) { if (muCur) music(); return; }
     H.t += dt;
     const s = ST[H.i]; if (!s) return;

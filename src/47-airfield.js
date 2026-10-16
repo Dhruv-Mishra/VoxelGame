@@ -44,7 +44,7 @@ try {
     const [ax0, az0, ax1, az1] = A.apron;
     paint(ax0, az0, ax1, az1, (x, z) => conc[((Math.floor(x / 5) + Math.floor(z / 5)) & 1)]);
     paint(ax0, az1, ax1, A.taxiZ - 6, (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1]);
-    for (let x = -580; x <= -380; x += 40) paint(x - 0.25, az0 + 6, x + 0.25, az1, () => yellow);   // stand lines
+    for (const x of [-542, -514, -486, -405]) paint(x - 0.25, az0 + 6, x + 0.25, az1, () => yellow);   // stand lines (52-planes parks on them)
     for (const x of [-450, -360]) { paint(x - 0.25, 84, x + 0.25, 118, () => yellow); paint(x - 3, 92, x + 3, 92.5, () => yellow); }
     // ---- R2 (departures, 09R) south of R1, the west crossing taxiway to it, the taxiway's east / west extensions and remote stand 3
     const R2 = A.runway2, sz0 = R2.z - R2.w / 2, sz1 = R2.z + R2.w / 2, tarmac = (x, z, bx, bz) => asph[AF.hash2(bx >> 2, bz >> 2) < 0.5 ? 0 : 1];
@@ -403,13 +403,13 @@ try {
       const look=AF.peopleKit.makeLook(col===0x26324e?'police':'ticket','m','adult',AF.rng(name.length*71));look.top.col=col;look.bottom.col=0x26324e;look.pose=pose;look.yaw=yaw;
       return AF.walkers.addPath('airport-staff-'+name,[[x,y,z]],{count:1,speed:0,activeRadius:230,looks:[look]});
     };
-    for(const [name,x,y,z,col] of [['security',-488.5,0.5,58.7,0x26324e],['lane2',-482,0.5,58.7,0x26324e],['checkin',-534,0.5,49.5,0x3f7f7c],['desk2',-529,0.5,49.5,0x3f7f7c],['cafe',-445,0.5,61.5,0xf3f0e6],['crew1',-566,0.25,92,0xff8a32],['crew2',-375,0.25,98,0xff8a32]])staff(name,x,y,z,col);
+    for(const [name,x,y,z,col] of [['security',-488.5,0.5,58.7,0x26324e],['lane2',-482,0.5,58.7,0x26324e],['checkin',-534,0.5,49.5,0x3f7f7c],['desk2',-529,0.5,49.5,0x3f7f7c],['cafe',-445,0.5,61.5,0xf3f0e6],['crew1',-550,0.25,88,0xff8a32],['crew2',-375,0.25,98,0xff8a32]])staff(name,x,y,z,col);
     staff('crewgate',A.crewGate.booth[0]+1.5,0.5,(A.crewGate.booth[1]+A.crewGate.booth[3])/2,0x26324e,'stand',-PI/2);
     A.marshallers=[staff('marshal1',-450,0.25,79,0xff8a32,'marshal',0),staff('marshal2',-360,0.25,79,0xff8a32,'marshal',0)];
   });
   AF.onBuild('airfield-staff',826,()=>{
     const spawn=(id,name,role,x,y,z,lines)=>AF.npc.spawn({id,name,role,x,y,z,visual:false,look:{},greet:[lines[0]],lines:[lines]});
-    A.staff=[spawn('airport-security','Officer Reed','Airport security',-488.5,0.5,58.7,['Go right through... just keep any firearms holstered.','The lounge is as far as passengers go. The apron is crew only \u2014 the crew gate is out by the hangars.']),spawn('airport-checkin','Mabel','Check-in agent',-534,0.5,49.5,['Welcome to Westgate. I can check that bag for you.','Departures through the checkpoint, gates straight ahead.']),spawn('airport-crew','Otto','Ground crew',-566,0.25,92,['The Sky Cub is ready for you.','Keep clear of the taxiway when an airliner arrives.'])];
+    A.staff=[spawn('airport-security','Officer Reed','Airport security',-488.5,0.5,58.7,['Go right through... just keep any firearms holstered.','The lounge is as far as passengers go. The apron is crew only \u2014 the crew gate is out by the hangars.']),spawn('airport-checkin','Mabel','Check-in agent',-534,0.5,49.5,['Welcome to Westgate. I can check that bag for you.','Departures through the checkpoint, gates straight ahead.']),spawn('airport-crew','Otto','Ground crew',-550,0.25,88,['The Sky Cub is ready for you.','Keep clear of the taxiway when an airliner arrives.'])];
   });
   AF.onTick('airfield-boarding',304,()=>{
     const camera=AF.camera.position;
