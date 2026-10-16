@@ -405,7 +405,7 @@ try {
     TG.x = car ? car.x : p.x; TG.y = car ? car.y : p.y; TG.z = car ? car.z : p.z; TG.speed = car ? Math.abs(car.v) : (AF.PL.walk.speed || 0);
     return TG;
   };
-  const los = (x0, y0, z0, x1, y1, z1) => { for (let i = 1; i < 6; i++) { const u = i / 6; if (AF.solidAt(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, z0 + (z1 - z0) * u)) return false; } return true; };
+  const los = (x0, y0, z0, x1, y1, z1) => AF.segClear(x0, y0, z0, x1, y1, z1);
   CB.los = los;
   const NPC_SND = { pistol: 'shot', smg: 'smg', lmg: 'lmg' };
   // one NPC round at the target: hit chance from range, the target's speed and stance; a hot tracer either way
@@ -417,7 +417,7 @@ try {
     const th = crouch ? 0.8 : 1.2, ex = T.x + (hit ? 0 : (Math.random() - 0.5) * 3), ey = T.y + (hit ? th : 0.3 + Math.random() * 1.4), ez = T.z + (hit ? 0 : (Math.random() - 0.5) * 3);
     // misses fly on past the target to whatever they hit
     let fx2 = ex, fy2 = ey, fz2 = ez;
-    if (!hit) { const dx = ex - mx, dy = ey - my, dz = ez - mz, L = Math.hypot(dx, dy, dz) || 1, R = Math.min(60, L + 25); fx2 = mx + dx / L * R; fy2 = my + dy / L * R; fz2 = mz + dz / L * R; for (let t = L; t < R; t += 0.5) { const qx = mx + dx / L * t, qy = my + dy / L * t, qz = mz + dz / L * t; if (AF.solidAt(qx, qy, qz)) { fx2 = qx; fy2 = qy; fz2 = qz; break; } } }
+    if (!hit) { const dx = ex - mx, dy = ey - my, dz = ez - mz, L = Math.hypot(dx, dy, dz) || 1, R = Math.min(60, L + 25), tw = AF.rayHit(mx, my, mz, dx / L, dy / L, dz / L, 0.3, R), t = tw < R ? tw : R; fx2 = mx + dx / L * t; fy2 = my + dy / L * t; fz2 = mz + dz / L * t; }
     FX.burst('flash', mx, my, mz, 1, { size: A.wpn === 'lmg' ? 0.35 : 0.25 }); tracer(mx, my, mz, fx2, fy2, fz2, A.wpn === 'lmg' ? 2 : 1); SFX.play(NPC_SND[A.wpn] || 'shot', w.x, w.z);
     if (CB.onShot) CB.onShot(A.wpn === 'lmg' ? 7 : A.wpn === 'smg' ? 3 : 1, mx, my, mz, fx2, fy2, fz2, hit ? 2 : 1);
     if (!hit) { impact(fx2, fy2, fz2, 0, 1); if (T === TG && !T.car && Math.hypot(ex - T.x, ez - T.z) < 2 && Math.random() < 0.35) AU(Math.random() < 0.5 ? 'ricochet' : 'bullet_hit', { x: ex, y: ey, z: ez }); return; }
@@ -562,10 +562,7 @@ try {
   CB.rayPerson = (ox, oy, oz, dx, dy, dz, x, y0, z, hgt) => { const t = rayPerson(ox, oy, oz, dx, dy, dz, x, y0, z, hgt); return t < Infinity ? (RPH ? -t : t) : Infinity; };
   const ray = (ox, oy, oz, dx, dy, dz, range, t0) => {
     HIT.t = range; HIT.kind = null; HIT.obj = null; HIT.head = false;
-    for (let t = t0 + 0.3; t < range; t += 0.45) if (AF.solidAt(ox + dx * t, oy + dy * t, oz + dz * t)) {
-      let a = t - 0.45, b = t; for (let i = 0; i < 4; i++) { const m = (a + b) / 2; if (AF.solidAt(ox + dx * m, oy + dy * m, oz + dz * m)) b = m; else a = m; }
-      HIT.t = a; HIT.kind = 'world'; break;
-    }
+    { const tw = AF.rayHit(ox, oy, oz, dx, dy, dz, t0 + 0.3, range); if (tw < range) { HIT.t = Math.max(t0, tw - 0.02); HIT.kind = 'world'; } }
     const C = CR(), R2 = range * range;
     if (C && !CB.gallery) for (const w of C.walkers) {
       if (!w.act || flat(w) || (w.x - ox) ** 2 + (w.z - oz) ** 2 > R2 || exempt(w)) continue;

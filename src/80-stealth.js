@@ -135,12 +135,8 @@ try {
     out.push({ x: x1, y: y1, z: z1 });
     return out;
   };
-  // line of sight: samples every ~0.45 m (voxels, ground, colliders)
-  const los = S.los = (x0, y0, z0, x1, y1, z1) => {
-    const d = Math.hypot(x1 - x0, y1 - y0, z1 - z0), n = Math.max(2, Math.ceil(d / 0.45));
-    for (let i = 1; i < n; i++) { const u = i / n; if (AF.solidAt(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, z0 + (z1 - z0) * u)) return false; }
-    return true;
-  };
+  // line of sight: exact (voxels, ground, colliders — 02 AF.segClear)
+  const los = S.los = (x0, y0, z0, x1, y1, z1) => AF.segClear(x0, y0, z0, x1, y1, z1);
   const inBox = (b, x, y, z, pad = 0) => !!b && x > b[0] - pad && x < b[3] + pad && y > b[1] - pad && y < b[4] + pad && z > b[2] - pad && z < b[5] + pad;
   S.inZone = (zid, x, y, z, pad) => { const zz = Z(zid); return !!zz && inBox(zz.box, x, y, z, pad); };
   S.isDark = (z, x, y, zz) => { for (const l of z.lights) if (l.off > 0 && x > l.box[0] && x < l.box[2] && zz > l.box[1] && zz < l.box[3]) return true; return false; };
@@ -176,9 +172,10 @@ try {
 
   // ---------------------------------------------------------------- guard voice + steering
   const bark = (g, key, force) => {
-    const now = AF.clock.t; if (!force && now - g.barkT < 3) return; g.barkT = now;
+    const now = AF.clock.t; if (!force && (now - g.barkT < 3 || now < (g.barkEnd || 0))) return; g.barkT = now;
     const id = AF.voAlias ? AF.voAlias(g.voice + '.' + key) : g.voice + '.' + key, L = AF.voLine && AF.voLine(id), a = g.a;
-    if (AF.audio && AF.audio.voice && L) AF.audio.voice(id, { x: a.x, y: a.y + 1.6, z: a.z });
+    const len = AF.audio && AF.audio.voice && L ? AF.audio.voice(id, { x: a.x, y: a.y + 1.6, z: a.z }) : 0;
+    g.barkEnd = now + (len || 1.2) + 0.2;   // a guard never talks over himself
     AF.emit('bubble', { who: a, name: L ? L[1] : g.name, text: L ? L[2] : key, dur: 2.2 });
   };
   S.bark = bark;

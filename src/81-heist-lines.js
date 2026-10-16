@@ -12,10 +12,11 @@ try {
     b1: 'Walk with me, both of you. You look like people who are tired of small change.',
     b2: 'The Harbour Trust. Eighteen inches of steel and the fattest vault on the coast. By sunrise, it\u2019s ours.',
     b3: 'My inside man, Kit Morrow, is hiding out on Serena Isle. Three kilometres of open water. You\u2019ll have to fly.',
-    b4: 'But Westgate won\u2019t hand a plane to just anyone. You\u2019ll need pilot\u2019s uniforms, and papers to match.',
-    b5: 'Kovac the tailor makes the airline\u2019s uniforms. Ezra Quill does the papers, at Harbour Stationers. Off you go.',
+    b4: 'But Westgate won\u2019t let just anyone past the crew gate. You\u2019ll need pilot\u2019s uniforms, and papers to match.',
+    b5: 'Kovac the tailor makes the airline\u2019s uniforms. His shop shut an hour ago. Ezra Quill does the papers, at Harbour Stationers. Off you go.',
     offer: 'There\u2019s a job. The biggest this town has ever seen. But it needs a crew. Two of you, at least.',
-    shop: 'Kovac\u2019s tailor shop. The finished uniforms hang on the rail behind the counter. Keep the clerk talking, or wait until her back is turned.',
+    shop: 'Kovac\u2019s tailor shop. Shut for the night, with a watchman inside. Pick the padlock on the front grille, and slip in behind him.',
+    shop1: 'You\u2019re in. The uniforms hang on the rail behind the counter. Stay low, and keep out of his torchlight.',
     shop2: 'Two uniforms. Very dashing. Now find Ezra, at Harbour Stationers.',
     ezra: 'Papers in hand? Good. Westgate Airfield, the crew gate on the apron side.',
     plane: 'Serena Isle is due south, three kilometres out. Keep her low over the water.',
@@ -127,8 +128,8 @@ try {
   });
   add('gate', 'Gate guard', {
     g1: 'Evening, Captain. Papers, please.',
-    g2: 'All in order. She\u2019s fuelled and waiting on the apron. Safe flight.',
-    no: 'No uniform, no papers, no entry. Move along.',
+    g2: 'All in order. Gate\u2019s open for you, Captain. Your plane is fuelled and waiting on the apron.',
+    no: 'Crew gate. No uniform, no papers, no entry. Move along.',
   });
   add('tower', 'Westgate Tower', {
     t1: 'Westgate tower. Aircraft on the apron, you are cleared for departure. Wind is light from the south.',

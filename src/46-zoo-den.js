@@ -6,10 +6,11 @@ try {
 //       ticked only while AF.den.setActive(true) and the player is within ~60 m. Underground lights are parked unless the camera
 //       is down there (they would light the paths from below and take light-pool slots). LEDs / lamps blink via palette entries.
 //   AF.den = { spots, lions:[{x,y,z,yaw,state,level}], setActive(on), reset(), calm(), awake(), setHatch(open), hatchOpen,
-//              hatchInteract (false = the lead's own interaction), onWake (callback(lion)), dmg }
+//              hatchInteract (false | () => bool: who may work the lion-house hatch; 81-heist limits it to the hacker at night),
+//              setDrain(open), drainOpen (the locked street hatch over the drain stair; shut unless the heist opens it), onWake, dmg }
 {
   const W = AF.W, PI = Math.PI, GOFF = Math.round(-W.Y0 * 4);
-  const D = AF.den = { lions: [], active: false, onWake: null, hatchOpen: false, hatchInteract: true, dmg: 34, hits: 0, stats: { draws: 0, ticks: 0 } };
+  const D = AF.den = { lions: [], active: false, onWake: null, hatchOpen: false, hatchInteract: false, dmg: 34, hits: 0, stats: { draws: 0, ticks: 0 } };
   // den interior (lions are confined to it) and the hatch opening in the back cave (stair flight A)
   const BOX = D.box = { x0: -514.25, z0: -105.25, x1: -496.25, z1: -90.25 };
   const HATCH = D.hatchRect = { x0: -512.25, z0: -104.75, x1: -509.5, z1: -103.5 };
@@ -393,6 +394,7 @@ try {
     CL(-489.0, -5.75, SZ1, -487.25, -2.25, SZ1 + 0.5);
     for (let k = 1; k <= 2; k++) F(-489.0, -6.0, SZ1 + 0.25 * (k - 1), -487.25, -5.75 + 0.25 * k, SZ1 + 0.25 * k, concF);
     W.tDirty = true;
+    D.drainRect = { x0: -489.0, x1: -487.25, z0: openZ, z1: zEnd, y: G };
     D.stats.buildMs = Math.round(performance.now() - t0);
     D.built = true;
   });
@@ -411,8 +413,31 @@ try {
     lid = AF.modelMesh(m, { vs: 1 / 16, anchor: [0.5, 0, 0.5], cast: false }); lid.name = 'den-hatch-lid'; lid.visible = false; lid.matrixAutoUpdate = false;
     AF.scene.add(lid); D.setHatch(false);
     AF.addInteract({ x: (HATCH.x0 + HATCH.x1) / 2, y: 0.75, z: HATCH.z1 + 0.2, r: 1.7, prio: 1.1, get label() { return D.hatchOpen ? 'Close the hatch' : 'Open the old hatch'; },
-      can: () => D.hatchInteract !== false && AF.mode === 'walk', act: () => { D.setHatch(!D.hatchOpen); snd('latch', HATCH.x0 + 1, 0.5, HATCH.z0 + 0.5, 0.8); } });
+      can: () => (typeof D.hatchInteract === 'function' ? D.hatchInteract() : D.hatchInteract !== false) && AF.mode === 'walk', act: () => { D.setHatch(!D.hatchOpen); snd('latch', HATCH.x0 + 1, 0.5, HATCH.z0 + 0.5, 0.8); } });
+    // the storm drain's street hatch over the stair up to Westgate Road: shut + locked (a raised steel cover filling the railed
+    // stairwell, rail-high so nobody climbs in or out); only the heist opens it (81 D.setDrain), for the hacker's escape
+    const R = D.drainRect;
+    if (R) {
+      const DW = Math.round((R.x1 - R.x0) * 16), DL = Math.round((R.z1 - R.z0) * 16), DH = 16, g = new AF.Model(DW, DH, DL), st = AF.col(0x4a4e54, { metal: 0.7, rough: 0.5, jitter: 0.2 }), dk = AF.col(0x1e2024, { metal: 0.5, rough: 0.7 }), ye = AF.col(0xe8c23a, { jitter: 0.1 });
+      for (let x = 0; x < DW; x++) for (let z = 0; z < DL; z++) for (let y = 0; y < DH; y++) {
+        const top = y === DH - 1, rim = x < 2 || z < 2 || x >= DW - 2 || z >= DL - 2;
+        g.set(x, y, z, top ? (rim ? ((((x + z) >> 2) & 1) ? ye : dk) : (x % 4 === 1 || z % 6 === 2) ? st : dk) : y >= DH - 3 && (x === 0 || z === 0 || x === DW - 1 || z === DL - 1) ? ((((x + z + y) >> 2) & 1) ? ye : dk) : st);
+      }
+      drainLid = AF.modelMesh(g, { vs: 1 / 16, anchor: [0.5, 0, 0], cast: false }); drainLid.name = 'den-drain-lid'; drainLid.visible = false; drainLid.matrixAutoUpdate = false;
+      drainLid.position.set((R.x0 + R.x1) / 2, R.y, R.z0); drainLid.updateMatrix(); drainLid.updateMatrixWorld(true);
+      AF.scene.add(drainLid); D.setDrain(false);
+    }
   });
+  let drainLid = null, drainCol = null;
+  D.drainOpen = false;
+  D.setDrain = (open) => {
+    const R = D.drainRect; if (!R) return;
+    open = !!open; if (open === D.drainOpen && (open || drainCol)) return;
+    D.drainOpen = open;
+    if (drainCol) { AF.removeCollider(drainCol); drainCol = null; }
+    if (!open) drainCol = AF.addCollider(R.x0, R.y - 0.25, R.z0, R.x1, R.y + 1, R.z1, 'den-drain');
+    if (AF.ready && !AF.TEST) snd('latch', (R.x0 + R.x1) / 2, R.y + 0.3, (R.z0 + R.z1) / 2, 0.9);
+  };
   const snd = (id, x, y, z, vol = 1, rate) => { if (AF.audio && AF.audio.play) AF.audio.play(id, { x, y, z, vol, rate }); };
 
   // ---------------------------------------------------------------- lions: shared InstancedMeshes (body, head, maned head, leg, tail)
@@ -679,6 +704,7 @@ try {
       AF.PAL.dirty = true;
     }
     if (lid) { const nearLid = Math.abs(cam.x - S.hatch.x) < 45 && Math.abs(cam.z - S.hatch.z) < 45; if (lid.visible !== nearLid) lid.visible = nearLid; }
+    if (drainLid) { const R = D.drainRect, nearD = !D.drainOpen && Math.abs(cam.x - R.x0) < 70 && Math.abs(cam.z - R.z0) < 70; if (drainLid.visible !== nearD) drainLid.visible = nearD; }
     if (!D.active || !M.list) return;
     const p = AF.player, nearP = Math.hypot(p.x - S.denCentre.x, p.z - S.denCentre.z) < 60, nearC = Math.hypot(cam.x - S.denCentre.x, cam.z - S.denCentre.z) < 60;
     if (!(nearP || nearC)) { if (vis) { showLions(false); if (D.awake() || D.lions.some((L) => L.level > 0)) D.reset(); } return; }
@@ -731,13 +757,17 @@ try {
     up: [[S.server.x, S.server.y, S.server.z], [-486.0, -5.75, -19.0], [-486.0, -5.75, -20.9], [-488.1, -5.75, -20.9], [S.manhole.x, S.manhole.y, S.manhole.z], [S.street.x, null, -10.2], [S.street.x, S.street.y, S.street.z]],
   };
   AF.test('den: yard -> den -> hatch -> bunker -> drain -> server and server -> drain stair -> street are walkable', () => {
-    const was = D.hatchOpen; D.setHatch(true);
+    const was = D.hatchOpen, wasDrain = D.drainOpen; D.setHatch(true); D.setDrain(true);
     try {
       const a = walkRoute(D.routes.down), b = walkRoute(D.routes.up);
       const probes = [[S.locker, 0.25], [S.denGate, 0.25], [S.bunkerIn, -4.75], [S.server, -5.75], [S.manhole, -5.75], [S.street, S.street.y]].map(([p, y]) => Math.abs(AF.surfaceBelow(p.x, p.z, p.y + 0.5, 3) - y) < 0.05);
       const head = [S.bunkerIn, S.server, S.manhole, S.sewerIn].every((p) => !AF.boxBlocked(p.x, p.y + 0.01, p.z, 0.3, 1.7));
-      return { ok: a.ok && b.ok && probes.every(Boolean) && head, info: 'down ' + a.info + ' | up ' + b.info + ' | spots ' + probes.map((v) => v ? 1 : 0).join('') + ' head ' + head };
-    } finally { D.setHatch(was); }
+      // shut, the street hatch seals the stairwell: the stair up is blocked, and a body walking in from the street stays at street level
+      D.setDrain(false); const R = D.drainRect, wb = { x: (R.x0 + R.x1) / 2, y: R.y, z: R.z1 + 1.5, vy: 0, r: 0.3, h: 1.7, onGround: true };
+      for (let i = 0; i < 60; i++) AF.moveBody(wb, 0, -3.5 / 30, 1 / 30, { step: 0.55 });
+      const shut = !walkRoute(D.routes.up).ok && wb.y > R.y - 0.05 && wb.z > R.z1 - 0.1;
+      return { ok: a.ok && b.ok && probes.every(Boolean) && head && shut, info: 'down ' + a.info + ' | up ' + b.info + ' | spots ' + probes.map((v) => v ? 1 : 0).join('') + ' head ' + head + ' | street hatch shut ' + shut };
+    } finally { D.setHatch(was); D.setDrain(wasDrain); }
   });
   AF.test('den: hatch lid closes the shaft, surface over the drain unchanged, zoo lions kept out of the night house', () => {
     D.setHatch(false); const closed = AF.boxBlocked(-510.6, 0.26, -104.1, 0.3, 1.7) && AF.boxBlocked(-509.9, 0.26, -104.1, 0.3, 1.7);

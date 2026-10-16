@@ -110,7 +110,8 @@ body.cctv-on #ui .hud,body.cctv-on #h-cross,body.cctv-on #h-xh,body.cctv-on #h-h
       CC.cd = a.cd ?? 5; render();
     }, () => { CC.busy = false; render(); });
   };
-  const say = (id) => { if (AF.audio && AF.audio.voice) AF.audio.voice(id, { radio: true, vol: 0.7 }); };
+  // through the heist's story-line queue when it runs (so Kestrel never cuts Vera off mid-sentence), straight to the radio otherwise
+  const say = (id) => { if (AF.heist && AF.heist.on && AF.heist.radio) AF.heist.radio(id, true); else if (AF.audio && AF.audio.voice) AF.audio.voice(id, { radio: true, vol: 0.7 }); };
   CC.act = doAct;
   let actKey = '';
   const render = () => {

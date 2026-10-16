@@ -3,7 +3,8 @@ try {
 // ===== 81-heist: THE HARBOUR TRUST JOB — a co-op story mission for a crew of two to four, across the whole map  (OWNER: game) =====
 // Vera Lark (the Blue Heron) plans it; Kit Morrow is the inside man on Serena Isle; Mr Prescott (the Solace Queen's high-roller salon)
 // carries the second vault key; Silas Crane runs the Queen's casino and Corsair Key; the Moretti family wants it all.
-//   I   Papers: Vera's briefing -> two pilot uniforms from Kovac's tailor (a clerk watches) -> pilot IDs from Ezra Quill (stamp
+//   I   Papers (night): Vera's briefing -> pick the night grille at Kovac's tailor, sneak past the watchman, two pilot uniforms off the
+//       rail -> pilot IDs from Ezra Quill (stamp
 //       minigame) -> the Westgate crew gate -> a plane -> 3 km south to Serena Isle
 //   II  Serena Isle: Kit (cutscene) -> the Moretti smugglers' tunnel (stealth) -> the arms cache (lockpick): silenced pistols + a drill
 //       -> the sea cave -> Moretti's men in the cove -> jet skis 1.5 km to the Solace Queen
@@ -36,26 +37,48 @@ try {
     lifting: false, dealing: false, drilling: false, lockT: 0, grip: [0, 0], bags: [false, false, false, false], failing: false, sentFor: -1, sentTr: '', cutting: false, cutOn: false, later: null,
     after: null, afterT: 0, roadblock: null, car: null, goonsN: 0, waves: 0, bosses: [], pay: 40000, runs: 0, need: NEED, solo: false, hud: { title: 'The Harbour Trust Job', line: '', t: null, pay: null } };
   AF.noTravel = () => H.on;
+  // the lion house's old hatch only works for the hacker on the night (it stays shut otherwise)
+  if (AF.den) AF.den.hatchInteract = () => is('night') && myRole() === 'hack';
+  // Westgate's crew gate (47): while the job is on, it opens for the crew once the gate guard has cleared their papers
+  if (AF.airside) { const prev = AF.airside.ok; AF.airside.ok = () => (H.on ? !!H.got.cleared : prev()); }
   const LOOKS = (HS && HS.looks) || {};
   { const prev = UI.lookOf; UI.lookOf = (name) => LOOKS[String(name).split(' ')[0].toLowerCase()] || (prev ? prev(name) : null); }
 
-  // ---------------------------------------------------------------- voices: radio lines queue (one at a time), NPCs speak in place
+  // ---------------------------------------------------------------- voices: ONE story line at a time
+  // NPC lines spoken in place and Vera's radio calls share a single queue, so nobody ever talks over anybody: a speaker's next line
+  // waits for the last, and a radio call waits for whoever is talking in the room plus a beat (Vera phones in after the scene, never
+  // over it). In-person lines go ahead of queued radio calls (an urgent call goes first); a cutscene holds the queue (it plays its own
+  // lines); an in-person line that waited too long (the moment has passed) is dropped. Guard barks (80-stealth) are not story lines.
   const VO = (id) => (AF.voLine ? AF.voLine(id) : null);
-  const RQ = []; let rqT = 0;
-  const radio = (id, first) => { if (!VO(id)) return; if (RQ.includes(id)) return; if (first) RQ.unshift(id); else RQ.push(id); };
-  const radioNow = () => {
-    if (rqT > 0 || !RQ.length) return;
-    const id = RQ.shift(), L = VO(id); if (!L) return;
-    const len = AF.audio && AF.audio.voice ? AF.audio.voice(id, { radio: true }) : 0;
-    rqT = (len || Math.max(2.2, L[2].length * 0.065)) + 0.4;
-    AF.emit('toast', { title: L[1], text: L[2], kind: 'radio', look: UI.lookOf(L[1]) });
+  const RQ = []; let talkEnd = -1e9, personEnd = -1e9;
+  const SAY_GAP = 0.3, RADIO_GAP = 1.2, STALE = 12;
+  const queue = (q) => {
+    if (RQ.some((o) => o.id === q.id)) return;
+    let i = 0;
+    if (q.urgent) { while (i < RQ.length && RQ[i].urgent) i++; }
+    else if (q.who) { while (i < RQ.length && (RQ[i].urgent || RQ[i].who)) i++; }
+    else i = RQ.length;
+    RQ.splice(i, 0, q);
   };
-  const speak = (id, who, dur) => {
-    const L = VO(id); if (!L || !who) return 0;
-    const len = AF.audio && AF.audio.voice ? AF.audio.voice(id, { x: who.x, y: who.y + 1.6, z: who.z }) : 0;
-    AF.emit('bubble', { who, name: L[1], text: L[2], dur: dur || Math.max(2.4, len + 0.4) });
-    return len;
+  const radio = (id, first) => { if (VO(id)) queue({ id, who: null, urgent: !!first, t: AF.clock.t }); };
+  const speak = (id, who, dur) => { if (VO(id) && who) queue({ id, who, dur, urgent: false, t: AF.clock.t }); };
+  const voiceNow = () => {
+    const now = AF.clock.t;
+    if (!RQ.length || now < talkEnd || MI.cut.on) return;
+    if (!RQ[0].who && now < personEnd + RADIO_GAP) return;
+    const q = RQ.shift(), L = VO(q.id); if (!L) return;
+    if (q.who) {
+      if (now - q.t > STALE) return;
+      const w = q.who, len = (AF.audio && AF.audio.voice ? AF.audio.voice(q.id, { x: w.x, y: w.y + 1.6, z: w.z }) : 0) || Math.max(2.2, L[2].length * 0.065);
+      AF.emit('bubble', { who: w, name: L[1], text: L[2], dur: q.dur || Math.max(2.4, len + 0.4) });
+      talkEnd = personEnd = now + len; talkEnd += SAY_GAP;
+    } else {
+      const len = (AF.audio && AF.audio.voice ? AF.audio.voice(q.id, { radio: true }) : 0) || Math.max(2.2, L[2].length * 0.065);
+      talkEnd = now + len + 0.4;
+      AF.emit('toast', { title: L[1], text: L[2], kind: 'radio', look: UI.lookOf(L[1]) });
+    }
   };
+  const hushVoices = () => { RQ.length = 0; talkEnd = personEnd = -1e9; };
   H.radio = radio; H.speak = speak;
 
   // ---------------------------------------------------------------- places + checks
@@ -174,9 +197,9 @@ try {
   // cp: reaching this step saves checkpoint cp · cut: a cutscene step · tag: the marker's label · mark(): the objective position ·
   // mu: the music · hostOnly: only the host decides it's done · time: hours to hold (host sets)
   const ST = [
-    { id: 'brief', cp: 0, act: 'Act I \u00b7 Papers', line: 'Vera\u2019s briefing', cut: () => cutBrief(), mu: 'mu_brief', time: 10.5 },
-    { id: 'uniform', tag: 'Kovac\u2019s', line: () => (H.got.uniform ? 'Get out of the tailor\u2019s' : near(A.shopDoor, 30) ? 'Take the {pilot uniforms} from the rail behind the counter \u2014 unseen' : 'Steal pilot uniforms from {Kovac\u2019s tailor shop}'),
-      mark: () => (dist(me(), A.rail) < 30 ? A.rail : A.shopDoor), enter: (r) => { scene('shop'); if (!r) radio('vera.shop'); }, done: () => !!H.got.uniform, mu: 'mu_plan' },
+    { id: 'brief', cp: 0, act: 'Act I \u00b7 Papers', line: 'Vera\u2019s briefing', cut: () => cutBrief(), mu: 'mu_brief', time: 22.75 },
+    { id: 'uniform', tag: () => (H.got.uniform ? 'Out' : H.got.grille ? 'Rail' : 'Grille'), line: () => uniformLine(),
+      mark: () => (H.got.uniform ? A.shopDoor : H.got.grille ? A.rail : A.grille || A.shopDoor), enter: (r) => { scene('shop'); if (!r) radio('vera.shop'); }, done: () => !!H.got.uniform && !inShop(), mu: 'mu_stealth', time: 23.25 },
     { id: 'forger', cp: 1, tag: 'Ezra', line: 'Get pilot papers from {Ezra Quill} in the back of Harbour Stationers', mark: () => A.ezra, enter: (r) => { scene('ezra'); if (!r) radio('vera.shop2'); }, done: () => !!H.got.papers, mu: 'mu_plan' },
     { id: 'gate', tag: 'Crew gate', line: 'Show your papers at the {Westgate crew gate}', mark: () => A.gate, enter: (r) => { scene('gate'); if (!r) radio('vera.ezra'); }, done: () => !!H.got.cleared, mu: 'mu_plan' },
     { id: 'plane', tag: 'Plane', line: 'Take a {plane} from the apron \u2014 one flies, the others ride along', mark: () => planeAt(), enter: () => { resetPlanes(); }, done: () => flying(), mu: 'mu_plan' },
@@ -252,6 +275,10 @@ try {
   const trackLine = () => { const s = curT(); return s ? lineOf(s) : myRole() === 'hack' ? 'Keep watching the cameras' : 'Hold tight'; };
   const trackMark = () => { const s = curT(); return s && s.mark ? s.mark() : null; };
   const belowZoo = () => { const p = AF.player, d = A.server; return AF.mode === 'walk' && !!d && p.y < (A.hatch ? A.hatch.y - 2.5 : -2) && dist(p, A.hatch) < 60; };
+  const inShop = () => { const b = A.shopBox, p = AF.player; return AF.mode === 'walk' && !!b && p.x > b[0] && p.x < b[3] && p.z > b[2] && p.z < b[5] && p.y < b[4]; };
+  const uniformLine = () => (H.got.uniform ? 'Slip back out of {Kovac\u2019s} \u2014 unseen'
+    : !H.got.grille ? (near(A.shopDoor, 30) ? 'Pick the padlock on the {night grille}' : 'Break into {Kovac\u2019s tailor shop} \u2014 it\u2019s shut for the night')
+      : 'Sneak past the {night watchman} \u2014 the {pilot uniforms} hang on the rail behind the counter');
   let rolePick = null;
   const chooseRoles = () => {
     if (crewN() < 2) { if (host()) { H.roles = ['solo']; send({ op: 'roles', r: H.roles }); } return; }
@@ -283,6 +310,8 @@ try {
     HB.lasers(night && H.tr.n >= 4 && !H.bags.every(Boolean));
     let mask = 0; for (let k = 0; k < 4; k++) if (!H.bags[k] && (night || is('escape'))) mask |= 1 << k; HB.bagsShow(H.got.cage || (night && H.tr.n >= 4) ? mask : 0);
     if (AF.den && AF.den.setActive) AF.den.setActive(night && (myRole() === 'hack' || crewN() < 2));
+    // the drain's street hatch opens only once Kestrel is hacked: the hacker's way out to Westgate
+    if (AF.den && AF.den.setDrain) AF.den.setDrain(H.on && !!H.got.hacked && (night || is('escape') || is('run')));
   };
   let trSeen = '';
   const trackEnter = (r) => { trSeen = ''; if (!r && crewN() < 2) radio('vera.z1'); applyNight(); };
@@ -298,7 +327,7 @@ try {
     if (H.failing) return;
     const r = myRole(), s = curT(); if (!s) return;
     const t = r === 'hack' ? 'h' : 'n', k = r === 'hack' ? H.tr.h : H.tr.n, sig = t + k;
-    if (s.done() && H.sentTr !== sig) { H.sentTr = sig; if (host()) trDone(t, k); else send({ op: 'tdone', t, k }, 0); }
+    if (s.done() && H.sentTr !== sig) { if (wantedHold()) { wantedNag(); return; } H.sentTr = sig; if (host()) trDone(t, k); else send({ op: 'tdone', t, k }, 0); }
   };
   const trDone = (t, k) => {   // host
     if (!is('night')) return;
@@ -325,7 +354,8 @@ try {
   const scene = (name) => {
     if (!HS || !HS.ready) return;
     const on = (k) => name === k;
-    HS.show('clerk', on('shop')); if (HS.props.rail) HS.props.rail.visible = on('shop');
+    HS.show('watch', on('shop')); if (HS.props.rail) HS.props.rail.visible = on('shop');
+    if (HS.grille) HS.grille(on('shop') && !H.got.grille); HS.shopShut = on('shop');
     HS.showNpc('ezra', on('ezra')); HS.showNpc('gate', on('gate') || on('ezra'));
     HS.showNpc('kit', on('kit'));
     for (const k in HS.walkers) if (/^(tunnel|post)/.test(k)) HS.show(k, on('tunnel'));
@@ -359,6 +389,18 @@ try {
     else MI.blip('heist-2', { at: m2, on: () => H.on && !H.failing && !!m2(), kind: 'objective', label: 'Partner', marker: true, r: 1.4, y: null });
   };
   let hudT = 0;
+
+  // ---------------------------------------------------------------- no progress while wanted: the job waits until the police lose you
+  // (the getaway and the Key's gunfight are the exceptions — the heat is the story there)
+  const HEAT_OK = new Set(['escape', 'run', 'away', 'fight']);
+  const wanted = () => { const C = CB(); return !!C && C.stars > 0; };
+  const wantedHold = () => { if (!H.on || !wanted()) return false; const s = ST[H.i]; return !!s && !s.cut && !HEAT_OK.has(s.id); };
+  let nagT = -1e9;
+  const wantedNag = (now) => {
+    const t = AF.clock.t; if (t - nagT < (now ? 2.5 : 12)) return; nagT = t;
+    sfx('ui_alert'); MI.shard('Wanted', 'Lose the police first \u2014 the job waits until they\u2019ve lost your trail', 'info', 2800);
+  };
+  H.wantedHold = wantedHold;
 
   // ---------------------------------------------------------------- step engine
   const enter = (i, restored) => {
@@ -402,6 +444,7 @@ try {
     if (HB && HB.ready) { HB.reset(); }
     if (S) for (const z of ['shop', 'tunnel', 'queen', 'zoo', 'bank']) S.reset(z);
     if (AF.den && AF.den.reset) AF.den.reset();
+    if (AF.den && AF.den.setHatch) AF.den.setHatch(false);
     H.took = {}; H.tray = false; H.busy = false; H.drilling = false; H.dealing = false; H.drillR = false; AF.PL.still = false;
     if (LN() && LN().openStaff) LN().openStaff(i === IDX.silas || i === IDX.silascut);
     if (H.roadblock) { for (const c of H.roadblock.cars) c.temp = true; H.roadblock = null; }
@@ -418,6 +461,7 @@ try {
   };
   const restore = (cp, failed) => {
     const C = CPS[cp]; let i = IDX[C.step]; H.cp = cp;
+    hushVoices();
     resetWorld(i);
     H.got = {}; for (const k of C.got) H.got[k] = true;
     H.bags = [0, 1, 2, 3].map(() => !!C.cash);
@@ -444,18 +488,20 @@ try {
   };
   const start = () => {
     if (H.on) return;
+    if (wanted()) { sfx('ui_alert'); MI.shard('Wanted', 'Lose the police first \u2014 Vera won\u2019t talk business with heat on you', 'info', 2800); return; }
     if (crewN() < NEED && !H.solo) { note('The Harbour Trust Job needs a crew of two. Host a co-op game and bring a friend \u2014 or pick "Go alone".', 'warn'); return; }
     if (!host()) { send({ op: 'go' }, 0); return; }
     begin(); send({ op: 'st', i: H.i, cp: H.cp, g: [], h: 0, n: 0 });
   };
   const end = (ok, quiet) => {
     if (!H.on) return;
-    H.on = false; H.i = -1; H.failing = false; H.after = null; H.later = null; H.cutting = false; RQ.length = 0;
+    H.on = false; H.i = -1; H.failing = false; H.after = null; H.later = null; H.cutting = false; hushVoices();
     if (MI.cut.on) MI.cut.finish(true);
     if (AF.mode === 'cctv' && AF.cctv) AF.cctv.close();
     if (AF.minigame && AF.minigame.open) AF.minigame.cancel();
     const C = CB(); if (C) { C.clearGoons(); if (C.unlend) C.unlend(); if (ok) C.clearWanted('Corsair Key keeps its secrets. The police lose the trail.'); }
     scene('none'); if (S) S.activate(null); if (HB && HB.ready) { HB.reset(); HB.night(false); }
+    if (AF.den) { if (AF.den.setHatch) AF.den.setHatch(false); if (AF.den.setDrain) AF.den.setDrain(false); }
     dress(null); H.grip[0] = H.grip[1] = 0; H.bags = [false, false, false, false]; H.roles = [];
     if (AF.hud.meterCancel) AF.hud.meterCancel(); H.lifting = false;
     if (LN() && LN().openStaff) LN().openStaff(false);
@@ -467,6 +513,7 @@ try {
       H.runs++; AF.money.add(H.pay); AF.saveSoon();
       sfx('jg_win'); setTimeout(() => sfx('v_complete'), 1300); MI.shard('Heist passed', 'The Harbour Trust Job \u00b7 your cut ' + AF.cash(H.pay), 'pass', 7000);
       setTimeout(() => note('Silas\u2019s Cub by the hangar is yours to borrow. Fly home whenever you like.', 'ok'), 3500);
+      if (AF.save.wear && !AF.TEST && !AF.save.wear.includes('uniform:pilot')) { AF.save.wear.push('uniform:pilot'); AF.saveSoon(); setTimeout(() => note('You kept a pilot\u2019s uniform \u2014 wear it from your wardrobe and Westgate\u2019s crew gate opens for you.', 'ok'), 8000); }
     } else if (!quiet) note('The job is off. Vera will be at the Blue Heron if you change your mind.', 'warn');
     veraBlip(); music();
     AF.emit('heist', H);
@@ -480,6 +527,7 @@ try {
   const setGot = (k, remote) => {
     if (H.got[k]) return; H.got[k] = true;
     if (!remote) send({ op: 'got', k });
+    if (k === 'grille') { sfx('latch'); if (HS.grille) HS.grille(false); radio('vera.shop1'); }
     if (k === 'uniform') { dress('pilot'); note('Pilot uniform on. Very dashing.', 'ok'); }
     if (k === 'cache') { const C = CB(); if (C && C.lend) C.lend('spistol', 60); note('Silenced pistols and a diamond-core drill. Headshots are quiet and final.', 'ok'); }
     if (k === 'key') { H.lifting = false; note('Prescott\u2019s key is yours.', 'ok'); }
@@ -491,16 +539,13 @@ try {
   };
   H.setGot = setGot;
 
-  // ---------------------------------------------------------------- act I: the tailor's, Ezra, the crew gate
-  const WKs = () => AF.walkers;
-  const clerkA = () => HS.walkers.clerk && HS.walkers.clerk.actors[0];
-  const chatClerk = (from) => {
-    const a = clerkA(); if (!a) return;
-    const r = from != null && AF.coop ? AF.coop.players.get(from) : null, p = r && r.seen ? r : AF.player;
-    WKs().hold(a, Math.atan2(p.x - a.x, p.z - a.z), 14);
-    speak(H.chatN++ % 2 ? 'mabel.chat2' : 'mabel.chat1', a);
+  // ---------------------------------------------------------------- act I: the tailor's after dark, Ezra, the crew gate
+  const pickGrille = () => {
+    if (H.got.grille || H.busy) return;
+    H.busy = true; sfx('click_metal');
+    play('lockpick', { title: 'Kovac\u2019s night grille', sub: 'A padlock on the shop door \u2014 pick it before the beat cop comes round', diff: 0.35, time: 45 })
+      .then((r) => { H.busy = false; if (r && r.ok && is('uniform')) setGot('grille'); });
   };
-  H.chatN = 0;
   const ezraPapers = () => {
     const n = HS.npc.ezra; if (H.got.papers || H.busy) return;
     H.busy = true; speak('ezra.e1', n);
@@ -731,10 +776,11 @@ try {
     A.carSpot = kerbAt(30, -98); if (A.carSpot) A.car = { x: A.carSpot.x, y: A.carSpot.y, z: A.carSpot.z };
     const LS = (LN() && LN().spots) || {};
     A.c5 = LS.tender ? { x: LS.tender.x, y: LS.tender.y, z: LS.tender.z, yaw: PI } : Object.assign(free(-230, 262, 4, 8), { yaw: PI });
-    const add = (o) => AF.addInteract(Object.assign({ prio: 2 }, o));
+    // every story interaction waits while the police are after you (the job only goes on once you've lost them)
+    const add = (o) => { const f = o.act; if (f) o.act = (...a) => { if (wantedHold()) { wantedNag(true); return; } f(...a); }; return AF.addInteract(Object.assign({ prio: 2 }, o)); };
     // act I
-    add({ x: A.rail.x, y: A.rail.y + 1, z: A.rail.z, r: 1.7, label: 'Take two pilot uniforms off the rail', can: () => walkOk() && is('uniform') && !H.got.uniform, act: () => { sfx('cloth'); setGot('uniform'); radio('vera.shop2'); } });
-    FOLLOW.push(follow(add({ x: 0, y: -999, z: 0, r: 2.2, label: 'Chat with the clerk (keeps her busy)', prio: 2.2, can: () => walkOk() && is('uniform') && !H.got.uniform && !(clerkA() && clerkA().rxOn && clerkA().rx.hold > 0), act: () => { chatClerk(null); send({ op: 'chat' }); } }), clerkA));
+    add({ x: A.grille.x, y: A.grille.y + 1, z: A.grille.z, r: 1.8, label: 'Pick the padlock on the night grille', prio: 2.4, can: () => walkOk() && is('uniform') && !H.got.grille && !H.busy, act: pickGrille });
+    add({ x: A.rail.x, y: A.rail.y + 1, z: A.rail.z, r: 1.7, label: 'Take two pilot uniforms off the rail', can: () => walkOk() && is('uniform') && H.got.grille && !H.got.uniform, act: () => { sfx('cloth'); setGot('uniform'); } });
     add({ x: A.ezra.x, y: A.ezra.y + 1, z: A.ezra.z, r: 2.4, label: 'Get your pilot papers from Ezra', prio: 2.4, can: () => walkOk() && is('forger') && !H.got.papers && !H.busy, act: ezraPapers });
     add({ x: A.gate.x, y: A.gate.y + 1, z: A.gate.z, r: 2.6, label: 'Show your papers at the crew gate', prio: 2.4, can: () => walkOk() && is('gate') && !H.got.cleared, act: showPapers });
     // act II
@@ -766,14 +812,13 @@ try {
     if (z('bank')) z('bank').onAlarm = (why) => { if (!H.bags.every(Boolean)) radio(/Gunfire|loud/i.test(why || '') ? 'vera.loud' : 'vera.spotted', true); };
     veraBlip();
   });
-  // the shop zone (the clerk is a path walker from 81-heist-sets): public floor = fine, behind the counter = trespassing
+  // the shop zone after closing (the watchman is a path walker from 81-heist-sets): nobody belongs inside, so any sighting counts
   AF.onBuild('heist-shop-zone', 945, () => {
-    if (!S || !HS || !HS.ready || !HS.walkers.clerk) return;
-    const b = A.shopBox, zz = S.define('shop', { box: b, mode: 'fail', voice: 'mabel', reflexS: 2.2, radius: 60 });
-    const g = S.guard('shop', { path: HS.walkers.clerk, voice: 'mabel', name: 'Clerk', range: 11, armed: false });
-    const counterX = b[0] + 1 + 9.0;
-    zz.disguise = (slot) => { const p = slot === mySlot() ? AF.player : AF.coop && AF.coop.players.get(slot); return !!p && p.x < counterX; };
-    zz.onAlarm = () => { speak('mabel.spot', g.a); fail('The clerk caught you behind the counter.'); };
+    if (!S || !HS || !HS.ready || !HS.walkers.watch) return;
+    const zz = S.define('shop', { box: A.shopBox, mode: 'fail', voice: 'g2', reflexS: 2.2, radius: 60 });
+    S.guard('shop', { path: HS.walkers.watch, voice: 'g2', name: 'Night watchman', range: 10, armed: false });
+    zz.disguise = () => false;
+    zz.onAlarm = () => fail('The night watchman caught you in Kovac\u2019s.');
   });
 
   // ---------------------------------------------------------------- Vera: the offer, the menu mid-job, the pause-menu buttons
@@ -836,9 +881,9 @@ try {
     return out;
   });
   // ---------------------------------------------------------------- co-op
-  const OPS = new Set(['go', 'st', 'done', 'fail', 'end', 'quit', 'retry', 'rs', 'got', 'roles', 'role', 'tr', 'tdone', 'wear', 'took', 'anger', 'strike', 'table', 'chat', 'lock', 'laser', 'grip', 'bag', 'drill']);
+  const OPS = new Set(['go', 'st', 'done', 'fail', 'end', 'quit', 'retry', 'rs', 'got', 'roles', 'role', 'tr', 'tdone', 'wear', 'took', 'anger', 'strike', 'table', 'lock', 'laser', 'grip', 'bag', 'drill']);
   const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
-  const GOT = new Set(['uniform', 'papers', 'cleared', 'kitkey', 'cache', 'key', 'keeper', 'hacked', 'hatch', 'gate', 'cage']);
+  const GOT = new Set(['grille', 'uniform', 'papers', 'cleared', 'kitkey', 'cache', 'key', 'keeper', 'hacked', 'hatch', 'gate', 'cage']);
   const adoptGot = (g) => { if (!Array.isArray(g)) return; for (const k of g) if (GOT.has(k) && !H.got[k]) setGot(k, true); };
   if (N && N.on) {
     N.on('heist', (m, from) => {
@@ -870,7 +915,6 @@ try {
         case 'anger': if (is('sting')) anger(AF.clamp(+m.s || 5, 1, 9), true); break;
         case 'strike': if (is('sting')) strike(true); break;
         case 'table': HS.showNpc('celeste', false); break;
-        case 'chat': if (is('uniform')) chatClerk(from); break;
         case 'lock': if (is('night')) lockOn(true); break;
         case 'laser': if (is('night')) cutLasers(true); break;
         case 'grip': if (int(m.k, 0, 1)) grip(m.k, true); break;
@@ -911,7 +955,7 @@ try {
   };
   let natT = 0, laserT = 0, drillNT = 0, warnT = 0;
   AF.onTick('heist', 425, (dt) => {
-    radioNow(); if (rqT > 0) rqT -= dt;
+    voiceNow();
     if (H.after) { H.afterT -= dt; if (H.afterT <= 0 && !(UI.dialogueOpen && UI.dialogueOpen())) { const f = H.after; H.after = null; f(); } }
     const mn = H.on ? '' : 'none'; if (MN.style.display !== mn) MN.style.display = mn;
     const tb = tabletOk() && crewN() < 2 ? '' : 'none'; if (TB.style.display !== tb) TB.style.display = tb;
@@ -919,7 +963,7 @@ try {
     if (!H.on) { if (muCur) music(); return; }
     H.t += dt;
     const s = ST[H.i]; if (!s) return;
-    if ((hudT -= dt) <= 0) { hudT = 0.16; H.hud.title = 'The Harbour Trust Job \u00b7 ' + actOf(H.i).replace(/^Act \w+ \u00b7 /, ''); H.hud.line = s.cut ? '' : lineOf(s); bars(); music(); }
+    if ((hudT -= dt) <= 0) { hudT = 0.16; H.hud.title = 'The Harbour Trust Job \u00b7 ' + actOf(H.i).replace(/^Act \w+ \u00b7 /, ''); H.hud.line = s.cut ? '' : wantedHold() ? '\u2605 Lose the police first \u2014 the job is on hold' : lineOf(s); bars(); music(); }
     if (!(AF.combat && AF.combat.gallery)) AF.hud.job = s.cut || AF.mode === 'cctv' ? null : H.hud;
     for (const it of FOLLOW) { const a = it._follow(); if (a && (it.can ? it.can() : true)) { it.x = a.x; it.y = a.y + 1; it.z = a.z; } else it.y = -999; }
     if (A.salonRope) A.salonRope.y1 = A.salonRope.y0 + ((is('salon') || is('sting')) && !myStingRole() ? 2.6 : 1e-6);
@@ -955,7 +999,7 @@ try {
       setTimeout(() => { const C = CB(); for (const c of R.cars) if (!c.dead) { AF.fx.boom(c.x, c.y + 0.5, c.z, 1); if (C) C.dmgCar(c, 999); } if (AF.camfx) AF.camfx.shake(0.04, 0.8); }, 900);
     }
     if (is('away') && !H.flag.water && dist(me(), A.keyStrip) < 2400) { H.flag.water = true; const C = CB(); if (C && C.stars) C.clearWanted('Out over open water \u2014 the police lose your trail.'); }
-    if (s.cut ? cutDone() : s.done()) complete();
+    if (s.cut ? cutDone() : s.done()) { if (wantedHold()) wantedNag(); else complete(); }
   });
 
   // ---------------------------------------------------------------- tests

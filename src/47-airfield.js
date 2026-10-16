@@ -5,6 +5,17 @@ try {
 {
   const P = AF.PLAN, W = AF.W, A = P.west.air, PI = Math.PI;
   const K = () => AF.westKit;
+  // airside access: the crew gate opens for whoever AF.airside.ok() lets through (by default a pilot's uniform: look.uniform, set by
+  // 81-heist-sets' uniforms and the home wardrobe; 81-heist widens it while the job is on). Everything else airside is sealed.
+  AF.airside = { ok: () => !!(AF.player && AF.player.look && AF.player.look.uniform === 'pilot') };
+  const NOCOL = 1e-6;
+  A.crewGate = { x0: -555, x1: -549, z: 32, booth: [-547.5, 26.5, -544.5, 30], guard: { x: -548.4, y: 0.25, z: 29.0, yaw: -PI / 2 }, s: 0, want: false, leaf: null, col: null, denyT: -99,
+    // s: 0 shut .. 1 slid fully open (west, behind the fence line, airside)
+    set(s) {
+      const G = A.crewGate; G.s = Math.max(0, Math.min(1, s));
+      if (G.col) G.col.y1 = G.s > 0.97 ? G.col.y0 + NOCOL : 3.25;
+      if (G.leaf) { const w = G.x1 - G.x0; G.leaf.position.set((G.x0 + G.x1) / 2 - w * G.s, 0.25, G.z + 0.125 + 0.5 * Math.min(1, G.s * 5)); G.leaf.updateMatrix(); G.leaf.updateMatrixWorld(true); }
+    } };
   AF.onBuild('west-airfield', 314, () => {
     const t0 = performance.now(), col = K().col, glow = K().glow;
     const asph = [col(0x3e3e42, { jitter: 0.35, pat: 'none', patTop: 'asphalt' }), col(0x46464a, { jitter: 0.35, pat: 'none', patTop: 'asphalt' })];
@@ -226,6 +237,7 @@ try {
       for (const offset of [-3, 0, 3]) for (const z of [70.5, 77.25]) W.fill(bridgeX + offset, 5.75, z, bridgeX + offset + 0.25, 6.5, z + 0.25, brass);
       W.clear(bridgeX - 1.5, 1.75, 77.25, bridgeX + 1.5, 5.25, 78.25);
       W.fill(bridgeX - 1.5, 1.5, 76, bridgeX + 1.5, 1.75, 83, steel);
+      W.fill(bridgeX - 1.25, 1.75, 83, bridgeX + 1.25, 5, 83.25, steel);   // the bridge's end door: shut (nobody drops onto the apron)
       W.fill(bridgeX - 1.5, 5, 76, bridgeX + 1.5, 5.5, 83, cream);
       for (const x of [bridgeX - 1.5, bridgeX + 1.25]) {
         W.fill(x, 1.75, 76, x + 0.25, 2.75, 83, cream);
@@ -278,10 +290,45 @@ try {
     W.fill(-642,0.25,31.75,-636,3,32.5,post);
     W.fill(-642,1.25,31.5,-636,1.75,31.75,col(0xe8c23a,{pat:'checker'}));
     sign('SERVICE / CLOSED',-639,3.2,31.5,0.08);
+    // ---- the crew gate: the one way airside, in the south fence beside hangar 2. A service road from Westgate Road, a guard booth on
+    // the landside verge, gate posts + a crossbar, and a sliding chain-link gate (a mesh + a collider) that opens only for staff
+    // (AF.airside.ok(): a pilot's uniform; the heist widens it) when they come near — see the 'airfield-crew-gate' tick
+    {
+      const G = A.crewGate, cx = (G.x0 + G.x1) / 2, z = G.z;
+      paint(G.x0, 6.5, G.x1, z, tarmac); paint(G.x0, z, G.x1, 72, tarmac);
+      paint(cx - 0.125, 8, cx + 0.125, 70, (x, zz) => ((Math.floor(zz / 3) & 1) ? yellow : null));
+      for (let x = G.x0; x < G.x1; x += 1) paint(x, z - 3, x + 0.5, z - 2.5, () => white);
+      W.clear(G.x0, 0, z - 0.25, G.x1, 3.5, z + 0.5);
+      for (const px of [G.x0 - 0.5, G.x1]) { W.fill(px, 0.25, z - 0.25, px + 0.5, 4, z + 0.5, post); W.fill(px, 3.75, z - 0.25, px + 0.5, 4, z + 0.5, yellow); }
+      W.fill(G.x0 - 0.5, 4, z, G.x1 + 0.5, 4.5, z + 0.25, post);
+      sign('CREW GATE \u00b7 STAFF ONLY', cx, 4.6, z - 0.05, 0.07);
+      // the booth: cream walls, glass on the road side, a door at the back, a teal roof
+      const [bx0, bz0, bx1, bz1] = G.booth;
+      W.fill(bx0, 0.25, bz0, bx1, 3, bz1, cream); W.clear(bx0 + 0.25, 0.5, bz0 + 0.25, bx1 - 0.25, 2.75, bz1 - 0.25);
+      W.fill(bx0, 1.25, bz0 + 0.5, bx0 + 0.25, 2.5, bz1 - 0.5, glass); W.fill(bx0 + 0.5, 1.25, bz1 - 0.25, bx1 - 0.5, 2.5, bz1, glass);
+      W.fill(bx0 + 0.5, 1.25, bz0, bx1 - 0.5, 2.5, bz0 + 0.25, glass);
+      W.clear(bx1 - 0.25, 0.5, bz0 + 1, bx1, 2.5, bz0 + 2);
+      W.fill(bx0 - 0.25, 3, bz0 - 0.25, bx1 + 0.25, 3.25, bz1 + 0.25, teal);
+      W.fill(bx0 + 0.25, 0.5, bz0 + 0.5, bx0 + 0.75, 1.25, bz1 - 0.5, wood);
+      W.fill(bx0 + 1, 3.25, bz0 + 1, bx0 + 1.5, 3.5, bz0 + 1.5, glow(0xffb040, 2.4, 'night'));
+      sign('CREW GATE', (bx0 + bx1) / 2, 3.6, bz0 - 0.3, 0.08);
+      AF.addLight({ x: cx, y: 4.2, z: z - 2, color: 0xfff0d0, intensity: 1, range: 14, kind: 'sign' });
+      // the sliding gate leaf: a steel frame round a chain-link panel, 1/8 m
+      const LW = Math.round((G.x1 - G.x0) * 8), m = new AF.Model(LW, 22, 1), fr = col(0x4a5258, { metal: 0.7, rough: 0.5 }), wire = col(0x697b7d, { metal: 0.65, rough: 0.75, jitter: 0.03 });
+      for (let x = 0; x < LW; x++) for (let y = 0; y < 22; y++) {
+        const edge = x < 2 || x >= LW - 2 || y < 2 || y >= 20 || x % 12 === 0, diag = ((x + y) % 4 === 0) || ((x - y + 400) % 4 === 0);
+        if (edge) m.set(x, y, 0, fr); else if (diag) m.set(x, y, 0, wire);
+      }
+      const leaf = AF.modelMesh(m, { vs: 1 / 8, anchor: [0.5, 0, 0.5], cast: false }); leaf.name = 'crew-gate'; leaf.matrixAutoUpdate = false; AF.scene.add(leaf);
+      G.leaf = leaf; G.col = AF.addCollider(G.x0, 0.25, z - 0.1, G.x1, 3.25, z + 0.35, 'crew-gate');
+      G.set(0);
+    }
     for(const x of [-497,-493,-481]) W.fill(x,0.25,43,x+0.25,1,43.25,brass);
     W.clear(-460,0.5,69.25,-457,3.5,70.5);
     W.clear(-460,0.5,62,-457,3.5,69.25);
-    sign('APRON',-458.5,3.8,69.25,0.1);
+    // the apron door is staff-only: a locked steel leaf (airside is reached through the crew gate, never through the terminal)
+    W.fill(-460,0.5,69.5,-457,3.5,69.75,steel); W.fill(-458.75,1.5,69.25,-458.5,2,69.5,brass);
+    sign('STAFF ONLY',-458.5,3.8,69.25,0.1);
     W.fill(-461,0.25,70,-456.5,0.5,87,cream);
     for(const x of [-523,-513,-503]) {paint(x-3,39,x+3,43,()=>yellow);sign('TAXI',x,0.6,43.25,0.08);}
     paint(-525,21,-466,30,()=>asph[0]);paint(-467,27,-460,39,()=>asph[0]);
@@ -292,6 +339,19 @@ try {
     W.fill(-529.25,0.25,36.5,-529,2.75,36.75,steel);
     AF.addLabel('Westgate Airfield', (A.x0 + A.x1) / 2, 150, 'place');
     A.buildMs = Math.round(performance.now() - t0);
+  });
+  // the crew gate: slides open while someone allowed airside is near it (on foot or driving), shuts once nobody is around; never
+  // closes on a body standing in the gap. Local to each client (a collider + a mesh), like every door.
+  AF.onTick('airfield-crew-gate', 446, (dt) => {
+    const G = A.crewGate; if (!G.col) return;
+    const P = AF.player, car = AF.mode === 'drive' && AF.vehicles && AF.vehicles.player, px = car ? car.x : P.x, pz = car ? car.z : P.z;
+    const cx = (G.x0 + G.x1) / 2, d = Math.hypot(px - cx, pz - G.z), near = d < 32 && (AF.mode === 'walk' || !!car);
+    const inGap = px > G.x0 - 0.6 && px < G.x1 + 0.6 && Math.abs(pz - G.z) < (car ? 3.2 : 0.9);
+    const ok = near && AF.airside.ok();
+    const want = ok || (inGap && G.s > 0.5);
+    if (want !== G.want) { G.want = want; if (AF.audio && AF.audio.play && d < 60) AF.audio.play('latch', { x: cx, y: 1.5, z: G.z, vol: 0.8, rate: 0.7 }); }
+    if (want ? G.s < 1 : G.s > 0) G.set(G.s + (want ? dt : -dt) * 0.55);
+    if (near && !ok && d < 7 && !(AF.heist && AF.heist.on) && AF.clock.t - G.denyT > 14) { G.denyT = AF.clock.t; AF.emit('toast', 'Crew gate \u2014 staff only. No uniform, no entry.'); }
   });
   let securityAt = -30, securityZ = 0;
   AF.onTick('airfield-security', 445, (dt, t) => {
@@ -344,11 +404,12 @@ try {
       return AF.walkers.addPath('airport-staff-'+name,[[x,y,z]],{count:1,speed:0,activeRadius:230,looks:[look]});
     };
     for(const [name,x,y,z,col] of [['security',-488.5,0.5,58.7,0x26324e],['lane2',-482,0.5,58.7,0x26324e],['checkin',-534,0.5,49.5,0x3f7f7c],['desk2',-529,0.5,49.5,0x3f7f7c],['cafe',-445,0.5,61.5,0xf3f0e6],['crew1',-566,0.25,92,0xff8a32],['crew2',-375,0.25,98,0xff8a32]])staff(name,x,y,z,col);
+    staff('crewgate',A.crewGate.booth[0]+1.5,0.5,(A.crewGate.booth[1]+A.crewGate.booth[3])/2,0x26324e,'stand',-PI/2);
     A.marshallers=[staff('marshal1',-450,0.25,79,0xff8a32,'marshal',0),staff('marshal2',-360,0.25,79,0xff8a32,'marshal',0)];
   });
   AF.onBuild('airfield-staff',826,()=>{
     const spawn=(id,name,role,x,y,z,lines)=>AF.npc.spawn({id,name,role,x,y,z,visual:false,look:{},greet:[lines[0]],lines:[lines]});
-    A.staff=[spawn('airport-security','Officer Reed','Airport security',-488.5,0.5,58.7,['Go right through... just keep any firearms holstered.','Enjoy your flight. The apron door is beyond the lounge.']),spawn('airport-checkin','Mabel','Check-in agent',-534,0.5,49.5,['Welcome to Westgate. I can check that bag for you.','Departures through the checkpoint, gates straight ahead.']),spawn('airport-crew','Otto','Ground crew',-566,0.25,92,['The Sky Cub is ready for you.','Keep clear of the taxiway when an airliner arrives.'])];
+    A.staff=[spawn('airport-security','Officer Reed','Airport security',-488.5,0.5,58.7,['Go right through... just keep any firearms holstered.','The lounge is as far as passengers go. The apron is crew only \u2014 the crew gate is out by the hangars.']),spawn('airport-checkin','Mabel','Check-in agent',-534,0.5,49.5,['Welcome to Westgate. I can check that bag for you.','Departures through the checkpoint, gates straight ahead.']),spawn('airport-crew','Otto','Ground crew',-566,0.25,92,['The Sky Cub is ready for you.','Keep clear of the taxiway when an airliner arrives.'])];
   });
   AF.onTick('airfield-boarding',304,()=>{
     const camera=AF.camera.position;
@@ -403,7 +464,7 @@ try {
     }
     return {ok:gaps===0&&AF.land.coastS(-650,246)<-12,info:probes+' probes, '+gaps+' gaps; sea closure z246'};
   });
-  AF.test('airfield: forecourt to apron succeeds only through security', () => {
+  AF.test('airfield: airside is staff-only — terminal, bridges and the shut crew gate block; the open crew gate lets through', () => {
     const clear=(points)=>{
       for(let index=1;index<points.length;index++) {
         const before=points[index-1],at=points[index],steps=Math.ceil(Math.hypot(at[0]-before[0],at[1]-before[1])*4);
@@ -411,9 +472,16 @@ try {
       }
       return true;
     };
-    const through=clear([[-491,38],[-491,50],[-490,50],[-490,61],[-458.5,61],[-458.5,85]]);
-    const west=clear([[-550,28],[-550,80]]),east=clear([[-430,38],[-430,85]]);
-    return {ok:through&&!west&&!east,info:'terminal '+through+', bypass west/east '+west+'/'+east};
+    const G=A.crewGate,s0=G.s,want0=G.want;
+    try{
+      const lounge=clear([[-491,38],[-491,50],[-490,50],[-490,61],[-458.5,61]]);
+      const terminal=clear([[-458.5,61],[-458.5,85]]);
+      const bridges=[-448,-358].every((x)=>AF.boxBlocked(x,1.75,83.1,0.3,1.7));
+      G.set(0);const shut=clear([[-552,20],[-552,80]]);
+      G.set(1);const open=clear([[-552,12],[-552,80]]);
+      const east=clear([[-430,38],[-430,85]]);
+      return {ok:lounge&&!terminal&&bridges&&!shut&&open&&!east,info:'lounge '+lounge+', terminal apron door '+terminal+', bridge doors shut '+bridges+', crew gate shut '+shut+' / open '+open+', east bypass '+east};
+    }finally{G.set(s0);G.want=want0;}
   });
 }
 

@@ -2217,6 +2217,53 @@ AF.solidAt = (x, y, z) => {
   if (a) for (const b of a) if (x >= b.x0 && x < b.x1 && y >= b.y0 && y < b.y1 && z >= b.z0 && z < b.z1) return true;
   return false;
 };
+// first solid along a ray (unit direction d): distance t in [t0, t1), or Infinity. Exact: walks every 0.25 m cell the ray crosses
+// (voxels + the ground) and slab-tests the collider boxes of every 8 m bucket it crosses, so a one-voxel wall or a thin collider
+// can never be skipped (a fixed-step march misses anything thinner than its step).
+const slabT = (b, ox, oy, oz, dx, dy, dz, t0) => {
+  let tn = t0, tf = Infinity;
+  if (dx) { let a = (b.x0 - ox) / dx, c = (b.x1 - ox) / dx; if (a > c) { const s = a; a = c; c = s; } if (a > tn) tn = a; if (c < tf) tf = c; } else if (ox < b.x0 || ox >= b.x1) return Infinity;
+  if (dy) { let a = (b.y0 - oy) / dy, c = (b.y1 - oy) / dy; if (a > c) { const s = a; a = c; c = s; } if (a > tn) tn = a; if (c < tf) tf = c; } else if (oy < b.y0 || oy >= b.y1) return Infinity;
+  if (dz) { let a = (b.z0 - oz) / dz, c = (b.z1 - oz) / dz; if (a > c) { const s = a; a = c; c = s; } if (a > tn) tn = a; if (c < tf) tf = c; } else if (oz < b.z0 || oz >= b.z1) return Infinity;
+  return tn <= tf ? tn : Infinity;
+};
+AF.rayHit = (ox, oy, oz, dx, dy, dz, t0, t1) => {
+  let best = t1;
+  // colliders: a 2D walk over the 8 m buckets
+  {
+    const sx = ox + dx * t0, sz = oz + dz * t0, ax = Math.abs(dx), az = Math.abs(dz);
+    let ci = Math.floor(sx / 8), ck = Math.floor(sz / 8);
+    const si = dx > 0 ? 1 : -1, sk = dz > 0 ? 1 : -1;
+    let ti = ax > 1e-9 ? t0 + (dx > 0 ? (ci + 1) * 8 - sx : sx - ci * 8) / ax : Infinity, tk = az > 1e-9 ? t0 + (dz > 0 ? (ck + 1) * 8 - sz : sz - ck * 8) / az : Infinity;
+    const di = ax > 1e-9 ? 8 / ax : Infinity, dk = az > 1e-9 ? 8 / az : Infinity;
+    for (let n = 0, tc = t0; n < 512 && tc < best; n++) {
+      const a = AF.colliders.get(ci * 100000 + ck);
+      if (a) for (const b of a) { const t = slabT(b, ox, oy, oz, dx, dy, dz, t0); if (t < best) best = t; }
+      if (ti < tk) { tc = ti; ti += di; ci += si; } else { tc = tk; tk += dk; ck += sk; }
+    }
+  }
+  // voxels + ground: Amanatides-Woo over the block grid
+  {
+    const gx = (ox + dx * t0 - X0) * INV, gy = (oy + dy * t0 - Y0) * INV, gz = (oz + dz * t0 - Z0) * INV;
+    let ix = Math.floor(gx), iy = Math.floor(gy), iz = Math.floor(gz);
+    const ax = Math.abs(dx) * INV, ay = Math.abs(dy) * INV, az = Math.abs(dz) * INV;
+    const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1;
+    let tx = ax > 1e-9 ? t0 + (dx > 0 ? ix + 1 - gx : gx - ix) / ax : Infinity, ty = ay > 1e-9 ? t0 + (dy > 0 ? iy + 1 - gy : gy - iy) / ay : Infinity, tz = az > 1e-9 ? t0 + (dz > 0 ? iz + 1 - gz : gz - iz) / az : Infinity;
+    const ex = ax > 1e-9 ? 1 / ax : Infinity, ey = ay > 1e-9 ? 1 / ay : Infinity, ez = az > 1e-9 ? 1 / az : Infinity;
+    for (let n = 0, t = t0; n < 16384 && t < best; n++) {
+      if (iy < W.hB(ix, iz) + GOFF) { best = t; break; }
+      const c = W.get(ix, iy, iz); if (c && AF.PAL.solid[c]) { best = t; break; }
+      if (tx < ty) { if (tx < tz) { t = tx; tx += ex; ix += sx; } else { t = tz; tz += ez; iz += sz; } }
+      else if (ty < tz) { t = ty; ty += ey; iy += sy; } else { t = tz; tz += ez; iz += sz; }
+    }
+  }
+  return best < t1 ? best : Infinity;
+};
+// is the straight segment a -> b clear of anything solid?
+AF.segClear = (x0, y0, z0, x1, y1, z1) => {
+  const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0, L = Math.hypot(dx, dy, dz);
+  return L < 1e-6 || AF.rayHit(x0, y0, z0, dx / L, dy / L, dz / L, 0, L) === Infinity;
+};
 // AABB (centre x,z; feet y; half-width r; height h) overlaps anything solid?
 AF.boxBlocked = (x, y, z, r, h) => {
   const bx0 = W.bx(x - r), bx1 = W.bx(x + r - 1e-4), bz0 = W.bz(z - r), bz1 = W.bz(z + r - 1e-4), by0 = W.by(y + 1e-3), by1 = W.by(y + h);

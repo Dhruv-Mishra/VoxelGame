@@ -180,6 +180,7 @@ try {
   const owns = (slot, id) => id === 'none' || S.wear.includes(slot + ':' + id) || cur(slot, base()) === id;
   const wear = (fn) => { const L = JSON.parse(JSON.stringify(myLook())); fn(L); S.looks[AF.friends.current.id] = L; AF.player.setLook(L); AF.saveSoon(); };
   const putOn = (slot, id) => wear((L) => {
+    delete L.uniform;
     if (slot === 'top') L.top.style = id; else if (slot === 'bottom') L.bottom.style = id;
     else if (slot === 'glasses') { if (id === 'on') L.glasses = base().glasses ?? 0x2a2a2e; else delete L.glasses; }
     else if (id === 'none') delete L[slot]; else { L[slot] = id; if (slot === 'hat' && L.hatCol == null) L.hatCol = 0x2d4270; }
@@ -198,7 +199,10 @@ try {
     const L = myLook();
     if (tab === TABS.length) return PAINT.flatMap(([k, name]) => COLS.map((col, i) => ({ name: i ? '' : name, sw: hex(col), tag: ' ', act: () => wear((Q) => { if (k === 'top') Q.top.col = col; else if (k === 'top2') { Q.top.col2 = col; if (Q.top.print != null) Q.top.print = col; } else if (k === 'bottom') Q.bottom.col = col; else Q[k] = col; }) })));
     const slot = TABS[tab][0];
-    return WEAR[slot].map(([id, name]) => { const on = cur(slot, L) === id, have = owns(slot, id); return { name, desc: have ? '' : 'Buy it at an outfitter', tag: on ? 'Wearing' : have ? 'Wear' : 'Locked', off: !have || on, act: () => putOn(slot, id) }; })
+    // the pilot's uniform kept from the Harbour Trust Job: Westgate's crew gate opens for it (47 AF.airside)
+    const pilot = tab === 0 && S.wear.includes('uniform:pilot') && AF.heistSets && AF.heistSets.uniform ? [{ name: 'Pilot\u2019s uniform', desc: 'Opens Westgate\u2019s crew gate', tag: L.uniform === 'pilot' ? 'Wearing' : 'Wear', off: L.uniform === 'pilot',
+      act: () => wear((Q) => { const U = AF.heistSets.uniform(Q, 'pilot'); for (const k of Object.keys(Q)) delete Q[k]; Object.assign(Q, U); }) }] : [];
+    return pilot.concat(WEAR[slot].map(([id, name]) => { const on = cur(slot, L) === id, have = owns(slot, id); return { name, desc: have ? '' : 'Buy it at an outfitter', tag: on ? 'Wearing' : have ? 'Wear' : 'Locked', off: !have || on, act: () => putOn(slot, id) }; }))
       .concat(tab === 0 ? [{ name: 'Original outfit', desc: 'Back to your usual look', tag: 'Reset', act: () => { delete S.looks[AF.friends.current.id]; AF.player.setLook(base()); AF.saveSoon(); } }] : []);
   }, TABS.map((t) => t[1]).concat('Colours'));
   AF.on('friend', (c) => { const L = S.looks[c.id]; if (L) AF.player.setLook(L); });
@@ -332,7 +336,7 @@ try {
     }
     // the wardrobe in every friend's front room
     for (const c of AF.friends.cast) { const h = AF.friends.homeOf(c.id); if (h) counter(h.spawn.x + Math.cos(h.spawn.yaw) * 1.4, h.spawn.y, h.spawn.z - Math.sin(h.spawn.yaw) * 1.4, 'Wardrobe', wardrobe, { kind: 'home', can: () => AF.friends.current === c, prio: 0.6 }); }
-    counter(-534, 0.5, 47.6, 'Westgate check-in', () => AF.emit('dialogue', { name: 'Mabel', role: 'Check-in agent', lines: ['No bags? Then you are all set, dear.', 'The planes on the apron are free to take up \u2014 just mind the airliners on the taxiway.'] }), { kind: 'ticket' });
+    counter(-534, 0.5, 47.6, 'Westgate check-in', () => AF.emit('dialogue', { name: 'Mabel', role: 'Check-in agent', lines: ['No bags? Then you are all set, dear.', 'The planes on the apron are crew only now \u2014 a pilot in uniform walks straight through the crew gate by the hangars.'] }), { kind: 'ticket' });
     if (AF.ui.map) {
       const map = AF.ui.map, ICON = { food: '#e9a35a', guns: '#e05a4a', wear: '#b68ae0', game: '#f3c84b', ticket: '#7ab8e8', paint: '#f2c24a', sell: '#7cd6a8' };
       const draw = (g, to, mini) => {

@@ -3,7 +3,8 @@ try {
 // ===== 81-heist-sets: the people, props and stealth zones of the Harbour Trust Job outside the bank (OWNER: game) =====
 // Built late (940) so the island, liner, zoo den and Corsair Key have published their spots (AF.island.heist, AF.liner.spots,
 // AF.den.spots, AF.key.spots); every lookup has a fallback so the job still runs if one of them is missing. 81-heist drives it all.
-//   shop   Kovac's tailor shop: a clerk on a loop (counter -> rail -> window); the uniform rail behind the counter
+//   shop   Kovac's tailor shop after closing: a padlocked night grille, a night watchman on a loop (window -> counter -> rail), the
+//          uniform rail behind the counter
 //   ezra   Ezra Quill, forger, in the back of Harbour Stationers
 //   gate   the Westgate crew gate: a booth, a barrier and its guard
 //   tunnel the Moretti smugglers' tunnel on Serena Isle: armed men on patrol, the arms cache
@@ -44,6 +45,7 @@ try {
     else if (kind === 'dealer') { L.top = { style: 'vest', col: 0xf4f0e6, col2: 0x8a1424 }; L.bottom = { style: 'jeans', col: 0x141418 }; L.shoe = 0x111114; }
     else if (kind === 'keeper') { L.top = { style: 'shirt', col: 0x8a7a4a, col2: 0x5a4a2a }; L.bottom = { style: 'jeans', col: 0x5a5030 }; L.hat = 'cap'; L.hatCol = 0x5a4a2a; L.shoe = 0x3a2a1a; }
     else if (kind === 'night') { L.top = { style: 'shirt', col: 0x1a1a1e, col2: 0x1a1a1e }; L.bottom = { style: 'jeans', col: 0x16161a }; L.shoe = 0x0c0c0e; }
+    if (kind) L.uniform = kind; else delete L.uniform;   // 47-airfield's crew gate reads look.uniform
     return L;
   };
   const npc = (id, name, role, look, at, yaw, o = {}) => {
@@ -68,13 +70,31 @@ try {
     const vx = d ? d.x - Math.sin(d.yaw) * 1.6 : -20, vz = d ? d.z - Math.cos(d.yaw) * 1.6 : 100, vp = free(vx, vz, (d ? d.y : 0.5) + 2, 4), vyaw = d ? d.yaw + PI : 0;
     A.vera = vp; A.veraYaw = vyaw;
     const c0 = free(vp.x + Math.sin(vyaw) * 2.2, vp.z + Math.cos(vyaw) * 2.2, vp.y + 2, 4); A.c0 = { x: c0.x, y: c0.y, z: c0.z, yaw: vyaw + PI };
-    // ---------------------------------------------------------------- the tailor's (Kovac, west Old Town): the clerk loops counter -> rail -> window
+    // ---------------------------------------------------------------- the tailor's (Kovac, west Old Town) after closing: a padlocked night
+    // grille across the doorway, a night watchman on a loop (window -> counter -> rail), the uniform rail behind the counter
     const tb = AF.buildings.find((b) => b.id === 'res-rs-b2-w6');
     const tx = tb ? tb.box[0] : -232, tz = tb ? tb.box[2] : -101, ty = AF.W.groundY(-226, -95) + 0.25;
-    A.shopDoor = free(tb && tb.doors[0] ? tb.doors[0].x - 1.6 : -234.6, tb && tb.doors[0] ? tb.doors[0].z : -90, ty + 2, 4); A.shopDoor.yaw = PI / 2;
+    const td = tb && tb.doors[0];
+    A.shopDoor = free(td ? td.x - 1.6 : -234.6, td ? td.z : -90, ty + 2, 4); A.shopDoor.yaw = PI / 2;
     A.rail = { x: tx + 11.4, y: ty, z: tz + 1.3 };
     A.shopBox = [tx - 1, ty - 1, tz - 1, tx + 14, ty + 5, tz + 14];
-    const clerk = walker('clerk', 'Clerk', [[tx + 10.4, ty, tz + 7.1], [tx + 10.6, ty, tz + 2.2], [tx + 3.2, ty, tz + 4.2]], { speed: 0.85, mode: 'loop', dwell: [{ i: 0, t: 7 }, { i: 1, t: 6 }, { i: 2, t: 9 }] }, crowdLook('clerk', 'f', rng, 0x7a2a3a, 0x2a2a30));
+    HS.shopId = tb ? tb.id : null;
+    walker('watch', 'Night watchman', [[tx + 3.2, ty, tz + 4.2], [tx + 10.4, ty, tz + 7.1], [tx + 10.6, ty, tz + 2.2]], { speed: 0.8, mode: 'loop', dwell: [{ i: 0, t: 8 }, { i: 1, t: 5 }, { i: 2, t: 4 }] }, crowdLook('worker', 'm', rng, 0x2a3550, 0x22222a));
+    // the night grille: a steel lattice + padlock filling the doorway (a mesh + a collider; open = collider flattened, leaf hidden)
+    {
+      const gz = td ? td.z + 0.125 : -90, gx = tx + 0.125, steel = col(0x3a3e44, { metal: 0.8, rough: 0.4 }), brass = col(0xc9a24a, { metal: 0.9, rough: 0.3 });
+      const m = new AF.Model(14, 24, 2);
+      for (let x = 0; x < 14; x += 2) m.box(x, 0, 0, x + 1, 24, 1, steel);
+      for (const y of [0, 7, 15, 23]) m.box(0, y, 0, 14, y + 1, 1, steel);
+      for (let k = 0; k < 14; k++) { m.box(k, 1 + k, 1, k + 1, 2 + k, 2, steel); m.box(13 - k, 1 + k, 1, 14 - k, 2 + k, 2, steel); }
+      m.box(5, 9, 1, 9, 12, 2, brass); m.box(6, 12, 1, 8, 14, 2, steel);
+      const mesh0 = mesh(m, 1 / 8, [0.5, 0, 0.5], gx, ty, gz, PI / 2); mesh0.visible = false;
+      const c = AF.addCollider(gx - 0.2, ty, gz - 0.875, gx + 0.2, ty + 3, gz + 0.875, 'heist-shop-grille');
+      HS.props.grille = mesh0;
+      HS.grille = (shut) => { c.y1 = shut ? ty + 3 : ty + 1e-6; mesh0.visible = !!shut; };
+      HS.grille(false);
+      A.grille = { x: gx - 0.9, y: ty, z: gz };
+    }
     // the rail of finished uniforms
     { const m = new AF.Model(16, 16, 4), steel = col(0x8a8f96, { metal: 0.8 }), navy = col(0x1c2848), gold = col(0xd8b04a, { metal: 0.7 }); m.box(0, 0, 1, 1, 16, 3, steel); m.box(15, 0, 1, 16, 16, 3, steel); m.box(0, 15, 1, 16, 16, 3, steel);
       for (let k = 0; k < 5; k++) { m.box(2 + k * 2.6, 5, 0, 4 + k * 2.6, 15, 4, navy); m.box(2 + k * 2.6, 13, 0, 4 + k * 2.6, 14, 4, gold); } HS.props.rail = mesh(m, 1 / 8, [0.5, 0, 0.5], A.rail.x, A.rail.y, A.rail.z, PI / 2); HS.props.rail.visible = false; }
@@ -83,16 +103,11 @@ try {
     A.ezra = st ? { x: st.box[0] + 7.8, y: 0.5, z: st.box[2] + 10.5 } : { x: 45.8, y: 0.5, z: 98.5 };
     A.ezraDoor = free(st && st.doors[0] ? st.doors[0].x : 43, st && st.doors[0] ? st.doors[0].z - 1.6 : 85.4, 3, 4); A.ezraDoor.yaw = 0;
     npc('ezra', 'Ezra Quill', 'Printer \u00b7 papers of every kind', LOOKS.ezra, A.ezra, -PI / 2, { greet: ['Shop\u2019s shut. Unless Vera sent you.'], lines: [['Paper, ink, a steady hand. That\u2019s all a man needs.']] });
-    // ---------------------------------------------------------------- the Westgate crew gate (by the terminal's east end, on the apron edge)
-    const AIR = AF.PLAN.west.air, gx = AIR.terminal[2] + 8, gz = AIR.apron[1] - 2;
-    A.gate = free(gx, gz, 12, 20); A.gateYaw = PI;
-    A.gateMeet = free(gx, gz - 2.6, 12, 20); A.gateMeet.yaw = 0;
-    { const m = new AF.Model(14, 22, 14), wall = col(0xe8e4d8), roof = col(0x2a3550), glass = AF.col('glass'), red = col(0xc02a2a), white = col(0xf2f2f2);
-      m.box(0, 0, 0, 14, 18, 14, wall); m.box(1, 8, 0, 13, 15, 14, glass); m.box(-0, 18, -0, 14, 20, 14, roof); m.box(2, 20, 2, 12, 22, 12, roof);
-      HS.props.booth = mesh(m, 1 / 8, [0.5, 0, 0.5], A.gate.x + 2.2, A.gate.y, A.gate.z + 0.6, 0); HS.props.booth.visible = true;
-      AF.addCollider(A.gate.x + 1.3, A.gate.y, A.gate.z - 0.3, A.gate.x + 3.1, A.gate.y + 2.6, A.gate.z + 1.5, 'heist-booth');
-      const b = new AF.Model(56, 3, 2); for (let x = 0; x < 56; x++) b.box(x, 0, 0, x + 1, 3, 2, (x >> 3) & 1 ? red : white);
-      HS.props.barrier = mesh(b, 1 / 8, [0, 0.5, 0.5], A.gate.x + 1.2, A.gate.y + 1.0, A.gate.z - 0.6, PI / 2); HS.props.barrier.visible = true; }
+    // ---------------------------------------------------------------- the Westgate crew gate: 47-airfield builds it in the perimeter fence
+    // (booth, sliding gate); the heist's gate guard stands at its barrier on the landside verge
+    const AIR = AF.PLAN.west.air, CG = AIR.crewGate;
+    if (CG) { A.gate = { x: CG.guard.x, y: CG.guard.y, z: CG.guard.z }; A.gateYaw = CG.guard.yaw; }
+    else { A.gate = free(AIR.terminal[0] - 4, AIR.terminal[1] - 14, 12, 20); A.gateYaw = PI; }
     npc('gate', 'Gate guard', 'Westgate crew gate', LOOKS.gate, A.gate, A.gateYaw, { greet: ['Crew gate. Papers ready, please.'], lines: [['Crew and pilots only past this point.']] });
     // ---------------------------------------------------------------- Serena Isle: Kit on the terrace, the smugglers' tunnel
     const I = WP.island, IH = (AF.island && AF.island.heist) || {};
@@ -177,8 +192,11 @@ try {
       HS.props.crate = mesh(m, 1 / 8, [0.5, 0, 0.5], A.crate.x, A.crate.y, A.crate.z, A.crate.yaw || 0); HS.props.crate.visible = false; }
     HS.ready = true;
   });
-  // the clerk + the guards only walk while their scene is on (81-heist toggles them)
+  // the watchman + the guards only walk while their scene is on (81-heist toggles them)
   HS.show = (key, on) => { const p = WKR[key]; if (p) p.enabled = !!on; };
   HS.showNpc = (key, on) => { const n = NPC[key]; if (n) { AF.npc.setHidden(n, !on); if (!on && n.root) n.root.rotation.x = 0; } };
+  // Kovac's is shut while the burglary is on: no shopkeepers at its counters (55's extras ask)
+  HS.shopShut = false;
+  { const prev = AF.closedAt; AF.closedAt = (b) => (HS.shopShut && b === HS.shopId) || (prev ? prev(b) : false); }
 }
 } catch (e) { AF.partError('81-heist-sets.js', e); }
