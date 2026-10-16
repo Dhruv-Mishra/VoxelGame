@@ -63,7 +63,33 @@ try {
     // the finale's stage: where Vera and Silas wait, outside the hangar doors
     KEY.spots.stash = { x: H.x - 4, y: H.y, z: H.z - 15 };
     KEY.spots.land = { x: H.x - 40, y: strip.y, z: strip.z + strip.w / 2 + 4, yaw: PI / 2 };
-    KEY.sites = [hangar, apron, villa, light, bar];
+    // ---- the finale's arena: the hangar front and the yard east of it down to the jetty, dressed with hard cover (sandbags,
+    //      fuel drums, crates, a fuel bowser, stacked containers); every piece is a merged outland prop with its own collider
+    const yard = site('Corsair Key Yard', H.x + 40, H.z + 2, 14, 12, H.y);
+    const sandbag = geometry('key-sandbags', 16, 4, 4, (m) => { for (let x = 0; x < 16; x++) for (let y = 0; y < 4; y++) m.box(x, y, (x + y) % 2 ? 0 : 1, x + 1, y + 1, 4, (x + y * 3) % 4 ? sand : cream); }, 0.25);
+    const container = (key, col) => geometry(key, 24, 10, 10, (m) => { m.box(0, 0, 0, 24, 10, 10, col); for (let x = 1; x < 24; x += 2) { m.box(x, 1, 0, x + 1, 9, 1, C.dark); m.box(x, 1, 9, x + 1, 9, 10, C.dark); } m.box(0, 9, 0, 24, 10, 10, C.dark); m.box(23, 1, 1, 24, 9, 9, C.white); }, 0.25);
+    const red = container('key-container-r', rust), blue = container('key-container-b', navy), teal = container('key-container-t', C.teal);
+    const bowser = geometry('key-fuel-bowser', 28, 12, 10, (m) => { m.box(0, 0, 1, 28, 2, 9, C.dark); m.box(20, 2, 1, 28, 10, 9, C.white); m.box(21, 6, 1, 28, 9, 2, C.win); m.box(1, 2, 1, 19, 10, 9, terra); m.box(1, 10, 3, 19, 11, 7, C.white); for (const x of [3, 15, 23]) for (const z of [0, 9]) m.box(x, 0, z, x + 3, 3, z + 1, C.dark); }, 0.25);
+    const drum = block('key-drum', 1, 2, 1, C.coral), crate = block('key-crate', 4, 4, 4, C.wood);
+    const ammo = geometry('key-weapons-crate', 13, 6, 7, (m) => { m.box(0, 0, 0, 13, 6, 7, paint(0x4d5a35)); m.box(0, 5, 0, 13, 6, 7, C.dark); m.box(5, 2, 0, 8, 4, 1, C.gold); for (const x of [0, 12]) m.box(x, 0, 0, x + 1, 6, 7, C.dark); }, 0.125);
+    // hangar front: sandbag nests at both door corners, the weapons crate by the door, drums
+    prop(hangar, sandbag, -14, -9.5); prop(hangar, sandbag, 14, -9.5); prop(hangar, sandbag, 16.5, -7.5, { rot: 1 });
+    prop(hangar, ammo, 5, -8.6);
+    for (const [dx, dz] of [[17.5, -11], [18.3, -11.2], [17.9, -10.4]]) prop(hangar, drum, dx, dz);
+    // the yard: the bowser, two container stacks, crates and drums, sandbags facing the jetty
+    prop(yard, bowser, -4, -6); prop(yard, red, 8, 6); prop(yard, blue, 8, 6, { y: yard.y + 2.5 }); prop(yard, teal, -8, 9, { rot: 1 }); prop(yard, red, -8, 9, { rot: 1, y: yard.y + 2.5 });
+    prop(yard, crate, 4, -2); prop(yard, crate, 6.2, -2); prop(yard, crate, 5.1, -2, { y: yard.y + 2 }); prop(yard, crate, -11, -1);
+    for (const [dx, dz] of [[12, -5], [12.8, -5.2], [12.4, -4.4], [-2, 4], [-1.2, 4.3]]) prop(yard, drum, dx, dz);
+    prop(yard, sandbag, 11, 1, { rot: 1 }); prop(yard, sandbag, 0, 11);
+    AF.addLight({ x: yard.x, y: yard.y + 6, z: yard.z, color: 0xffd8a0, intensity: 1.3, range: 18, kind: 'street' });
+    // spots for 81-heist: arena centre, goon spawns round the edges (strip end, west apron, behind the hangar, beach, jetty),
+    // the weapons crate, Silas's run from the hangar door down to the jetty
+    const freeAt = (x, z) => { for (let r = 0; r < 10; r += 0.75) for (let a = 0; a < 12; a++) { const px = x + Math.cos(a / 12 * PI * 2) * r, pz = z + Math.sin(a / 12 * PI * 2) * r; if (O.h(px, pz) < 0.6) { if (!r) break; continue; } const py = AF.surfaceBelow(px, pz, ky(px, pz) + 4, 8); if (!AF.boxBlocked(px, py + 0.05, pz, 0.4, 1.8)) return { x: +px.toFixed(2), y: py, z: +pz.toFixed(2) }; if (!r) break; } return null; };
+    const spawns = [[H.x + 42, strip.z - 6], [H.x + 20, strip.z - 9], [H.x - 45, H.z - 4], [H.x - 38, H.z + 8], [H.x - 8, H.z + 20], [H.x + 18, H.z + 20], [H.x + 58, H.z - 6], [H.x + 60, H.z + 8], [K.dock.x - 4, K.dock.z + 6], [K.dock.x + 2, K.dock.z - 6]].map(([x, z]) => freeAt(x, z)).filter(Boolean);
+    const jet = KEY.spots.jetty, run = [[H.x, H.z - 9.5], [H.x + 22, H.z - 13], [H.x + 42, H.z - 9], [H.x + 57, H.z - 8], [K.dock.x - 6, K.dock.z - 12], [K.dock.x, K.dock.z]].map(([x, z]) => { const y = AF.surfaceBelow(x, z, ky(x, z) + 4, 8); return [+x.toFixed(2), y, +z.toFixed(2)]; });
+    run.push([+jet.x.toFixed(2), jet.y, +jet.z.toFixed(2)]);
+    KEY.spots.fight = { centre: { x: H.x + 18, y: H.y, z: H.z - 4 }, goonSpawns: spawns, crate: { x: H.x + 5, y: H.y, z: H.z - 8.6, yaw: PI }, silasRun: run };
+    KEY.sites = [hangar, apron, villa, light, bar, yard];
     AF.addLabel('Corsair Key', K.cx, K.cz - 8, 'place');
   });
   // a Cub on the apron (crashes tow it back here), and the approach guidance knows the strip
@@ -71,6 +97,14 @@ try {
     if (!K || !AF.planes || !AF.planes.make) return;
     KEY.plane = AF.planes.make('cub', K.hangar.x - 18, K.airstrip.z + K.airstrip.w / 2 + 6, -PI / 2);
     AF.planes.runways.push(K.airstrip);
+  });
+  AF.test('key: the finale arena has cover, goon spawns round the edges and a clear run from the hangar to the jetty', () => {
+    const F = KEY.spots.fight; if (!F) return { ok: false, info: 'no fight spots' };
+    const yard = KEY.sites.find((q) => q.name === 'Corsair Key Yard'), cover = (yard ? yard.props.length : 0) + KEY.sites[0].props.length;
+    const open = (p) => !AF.boxBlocked(p.x ?? p[0], (p.y ?? p[1]) + 0.05, p.z ?? p[2], 0.35, 1.7);
+    const spawns = F.goonSpawns.filter(open).length, run = F.silasRun;
+    let blocked = 0; for (let i = 1; i < run.length; i++) for (let t = 0; t <= 1; t += 0.1) { const x = AF.lerp(run[i - 1][0], run[i][0], t), z = AF.lerp(run[i - 1][2], run[i][2], t); let y = AF.surfaceBelow(x, z, Math.max(run[i - 1][1], run[i][1]) + 1, 4); for (const dx of [-0.3, 0.29]) for (const dz of [-0.3, 0.29]) y = Math.max(y, AF.surfaceBelow(x + dx, z + dz, y + 0.55, 1)); if (AF.boxBlocked(x, y + 0.05, z, 0.3, 1.7)) blocked++; }
+    return { ok: cover >= 20 && F.goonSpawns.length >= 8 && spawns === F.goonSpawns.length && !blocked && !!KEY.spots.stash && !!KEY.spots.land, info: 'cover props ' + cover + ', spawns ' + spawns + '/' + F.goonSpawns.length + ', blocked run samples ' + blocked };
   });
   AF.test('key: Corsair Key rises from the sea with a flat, clear strip and its sites', () => {
     const s = K.airstrip; let lo = Infinity, hi = -Infinity, hits = 0;

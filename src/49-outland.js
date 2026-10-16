@@ -10,7 +10,7 @@ const terrainBuf = O.terrainBuf;
 R.scratchBytes = terrainBuf.p.byteLength + terrainBuf.uv.byteLength + terrainBuf.pal.byteLength + terrainBuf.an.byteLength + terrainBuf.idx.byteLength;
 function node(x, z, level, parent) {
   const size = 32 * 2 ** level;
-  const entry = { x, z, level, size, parent, children: null, meshes: [], ins: [], outs: [], rim: new Float32Array(260), ready: false, split: false, busy: false, fadeE: null, used: stamp, bytes: 0, queued: false, dirty: false, hx: 1e9, hz: 1e9, hh: 0, hx2: 1e9, hz2: 1e9, hh2: 0, hk: 0 };
+  const entry = { x, z, level, size, parent, children: null, meshes: [], ins: [], outs: [], rim: new Float32Array(260), ready: false, split: false, busy: false, fadeE: null, used: stamp, bytes: 0, queued: false, dirty: false, hx: 1e9, hz: 1e9, hh: 0, hx2: 1e9, hz2: 1e9, hh2: 0, hk: 0, isle: undefined };
   entry.finish = () => { entry.busy = false; };
   nodes.push(entry); return entry;
 }
@@ -92,9 +92,12 @@ function frozen(entry) {
   return false;
 }
 // split wanted? (hysteresis: a split tile merges back only 25 % farther out; reach > 1 = the prefetch radius)
+// tiles that may split: the play area, and the islands far out at sea (the open sea between has no terrain tiles at all)
+const isleRects = [plan.island, plan.key].filter(Boolean).map((isle) => [isle.cx - isle.rx * 1.45 - 8, isle.cz - isle.rz * 1.45 - 8, isle.cx + isle.rx * 1.45 + 8, isle.cz + isle.rz * 1.45 + 8]);
+const nearIsle = (x0, z0, size) => isleRects.some((r) => x0 < r[2] && x0 + size > r[0] && z0 < r[3] && z0 + size > r[1]);
 function wants(entry, cp, split, reach = 1) {
   if (entry.level <= 0) return false;
-  const horizon = entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > 800;
+  const horizon = (entry.x + entry.size < plan.play.x0 || entry.x > plan.play.x1 || entry.z + entry.size < plan.play.z0 || entry.z > plan.play.z1 + 40) && !(entry.isle ??= nearIsle(entry.x, entry.z, entry.size));
   if (horizon) return false;
   const threshold = entry.level === 1 ? 100 * AF.LOD.view : entry.size * AF.LOD.outland;
   return Math.min(distance(entry, cp.x, cp.y, cp.z), distance(entry, ahead.x, cp.y, ahead.z) + 24) < threshold * (split ? 1.25 : 1) * reach;
@@ -356,6 +359,8 @@ AF.onBuild('outland-roots', 497, () => {
   const start = performance.now();
   for (let x = -1484; x < O.bounds.x1; x += 512) for (let z = -1708; z < O.bounds.z1; z += 512) {
     if (x >= W.X0 && x + 512 <= W.x1 && z >= W.Z0 && z + 512 <= W.z1) continue;
+    // past the coast only the islands get terrain (the 10-terrain sea bed lies under the open sea)
+    if (z >= W.z1 + 32 && !nearIsle(x, z, 512)) continue;
     const root = node(x, z, 4, null); roots.push(root);
     const gen = build(root); while (!gen.next().done);
     fade.swap(root, empty, root.meshes);
@@ -430,11 +435,12 @@ AF.test('outland: seam continuity along 200 non-building border samples', () => 
 });
 AF.test('outland: terrain physics on range and island; sea gap and reserved pads', () => {
   let ok = true;
-  for (const coords of [[220, -760], [-60, 600]]) {
+  const I = plan.island, ix = I.cx, iz = I.cz;
+  for (const coords of [[220, -760], [ix, iz]]) {
     const x = coords[0], z = coords[1], y = W.groundY(x, z);
     if (y <= 0 || AF.surfaceBelow(x, z, y + 2, 6) !== y || !AF.boxBlocked(x, y - 0.5, z, 0.1, 1.7) || AF.boxBlocked(x, y + 2, z, 0.1, 1.7)) ok = false;
   }
-  const island = W.groundY(-60, 600), gap = W.groundY(-60, 380), strip = W.groundY(-100, 540), resort = W.groundY(-170, 640);
+  const island = W.groundY(ix, iz), gap = W.groundY(ix, (iz + 300) / 2), strip = W.groundY(-100, I.airstrip.z), resort = W.groundY(I.resort.x, I.resort.z);
   return { ok: ok && island > 0 && gap < -1.25 && strip === 2 && resort === 3, info: 'island ' + island + ', gap ' + gap + ', strip ' + strip + ', resort ' + resort };
 });
 AF.test('outland: bounded resident geometry and single LOD cover', () => {

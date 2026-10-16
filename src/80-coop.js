@@ -18,13 +18,13 @@ try {
   const MODES = ['walk', 'drive', 'fly', 'jetski', 'carousel', 'funride', 'ride', 'ferry-ride', 'row', 'skydive', 'dead', 'passenger', 'photo', 'aerial', 'cine', 'other'];
   const MODE_I = new Map(MODES.map((m, i) => [m, i])), M = Object.fromEntries(MODES.map((m, i) => [m, i]));
   const JP = ['legL', 'legR', 'armL', 'armL', 'armR', 'armR', 'armR', 'chest', 'chest', 'head', 'head'], JA = ['x', 'x', 'x', 'z', 'x', 'y', 'z', 'x', 'y', 'x', 'y'], NJ = JP.length;
-  const HELD = [null, 'keyboard', 'bag', 'dumbbell', 'mic', 'bat', 'pan', 'cutlass', 'guitar', 'revolver', 'shotgun', 'tommy', 'rifle'];
+  const HELD = [null, 'keyboard', 'bag', 'dumbbell', 'mic', 'bat', 'pan', 'cutlass', 'guitar', 'revolver', 'shotgun', 'tommy', 'rifle', 'spistol', 'ssmg', 'lmg'];
   const FRAMES = ['a', 'p', 'b', 'sit', 'work', 'phone', 'chat', 'look', 'hail', 'runA', 'runB'], WF = ['a', 'p', 'b', 'p'];
-  const SND = [null, 'shot', 'shotgun', 'smg', 'rifle'];
+  const SND = [null, 'shot', 'shotgun', 'smg', 'rifle', 'sil', 'sil', 'lmg'];
   const VK_CAR = 1, VK_PLANE = 2, VK_SKI = 3;
   const AK = { carousel: 1, wheel: 2, coaster: 3, train: 4, ferry: 5 };
   const COLORS = ['#ffd24a', '#5ad1ff', '#ff7ab8', '#9dff7a'];
-  const F_VIS = 1, F_SIT = 2, F_TP = 4, F_GROUND = 8, F_AIM = 16, F_DEAD = 32, F_J = 64;
+  const F_VIS = 1, F_SIT = 2, F_TP = 4, F_GROUND = 8, F_AIM = 16, F_DEAD = 32, F_J = 64, F_CROUCH = 128;
   const V_ENGINE = 1, V_DEAD = 2, V_BURN = 4, V_SQUAD = 8, V_GROUND = 16;
   const HIT_KINDS = new Set(['gun', 'melee', 'car', 'boom']);
   const num = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
@@ -225,7 +225,7 @@ try {
     w.u8v(1); w.u8v(N.me); w.u16(seq); w.u32(now);
     const x = root.position.x, y = root.position.y, z = root.position.z, veh = myVeh(), ride = AF.mode === 'passenger' && C.ride.veh, a = anchorOf();
     let fl = 0;
-    if (P.visible) fl |= F_VIS; if (parts.sitting) fl |= F_SIT; if ((x - lastX) ** 2 + (y - lastY) ** 2 + (z - lastZ) ** 2 > 900) fl |= F_TP;
+    if (P.visible) fl |= F_VIS; if (parts.sitting) fl |= F_SIT; if (parts.bent) fl |= F_CROUCH; if ((x - lastX) ** 2 + (y - lastY) ** 2 + (z - lastZ) ** 2 > 900) fl |= F_TP;
     if (P.body && P.body.onGround) fl |= F_GROUND; if (AF.PL.aim) fl |= F_AIM; if (AF.health && AF.health.dead) fl |= F_DEAD;
     lastX = x; lastY = y; lastZ = z; lastYaw = root.rotation.y;
     // joints go while they change, three more times after (a lost packet), and every 8th snapshot
@@ -339,6 +339,8 @@ try {
   const playShot = (wid, hit, mx, my, mz, ex, ey, ez, now) => {
     const FX = AF.fx; if (!FX || !FX.glow) return;
     const cp = AF.camera.position; if ((mx - cp.x) ** 2 + (mz - cp.z) ** 2 > 250000) return;
+    // 77-combat draws the tracer + flash and tells listeners (stealth) a remote shot was heard
+    if (AF.combat && AF.combat.remoteShot) { AF.combat.remoteShot(wid, hit, mx, my, mz, ex, ey, ez); if (now - sndAt > 40) { sndAt = now; AF.sfx.play(SND[wid] || 'shot', mx, mz); } return; }
     FX.burst('flash', mx, my, mz, 1, { size: wid === 2 ? 0.9 : 0.6 }); FX.line(mx, my, mz, ex, ey, ez);
     if (hit === 1) FX.burst('dust', ex, ey, ez, 2); else if (hit === 2) FX.burst('hit', ex, ey, ez, 1); else if (hit === 3) FX.burst('spark', ex, ey, ez, 3, { spread: 4 });
     if (now - sndAt > 40) { sndAt = now; AF.sfx.play(SND[wid] || 'shot', mx, mz); }
@@ -445,8 +447,8 @@ try {
     ensureAvatar(r);
     const P = r.P, root = P.root, fl = o[P_FLAGS] | 0, mode = o[P_MODE] | 0;
     r.mode = mode; r.stars = (o[P_STAT] | 0) >> 5; r.hp = ((o[P_STAT] | 0) & 31) / 31; r.dead = !!(fl & F_DEAD);
-    r.veh = (((o[P_VHI] | 0) << 16) | (o[P_VLO] | 0)) >>> 0; r.seat = o[P_SEAT] | 0; r.ak = o[P_AK] | 0; r.ai = o[P_AI] | 0;
-    AF.avatar.sit(P, !!(fl & F_SIT), 0.6);
+    r.veh = (((o[P_VHI] | 0) << 16) | (o[P_VLO] | 0)) >>> 0; r.seat = o[P_SEAT] | 0; r.ak = o[P_AK] | 0; r.ai = o[P_AI] | 0; r.crouch = !(fl & F_SIT) && !!(fl & F_CROUCH);
+    AF.avatar.sit(P, !!(fl & F_SIT), 0.6); if (AF.avatar.crouchLegs) AF.avatar.crouchLegs(P, !(fl & F_SIT) && !!(fl & F_CROUCH));
     for (let j = 0; j < NJ; j++) P[JP[j]].rotation[JA[j]] = o[6 + j];
     P.hips.position.y = o[P_HIPS];
     let vis = !!(fl & F_VIS);
@@ -496,7 +498,7 @@ try {
       AF.player.setVisible(!plane);
       const d = RP.get(v.net); N.send('seat', { h: hashOf(v), s: 1 });
       toast('You hop in' + (d ? ' with ' + d.peer.name : '') + '. ' + (AF.touch ? 'EXIT to get out.' : 'E to get out.'));
-      AF.emit('hint', AF.touch ? '' : 'Mouse look \u00b7 C camera \u00b7 E get out');
+      AF.emit('hint', AF.touch ? '' : 'Mouse look \u00b7 V camera \u00b7 E get out');
     },
     exit() { PR.veh = null; AF.PL.seat = null; AF.player.setVisible(true); AF.emit('hud', { speed: null }); AF.emit('hint', ''); },
     update() {
@@ -709,6 +711,7 @@ try {
   C.setPvp = (on) => { if (N.role !== 'host') return; C.pvp = !!on; if (CB) CB.pvp = C.pvp; N.send('pvp', { on: C.pvp }); };
   C.goTo = (slot) => {
     const r = RP.get(slot); if (!r || !r.seen) return;
+    if (AF.noTravel && AF.noTravel()) { toast('No shortcuts mid-heist \u2014 make your own way there.'); return; }
     const a = Math.random() * TAU, px = r.x + Math.sin(a) * 2.5, pz = r.z + Math.cos(a) * 2.5;
     const go = () => { const y = AF.surfaceBelow(px, pz, r.y + 3, 40); AF.setMode('walk', { x: px, y: Number.isFinite(y) ? y : r.y, z: pz, yaw: a + PI, snap: true }); };
     if (AF.stream && AF.stream.travel) AF.stream.travel({ label: r.peer.name, go }); else go();

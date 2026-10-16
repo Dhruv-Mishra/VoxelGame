@@ -1,7 +1,9 @@
 // ================================================================ 70-player.js
 try {
 // ===== 70-player: AF.avatar (parametric voxel people — the player + the friends), 'aerial' orbit camera + 'walk' modes  (OWNER: player) =====
-// AF.player = {x,y,z,yaw, body, mesh, visible, setVisible(b), teleport(x,y,z,yaw), setLook(look)}
+// AF.player = {x,y,z,yaw, body, mesh, visible, setVisible(b), teleport(x,y,z,yaw), setLook(look), crouch, setCrouch(on), noise, eyeH}
+//   walk: C toggles a crouch (45 % speed, 1.1 m collider so you fit under 1.1 m+ gaps, bent-leg pose); sprinting / jumping stands you
+//   up when there is headroom. noise (per frame) 0 still · 0.12 crouch-walk · ~0.35 walk · 1 sprint / hard landing; eyeH 1.55 / 0.95 m.
 // AF.flyTo(pos, target, dur)  AF.interactTarget  AF.emit('interact', target)
 {
   const PI = Math.PI;
@@ -37,6 +39,14 @@ try {
   const legModel = (L, C, side, bent) => {
     const skirt = L.bottom && L.bottom.style === 'skirt', shorts = L.bottom && L.bottom.style === 'shorts';
     const pant = (y) => skirt ? C.skin : shorts ? (y < 7 ? C.skin : C.bot) : C.bot;
+    if (bent === 'crouch') {
+      // crouching: the thigh rises forward to the knee, the shin slants back down to a foot under the hip (hip pivot at y 8, z 2)
+      const m = new AF.Model(4, 12, 11);
+      for (let z = 0; z < 11; z++) { const yc = Math.round(8 + (z - 2) * 2 / 7); m.box(0, yc - 2, z, 4, yc + 2, z + 1, skirt && z > 6 ? C.skin : pant(10)); }
+      for (let y = 3; y < 10; y++) { const zc = Math.round(4 + (y - 2) * 5 / 8); m.box(0, y, zc - 2, 4, y + 1, zc + 2, pant(y < 6 ? 4 : 10)); }
+      m.box(0, 0, 1, 4, 1, 8, C.sole); m.box(0, 1, 1, 4, 3, 8, C.shoe);
+      return m;
+    }
     if (!bent) {
       const m = new AF.Model(4, 12, 6);
       for (let y = 3; y < 12; y++) m.box(0, y, 1, 4, y + 1, 5, pant(y));
@@ -171,6 +181,7 @@ try {
     const C = pal(L), key = JSON.stringify(L), keys = [];
     const gLegL = cget('lL' + key, () => legModel(L, C, -1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C), keys), gLegR = cget('lR' + key, () => legModel(L, C, 1, false), [0.5, 1, 0.5], (m) => FINE.leg(m, L, C), keys);
     const gBent = cget('lB' + key, () => legModel(L, C, 1, true), [0.5, 1, 2 / 11], null, keys);
+    const gCrouch = cget('lC' + key, () => legModel(L, C, 1, 'crouch'), [0.5, 8 / 12, 2 / 11], null, keys);
     const gTorso = cget('t' + key, () => torsoModel(L, C), [0.5, 0, 0.5], (m) => FINE.torso(m, L, C), keys);
     const gArm = cget('a' + key, () => armModel(L, C), [0.5, 1, 0.5], (m) => FINE.arm(m, L, C), keys);
     const gHead = cget('h' + key, () => headModel(L, C), [0.5, 4 / 15, 0.5], (m) => FINE.head(m, L, C), keys);
@@ -189,22 +200,26 @@ try {
     let skirt = null;
     if (L.bottom && L.bottom.style === 'skirt') { skirt = AF.modelMesh(cget('s' + key, () => skirtModel(L, C), [0.5, 1, 0.5], (m) => FINE.skirt(m, L, C), keys)); skirt.position.y = 0.02; hips.add(skirt); }
     root.scale.setScalar(L.height || 1);
-    const parts = { root, hips, legL, legR, chest, torso, armL, armR, head, skirt, gLeg: [gLegL, gLegR], gBent, sitting: false, keys };
+    const parts = { root, hips, legL, legR, chest, torso, armL, armR, head, skirt, gLeg: [gLegL, gLegR], gBent, gCrouch, sitting: false, bent: false, keys };
     for (const m of [legL, legR, torso, armL, armR, headM, skirt]) if (m) { m.castShadow = true; m.receiveShadow = true; }
     return parts;
   };
   // sit / stand: swap the legs for the bent pair and lower the hips onto a seat (seatH = seat height above the feet)
   AV.sit = (P, on, seatH = 0.75) => {
-    if (P.sitting === on) return; P.sitting = on;
+    if (P.sitting === on) return; P.sitting = on; P.bent = false;
     P.legL.geometry = on ? P.gBent : P.gLeg[0]; P.legR.geometry = on ? P.gBent : P.gLeg[1];
     for (const l of [P.legL, P.legR]) l.rotation.set(0, 0, 0);
     P.hips.position.y = on ? (seatH + 0.12) / (P.root.scale.y || 1) : 0.75;
   };
-  // idle / walk / sit animation shared by the player and the friends. st = { phase, speed, air, t, land }
+  // crouch: the folded crouch legs (knee up front, foot under the hip, sole 0.5 m below the hip pivot)
+  const bentLegs = (P, on) => { if (P.bent === on || P.sitting || !P.gCrouch) return; P.bent = on; P.legL.geometry = on ? P.gCrouch : P.gLeg[0]; P.legR.geometry = on ? P.gCrouch : P.gLeg[1]; };
+  AV.crouchLegs = bentLegs;
+  // idle / walk / sit / crouch animation shared by the player and the friends. st = { phase, speed, air, t, land, crouch (0..1) }
   AV.animate = (P, st, dt, hs, onGround) => {
     st.t += dt; st.speed = AF.lerp(st.speed, hs, 1 - Math.exp(-dt * 10));
     const s = st.speed, amp = AF.clamp(s / 5, 0, 1.25);
-    st.phase += dt * (s > 0.2 ? 2.1 + s * 1.05 : 0);
+    const cr = P.sitting ? 0 : st.crouch || 0;
+    st.phase += dt * (s > 0.2 ? (cr > 0.5 ? 4.2 + s * 1.6 : 2.1 + s * 1.05) : 0);
     const sw = Math.sin(st.phase);
     st.air = AF.lerp(st.air, onGround ? 0 : 1, 1 - Math.exp(-dt * 12));
     const a = st.air, idle = Math.max(0, 1 - s / 1.5);
@@ -214,13 +229,27 @@ try {
       P.chest.rotation.x = 0.05 + breathe * 2; P.head.rotation.y = Math.sin(st.t * 0.37) * 0.3; P.head.rotation.x = 0.05;
       return;
     }
+    bentLegs(P, cr > 0.5);
+    if (P.bent) {
+      // crouch / crouch-walk: hips low, feet planted, the stepping leg swings its knee forward and up, chest over the knees
+      const ca = AF.clamp(s / 2.6, 0, 1), H = AF.lerp(0.75, 0.5, cr) + Math.abs(Math.cos(st.phase)) * 0.025 * ca;
+      P.legL.rotation.x = -Math.max(0, sw) * 0.35 * ca + Math.max(0, -sw) * 0.1 * ca; P.legR.rotation.x = -Math.max(0, -sw) * 0.35 * ca + Math.max(0, sw) * 0.1 * ca; P.legL.rotation.z = -0.05; P.legR.rotation.z = 0.05;
+      P.hips.position.y = H + breathe * 0.5;
+      P.armL.rotation.x = AF.lerp(sw * 0.35 * ca, -0.55, 0.6 * cr); P.armR.rotation.x = AF.lerp(-sw * 0.35 * ca, -0.55, 0.6 * cr);
+      P.armL.rotation.z = -0.12; P.armR.rotation.z = 0.12;
+      P.chest.rotation.x = 0.45 * cr + breathe * 2; P.chest.rotation.y = sw * 0.05 * ca;
+      P.head.rotation.x = -0.32 * cr; P.head.rotation.y = st.lookYaw != null ? st.lookYaw : Math.sin(st.t * 0.37) * 0.3 * idle * idle;
+      st.land = Math.max(0, (st.land || 0) - dt * 5);
+      return;
+    }
     P.legL.rotation.x = AF.lerp(-sw * 0.75 * Math.min(amp, 1), -0.55, a);
     P.legR.rotation.x = AF.lerp(sw * 0.75 * Math.min(amp, 1), 0.35, a);
     P.armL.rotation.x = AF.lerp(sw * 0.7 * Math.min(amp, 1.1), -2.3, a * 0.8);
     P.armR.rotation.x = AF.lerp(-sw * 0.7 * Math.min(amp, 1.1), -0.4, a * 0.8);
     P.armL.rotation.z = -0.06 - idle * 0.02 - a * 0.15; P.armR.rotation.z = 0.06 + idle * 0.02 + a * 0.15;
-    P.hips.position.y = 0.75 + Math.abs(Math.cos(st.phase)) * 0.045 * Math.min(amp, 1) + breathe - (st.land || 0) * 0.08;
-    P.chest.rotation.x = Math.min(amp, 1.2) * 0.12 + breathe * 2;
+    P.legL.rotation.z = P.legR.rotation.z = 0;
+    P.hips.position.y = 0.75 + Math.abs(Math.cos(st.phase)) * 0.045 * Math.min(amp, 1) + breathe - (st.land || 0) * 0.08 - 0.25 * cr;
+    P.chest.rotation.x = Math.min(amp, 1.2) * 0.12 + breathe * 2 + 0.45 * cr;
     P.chest.rotation.y = sw * 0.08 * Math.min(amp, 1);
     P.head.rotation.x = -Math.min(amp, 1.2) * 0.08 + Math.sin(st.t * 0.7) * 0.03 * idle;
     P.head.rotation.y = (st.lookYaw != null ? st.lookYaw : Math.sin(st.t * 0.37) * 0.25 * idle * idle);
@@ -230,9 +259,19 @@ try {
 
   // ------------------------------------------------------------------ the player
   const body = { x: 0, y: 0.25, z: 28, vy: 0, r: 0.3, h: 1.7, onGround: true };
-  const AN = { phase: 0, speed: 0, air: 0, t: 0, land: 0 };
+  const AN = { phase: 0, speed: 0, air: 0, t: 0, land: 0, crouch: 0 };
+  const STAND_H = 1.7, CROUCH_H = 1.1, EYE_STAND = 1.55, EYE_CROUCH = 0.95;
   const player = AF.player = {
     x: 0, y: 0.25, z: 28, yaw: PI, body, mesh: null, visible: true, parts: null, look: AV.DEFAULT,
+    // stance (KeyC on foot): crouch = toggled state; noise = how loud the player is this frame (0 still, ~0.12 crouch-walk, ~0.35 walk,
+    // 1 sprint or a hard landing); eyeH = head height above the feet (the stealth line-of-sight target)
+    crouch: false, noise: 0, eyeH: EYE_STAND,
+    // false (and stays crouched) when there is no headroom to stand up
+    setCrouch(on) {
+      on = !!on; if (on === player.crouch) return true;
+      if (!on && AF.boxBlocked && AF.boxBlocked(body.x, body.y, body.z, body.r, STAND_H)) return false;
+      player.crouch = on; body.h = on ? CROUCH_H : STAND_H; AF.emit('crouch', on); return true;
+    },
     setVisible(b) { player.visible = !!b; if (player.mesh) player.mesh.visible = !!b && !PL.hideMesh; },
     teleport(x, y, z, yaw) {
       if (!isFinite(x) || !isFinite(z)) return;
@@ -440,7 +479,8 @@ try {
   // ------------------------------------------------------------------ WALK (third person + first person)
   const WK = PL.walk = { camYaw: 0, camPitch: 0.22, boom: 3, fp: false, blend: 1, from: V3(), fromQ: new THREE.Quaternion(), lastMouse: 0, indoor: 0 };
   const TMP = V3(), LOOK = V3(), QT = new THREE.Quaternion();
-  const WALK = 5.8, RUN = 9.5;
+  const WALK = 5.8, RUN = 9.5, CROUCH_K = 0.45;
+  const NZ = { land: 0, landK: 0 };
   const vel = { x: 0, z: 0 };
   // knockback (hits, explosions, cars): adds to the walk velocity; vy > 0 throws the body up
   PL.push = (vx, vz, vy) => { vel.x += vx; vel.z += vz; if (vy) { body.vy = vy; body.onGround = false; } };
@@ -485,7 +525,7 @@ try {
   const walkCamera = (dt) => {
     const c = cam();
     // pivot height eases over steps and kerbs (a 0.55 m step-up no longer jolts the view); teleports and jumps > 1.5 m snap
-    const eyeY = body.y + 1.58 * (player.look.height || 1);
+    const eyeY = body.y + (1.58 - (EYE_STAND - EYE_CROUCH) * AN.crouch) * (player.look.height || 1);
     if (!(Math.abs(eyeY - (WK.py ?? eyeY)) < 1.5) || WK.blend < 1) WK.py = eyeY;
     else WK.py += (eyeY - WK.py) * (1 - Math.exp(-dt * (body.onGround ? 16 : 30)));
     const hx = body.x, hy = WK.fp ? eyeY : WK.py, hz = body.z;
@@ -557,11 +597,12 @@ try {
       WK.camYaw = yaw + PI; WK.camPitch = 0.2; WK.boom = 0.6;
       const c = cam(); WK.from.copy(c.position); WK.fromQ.copy(c.quaternion); WK.blend = (opts.snap || from == null) ? 1 : 0;
       vel.x = vel.z = 0;
+      player.crouch = false; body.h = STAND_H; AN.crouch = 0; player.eyeH = EYE_STAND; player.noise = 0; NZ.land = 0;
       if (player.parts) AV.sit(player.parts, false);
       player.setVisible(true);
       AF.emit('hint', '');
     },
-    exit() { AF.interactTarget = null; PL.hideMesh = false; if (player.mesh) player.mesh.visible = player.visible; const c = cam(); WK.fov = 50; if (c.fov !== 50) { c.fov = 50; c.updateProjectionMatrix(); } },
+    exit() { AF.interactTarget = null; PL.hideMesh = false; player.noise = 0; if (player.crouch) { player.crouch = false; body.h = STAND_H; AF.emit('crouch', false); } AN.crouch = 0; if (player.parts) bentLegs(player.parts, false); player.eyeH = EYE_STAND; if (player.mesh) player.mesh.visible = player.visible; const c = cam(); WK.fov = 50; if (c.fov !== 50) { c.fov = 50; c.updateProjectionMatrix(); } },
     update(dt) {
       const I = AF.input, m = I.mouse, modal = inModal() || !!PL.busy;
       const locked = !!document.pointerLockElement;
@@ -585,11 +626,15 @@ try {
         if (I.stick && (I.stick.x || I.stick.y)) { ix += I.stick.x; iz += I.stick.y; }
       }
       const mag = Math.min(1, Math.hypot(ix, iz)), analog = !!(I.stick && (I.stick.x || I.stick.y));
-      const run = I.key('ShiftLeft') || I.key('ShiftRight') || !!(I.stick && I.stick.run);
+      let run = I.key('ShiftLeft') || I.key('ShiftRight') || !!(I.stick && I.stick.run);
+      // KeyC toggles the crouch; sprinting or jumping stands you up (when there is headroom: else you stay low and can't sprint)
+      if (!modal && I.hit('KeyC')) { if (!player.setCrouch(!player.crouch)) AF.emit('toast', 'No room to stand up here.'); }
+      if (player.crouch && run && (ix || iz) && !player.setCrouch(false)) run = false;
+      if (player.crouch && !modal && I.hit('Space') && !player.setCrouch(false)) I.pressed.delete('Space');
       const fx = -Math.sin(WK.camYaw), fz = -Math.cos(WK.camYaw), rx = -fz, rz = fx;
       let wx = fx * iz + rx * ix, wz = fz * iz + rz * ix;
       const wl = Math.hypot(wx, wz);
-      const sp = (run ? RUN : WALK) * (analog ? mag : 1);
+      const sp = (player.crouch ? WALK * CROUCH_K : run ? RUN : WALK) * (analog ? mag : 1);
       WK.running = run && wl > 0;
       if (wl > 0) { wx = wx / wl * sp; wz = wz / wl * sp; }
       const acc = 1 - Math.exp(-dt * (body.onGround ? 18 : 3));
@@ -601,9 +646,13 @@ try {
       const bounds = AF.PLAN.world.play, margin = AF.PLAN.world.margin;
       body.x = AF.clamp(body.x, bounds.x0 - margin, bounds.x1 + margin);
       body.z = AF.clamp(body.z, bounds.z0 - margin, AF.PLAN.world.bounds.z1 - margin);
-      if (wasAir && body.onGround) { AN.land = 0.6; AF.emit('land', -vy0); }
+      if (wasAir && body.onGround) { AN.land = 0.6; AF.emit('land', -vy0); if (-vy0 > 8.5) { NZ.land = 0.3; NZ.landK = 1; } else if (-vy0 > 5) { NZ.land = 0.2; NZ.landK = 0.5; } }
       const hs = Math.hypot(body.x - ox, body.z - oz) / Math.max(dt, 1e-4);
       WK.speed = hs;
+      AN.crouch += ((player.crouch ? 1 : 0) - AN.crouch) * (1 - Math.exp(-dt * 12));
+      player.eyeH = EYE_STAND - (EYE_STAND - EYE_CROUCH) * AN.crouch;
+      NZ.land = Math.max(0, NZ.land - dt);
+      player.noise = Math.max(NZ.land > 0 ? NZ.landK : 0, !body.onGround || hs < 0.4 ? 0 : player.crouch ? 0.12 : hs > 7 ? 1 : 0.35 * Math.min(1, hs / 4));
       if (body.hitWall) { vel.x *= 0.6; vel.z *= 0.6; }
       if (WK.fp || PL.aim) player.yaw = WK.camYaw + PI;
       else if (wl > 0) player.yaw += AF.angDiff(player.yaw, Math.atan2(wx, wz)) * (1 - Math.exp(-dt * 12));
@@ -657,6 +706,7 @@ try {
   });
   // outside walk/aerial (driving, flying, riding): the vehicle owner may seat the avatar via PL.seat = {x,y,z,yaw,roll,pitch,bike}
   AF.onTick('player-idle', 160, (dt) => {
+    if (AF.mode !== 'walk') player.noise = 0;
     if (!player.mesh || AF.mode === 'walk' || AF.mode === 'aerial' || AF.mode === 'skydive' || AF.mode === 'row' || AF.mode === 'dead') return;
     const S = PL.seat;
     if (S && player.parts) {
@@ -671,6 +721,20 @@ try {
   });
   AF.on('mode', (m) => { if (m === 'walk' || m === 'aerial') { PL.seat = null; if (player.parts) AV.sit(player.parts, false); if (player.mesh) player.mesh.rotation.set(0, player.yaw, 0); } });
   AF.toast = AF.toast || ((msg) => AF.emit('toast', msg));
+
+  AF.test('player: C crouches (lower eye, small collider, quiet steps), standing up needs headroom', () => {
+    const was = AF.mode, I = AF.input, S = AF.ui && AF.ui.state, title = S && S.title; if (S) S.title = false; if (AF.mode !== 'walk') AF.setMode('walk', {});
+    const step = (n) => { for (let i = 0; i < n; i++) AF.modes.walk.update(1 / 30); };
+    try {
+      I.pressed.add('KeyC'); step(1); I.pressed.clear(); step(20);
+      const low = player.crouch && body.h === CROUCH_H && player.eyeH < 1.05 && player.noise === 0 && !!player.parts.bent;
+      I.down.add('KeyW'); step(20); const sneak = Math.abs(player.noise - 0.12) < 0.01 && WK.speed < WALK * 0.6;
+      I.down.delete('KeyW'); I.pressed.add('KeyC'); step(1); I.pressed.clear(); I.down.add('KeyW'); step(20);
+      const walk = !player.crouch && body.h === STAND_H && player.noise > 0.25 && player.noise < 0.45 && player.eyeH > 1.45;
+      I.down.add('ShiftLeft'); step(20); const sprint = player.noise === 1;
+      return { ok: low && sneak && walk && sprint, info: `crouch ${low}, sneak ${sneak} (${player.noise}), walk ${walk}, sprint ${sprint}` };
+    } finally { I.down.delete('KeyW'); I.down.delete('ShiftLeft'); I.pressed.clear(); player.setCrouch(false); if (S) S.title = title; if (was && was !== AF.mode) AF.setMode(was); }
+  });
 }
 
 // mouse-look sensitivity (saved per browser)

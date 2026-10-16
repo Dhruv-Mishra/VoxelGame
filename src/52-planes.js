@@ -98,7 +98,7 @@ try {
       PL.cur = pl; FL.init = false; FL.orbit = FL.orbitP = FL.idle = 0; FL.zoom = 1;
       if (AF.player) AF.player.setVisible(false);
       AF.emit('toast', 'Cleared for take-off in the ' + pl.name + '. ' + (AF.touch ? 'Hold THR + to open the throttle, push the stick up to lift off.' : 'Hold Space to open the throttle, then W to lift off.'));
-      AF.emit('hint', AF.touch ? '' : 'Space/Shift throttle \u00b7 W/S nose up/down \u00b7 A/D bank (ground: steer) \u00b7 Q/E rudder \u00b7 X/B brakes \u00b7 S at idle: reverse \u00b7 I invert pitch \u00b7 Mouse look \u00b7 C camera \u00b7 F exit');
+      AF.emit('hint', AF.touch ? '' : 'Space/Shift throttle \u00b7 W/S nose up/down \u00b7 A/D bank (ground: steer) \u00b7 Q/E rudder \u00b7 X/B brakes \u00b7 S at idle: reverse \u00b7 I invert pitch \u00b7 Mouse look \u00b7 V camera \u00b7 F exit');
     },
     exit() {
       const pl = PL.cur; PL.cur = null;
@@ -232,7 +232,8 @@ try {
 
   // ---------------------------------------------------------------- bail out: freefall, then a striped canopy (Space / tap CHUTE, or
   // automatically at 70 m). W/S dive + flare, A/D turn. The empty plane glides down on its own and the ground crew recovers it.
-  const SK = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, yaw: 0, chute: false, open: 0, st: { phase: 0, speed: 0, air: 1, t: 0, land: 0 }, rig: null, cam: new THREE.Vector3(), camInit: false };
+  const SK = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, yaw: 0, chute: false, open: 0, st: { phase: 0, speed: 0, air: 1, t: 0, land: 0 }, rig: null, cam: new THREE.Vector3(), camInit: false,
+    orb: 0, orbP: 0, dragT: 0, cyaw: 0, sw: 0, swv: 0 };   // look-around orbit (mouse / drag, independent of steering) + canopy swing
   const buildRig = () => {
     const g = new THREE.Group(), cv = document.createElement('canvas'); cv.width = 128; cv.height = 8;
     const c2 = cv.getContext('2d'); for (let i = 0; i < 8; i++) { c2.fillStyle = ['#d8402a', '#f4ecd8', '#2f6aa8', '#f4ecd8'][i % 4]; c2.fillRect(i * 16, 0, 16, 8); }
@@ -245,7 +246,7 @@ try {
   };
   AF.modes.skydive = {
     enter(o = {}) {
-      Object.assign(SK, { x: o.x, y: o.y, z: o.z, vx: o.vx || 0, vy: o.vy || 0, vz: o.vz || 0, yaw: o.yaw || 0, chute: false, open: 0, camInit: false });
+      Object.assign(SK, { x: o.x, y: o.y, z: o.z, vx: o.vx || 0, vy: o.vy || 0, vz: o.vz || 0, yaw: o.yaw || 0, chute: false, open: 0, camInit: false, orb: 0, orbP: 0, dragT: 0, cyaw: o.yaw || 0, sw: 0, swv: 0 });
       if (!SK.rig) SK.rig = buildRig();
       SK.rig.visible = false; SK.rig.scale.setScalar(0.05);
       if (AF.player) AF.player.setVisible(true);
@@ -258,7 +259,10 @@ try {
       const fwdIn = AF.clamp((I.key('KeyW') || I.key('ArrowUp') ? 1 : 0) - (I.key('KeyS') || I.key('ArrowDown') ? 1 : 0) + (S ? S.y : 0), -1, 1);
       const turnIn = AF.clamp((I.key('KeyD') || I.key('ArrowRight') ? 1 : 0) - (I.key('KeyA') || I.key('ArrowLeft') ? 1 : 0) + (S ? S.x : 0), -1, 1);
       const gy = Math.max(AF.W.groundY(SK.x, SK.z), SK.z > 206 ? -1.25 : -99), h = SK.y - gy;
-      if (!SK.chute && (I.hit('Space') || h < 70)) { SK.chute = true; AF.emit('toast', 'Canopy open! Steer with A/D, hold S to flare before touchdown.'); }
+      if (!SK.chute && (I.hit('Space') || h < 70)) {
+        SK.chute = true; SK.swv += 1.4; AF.emit('toast', 'Canopy open! Steer with A/D, hold S to flare before touchdown.');
+        if (AF.camfx) AF.camfx.shake(0.06, 0.8, 6);   // the jolt of the canopy biting
+      }
       SK.yaw -= turnIn * (SK.chute ? 0.9 : 1.6) * dt;
       const hx = Math.sin(SK.yaw), hz = Math.cos(SK.yaw);
       if (SK.chute) {
@@ -278,18 +282,33 @@ try {
         AF.emit('toast', hard ? 'Oof \u2014 a rough landing, but you walk it off.' : SK.z > 206 && land < -1 ? 'Splashdown! Swim for the shore.' : 'Touchdown under canopy. Nice jump!');
         AF.setMode('walk', { x: SK.x, y: land, z: SK.z, yaw: SK.yaw }); return;
       }
-      // the avatar hangs under the canopy (or spreads out in freefall)
+      // the avatar hangs under the canopy (or spreads out in freefall); under canopy the pilot swings like a pendulum (turns + a breeze)
+      if (SK.chute) { SK.swv += (-5.5 * SK.sw - 1.1 * SK.swv - turnIn * 1.6 + Math.sin(AF.clock.t * 0.9) * 0.25) * dt; SK.sw = AF.clamp(SK.sw + SK.swv * dt, -0.35, 0.35); }
       if (P && P.mesh) {
-        P.mesh.position.set(SK.x, SK.y, SK.z); P.mesh.rotation.set(SK.chute ? 0 : 1.2, SK.yaw, -turnIn * 0.25, 'YXZ');
+        P.mesh.position.set(SK.x, SK.y, SK.z); P.mesh.rotation.set(SK.chute ? 0 : 1.2, SK.yaw, -turnIn * 0.25 + SK.sw, 'YXZ');
         SK.st.air = 1; if (P.parts) AF.avatar.animate(P.parts, SK.st, dt, 0, false);
       }
-      const R = SK.rig; R.visible = SK.chute; R.scale.setScalar(0.1 + 0.9 * SK.open); R.position.set(SK.x, SK.y, SK.z); R.rotation.set(-fwdIn * 0.12, SK.yaw, -turnIn * 0.3, 'YXZ');
-      // chase camera behind and above
-      const back = SK.chute ? 11 : 8, up = SK.chute ? 4.5 : 3.2;
-      tmp.set(SK.x - hx * back, SK.y + up, SK.z - hz * back); tmp.y = Math.max(tmp.y, ground(tmp.x, tmp.z) + 1);
-      if (!SK.camInit) { SK.cam.copy(tmp); SK.camInit = true; } else SK.cam.lerp(tmp, 1 - Math.exp(-dt * 4));
-      const cam = AF.camera; cam.position.copy(SK.cam); cam.up.copy(UP); look.set(SK.x, SK.y + (SK.chute ? 1.5 : 0), SK.z); cam.lookAt(look);
+      const R = SK.rig; R.visible = SK.chute; R.scale.setScalar(0.1 + 0.9 * SK.open); R.position.set(SK.x, SK.y, SK.z); R.rotation.set(-fwdIn * 0.12, SK.yaw, -turnIn * 0.3 + SK.sw, 'YXZ');
+      // chase camera behind and above; mouse (pointer lock) / a touch drag orbits it round the jumper, independent of A/D steering,
+      // and it eases back behind once you stop looking around
+      const m = I.mouse, spd = Math.hypot(SK.vx, SK.vy, SK.vz);
+      if ((document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) {
+        const o = SK.orb - m.dx * 0.006; SK.orb = Math.atan2(Math.sin(o), Math.cos(o)); SK.orbP = AF.clamp(SK.orbP + m.dy * 0.004, -0.75, 1.05); SK.dragT = 1.6;
+      } else if ((SK.dragT -= dt) < 0) { const k = Math.exp(-dt * 1.6); SK.orb *= k; SK.orbP *= k; }
+      SK.cyaw += AF.angDiff(SK.cyaw, SK.yaw) * (1 - Math.exp(-dt * 3));
+      const a = SK.cyaw + SK.orb, el = AF.clamp((SK.chute ? 0.39 : 0.38 + AF.smooth(15, 52, spd) * 0.3) + SK.orbP, -0.4, 1.43), dist = SK.chute ? 11.9 : 8.6 + AF.smooth(15, 52, spd) * 2.5;
+      look.set(SK.x, SK.y + (SK.chute ? 1.5 : 0), SK.z);
+      // the boom (camera minus target) is smoothed, not the world position: no fall-speed lag, so any orbit angle stays put
+      tmp.set(-Math.sin(a) * Math.cos(el) * dist, Math.sin(el) * dist, -Math.cos(a) * Math.cos(el) * dist);
+      if (!SK.camInit) { SK.cam.copy(tmp); SK.camInit = true; } else SK.cam.lerp(tmp, 1 - Math.exp(-dt * (SK.dragT > 0 ? 10 : 4)));
+      const cam = AF.camera; cam.position.copy(look).add(SK.cam); cam.position.y = Math.max(cam.position.y, ground(cam.position.x, cam.position.z) + 1); cam.up.copy(UP); cam.lookAt(look);
       AF.camTarget.copy(look); AF.shadowFocus.set(SK.x, 0, SK.z); AF.shadowRadius = 60;
+      // feel: buffeting that builds to terminal velocity, wind streaks + a wider view in freefall; a slow sway under the canopy
+      const CF = AF.camfx;
+      if (CF) {
+        if (!SK.chute) { const f = AF.smooth(12, 50, spd); CF.rumble('fall', 0.0015 + f * 0.0095, 6 + f * 7); CF.wind(AF.smooth(14, 46, spd)); CF.fov(f * 11); }
+        else CF.rumble('canopy', 0.003 + Math.abs(SK.sw) * 0.01, 0.5);
+      }
       AF.emit('hud', { mode: 'fly', speed: Math.hypot(SK.vx, SK.vy, SK.vz) * 2.237, alt: Math.max(0, h), car: SK.chute ? 'Parachute \u00b7 A/D steer \u00b7 S flare' : 'Freefall \u00b7 ' + (AF.touch ? 'tap CHUTE' : 'Space') + ' to open' });
     },
   };

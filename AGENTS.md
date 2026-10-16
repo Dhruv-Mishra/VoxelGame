@@ -17,6 +17,10 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Sounds = `assets/sfx/*.mp3` + `CREDITS.txt`, built by `node tools/sfx-build.mjs [--list] [--only=a,b] [--force] [--reencode]` (Freesound CC0
   picks, Kenney packs, flite TTS for PA / radio lines; needs ffmpeg + flite; caches in `tools/tmp-sfx/`; `--reencode` rebuilds every
   file from the cached sources after an encoder / level change). Ids are wired in 75's `LIB`.
+- Heist voices = `assets/vo/<id>.mp3` + `index.json`, every line of `AF.VO` (`src/81-heist-lines.js`) spoken by Kokoro TTS:
+  `node tools/vo-build.mjs [--list] [--only=a,b] [--force] [--reencode]` (needs python `pip install kokoro-onnx soundfile` + ffmpeg;
+  model + raw WAVs cached in `tools/tmp-vo/`; only changed lines re-render). Music = `assets/music/<id>.mp3` + `CREDITS.txt`
+  (Kevin MacLeod, CC BY 4.0 — keep the credit), `node tools/music-build.mjs [--only=a,b] [--force]` (cache `tools/tmp-music/`).
 - Co-op signaling = Cloudflare Worker + Durable Object in `signal/` (`npx wrangler@4 deploy` from `signal/`). Its URL is `SIGNAL` in
   `79-net.js`; game origins must match `ALLOWED_ORIGINS` in `signal/wrangler.toml`. Optional TURN: `wrangler secret put
   TURN_KEY_ID` / `TURN_KEY_API_TOKEN`. The build stamps `'%%BUILD_HASH%%'`; hosts reject guests on another build.
@@ -39,16 +43,24 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 ## Parts map
 - Engine: 00 prologue · 01 core/input/pointer lock · 01-stream (streaming engine, preload, travel veil, shader warm-up) ·
   02 voxels, region LOD, mesher workers · 03 renderer, tiers, LOD table, resolution · 04 `AF.Vehicle` base class ·
+  04-camfx (`AF.camfx`: `shake(amp, s, freq)`, `rumble(key, amp, freq)`, `fov(deg)`, `wind(k)` DOM speed overlay; applied after the
+  camera owners, undone next frame; `portSolace.shake` / menu "Camera shake") ·
   60 atmosphere · 61 post (bloom, AO, grade, upscale) · 62 water · 63 sky.
 - World: 05 plan · 07 outland height/colour + tile mesher (workers) · 10 terrain/coast · 11 streets · 12 nature ·
   13–43 districts · 44-farms/flora/island/sites/wayside · 44-key (Corsair Key: Silas's island east of Serena — airstrip, hangar,
   villa, jetty, lighthouse, a flyable Cub; built from Serena's cached kit; the heist's finale) · 45 friends colony (its road joins
   the highway, 49-roads) · 46 zoo (`ZOO.hours` 8–22, `AF.zoo.feed/feedAt/lure`) ·
   46-zoo-tree (Treetop Trail annex: Great Banyan, treehouse deck, boardwalk ramps, rope bridge, lookout — static voxels, no draws) ·
+  46-zoo-den (`AF.den`: Lion House night den + keepers' yard at Pride Rock's SE corner, and below it a 1941 bunker, a brick storm
+  drain under the east walk, the Kestrel Systems fibre junction (server room) and a stair up to Westgate Road; underground rooms
+  are carved by sinking heightmap columns and refilling them with soil voxels (`sink`); heist-only lions (5 instanced draws,
+  `setActive`), `spots` for the heist) ·
   46-zoo-visit (paw-print trails + arrows, fingerposts, trail board, ticket booth attendant, feeding stations, keepers on the
   feeding schedule, closing time, passport stamps in `AF.save.zoo`) · 47 airfield · 48 sea ·
-  48-liner (SS Solace Queen off the Pleasure Pier: walkable hull model + colliders, Grand Casino, Gilded Room, purser's cage +
-  vault doors `AF.liner.openVault/openStaff`, Starlight Lounge, sun deck, gangway, pontoon; `AF.liner.where/tables/spots`) ·
+  48-liner (SS Solace Queen anchored at (-225, 1450), 190 m: walkable hull model + colliders; deck 1 grand atrium, double-height
+  casino hall + gallery, purser's cage + vault + Silas's office (`AF.liner.openVault/openStaff`), crew corridor / pantry / crew lounge /
+  crew stairs; deck 3 promenade, Palm Court, Starlight Lounge; deck 4 sun deck + High Rollers' Salon; boarding pontoon; the shore
+  launch `AF.liner.tender` from the Pleasure Pier head, mode `tender`; `AF.liner.where/room/tables/spots`) ·
   49 outland quadtree · 49-roads.
 - Actors: 50 vehicles · 51 traffic · 52 planes · 53 air traffic · 54 path walkers · 55 pedestrians · 56 animals ·
   56-wild outland fauna · 57 friends (cast, dialogue) · 58 pets (`AF.pets`: Paws & Claws store on Friends Lane, a following pet per
@@ -57,10 +69,14 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   73 mission kit (`AF.mission`: `blip/unblip` map + minimap blips with world markers (one instanced draw), `objective`, `bar`,
   `shard` big-message cards, `cut` cutscene player) · 74 map (`map.overlays`, `map.miniOverlays`) ·
   75 extras (photo mode `P`, Solace Stars collectibles) · 75-audio (`AF.audio`: samples, loops, zone ambience beds, footsteps,
-  vehicles, PA; `play(id, {x,y,z})`, `hold(key, id, vol, rate, x, y, z)`) · 98 tests · 99 boot.
+  vehicles, PA; `play(id, {x,y,z})`, `hold(key, id, vol, rate, x, y, z)`; heist lines `voice(id, {x,y,z,radio}) → s`, `voiceLen`,
+  `voicePreload`, `stopVoice`; `music(id | null, {fade, vol})`) · 98 tests · 99 boot.
 - Gameplay: 76 core (`AF.G` tuning, `AF.save`, money, health/death, `AF.shop` sheet, `AF.fx` particles, `AF.sfx`, `AF.hud`,
   forget policy) · 76-inventory (`AF.inv`: the bag on I / BAG — snacks, pet treats, `AF.inv.extra` rows lent by missions;
-  `AF.save.inv`) · 77 combat (weapons, engaged peds, run-overs, police/wanted, autogyro, vehicle damage) · 78 jobs (jobs,
+  `AF.save.inv`) · 76-minigame (`AF.minigame.play(kind, opts) → Promise<{ ok, cancelled, … }>`: lockpick, circuit, flow, signal,
+  drill, deal, stamp, keypad — a DOM + Canvas2D overlay counted in `AF.ui.modalOpen()`, Esc cancels; `?mg=<kind>` opens one) ·
+  77 combat (weapons + gunplay: spread / recoil / tracers `CB.tracer` / headshots / hit markers, mission lending
+  `CB.lend/unlend/has`, `'gunshot'` events, engaged peds + goon AI, run-overs, police/wanted, autogyro, vehicle damage) · 78 jobs (jobs,
   counters, Body Works / Motor Exchange zones, carnival games, carousel, wardrobe, Westgate check-in) · 78-casino (`AF.casino`:
   slots, roulette, blackjack, craps, baccarat at the liner's tables) · 81 heist (`AF.heist`: "The Harbour Trust Job", a co-op
   story mission from Vera at the Blue Heron — plane, island, mob ambush, jet skis, casino lift, night bank stealth, getaway).
@@ -76,18 +92,20 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   clearGoons`: hostile without a wanted level, no heat). Kids / wheelchair users only ever flee. The player starts with bare fists
   (weapon slot 0); a friend's signature melee and bought guns follow.
 - Vehicles: `car.hp` → `car.dmg` (instanced `carDmg` attribute in the car paint shader); impacts arrive via `VV.onImpact`.
-  The player always sits in the vehicle (`AF.Vehicle.seat`, `VV.seatLocal`). Camera distance is `AF.view` (C cycles
+  The player always sits in the vehicle (`AF.Vehicle.seat`, `VV.seatLocal`). Camera distance is `AF.view` (V cycles
   first person / near / far) for walk, chase cams and planes — no wheel zoom.
 - Jobs extend `class Job` (78): implement `plan()` → next stop `{x,z,r,wait,t,pay,label,done}` (null ends the shift).
   Counters: `counter(x,y,z,label,open)` + `AF.shop.open({title,sub,tabs,items(tab)})`; drive-in zones via `zone()`.
-- Keys: Q / click attack, Z / right mouse aim, wheel / 1–5 / X weapon (hold X = weapon wheel), R reload, C camera, J job. Touch (72):
+- Keys: Q / click attack, Z / right mouse aim, wheel / 1–5 / X weapon (hold X = weapon wheel; the weapon HUD's ▸ = next), R reload,
+  C crouch (`AF.player.crouch/noise/eyeH`), V camera, J job. Touch (72):
   stick to the rim runs; one context cluster bottom-right (big primary + ≤ 3 secondaries chosen per mode / weapon, `AF.touchUI`) +
-  CAM / JOB utilities; WPN tap = next weapon, hold = the wheel (`AF.combat.wheelOpen/wheelAim/wheelClose`).
+  CAM / JOB / BAG utilities; CROUCH in the cluster; weapons from the HUD chip (tap ▸ = next, hold = the wheel, `AF.combat.wheelOpen/wheelAim/wheelClose`).
 - Path walkers (54: airport, outland, island, liner, heist guards) react via `AF.walkers.near/knock/stagger/scare/isDown` (77 bumps,
-  hits, run-overs, panic); `CB.onWalkerHit(a, kind)` returning true swallows a hit (the heist's takedowns).
+  hits, run-overs, panic); `CB.onWalkerHit(a, kind, fx, fz, { head, dmg, silenced, weapon })` returning true swallows a hit (the heist's takedowns).
 - Missions (81): steps with checkpoints; `AF.respawnAt()` (76) lets a mission wake a knocked-out player at its checkpoint.
   The heist is host-authoritative (`heist` net ops; guests send `done`/`fail`/`retry`); it needs a crew of two to start but every
-  step has a solo way through if a partner drops. `node tools/coop-heist.js` (server running, playwright resolvable, optional
+  step has a solo way through if a partner drops. No teleports mid-heist: `AF.noTravel()` makes map travel, go-to-friend and skip-crossing
+  refuse; only cutscenes and checkpoint retries move the crew. `AF.quiet` (heist on) binds 60 % of the crowd. `node tools/coop-heist.js` (server running, playwright resolvable, optional
   `CHROME=`) plays it end to end with two real clients: lockstep, the two-key step, fail → shared checkpoint, retry, payout.
   Modal overlays (`AF.shop`, the casino panel `UI.state.casino`) count in `UI.modalOpen()`; Escape closes them.
 

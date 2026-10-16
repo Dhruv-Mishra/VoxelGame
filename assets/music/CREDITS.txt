@@ -1,0 +1,46 @@
+Port Solace — heist music (assets/music). Built by tools/music-build.mjs from the sources below (trimmed to loops, levelled, re-encoded).
+
+mu_brief.mp3 — "Night on the Docks - Sax" Kevin MacLeod (incompetech.com)
+  Licensed under Creative Commons: By Attribution 4.0 License, http://creativecommons.org/licenses/by/4.0/
+  Source: https://incompetech.com/music/royalty-free/mp3-royaltyfree/Night%20on%20the%20Docks%20-%20Sax.mp3
+  Use: smoky noir sax for Vera’s briefing. Cut: 12.5 s + 96 s, looped with a 4 s crossfade.
+
+mu_plan.mp3 — "Spy Glass" Kevin MacLeod (incompetech.com)
+  Licensed under Creative Commons: By Attribution 4.0 License, http://creativecommons.org/licenses/by/4.0/
+  Source: https://incompetech.com/music/royalty-free/mp3-royaltyfree/Spy%20Glass.mp3
+  Use: cool, sneaky jazz groove for the city prep. Cut: 4 s + 44 bars at 110 bpm, looped with a 2 s crossfade.
+
+mu_island.mp3 — "Secret of Tiki Island" Kevin MacLeod (incompetech.com)
+  Licensed under Creative Commons: By Attribution 4.0 License, http://creativecommons.org/licenses/by/4.0/
+  Source: https://incompetech.com/music/royalty-free/mp3-royaltyfree/Secret%20of%20Tiki%20Island.mp3
+  Use: tropical but mysterious. Cut: 92 s + 42 bars at 120 bpm, looped with a 2 s crossfade.
+
+mu_tension.mp3 — "Ossuary 6 - Air" Kevin MacLeod (incompetech.com)
+  Licensed under Creative Commons: By Attribution 4.0 License, http://creativecommons.org/licenses/by/4.0/
+  Source: https://incompetech.com/music/royalty-free/mp3-royaltyfree/Ossuary%206%20-%20Air.mp3
+  Use: low, dark tension bed (island, tunnel). Cut: 100 s + 20 bars at 50 bpm, looped with a 4 s crossfade.
+
+mu_casino.mp3 — "In Your Arms" Kevin MacLeod (incompetech.com)
+  Licensed under Creative Commons: By Attribution 4.0 License, http://creativecommons.org/licenses/by/4.0/
+  Source: https://incompetech.com/music/royalty-free/mp3-royaltyfree/In%20Your%20Arms.mp3
+  Use: 1940 big-band ballad for the liner’s casino. Cut: 4 s + 37 bars at 98 bpm, looped with a 2 s crossfade.
+
+mu_stealth.mp3 — "Chase Pulse" Kevin MacLeod (incompetech.com)
+  Licensed under Creative Commons: By Attribution 4.0 License, http://creativecommons.org/licenses/by/4.0/
+  Source: https://incompetech.com/music/royalty-free/mp3-royaltyfree/Chase%20Pulse.mp3
+  Use: dark, pulsing low synths (zoo, bank). Cut: 4 s + 54 bars at 135 bpm, looped with a 2 s crossfade.
+
+mu_action.mp3 — "Movement Proposition" Kevin MacLeod (incompetech.com)
+  Licensed under Creative Commons: By Attribution 4.0 License, http://creativecommons.org/licenses/by/4.0/
+  Source: https://incompetech.com/music/royalty-free/mp3-royaltyfree/Movement%20Proposition.mp3
+  Use: driving percussion + horns for gunfights. Cut: 2 s + 42 bars at 126 bpm, looped with a 1.5 s crossfade.
+
+mu_chase.mp3 — "Mistake the Getaway" Kevin MacLeod (incompetech.com)
+  Licensed under Creative Commons: By Attribution 4.0 License, http://creativecommons.org/licenses/by/4.0/
+  Source: https://incompetech.com/music/royalty-free/mp3-royaltyfree/Mistake%20the%20Getaway.mp3
+  Use: horn-blast car chase for the police getaway. Cut: 1 s + 36 bars at 141 bpm, looped with a 1.5 s crossfade.
+
+mu_finale.mp3 — "Volatile Reaction" Kevin MacLeod (incompetech.com)
+  Licensed under Creative Commons: By Attribution 4.0 License, http://creativecommons.org/licenses/by/4.0/
+  Source: https://incompetech.com/music/royalty-free/mp3-royaltyfree/Volatile%20Reaction.mp3
+  Use: aggressive brass for the final showdown. Cut: 8 s + 58 bars at 155 bpm, looped with a 2 s crossfade.

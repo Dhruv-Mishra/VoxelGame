@@ -593,14 +593,14 @@ AF.modes.ride = {
     setFov();
     if (AF.player && AF.player.setVisible) AF.player.setVisible(false);
     const T = AF.train, n = T && T.stops ? T.stops[T.nextIdx] : null;
-    AF.emit('hint', 'C — change view · drag to look · E — step off at a stop');
+    AF.emit('hint', 'V — change view · drag to look · E — step off at a stop');
     AF.emit('toast', 'Fares please! Loop · Harbour line' + (n ? ' — next stop: ' + n.name : ''));
   },
   exit(to) { if (AF.player && AF.player.setVisible) AF.player.setVisible(true); AF.emit('hint', ''); if (AF.camera && RIDE.fov0 != null) { AF.camera.fov = RIDE.fov0; AF.camera.updateProjectionMatrix(); RIDE.fov0 = null; } },
   update(dt) {
     RIDE.t += dt;
     const I = AF.input;
-    if (I.hit('KeyC')) { RIDE.view = (RIDE.view + 1) % VIEWS.length; RIDE.yaw = 0; RIDE.pitch = 0; RIDE.ts = null; RIDE.smooth = false; setFov(); AF.emit('toast', VIEWS[RIDE.view]); }
+    if (I.hit('KeyV')) { RIDE.view = (RIDE.view + 1) % VIEWS.length; RIDE.yaw = 0; RIDE.pitch = 0; RIDE.ts = null; RIDE.smooth = false; setFov(); AF.emit('toast', VIEWS[RIDE.view]); }
     if (I.mouse.buttons & 1 || document.pointerLockElement) { RIDE.yaw -= I.mouse.dx * 0.004; RIDE.pitch = AF.clamp(RIDE.pitch - I.mouse.dy * 0.004, -1.1, 1.1); }
     if ((I.hit('KeyE') || I.hit('Escape')) && RIDE.t > 0.6) {
       const T = AF.train;

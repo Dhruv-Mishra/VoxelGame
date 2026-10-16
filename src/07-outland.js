@@ -12,8 +12,10 @@ const tiles = new Map(), edges = new Map(), segments = [], roadGrid = new Map(),
 const hex = [AF.PAL.hex[AF.col('grass')], 0x5d8a37, 0x6f797c, 0xf5f8f9, 0xcabe9f, 0xa19b70, 0x85916b, 0x929078, 0x807363, 0x48573d, 0x4a4a4f, 0xe8dfb5, 0xada084, 0x948166, 0x536455,
   0x88a049, 0x7da646, 0x566467, 0x807e73, 0x414d51, 0x5e574c, 0xb9ae91, 0xd4c5a6, 0x557a34, 0x7a745e, 0x8b816b, 0x8e8862, 0x747e5c, 0x867c6b,
   0xc8ac72, 0xd9bf87, 0xb29668, 0xc9a64c, 0xb18e3c, 0x67625b, 0x625d56, 0x6c675f, 0x726c63, 0x46423d, 0xcfa640, 0x3f6a2c, 0x4b6b2e, 0x8a8270, 0x5a5a48, 0x9a8462, 0x7d8f4a, 0x6a7a3a,
-  0xe3c98f, 0xd6b97c, 0xecd9a8, 0xb59767, 0x38322f, 0x7a4632, 0xd9cfb6];
-const GRASS = new Set([0, 1, 9, 15, 16, 23, 40, 41, 45, 46]), ROCK = new Set([2, 8, 17, 18, 19, 20, 51, 52]);
+  0xe3c98f, 0xd6b97c, 0xecd9a8, 0xb59767, 0x38322f, 0x7a4632, 0xd9cfb6,
+  // 54 damp sand, 55 dark lava, 56 lush jungle floor, 57 mossy basalt, 58 red scoria
+  0xc2a878, 0x2c2826, 0x3c6a2c, 0x56613f, 0x8e4a33];
+const GRASS = new Set([0, 1, 9, 15, 16, 23, 40, 41, 45, 46, 56]), ROCK = new Set([2, 8, 17, 18, 19, 20, 51, 52, 55, 57, 58]);
 const pal = O.pal = hex.map((value, index) => index >= 34 && index <= 38 ? AF.col(value, { jitter: 0.2, edge: 0.02, pat: 'asphalt' }) : index === 39 ? AF.col(value, { jitter: 0.35, edge: 0.03 })
   : index === 53 ? AF.col(value, { jitter: 0.3, edge: 0.1, pat: 'none', patTop: 'slab' })
   : AF.col(value, { jitter: 0.9, edge: 0, pat: ROCK.has(index) ? 'stone' : 'none', patTop: GRASS.has(index) ? 'grass' : ROCK.has(index) ? 'stone' : 'none' }));
@@ -40,16 +42,178 @@ function ridges(x, z) {
 }
 O.coastX = (z, east = false) => east ? 1090 + Math.sin(z * 0.012) * 16 + (noise(z * 0.022 + 19, 6) - 0.5) * 38 : -1285 + Math.sin(z * 0.009) * 18 + (noise(z * 0.016, 3) - 0.5) * 28;
 O.dryWeight = (x, z) => smooth(610, 740, x + (noise(x * 0.015, z * 0.015 + 51) - 0.5) * 70) * smooth(-100, 5, z + (noise(x * 0.012 + 29, z * 0.012) - 0.5) * 60) * (1 - smooth(1060, 1140, x)) * (1 - smooth(240, 300, z));
+// ---------------------------------------------------------------- SERENA ISLE (05-plan world.island), authored in its own frame
+// (u = x - cx, v = z - cz): beaches south and west, basalt cliffs on the east, a ridged volcano with a crater-rim terrace, a lava
+// terrace the spring stream falls over, tors, a reef offshore, Moretti's cove and the smugglers' lava tube.
+const ISLE = P.island;
 function islandE(x, z) {
-  const isle = P.island, dx = (x - isle.cx) / isle.rx, dz = (z - isle.cz) / isle.rz;
-  return Math.hypot(dx, dz) + (noise(x * 0.018 + 20, z * 0.018) - 0.5) * 0.13
-    + Math.exp(-(((x + 115) / 42) ** 2 + ((z - 718) / 25) ** 2)) * 0.14
-    - Math.exp(-(((x - 120) / 55) ** 2 + ((z - 660) / 18) ** 2)) * 0.13;
+  const u = x - ISLE.cx, v = z - ISLE.cz;
+  return Math.hypot(u / ISLE.rx, v / ISLE.rz) + (noise(x * 0.018 + 20, z * 0.018) - 0.5) * 0.13 + (noise(x * 0.07 - 7, z * 0.07 + 3) - 0.5) * 0.03
+    + Math.exp(-(((u + 55) / 42) ** 2 + ((v - 118) / 25) ** 2)) * 0.14      // the party beach bay
+    - Math.exp(-(((u - 180) / 55) ** 2 + ((v - 60) / 22) ** 2)) * 0.15      // the east peninsula (Moretti's cove)
+    - Math.exp(-(((u + 196) / 24) ** 2 + ((v - 10) / 28) ** 2)) * 0.05;     // Serena Point
 }
+const ISLE_BOX = { x0: ISLE.cx - ISLE.rx * 1.45, x1: ISLE.cx + ISLE.rx * 1.45, z0: ISLE.cz - ISLE.rz * 1.45, z1: ISLE.cz + ISLE.rz * 1.45 };
+// open sea: past the city-edge blend and clear of both islands (O.h answers -4 before the pad loop)
+const seaFar = (x, z) => {
+  if (z <= W.z1 + 90) return false;
+  if (x > ISLE_BOX.x0 && x < ISLE_BOX.x1 && z > ISLE_BOX.z0 && z < ISLE_BOX.z1) return false;
+  const k = P.key; return !k || Math.abs(x - k.cx) > k.rx * 1.45 || Math.abs(z - k.cz) > k.rz * 1.45;
+};
+O.seaFar = seaFar;
+function reefH(x, z) {
+  const r = ISLE.reef; if (!r) return -4;
+  const q = ((x - r.x) / r.rx) ** 2 + ((z - r.z) / r.rz) ** 2;
+  return q < 1.8 ? Math.min(-1.8, Math.max(-4, -1.85 - q * 1.3 + (noise(x * 0.18, z * 0.18) - 0.5) * 0.5)) : -4;
+}
+// the island before its cove, stream and tunnel (the stream levels and the tunnel floor are measured on this)
+function isleShape(x, z) {
+  const u = x - ISLE.cx, v = z - ISLE.cz, e = islandE(x, z);
+  if (e > 1.18) return reefH(x, z);
+  const th = Math.atan2(v / ISLE.rz, u / ISLE.rx);
+  // east coast: a raised rim with sheer basalt cliffs (the runway's approach line, th -0.48, stays a beach)
+  const cliff = smooth(-0.3, -0.12, th) * (1 - smooth(0.85, 1.05, th));
+  let height = -4 + smooth(1.18, 0.82, e) * 9;
+  if (cliff > 0) height = AF.lerp(height, -4 + smooth(1.05, 0.99, e) * (13 + (noise(x * 0.04, z * 0.04 + 9) - 0.5) * 6) - smooth(0.96, 0.78, e) * 4, cliff);
+  const cone = ISLE.cone, cu = x - cone.x, cv = z - cone.z, distance = Math.hypot(cu, cv), t = Math.max(0, 1 - distance / cone.r), ang = Math.atan2(cv, cu);
+  if (t > 0) {
+    // ridged flanks: radial ribs and gullies, strongest half way up
+    const rib = Math.abs(Math.sin(ang * 7 + noise(x * 0.03 + 5, z * 0.03) * 2.6)), flank = smooth(0.06, 0.32, t) * (1 - smooth(0.7, 0.86, t));
+    height += t ** 1.3 * 50 * (1 + (rib - 0.6) * 0.24 * flank);
+  }
+  height += Math.exp(-(((distance - cone.craterR - 1.5) / 2.6) ** 2)) * 2.2 - (1 - smooth(4, cone.craterR, distance)) * 14;
+  if (distance < 10) height = Math.min(height, 39 + distance * 0.2);
+  // the crater-rim trail: a level bench round the summit
+  const bench = Math.abs(distance - cone.craterR - 4);
+  if (bench < 2.6) height = AF.lerp(RIM_Y, height, smooth(1.5, 2.6, bench));
+  // a basalt shelf on the south-west flank: the stream crosses it and falls over its lip
+  const tm = Math.exp(-(((ang - 2.1) / 0.42) ** 2));
+  if (tm > 0.01) { const w = tm * smooth(37, 46, distance) * smooth(68.5, 65.5, distance + (noise(x * 0.08, z * 0.08) - 0.5) * 2.4); if (w > 0) height = AF.lerp(height, 18.5 + (66 - distance) * 0.06, w); }
+  // tors: lava outcrops on the eastern hills, Serena Point and the upper flanks
+  const tor = noise(x * 0.045 + 31, z * 0.045 - 17);
+  if (tor > 0.7) height += (tor - 0.7) * 24 * smooth(0.95, 0.85, e) * Math.max(smooth(60, 80, u), smooth(-160, -180, u), smooth(0.25, 0.4, t));
+  height += Math.exp(-(((u + 196) / 18) ** 2 + ((v - 10) / 24) ** 2)) * 4;
+  const strip = ISLE.airstrip, stripD = Math.hypot(Math.max(strip.x0 - x, 0, x - strip.x1), Math.max(Math.abs(z - strip.z) - strip.w / 2, 0));
+  height = AF.lerp(strip.y, height, smooth(0, 16, stripD));
+  const resort = ISLE.resort;
+  height = AF.lerp(resort.y, height, smooth(resort.r, resort.r + 18, Math.hypot(x - resort.x, z - resort.z)));
+  const landing = ISLE.landing;
+  height = AF.lerp(landing.y, height, smooth(landing.r, landing.r + 10, Math.hypot(x - landing.x, z - landing.z)));
+  return e > 1 ? Math.max(height, reefH(x, z)) : height;
+}
+const RIM_Y = (() => { const c = ISLE.cone, d = c.craterR + 4; return Math.round((5 + (1 - d / c.r) ** 1.3 * 50 + Math.exp(-((2.5 / 2.6) ** 2)) * 2.2) * 4) / 4; })();
+// the cove: a ring of cliffs round a deep basin, a dog-leg channel to the sea, the cave ledge
+const COVE = ISLE.cove;
+function coveH(x, z, height) {
+  const c = COVE; if (!c || Math.abs(x - c.x) > 75 || Math.abs(z - c.z) > 55) return height;
+  const r = Math.hypot(x - c.x, z - c.z) + (noise(x * 0.09 + 2, z * 0.09) - 0.5) * 3;
+  let cd = Infinity, ax = c.x, az = c.z;
+  for (const [bx, bz] of c.channel) {
+    const dx = bx - ax, dz = bz - az, t = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz), 0, 1);
+    cd = Math.min(cd, Math.hypot(x - ax - dx * t, z - az - dz * t)); ax = bx; az = bz;
+  }
+  const ring = smooth(c.r + 30, c.r + 6, r), rim = c.rim + (noise(x * 0.07 - 3, z * 0.07 + 8) - 0.5) * 4;
+  if (ring > 0 && rim > height) height += (rim - height) * ring;
+  const water = Math.min(r - c.r, cd + (noise(x * 0.1, z * 0.1 - 4) - 0.5) * 2 - c.channelHW);
+  if (water < 1.6) height = AF.lerp(-3.6, height, smooth(-0.4, 1.6, water));
+  const L = c.ledge; if (x >= L.x0 && x < L.x1 && z >= L.z0 && z < L.z1) height = L.y;
+  return height;
+}
+// the stream: levels fall from the spring to the sea (a terrace lip makes the falls); its bed is carved like the mainland rivers
+const ST = ISLE.stream ? (() => {
+  const pts = catmull(ISLE.stream.pts, 3), levels = [];
+  let level = Infinity;
+  for (const [x, z] of pts) { level = Math.min(level, isleShape(x, z) - 0.9); levels.push(Math.max(level, -1.25)); }
+  levels[levels.length - 1] = -1.25;
+  // the falls: the steepest reach; a plunge pool at its foot
+  let fi = 1, fd = 0; for (let i = 1; i < pts.length; i++) { const drop = (levels[i - 1] - levels[i]) / (Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) || 1); if (drop > fd) { fd = drop; fi = i; } }
+  const foot = Math.min(pts.length - 1, fi + 1), pool = { x: pts[foot][0], z: pts[foot][1], y: levels[foot], r: 3.2 };
+  const segs = []; for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], dx = b[0] - a[0], dz = b[1] - a[1]; segs.push({ x: a[0], z: a[1], dx, dz, len2: dx * dx + dz * dz || 1, y0: levels[i - 1], y1: levels[i] }); }
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  return { name: 'Serena Falls', pts, levels, hw: ISLE.stream.w / 2, segs, pool, lip: pts[fi - 1], box: [x0 - 12, z0 - 12, x1 + 12, z1 + 12] };
+})() : null;
+O.isleStream = ST;
+let stD = Infinity, stY = 0;
+function streamAt(x, z) {
+  stD = Infinity; const s = ST; if (!s || x < s.box[0] || x > s.box[2] || z < s.box[1] || z > s.box[3]) return;
+  let best = Infinity;
+  for (const g of s.segs) {
+    const t = clamp(((x - g.x) * g.dx + (z - g.z) * g.dz) / g.len2, 0, 1), dx = x - g.x - g.dx * t, dz = z - g.z - g.dz * t, d = dx * dx + dz * dz;
+    if (d < best) { best = d; stY = g.y0 + (g.y1 - g.y0) * t; }
+  }
+  stD = Math.sqrt(best);
+}
+function streamCarve(x, z, height) {
+  const P0 = ST.pool, pd = Math.hypot(x - P0.x, z - P0.z);
+  if (pd < P0.r + 2) height = pd < P0.r ? Math.min(height, P0.y - 0.5 - 1.2 * (1 - (pd / P0.r) ** 2)) : Math.min(height, Math.max(P0.y + 0.3, AF.lerp(P0.y + 0.3, height, (pd - P0.r) / 2)));
+  streamAt(x, z); if (stD > ST.hw + 9) return height;
+  const hw = ST.hw;
+  if (stD < hw) return Math.min(height, stY - 0.5 - 0.9 * (1 - (stD / hw) ** 2));
+  let out = Math.min(height, stY + 0.3 + (stD - hw) * Math.min(1.4, 0.45 + Math.max(0, height - stY) * 0.05));
+  if (stD < hw + 2) out = Math.max(out, stY + 0.3);
+  return out;
+}
+// ---- the smugglers' tunnel: centre-line, half-width / height swelling into chambers, a floor falling 0.5 m steps to the cove.
+// tunnelAt(x,z) fills TN_ (s along, d across, hw, floor, ceil) and returns 0 outside the band, 1 inside it, 2 inside the hollow.
+const TUN = ISLE.tunnel;
+const TN = TUN ? (() => {
+  const pts = TUN.pts, cs = [0];
+  for (let i = 1; i < pts.length; i++) cs.push(cs[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  const L = cs[cs.length - 1], dir = [pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]], dl = Math.hypot(dir[0], dir[1]);
+  const out = [dir[0] / dl, dir[1] / dl], front = [pts[0][0] + out[0] * 3, pts[0][1] + out[1] * 3];
+  const yE = Math.round(isleShape(front[0], front[1]) * 2) / 2, yX = TUN.exitY;
+  // the cleft ramps from the mouth down to the hillside 8 m out
+  const cleftSlope = clamp((yE - isleShape(pts[0][0] + out[0] * 8.5, pts[0][1] + out[1] * 8.5)) / 8, 0, 0.45);
+  const chambers = TUN.chambers.map(([i, hw, h]) => ({ s: cs[i], hw, h }));
+  return { pts, cs, L, yE, yX, out, cleftSlope, chambers, box: [x0 - 34, z0 - 34, x1 + 34, z1 + 34], MZ: 1.5, band: 1.25 };
+})() : null;
+const TN_ = { s: 0, d: 0, hw: 0, floor: 0, ceil: 0, end: false };
+O.tunnelInfo = TN_;
+function tunnelAt(x, z) {
+  const T = TN; if (!T || x < T.box[0] || x > T.box[2] || z < T.box[1] || z > T.box[3]) return 0;
+  let best = Infinity, bs = 0, before = false;
+  for (let i = 1; i < T.pts.length; i++) {
+    const a = T.pts[i - 1], b = T.pts[i], dx = b[0] - a[0], dz = b[1] - a[1], len2 = dx * dx + dz * dz, raw = ((x - a[0]) * dx + (z - a[1]) * dz) / len2, t = clamp(raw, 0, 1);
+    const d = (x - a[0] - dx * t) ** 2 + (z - a[1] - dz * t) ** 2;
+    if (d < best) { best = d; bs = T.cs[i - 1] + Math.sqrt(len2) * t; before = i === 1 && raw < 0 || i === T.pts.length - 1 && raw > 1; }
+  }
+  const d = Math.sqrt(best); if (d > 30) return 0;
+  let hw = TUN.hw, h = TUN.h;
+  for (const c of T.chambers) { const k = Math.exp(-(((bs - c.s) / 6) ** 2)); hw += (c.hw - TUN.hw) * k; h += (c.h - TUN.h) * k; }
+  hw += (noise(x * 0.45 + 3, z * 0.45 - 5) - 0.5) * 0.9 * smooth(0, 3, bs) * smooth(T.L, T.L - 3, bs);
+  const floor = Math.round(AF.lerp(T.yE, T.yX, bs / T.L) * 2) / 2;
+  TN_.s = before ? (bs < 1 ? -d : T.L + d) : bs; TN_.d = before ? 0 : d; TN_.hw = hw; TN_.floor = floor;
+  TN_.ceil = floor + Math.round((h + (noise(x * 0.5 + 9, z * 0.5) - 0.5) * 0.8) * 2) / 2; TN_.end = before;
+  return !before && d < hw ? 2 : 1;
+}
+O.tunnelAt = tunnelAt; O.tunnel = TN;
+// the island's surface over the tunnel (a lava ridge keeps the tube buried; a walled cleft leads to its mouth), then the hollow
+let cutOn = true;
+function isleH(x, z) {
+  let height = isleShape(x, z);
+  height = coveH(x, z, height);
+  if (ST) height = streamCarve(x, z, height);
+  const k = tunnelAt(x, z); if (!k) return height;
+  const T = TN, s = TN_.s;
+  if (!TN_.end) {
+    const top = TN_.ceil + 2.6 + noise(x * 0.06, z * 0.06 + 2) * 1.5;
+    height = Math.max(height, top - Math.max(0, TN_.d - TN_.hw - 2.5) * 0.75);
+  } else if (s < 0 && s > -7.5) {
+    // the cleft: a level floor between rock arms, open to the hillside below
+    const across = Math.abs((x - T.pts[0][0]) * T.out[1] - (z - T.pts[0][1]) * T.out[0]), core = T.yE + s * T.cleftSlope;
+    if (across < 2.2) height = core;
+    else if (across < 6.5) height = Math.max(height, core + 3.8 + s * 0.2 - (across - 2.2) * 0.25);
+  }
+  if (k === 2 && cutOn) return TN_.floor;
+  return height;
+}
+// the surface the island is drawn with: the tube stays covered (44-island's model draws its mouths, floor and roof)
+O.hNat = (x, z) => { cutOn = false; const h = O.h(x, z); cutOn = true; return h; };
 // Corsair Key (05-plan world.key): a low island with one rounded hill, levelled at its airstrip
 function keyE(x, z) {
   const k = P.key, dx = (x - k.cx) / k.rx, dz = (z - k.cz) / k.rz;
-  return Math.hypot(dx, dz) + (noise(x * 0.02 + 40, z * 0.02 - 9) - 0.5) * 0.14 + Math.exp(-(((x - 645) / 34) ** 2 + ((z - 742) / 20) ** 2)) * 0.1;
+  return Math.hypot(dx, dz) + (noise(x * 0.02 + 40, z * 0.02 - 9) - 0.5) * 0.14 + Math.exp(-(((x - k.cx - 85) / 34) ** 2 + ((z - k.cz - 50) / 20) ** 2)) * 0.1;
 }
 function keyH(x, z) {
   const k = P.key; if (!k || Math.abs(x - k.cx) > k.rx * 1.4 || Math.abs(z - k.cz) > k.rz * 1.4) return -4;
@@ -62,20 +226,9 @@ function keyH(x, z) {
 }
 function raw(x, z) {
   if (z > 300) {
-    const isle = P.island, radius = islandE(x, z), key = keyH(x, z);
-    if (radius > 1.18) return key;
-    let height = -4 + smooth(1.18, 0.82, radius) * 9;
-    const cone = isle.cone, distance = Math.hypot(x - cone.x, z - cone.z);
-    height += Math.max(0, 1 - distance / cone.r) ** 1.3 * 50 - (1 - smooth(4, cone.craterR, distance)) * 14;
-    if(distance<10)height=Math.min(height,39+distance*0.2);
-    height+=Math.exp(-(((x+256)/18)**2+((z-610)/24)**2))*4;
-    const strip = isle.airstrip, stripD = Math.hypot(Math.max(strip.x0 - x, 0, x - strip.x1), Math.max(Math.abs(z - strip.z) - strip.w / 2, 0));
-    height = AF.lerp(strip.y, height, smooth(0, 16, stripD));
-    const resort = isle.resort;
-    height = AF.lerp(resort.y, height, smooth(resort.r, resort.r + 18, Math.hypot(x - resort.x, z - resort.z)));
-    const landing = isle.landing;
-    height = AF.lerp(landing.y, height, smooth(landing.r, landing.r + 10, Math.hypot(x - landing.x, z - landing.z)));
-    return Math.max(height, key);
+    const key = keyH(x, z);
+    if (x < ISLE_BOX.x0 || x > ISLE_BOX.x1 || z < ISLE_BOX.z0 || z > ISLE_BOX.z1) return key;
+    return Math.max(isleH(x, z), key);
   }
   const coast = O.coastZ(x), westInland = x - O.coastX(z), eastInland = O.coastX(z, true) - x, inland = Math.min(coast - z, westInland, eastInland);
   if (inland < -32) return -4;
@@ -190,6 +343,7 @@ function carve(x, z, height) {
 }
 O.h = (x, z) => {
   if (W.col(x, z) >= 0) return W.H[W.col(x, z)] * 0.25;
+  if (seaFar(x, z)) return -4;
   const distance = Math.hypot(Math.max(W.X0 - x, 0, x - W.x1), Math.max(W.Z0 - z, 0, z - W.z1));
   let height = raw(x, z);
   if (distance < 90) height = AF.lerp(edge(x, z), height, smooth(0, 90, distance));
@@ -242,7 +396,7 @@ function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
     riverAt(x, z); if (rivD < rivHW + 3.5 && height < rivY + 1.5) return rivD < rivHW ? 43 : 42;
   }
   const patch = noise(x * 0.035 + 11, z * 0.035 - 4), tone = patch < 0.38 ? 0 : patch < 0.66 ? 1 : 2;
-  if (height < -1.25) return 14;
+  if (height < -1.25) return z > 300 && height > -2.6 ? 54 : 14;
   for (const pad of O.pads) if (pad.kind === 'hamlet' && Math.abs(x - pad.x) < pad.rx && Math.abs(z - pad.z) < pad.rz) {
     if (Math.abs(x - pad.x) < 2 || Math.abs(z - pad.z) < 2) return 12;
     return O.dryWeight(x, z) > 0.5 ? [29, 30, 31][tone] : patch < 0.55 ? 23 : 15;
@@ -259,16 +413,28 @@ function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
       if (slope > 0.9) return [20, 51, 8][tone];
       return height > 8 ? [40, 1, 23][tone] : [16, 1, 15][tone];
     }
-    // Serena Isle: asphalt strip, wet sand at the waterline, warm beaches, tropical lowland, jungle flanks, a basalt cone and red crater rim
+    // Serena Isle: asphalt strip, wet + damp sand at the waterline, warm beaches, lush lowland, jungle flanks, basalt cliffs and
+    // tors, a scoria crater rim with its trail bench, the stream bed; the tube's open cells are drawn by its model (44-island)
     const isle = P.island, strip = isle.airstrip;
     if (x >= strip.x0 && x <= strip.x1 && Math.abs(z - strip.z) < strip.w / 2) return 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3);
-    if (height < 0.4) return 50;
-    if (islandE(x, z) > 0.8 || height < 2.1) return [47, 48, 49][tone];
+    const tk = tunnelAt(x, z);
+    if (tk && !TN_.end && step <= 0.5) { const m = TN_.s < TN.MZ || TN_.s > TN.L - TN.MZ; if (tk === 2 ? m || height <= TN_.ceil + 1 : m && TN_.d < TN_.hw + TN.band) return -1; }
+    if (tk && TN_.end && TN_.s < 0 && TN_.s > -8) return [55, 51, 57][tone];
+    const C = COVE;
+    if (C && x >= C.ledge.x0 && x < C.ledge.x1 && z >= C.ledge.z0 && z < C.ledge.z1) return 51;
+    if (C && height > 1.5 && slope > 0.9 && Math.hypot(x - C.x, z - C.z) < C.r + 7) return [55, 51, 57][tone];
+    if (ST) { streamAt(x, z); if (stD < ST.hw + 2.5 && height < stY + 1.2) return stD < ST.hw ? 43 : 42; }
+    if (height < 0.25) return 50;
+    if (height < 1.2 && noise(x * 0.5 + 4, z * 0.5) < 0.45 + (1.2 - height) * 0.6) return 54;
+    if (islandE(x, z) > 0.8 && height < 4 || height < 2.1) return [47, 48, 49][tone];
     const cone = isle.cone, d = Math.hypot(x - cone.x, z - cone.z);
-    if (height > 31) return d < cone.craterR + 8 ? 52 : [51, 19, 20][tone];
-    if (height > 23 || slope > 0.9) return [20, 51, 8][tone];
-    if (height > 9) return [40, 1, 23][tone];
-    return [16, 1, 15][tone];
+    if (Math.abs(d - cone.craterR - 4) < 1.4 && Math.abs(height - RIM_Y) < 0.6) return 44;
+    if (height > 31) return d < cone.craterR + 8 ? (patch < 0.5 ? 52 : 58) : [51, 19, 57][tone];
+    if (slope > 0.9) return height > 6 ? [55, 51, 8][tone] : [20, 51, 8][tone];
+    if (height > 23) return [20, 51, 57][tone];
+    const lush = noise(x * 0.012 + 70, z * 0.012 - 30);
+    if (height > 9) return lush > 0.55 ? [56, 40, 1][tone] : [40, 1, 23][tone];
+    return lush > 0.6 ? [56, 16, 45][tone] : [16, 1, 15][tone];
   }
   const inland = Math.min(O.coastZ(x) - z, x - O.coastX(z), O.coastX(z, true) - x);
   if (inland < 19) return x < -660 ? [21, 4, 22][tone] : [17, 2, 18][tone];
@@ -294,13 +460,14 @@ function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
   const meadow = noise(x * 0.012 + 31, z * 0.012);
   return meadow > 0.6 ? [15, 45, 16][tone] : meadow > 0.42 ? [41, 46, 23][tone] : [24, 41, 25][tone];
 }
-O.colTop = (x, z, height, slope, step) => pal[colorIndex(x, z, height, slope, step)];
+O.colTop = (x, z, height, slope, step) => { const index = colorIndex(x, z, height, slope, step); return index < 0 ? 0 : pal[index]; };
 O.colSide = (x, z, height = O.h(x, z)) => pal[height > 70 ? ((Math.floor(height / 12 + noise(x * 0.04, z * 0.04)) % 3 + 3) % 3 === 0 ? 19 : 20) : 8];
-O.colorAt = (x, z) => hex[colorIndex(x, z)];
+O.colorAt = (x, z) => hex[Math.max(0, colorIndex(x, z, O.hNat(x, z), 0, 1))];
 O.biome = (x, z) => O.h(x, z) < -1.25 ? 'sea' : z > 300 ? 'island' : z < -300 ? Math.abs(x + 40) < 110 && z > -710 ? 'valley' : O.jungle(x, z) > 0.5 ? 'jungle' : 'range' : x < -660 ? 'farmland' : O.dryWeight(x, z) > 0.5 ? 'desert' : 'forest';
 O.waterY = (x, z) => {
   for (const lake of waters) if (Math.abs(x - lake.cx) <= lake.rx * 1.08 && Math.abs(z - lake.cz) <= lake.rz * 1.08 && waterE(x, z, lake) <= 1.04) return lake.waterY;
   if (z <= 300) { riverAt(x, z); if (rivD < rivHW + 0.4) return rivY; }
+  else if (ST) { streamAt(x, z); if (stD < ST.hw + 0.4) return stY; if (Math.hypot(x - ST.pool.x, z - ST.pool.z) < ST.pool.r) return ST.pool.y; }
   return O.h(x, z) < -1.25 ? -1.25 : null;
 };
 O.forestDensity = (x, z) => {
@@ -388,7 +555,7 @@ const pastEnd = (road, x, z) => {
 };
 // outland mesher heights (49-outland): a quantised cell never rises through an asphalt ribbon or deck it overlaps at any LOD
 O.meshH = (x, z, step) => {
-  const quantum = step <= 1 ? step * 0.5 : step * 0.75, height = Math.round(O.h(x, z) / quantum) * quantum;
+  const quantum = step <= 1 ? step * 0.5 : step * 0.75, height = Math.round((z > 300 ? O.hNat(x, z) : O.h(x, z)) / quantum) * quantum;
   if (z > 300) return height;
   const reach = step * 0.71 + 0.35;
   let cap = Infinity;
@@ -417,7 +584,7 @@ const ribbonCap = (x, z) => {
 };
 const RIM_DIRS = [[8, 0], [-8, 0], [0, 8], [0, -8]];
 O.rimH = (x, z) => {
-  const natural = Math.round(O.h(x, z) * 4) / 4;
+  const natural = Math.round((z > 300 ? O.hNat(x, z) : O.h(x, z)) * 4) / 4;
   if (z > 300 || !O.edgeReady) return natural;
   roadAt(x, z); if (roadD > 17) return natural;
   const own = ribbonCap(x, z), hidden = own < Infinity, depth = capTunnel ? 40 : 8;
@@ -432,7 +599,7 @@ O.rimH = (x, z) => {
   }
   return value < natural ? Math.floor(value * 4) / 4 : natural;
 };
-O.riverInfo = (x, z) => { riverAt(x, z); return { d: rivD, y: rivY, hw: rivHW }; };
+O.riverInfo = (x, z) => { if (z > 300) { if (ST) streamAt(x, z); else stD = Infinity; return { d: stD, y: stY, hw: ST ? ST.hw : 0 }; } riverAt(x, z); return { d: rivD, y: rivY, hw: rivHW }; };
 O.fieldEdge = (x, z) => { farmAt(x, z); return fieldD; };
 O.fieldMeadow = (x, z) => { farmAt(x, z); return fieldId >= 0.8; };
 O.fieldWheat = (x, z) => { farmAt(x, z); return x < -660 && z > -300 && z < O.coastZ(x) - 30 && fieldId < 0.3 && fieldD > 7 && laneD > 7; };
@@ -531,6 +698,8 @@ function buildRivers() {
     }
     const middle = pts[Math.floor(pts.length / 2)]; AF.addLabel(spec.name, middle[0], middle[1], 'place');
   }
+  // Serena Isle's stream (carved by the island's own height function; 49-outland draws its water and falls with the rivers)
+  if (ST) { O.rivers.push({ name: ST.name, pts: ST.pts, levels: ST.levels, hw: ST.hw }); const lip = ST.pts[Math.floor(ST.pts.length * 0.4)]; AF.addLabel(ST.name, lip[0], lip[1], 'place'); }
   riverReady = true;
 }
 function nearestOn(road, x, z) {
@@ -687,7 +856,7 @@ AF.onBuild('outland-wayside', 496.25, () => {
   tiles.clear();
 });
 for (const road of P.roads) { road.ctrl = road.points.map((point) => [point[0], point[1]]); road.kind = road.surface === 'gravel' ? 1 : road.surface === 'trail' ? 2 : 0; road.grade = road.ring ? 0.07 : road.kind === 2 ? 0.3 : 0.1; road.flags = new Uint8Array(road.points.length); }
-for (const entry of [['Solace Range', 220, -780], ['Park Valley', -40, -440], ['Lake Tamsin', -40, -650], ['Westmoor', -1000, -100], ['Eastwood', 800, -160], ['Serena Isle', -60, 600], ['Tamsin Jungle', 715, -375]]) AF.addLabel(entry[0], entry[1], entry[2]);
+for (const entry of [['Solace Range', 220, -780], ['Park Valley', -40, -440], ['Lake Tamsin', -40, -650], ['Westmoor', -1000, -100], ['Eastwood', 800, -160], ['Serena Isle', ISLE.cx, ISLE.cz], ['Tamsin Jungle', 715, -375]]) AF.addLabel(entry[0], entry[1], entry[2]);
 AF.addLabel('Mirror Lake', 828, -198);
 AF.addLabel('Ochre Flats', 930, 70);
 for (const road of P.roads) { const point = road.points[1]; AF.addLabel(road.name, point[0], point[1], 'street'); }

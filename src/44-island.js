@@ -1,7 +1,9 @@
 try {
-const O=AF.outland,I=AF.PLAN.world.island,S=AF.island={sites:[],palms:0,walkers:0,paths:[],trail:[]};
+const O=AF.outland,I=AF.PLAN.world.island,S=AF.island={sites:[],palms:0,walkers:0,paths:[],trail:[],spots:{}};
+// the island's props were authored with it at z 600: Z() carries those coordinates to where it lies now (05-plan IZ)
+const IZ=I.cz-600,Z=z=>z+IZ;
 const route=I.ferry;
-const F=S.ferry={dock:0,from:0,to:1,elapsed:0,rider:false,waiting:-1,acc:0,x:0,z:277,y:-2.25,yaw:Math.atan2(-20,128),speed:0};
+const F=S.ferry={dock:0,from:0,to:1,elapsed:0,rider:false,waiting:-1,acc:0,x:0,z:277,y:-2.25,yaw:Math.atan2(route.path[1][0]-route.path[0][0],route.path[1][1]-route.path[0][1]),speed:0,len:Math.hypot(route.path[1][0]-route.path[0][0],route.path[1][1]-route.path[0][1])};
 const chase=new THREE.Vector3(),target=new THREE.Vector3();
 const ridePrompt={label:'Skip crossing',act:()=>F.skip()};
 const rideHud={mode:'drive',speed:0,car:'Solace Belle'};
@@ -17,23 +19,25 @@ function canopy(key,col){return geometry(key,12,7,10,model=>{for(const x of [0,1
 function openCanopy(site,geo,dx,dz){prop(site,geo,dx,dz,{collide:false});for(const offset of [-2.75,2.75])AF.addCollider(site.x+dx+offset-0.25,site.y,site.z+dz-2.5,site.x+dx+offset+0.25,site.y+3,site.z+dz-2,'island:'+site.name);}
 function cottage(col){return geometry('cottage-'+col,14,12,12,model=>{model.box(1,0,1,13,1,11,rock);model.box(1,1,1,13,8,11,col);for(let layer=0;layer<4;layer++)model.box(0,8+layer,layer,14,9+layer,12-layer,teal);model.box(6,1,10,9,6,11,wood);for(const x of [2,10]){model.box(x,3,10,x+2,6,11,win);model.box(x,6,11,x+2,7,12,white);}return model;});}
 function waterRect(points,indices,x,z,width,depth,y){const start=points.length/3;points.push(x-width/2,y,z-depth/2,x-width/2,y,z+depth/2,x+width/2,y,z+depth/2,x+width/2,y,z-depth/2);indices.push(start,start+1,start+2,start,start+2,start+3);}
+// no trees or palms on the smugglers' tube, in its cleft, or on the cove's ledge and dock (44-flora asks)
+S.noFlora=(x,z)=>{const k=O.tunnelAt?O.tunnelAt(x,z):0,t=O.tunnelInfo;if(k&&(t.end?t.s<0&&t.s>-10:t.d<t.hw+3))return true;const c=I.cove;return !!c&&x>c.ledge.x0-3&&x<c.dock.x1+3&&z>c.ledge.z0-3&&z<c.ledge.z1+3;};
 AF.onBuild('island-sites',496.4,()=>{
- const hotel=site('Hotel Serena',-170,631,22,14,3),village=site("Fisher's Landing",-20,486,20,18,2),light=site('Serena Point Light',-256,610,6,6,7),air=site('Serena Airstrip',-182,561,19,8,2),look=site('Crater Lookout',-10,643,4,3,Math.round(O.h(-10,643)*4)/4),bar=site('Palm Beach Bar',-226,665,7,7);
+ const hotel=site('Hotel Serena',-170,Z(631),22,14,3),village=site("Fisher's Landing",-20,Z(486),20,18,2),light=site('Serena Point Light',-256,Z(610),6,6,7),air=site('Serena Airstrip',-182,Z(561),19,8,2),look=site('Crater Lookout',-10,Z(643),4,3,Math.round(O.h(-10,Z(643))*4)/4),bar=site('Palm Beach Bar',-226,Z(665),7,7);
  S.hotel=hotel;S.village=village;S.light=light;S.lookout=look;
  prop(hotel,geometry('hotel',84,36,48,model=>{
   for(let level=0;level<4;level++){const inset=level===3?8:level===2?3:0,y=level*8;model.box(2+inset,y,2+inset,82-inset,y+8,44-inset,white);model.box(inset,y+7,inset,84-inset,y+8,46-inset,mint);for(let x=6+inset;x<78-inset;x+=7)for(const z of [2+inset,43-inset]){model.box(x,y+2,z,x+4,y+6,z+1,win);model.box(x-1,y+1,z,x+5,y+2,z+1,gold);}for(let z=7+inset;z<39-inset;z+=7)for(const x of [2+inset,81-inset])model.box(x,y+2,z,x+1,y+6,z+4,win);}
   for(let x=0;x<12;x++)for(let z=34;z<48;z++)if(Math.hypot(x-12,z-34)>12)model.box(x,0,z,x+1,32,z+1,0);
   model.box(36,0,43,49,5,45,teal);model.box(33,6,42,52,7,48,mint);model.box(38,32,12,46,36,27,coral);for(const x of [10,72])model.box(x,0,43,x+2,27,45,mint);
  }));sign(hotel,'HOTEL SERENA',0,12,hotel.y+14);
- const poolSite={...hotel,name:'Hotel Serena Pool',x:-170,z:663,props:[]};S.sites.push(poolSite);
+ const poolSite={...hotel,name:'Hotel Serena Pool',x:-170,z:Z(663),props:[]};S.sites.push(poolSite);
  for(const dz of [-6,6])prop(poolSite,block('pool-edge-long',44,1,3,white),0,dz);for(const dx of [-10.5,10.5])prop(poolSite,block('pool-edge-short',3,1,22,white),dx,0);
  prop(poolSite,block('pool-floor',40,1,20,teal),0,0,{y:2.4,collide:false});
  const lounger=geometry('lounger',3,3,5,model=>{model.box(0,1,0,3,2,5,white);model.box(0,2,0,3,3,2,mint);model.box(0,0,1,1,1,4,wood);model.box(2,0,1,3,1,4,wood);}),umbrella=geometry('umbrella',9,7,9,model=>{model.box(4,0,4,5,6,5,wood);for(let layer=0;layer<3;layer++)model.box(layer,4+layer,layer,9-layer,5+layer,9-layer,layer%2?white:coral);});
  for(let index=0;index<8;index++){const dx=-14+(index%4)*9,dz=index<4?10:-10;prop(poolSite,lounger,dx,dz);if(index%2===0)prop(poolSite,umbrella,dx+2,dz+1,{collide:false});}
- const cabana=canopy('cabana',mint);for(let index=0;index<5;index++){const beach=site('Serena Cabana '+(index+1),-205+index*17,690,4,4);openCanopy(beach,cabana,0,0);}
+ const cabana=canopy('cabana',mint);for(let index=0;index<5;index++){const beach=site('Serena Cabana '+(index+1),-205+index*17,Z(690),4,4);openCanopy(beach,cabana,0,0);}
  openCanopy(bar,geometry('bar',24,9,14,model=>{model.box(0,0,8,24,3,12,coral);model.box(0,3,7,24,4,13,wood);for(const x of [0,23])model.box(x,0,0,x+1,8,14,wood);model.box(0,8,0,24,9,14,teal);for(let x=2;x<23;x+=3)model.box(x,7,0,x+1,8,1,glow);}),0,0);sign(bar,'BEACH BAR',0,3.6,bar.y+4.6);AF.addLight({x:bar.x,y:bar.y+3,z:bar.z,color:0xffc878,intensity:1.3,range:15,kind:'street'});
- const board=block('boardwalk',12,1,8,wood);for(let x=-214;x<=-112;x+=6)O.addProp(board,x,Math.round(O.h(x,679)*4)/4+0.05,679,0,{tag:'island:boardwalk'});
- for(const [x,z,index]of [[-37,477,0],[-4,477,1],[-38,491,2],[-3,491,3],[-36,503,4],[-4,503,5],[-50,491,6]]){const house=site('Landing Cottage '+(index+1),x,z,4,4,2);prop(house,cottage(index%2?mint:coral));}
+ const board=block('boardwalk',12,1,8,wood);for(let x=-214;x<=-112;x+=6)O.addProp(board,x,Math.round(O.h(x,Z(679))*4)/4+0.05,Z(679),0,{tag:'island:boardwalk'});
+ for(const [x,z,index]of [[-37,477,0],[-4,477,1],[-38,491,2],[-3,491,3],[-36,503,4],[-4,503,5],[-50,491,6]]){const house=site('Landing Cottage '+(index+1),x,Z(z),4,4,2);prop(house,cottage(index%2?mint:coral));}
  const market=canopy('market',coral);for(const dx of [-11,11])openCanopy(village,market,dx,3);sign(village,"FISHER'S LANDING",0,-3,4.5);
  const net=geometry('fishing-net',12,5,1,model=>{for(let x=0;x<12;x++)for(let y=0;y<5;y++)if((x+y)%2===0)model.set(x,y,0,wood);model.box(0,0,0,1,5,1,wood);model.box(11,0,0,12,5,1,wood);});prop(village,net,17,-12,{collide:false});
  const boat=geometry('fishing-skiff',6,4,16,model=>{model.box(1,0,1,5,1,15,wood);for(const x of [0,5])model.box(x,1,1,x+1,3,15,coral);for(const z of [0,15])model.box(1,1,z,5,3,z+1,coral);model.box(1,2,6,5,3,7,white);});for(let index=0;index<3;index++)prop(village,boat,10+index*5,-38-index*3,{y:-1.2,collide:false});
@@ -48,14 +52,142 @@ AF.onBuild('island-sites',496.4,()=>{
  for(const x of [runway.x0+9,runway.x1-9])for(const dz of [-8.4,-6.6,-4.8,-3,3,4.8,6.6,8.4])O.addProp(mark('rw-key',160,14,stripe),x,ry,runway.z+dz,0,{collide:false});
  for(const [x,text,rot] of [[runway.x0+24,'09',0],[runway.x1-24,'27',2]]){const t=AF.textModel(text,stripe,{pad:0}),k=12,m=new AF.Model(t.h*k,1,t.w*k);for(let tx=0;tx<t.w;tx++)for(let ty=0;ty<t.h;ty++)if(t.get(tx,ty,0))m.box(ty*k,0,tx*k,ty*k+k,1,tx*k+k,stripe);const geo=AF.meshModel(m,{vs:1/16,flat:true});geo.userData.lod=geo;O.addProp(geo,x,ry,runway.z,rot,{collide:false});}
  for(let x=runway.x0+2;x<=runway.x1-2;x+=20)for(const dz of [-11.7,11.7]){const end=x<runway.x0+6||x>runway.x1-6;O.addProp(mark(end?'rw-end-light':'rw-light',4,4,end?lampG:lamp,4),x,runway.y,runway.z+dz,0,{collide:false});}
- const apron=site('Serena Apron',-150,556,22,5,2);apron.face=[0,-1];
+ const apron=site('Serena Apron',-150,Z(556),22,5,2);apron.face=[0,-1];
  prop(air,geometry('windsock',14,15,3,model=>{model.box(1,0,1,2,14,2,dark);for(let x=2;x<14;x++)model.box(x,11,0,x+1,14-Math.floor(x/5),3,x%4<2?coral:white);}),25,0);
  for(let index=0;index<=240;index++){const progress=index/240,angle=Math.PI-progress*Math.PI/2+Math.sin(progress*Math.PI*6)*0.18,radius=85-67*progress,x=I.cone.x+Math.cos(angle)*radius,z=I.cone.z+Math.sin(angle)*radius,y=Math.round(O.h(x,z)*4)/4;S.trail.push([x,y+0.25,z]);O.addProp(block('trail-step',6,1,6,gold),x,y+0.04,z,0,{tag:'island:trail'});if(index%9===0)O.addProp(block('lava-rock',3,2,3,rock),x+3,y,z+2,0,{collide:false});}
  furniture(look,-2,0);prop(look,block('lookout-deck',16,1,12,wood),0,0,{y:look.y-0.5});
- const points=[],indices=[];waterRect(points,indices,-170,663,20,10,3.16);const start=points.length/3;points.push(I.cone.x,41.5,I.cone.z);for(let index=0;index<=32;index++){const angle=index/32*Math.PI*2;points.push(I.cone.x+Math.cos(angle)*9,41.5,I.cone.z+Math.sin(angle)*9);if(index)indices.push(start,start+index+1,start+index);}const water=new THREE.BufferGeometry();water.setAttribute('position',new THREE.Float32BufferAttribute(points,3));water.setIndex(indices);water.computeVertexNormals();water.computeBoundingSphere();water.userData.kind='lake';water.userData.waterY=3.16;water.userData.outland=true;AF.addWater(water);
+ const points=[],indices=[];waterRect(points,indices,-170,Z(663),20,10,3.16);const start=points.length/3;points.push(I.cone.x,41.5,I.cone.z);for(let index=0;index<=32;index++){const angle=index/32*Math.PI*2;points.push(I.cone.x+Math.cos(angle)*9,41.5,I.cone.z+Math.sin(angle)*9);if(index)indices.push(start,start+index+1,start+index);}
+ // the plunge pool under Serena Falls (07-outland carves it at the foot of the stream's steepest reach)
+ const PL=O.isleStream&&O.isleStream.pool;if(PL){const s0=points.length/3;points.push(PL.x,PL.y,PL.z);for(let index=0;index<=20;index++){const angle=index/20*Math.PI*2;points.push(PL.x+Math.cos(angle)*(PL.r+0.3),PL.y,PL.z+Math.sin(angle)*(PL.r+0.3));if(index)indices.push(s0,s0+index+1,s0+index);}}
+ const water=new THREE.BufferGeometry();water.setAttribute('position',new THREE.Float32BufferAttribute(points,3));water.setIndex(indices);water.computeVertexNormals();water.computeBoundingSphere();water.userData.kind='lake';water.userData.waterY=3.16;water.userData.outland=true;AF.addWater(water);
  for(let index=0;index<210;index++){const angle=index/210*Math.PI*2,radius=0.78+AF.hash2(index,92)*0.17,x=I.cx+Math.cos(angle)*I.rx*radius,z=I.cz+Math.sin(angle)*I.rz*radius;if(Math.abs(z-runway.z)<22||Math.hypot(x-light.x,z-light.z)<15||S.sites.some(site=>Math.abs(x-site.x)<site.rx+4&&Math.abs(z-site.z)<site.rz+4))continue;if(AF.flora.add('palm',x,z,{scale:0.65+AF.hash2(index,41)*0.5,rot:angle,planted:true,biome:'island'}))S.palms++;}
- for(let index=0;index<24;index++){const x=-207+(index%8)*10,z=652+Math.floor(index/8)*13;if(Math.abs(x+170)<24&&z<674)continue;if(AF.flora.add('palm',x,z,{scale:0.8+AF.hash2(index,9)*0.3,planted:true,biome:'island'}))S.palms++;}
- AF.flora.scatter('shrub',{x0:-260,z0:584,x1:-231,z1:644,spacing:7,density:0.7,planted:true,biome:'island'});AF.flora.scatter('rock',{x0:108,z0:610,x1:146,z1:669,spacing:8,density:0.6,planted:true,biome:'island'});
+ for(let index=0;index<24;index++){const x=-207+(index%8)*10,z=Z(652)+Math.floor(index/8)*13;if(Math.abs(x+170)<24&&z<Z(674))continue;if(AF.flora.add('palm',x,z,{scale:0.8+AF.hash2(index,9)*0.3,planted:true,biome:'island'}))S.palms++;}
+ AF.flora.scatter('shrub',{x0:-260,z0:Z(584),x1:-231,z1:Z(644),spacing:7,density:0.7,planted:true,biome:'island'});AF.flora.scatter('rock',{x0:108,z0:Z(610),x1:146,z1:Z(669),spacing:8,density:0.6,planted:true,biome:'island'});
+ // the wreck of the Lucky Marlin, heeled over on the south-west reef (jet skis bump off it; the shallows glow turquoise round it)
+ const R=I.reef;if(R){const hull=AF.col(0x4a3527,{pat:'plank',jitter:0.5,edge:0.25}),keel=AF.col(0x2b2420,{jitter:0.4}),algae=AF.col(0x4f6b3a,{jitter:0.6});
+  const wreck=geometry('wreck',44,16,14,m=>{for(let x=0;x<44;x++){if(x>34&&AF.hash2(x,3)<0.6)continue;const t=x/43,half=Math.max(1,Math.round(6.5*Math.sin(Math.min(1,t*1.15+0.08)*Math.PI)**0.6));for(let z=7-half;z<7+half;z++){const lean=Math.round((z-7)*0.55);for(let y=0;y<8;y++){const edge=z===7-half||z===7+half-1||y===0;if(!edge&&y<7)continue;if(x>30&&y>4&&AF.hash2(x,y*7+z)<0.5)continue;m.set(x,y+lean+4,z,y<2?algae:y===0?keel:hull);}}}m.box(16,8,6,17,16,7,keel);m.box(12,13,6,22,14,7,keel);},0.5);
+  O.addProp(wreck,R.x,-4.6,R.z,0,{tag:'island:wreck'});AF.addLabel('Wreck of the Lucky Marlin',R.x,R.z,'place');}
+});
+// ---------------------------------------------------------------- the Moretti smugglers' tunnel (heist act II)
+// 07-outland cuts the hollow out of the ground for physics (O.h) but keeps drawing the hillside over it (O.hNat) and leaves the
+// tube's open cells undrawn; this lines it: a 0.5 m basalt shell per 32 m outland tile (floor, rough walls, roof, the rock over both
+// mouths; merged into the tile meshes, so no draws of its own), roof colliders that carry the hillside above, lanterns (pooled
+// lights), crates, nets, an old mine track, the arms cache, boulders hiding the cleft, and the cove's dock with its moored skis.
+const TUN=S.tunnelStats={chunks:0,cells:0,colliders:0,triangles:0,lights:0};
+AF.onBuild('island-tunnel',496.42,()=>{
+ const T=O.tunnel;if(!T)return;
+ const stone=(hex,k)=>AF.col(hex,{pat:'stone',jitter:k,edge:0.12});
+ const wallC=[stone(0x3a3531,0.7),stone(0x2c2826,0.6),stone(0x47403a,0.7),stone(0x35302c,0.8)],floorC=[AF.col(0x52473c,{jitter:0.6,edge:0.04}),AF.col(0x463c33,{jitter:0.6,edge:0.04})];
+ const lampC=AF.col(0xffb24d,{emit:0xff9b30,emitK:3.2,mode:'always',jitter:0.2,edge:0}),mossC=stone(0x4a5636,0.6),iron=AF.col(0x3b3d40,{metal:0.6,rough:0.5,jitter:0.2}),rust=AF.col(0x7a4a32,{jitter:0.5}),olive=AF.col(0x4d5a35,{jitter:0.3,edge:0.2}),rope=AF.col(0xb9a27a,{jitter:0.3,edge:0});
+ const q2=v=>Math.round(v*2)/2,f2=v=>Math.floor(v*2)/2,ti=O.tunnelInfo,BAND=T.band;
+ let x0=Infinity,x1=-Infinity,z0=Infinity,z1=-Infinity;for(const [x,z] of T.pts){x0=Math.min(x0,x);x1=Math.max(x1,x);z0=Math.min(z0,z);z1=Math.max(z1,z);}
+ x0=Math.floor(x0-9);x1=Math.ceil(x1+9);z0=Math.floor(z0-9);z1=Math.ceil(z1+9);
+ const NI=(x1-x0)*2,NK=(z1-z0)*2,N=NI*NK,kind=new Uint8Array(N),fl=new Float32Array(N),ce=new Float32Array(N),na=new Float32Array(N),ss=new Float32Array(N),lamp=new Map();
+ const cx=i=>x0+i*0.5+0.25,cz=k=>z0+k*0.5+0.25,mouth=s=>s<T.MZ||s>T.L-T.MZ;
+ for(let i=0;i<NI;i++)for(let k=0;k<NK;k++){const t=O.tunnelAt(cx(i),cz(k));if(!t||ti.end||t===1&&ti.d>=ti.hw+BAND)continue;const n=i*NK+k;kind[n]=t;fl[n]=ti.floor;ce[n]=ti.ceil;ss[n]=ti.s;}
+ for(let n=0;n<N;n++)if(kind[n])na[n]=Math.round(O.hNat(cx(Math.floor(n/NK)),cz(n%NK))*4)/4;
+ // centre-line samples: point, tangent, floor at s
+ const along=s=>{s=AF.clamp(s,0,T.L);let i=1;while(i<T.cs.length-1&&T.cs[i]<s)i++;const a=T.pts[i-1],b=T.pts[i],len=T.cs[i]-T.cs[i-1],u=(s-T.cs[i-1])/len,dx=(b[0]-a[0])/len,dz=(b[1]-a[1])/len,x=a[0]+(b[0]-a[0])*u,z=a[1]+(b[1]-a[1])*u;O.tunnelAt(x,z);return{x,z,dx,dz,y:ti.floor,hw:ti.hw,ceil:ti.ceil};};
+ const cellOf=(x,z)=>{const i=Math.floor((x-x0)*2),k=Math.floor((z-z0)*2);return i<0||k<0||i>=NI||k>=NK?-1:i*NK+k;};
+ // lanterns: every 12 m, alternate walls, an emissive block 2 m up the first wall cell, each with a pooled light
+ const lights=[];
+ for(let s=5,side=1;s<T.L-2;s+=12,side=-side){const c=along(s);for(let d=c.hw-0.75;d<c.hw+2;d+=0.25){const x=c.x-c.dz*side*d,z=c.z+c.dx*side*d,n=cellOf(x,z);if(n>=0&&kind[n]===1){lamp.set(n,fl[n]+2);lights.push([c.x-c.dz*side*(c.hw-0.6),c.y+2.3,c.z+c.dx*side*(c.hw-0.6)]);break;}}}
+ for(const l of lights){AF.addLight({x:l[0],y:l[1],z:l[2],color:0xffb060,intensity:1.6,range:12,kind:'street',night:false});TUN.lights++;}
+ // the shell, one model per 32 m outland tile (the quadtree's level-0 grid)
+ const RX=-1484,RZ=-1708;
+ for(let tx=RX+Math.floor((x0-RX)/32)*32;tx<x1;tx+=32)for(let tz=RZ+Math.floor((z0-RZ)/32)*32;tz<z1;tz+=32){
+  let lo=Infinity,hi=-Infinity,deep=-1;const cells=[];
+  for(let i=Math.max(0,(tx-x0)*2);i<Math.min(NI,(tx+32-x0)*2);i++)for(let k=Math.max(0,(tz-z0)*2);k<Math.min(NK,(tz+32-z0)*2);k++){
+   const n=i*NK+k,t=kind[n];if(!t)continue;const s=ss[n],m=mouth(s);let a=fl[n]-1,b;
+   if(t===2){const top=m||na[n]<=ce[n]+1?q2(na[n]):ce[n]+1;b=Math.max(fl[n],top);if(deep<0&&na[n]>ce[n]+3)deep=n;}
+   else b=m?q2(na[n]):Math.min(ce[n]+1,f2(na[n]));
+   if(b<=a)continue;cells.push(n,a,b);lo=Math.min(lo,a);hi=Math.max(hi,b);
+  }
+  if(!cells.length)continue;
+  const mw=64,mh=Math.round((hi-lo)*2),md=64,model=new AF.Model(mw,mh,md);
+  for(let c=0;c<cells.length;c+=3){
+   const n=cells[c],i=Math.floor(n/NK),k=n%NK,mx=Math.round((x0+i*0.5-tx)*2),mz=Math.round((z0+k*0.5-tz)*2),ya=Math.round((cells[c+1]-lo)*2),yb=Math.round((cells[c+2]-lo)*2),x=cx(i),z=cz(k),h=AF.hash2(i*7+3,k*5+1);
+   const skin=mouth(ss[n])||kind[n]===2&&na[n]<=ce[n]+1?O.colTop(x,z,na[n],0,1):0;
+   if(kind[n]===2){
+    const floorY=Math.round((fl[n]-lo)*2),ceilY=Math.round((ce[n]-lo)*2);
+    for(let y=ya;y<floorY;y++)model.set(mx,y,mz,floorC[h<0.5?0:1]);
+    for(let y=Math.max(ceilY,floorY);y<yb;y++)model.set(mx,y,mz,y===yb-1&&skin?skin:wallC[(h*4)|0]);
+   }else{
+    const lit=lamp.get(n);
+    for(let y=ya;y<yb;y++)model.set(mx,y,mz,lit!==undefined&&Math.abs(y/2+lo-lit)<0.3?lampC:y===yb-1&&skin?skin:y===ya+2&&AF.hash2(i+y,k)<0.25?mossC:wallC[(AF.hash2(i*3+y,k*3-y)*4)|0]);
+   }
+  }
+  const geo=AF.meshModel(model,{vs:0.5,anchor:[0,0,0],flat:true});delete geo.userData.src;
+  // far LOD (level >= 1 tiles draw the hillside whole): one voxel buried under the deepest stretch of floor
+  const dn=deep>=0?deep:cells[0],di=Math.floor(dn/NK),dk=dn%NK,lodM=new AF.Model(1,1,1).set(0,0,0,wallC[0]);
+  const lod=AF.meshModel(lodM,{vs:0.5,anchor:[-Math.round((x0+di*0.5-tx)*2),-Math.round((fl[dn]-1-lo)*2),-Math.round((z0+dk*0.5-tz)*2)],flat:true});delete lod.userData.src;
+  geo.userData.lod=lod;geo.userData.lod2=lod;geo.userData.small=true;
+  O.addProp(geo,tx,lo,tz,0,{collide:false});TUN.chunks++;TUN.cells+=cells.length/3;TUN.triangles+=geo.index.count/3;
+ }
+ // roof colliders over the hollow (from the ceiling up to the drawn hillside), merged into runs along x, then along z
+ const runs=new Map(),boxes=[];
+ for(let k=0;k<NK;k++){let i=0;while(i<NI){const n=i*NK+k;if(kind[n]!==2||na[n]<=ce[n]){i++;continue;}let j=i+1;while(j<NI){const m=j*NK+k;if(kind[m]!==2||ce[m]!==ce[n]||na[m]!==na[n])break;j++;}
+  const key=i+','+j+','+ce[n]+','+na[n],prev=runs.get(key);if(prev&&prev.k1===k)prev.k1=k+1;else{if(prev)boxes.push(prev);runs.set(key,{i,j,k0:k,k1:k+1,y0:ce[n],y1:na[n]});}i=j;}}
+ for(const r of [...boxes,...runs.values()]){AF.addCollider(x0+r.i*0.5,r.y0,z0+r.k0*0.5,x0+r.j*0.5,r.y1,z0+r.k1*0.5,'island:tunnel-roof');TUN.colliders++;}
+ // ---- dressing: crates, barrels, nets, lanterns, the mine track, the arms cache
+ const crate=geometry('t-crate',8,6,6,m=>{m.box(0,0,0,8,6,6,wood);for(const x of [0,7])m.box(x,0,0,x+1,6,6,dark);m.box(0,5,0,8,6,6,dark);m.box(3,2,0,5,4,1,gold);},0.25);
+ const crateS=geometry('t-crate-s',5,5,5,m=>{m.box(0,0,0,5,5,5,wood);m.box(0,4,0,5,5,5,dark);m.box(0,0,0,1,5,5,dark);},0.25);
+ const barrel=geometry('t-barrel',4,5,4,m=>{m.box(0,0,1,4,5,3,rust);m.box(1,0,0,3,5,4,rust);for(const y of [1,3])m.box(0,y,1,4,y+1,3,iron);},0.25);
+ const netG=geometry('t-net',14,10,1,m=>{for(let x=0;x<14;x++)for(let y=0;y<10;y++)if((x+y)%2===0||y===9)m.set(x,y,0,rope);},0.25);
+ const pole=geometry('t-lamp-pole',3,18,3,m=>{m.box(1,0,1,2,15,2,dark);m.box(0,15,0,3,17,3,iron);m.box(1,15,1,2,17,2,lampC);},1/8);
+ const cart=geometry('t-mine-track',32,8,14,m=>{for(let x=0;x<32;x+=6)m.box(x,0,0,x+2,1,14,wood);for(const z of [3,10])m.box(0,1,z,32,2,z+1,iron);m.box(8,2,1,24,3,13,iron);m.box(8,3,1,24,8,2,rust);m.box(8,3,12,24,8,13,rust);m.box(8,3,1,9,8,13,rust);m.box(23,3,1,24,8,13,rust);for(let x=10;x<22;x++)for(let z=2;z<12;z++)if(AF.hash2(x,z)<0.6)m.set(x,4+((x*z)%3),z,wallC[1]);},1/8);
+ const table=geometry('t-cache-table',14,4,8,m=>{m.box(0,3,0,14,4,8,wood);for(const x of [0,13])for(const z of [0,7])m.box(x,0,z,x+1,3,z+1,wood);},0.25);
+ const cacheBox=geometry('t-cache-crate',20,10,12,m=>{m.box(0,0,0,20,10,12,olive);for(const x of [0,19])m.box(x,0,0,x+1,10,12,dark);m.box(0,9,0,20,10,12,dark);for(let x=3;x<17;x+=4)m.box(x,6,0,x+2,7,1,white);m.box(8,3,0,12,6,1,dark);m.box(9,3,0,11,5,0,gold);m.set(9,4,0,gold);m.set(10,4,0,gold);m.box(9,1,0,11,3,1,gold);},1/8);
+ const place=(geo,x,z,rot=0,collide=true)=>{O.tunnelAt(x,z);return O.addProp(geo,x,ti.floor,z,rot,{tag:'island:tunnel',collide});};
+ const chamber=j=>{const c=T.chambers[j],p=along(c.s),nx=-p.dz,nz=p.dx;return{...p,nx,nz,s:c.s,r:c.hw};};
+ const A=chamber(0),B=chamber(1),C=chamber(2);
+ // props stand in a chamber's side pockets: every footprint corner inside the hollow and out of the 3.2 m walking lane round the
+ // centre-line (where the guards walk); pocket() takes the free spot farthest from the lane
+ const taken=[];
+ const fits=(x,z,hx,hz)=>{for(const [ox,oz] of [[0,0],[-hx,-hz],[hx,-hz],[-hx,hz],[hx,hz]])if(O.tunnelAt(x+ox,z+oz)!==2||ti.end||ti.d<1.6||ti.d>ti.hw-0.25)return false;return true;};
+ const pocket=(ch,hx,hz)=>{let best=null,bd=-1;for(let a=0;a<32;a++)for(let r=1.6;r<=ch.r+1;r+=0.25){const x=ch.x+Math.cos(a/32*Math.PI*2)*r,z=ch.z+Math.sin(a/32*Math.PI*2)*r;if(taken.some(t=>Math.abs(t[0]-x)<t[2]+hx+0.3&&Math.abs(t[1]-z)<t[3]+hz+0.3)||!fits(x,z,hx,hz))continue;O.tunnelAt(x,z);if(ti.d>bd){bd=ti.d;best=[x,z];}}if(best)taken.push([best[0],best[1],hx,hz]);return best;};
+ const face=(x,z)=>{O.tunnelAt(x,z);const p=along(ti.s),fx=p.x-x,fz=p.z-z,l=Math.hypot(fx,fz)||1;return{fx:fx/l,fz:fz/l,rot:Math.abs(fz)>=Math.abs(fx)?(fz<0?0:2):(fx<0?1:3)};};
+ const put=(ch,geo,hx,hz,rot=0,collide=true)=>{const p=pocket(ch,rot%2?hz:hx,rot%2?hx:hz);if(p)place(geo,p[0],p[1],rot,collide);return p;};
+ // C first: the arms cache, a big padlocked crate on a table in the deepest pocket, facing the lane; gun crates round it
+ const cp=pocket(C,1.8,1.8),cf=face(cp[0],cp[1]);O.tunnelAt(cp[0],cp[1]);const cacheX=cp[0],cacheZ=cp[1],cacheY=ti.floor,cacheYaw=Math.atan2(cf.fx,cf.fz);
+ place(table,cacheX,cacheZ,cf.rot);O.addProp(cacheBox,cacheX,cacheY+1,cacheZ,cf.rot,{tag:'island:tunnel-cache'});
+ put(C,crate,1,0.75);put(C,crate,1,0.75,1);put(C,crateS,0.65,0.65);put(C,pole,0.25,0.25,0,false);
+ // A: the guard room behind the cleft: crates, a barrel, a lamp post
+ put(A,crate,1,0.75);put(A,crate,1,0.75,1);put(A,crateS,0.65,0.65);put(A,barrel,0.5,0.5);put(A,pole,0.25,0.25,0,false);
+ // B: the old mine depot: a stub of track with an ore cart, nets hung to dry, barrels
+ const trackRot=Math.abs(B.dx)>Math.abs(B.dz)?0:1,tp=put(B,cart,2.05,0.95,trackRot,false);
+ if(tp)AF.addCollider(tp[0]-(trackRot?0.95:2.05),B.y,tp[1]-(trackRot?2.05:0.95),tp[0]+(trackRot?0.95:2.05),B.y+1,tp[1]+(trackRot?2.05:0.95),'island:tunnel');
+ if(!put(B,netG,1.75,0.2,0,false))put(B,netG,1.75,0.2,1,false);put(B,barrel,0.5,0.5);put(B,barrel,0.5,0.5);put(B,crateS,0.65,0.65);
+ for(const ch of [A,B,C]){AF.addLight({x:ch.x,y:ch.y+3,z:ch.z,color:0xffb868,intensity:1.4,range:11,kind:'street',night:false});TUN.lights++;}
+ // the cleft: two boulders screen the mouth from the hillside (the way in weaves between them)
+ const boulder=geometry('t-boulder',9,6,8,m=>{m.sphere(4.5,1.5,4,4.4,wallC[0],(x,y,z)=>y<6?wallC[(AF.hash2(x*3+y,z)*4)|0]:0);});
+ const out=T.out,mx0=T.pts[0][0],mz0=T.pts[0][1],yE=T.yE;
+ for(const [d,side] of [[8.5,1],[11,-1]]){const x=mx0+out[0]*d-out[1]*side*3.4,z=mz0+out[1]*d+out[0]*side*3.4;O.addProp(boulder,x,Math.min(O.h(x,z),yE)-0.5,z,side>0?0:1,{tag:'island:tunnel-boulder'});}
+ // the cove: a plank dock on piles from the cave ledge into the basin, a lantern post at its end
+ const CV=I.cove;if(CV){const D=CV.dock,len=D.x1-D.x0,deck=geometry('cove-dock',Math.round(len*4),1,Math.round(D.w*4),m=>{for(let x=0;x<m.w;x++)m.box(x,0,0,x+1,1,m.d,x%3?wood:dark);},0.25),piles=geometry('cove-piles',Math.round(len*4),24,Math.round(D.w*4),m=>{for(let x=1;x<m.w;x+=10)for(const z of [0,m.d-1])m.box(x,0,z,x+1,24,z+1,dark);},0.25);
+  O.addProp(deck,(D.x0+D.x1)/2,D.y-0.25,D.z,0,{tag:'island:cove-dock'});O.addProp(piles,(D.x0+D.x1)/2,D.y-6.25,D.z,0,{collide:false});O.addProp(pole,D.x1-0.6,D.y,D.z+D.w/2-0.4,0,{collide:false});
+  AF.addLight({x:D.x1-0.6,y:D.y+2,z:D.z+D.w/2-0.4,color:0xffc070,intensity:1.2,range:10,kind:'street',night:false});TUN.lights++;}
+ // ---- the heist's spots (81-heist): centre-line, guard routes and posts, cache, mouths, cove, moored skis, Kit on the hotel terrace
+ const line=(sa,sb,step=1.5)=>{const pts=[];for(let s=sa;s<=sb+1e-6;s+=step){const p=along(s);pts.push([+p.x.toFixed(2),p.y,+p.z.toFixed(2)]);}return pts;};
+ const entry=along(0),exit=along(T.L);
+ const H=S.heist={
+  tunnelEntry:{x:+(mx0+out[0]*2.5).toFixed(2),y:AF.W.groundY(mx0+out[0]*2.5,mz0+out[1]*2.5),z:+(mz0+out[1]*2.5).toFixed(2),yaw:Math.atan2(-out[0],-out[1])},
+  tunnel:line(0,T.L,2),length:T.L,
+  cache:{x:+cacheX.toFixed(2),y:cacheY+1,z:+cacheZ.toFixed(2),yaw:cacheYaw},
+  cacheStand:{x:+(cacheX+cf.fx*1.6).toFixed(2),y:cacheY,z:+(cacheZ+cf.fz*1.6).toFixed(2),yaw:Math.atan2(-cf.fx,-cf.fz)},
+  guardPosts:[A,B,C].map(ch=>{const p=pocket(ch,0.35,0.35)||[ch.x,ch.z],f=face(p[0],p[1]);O.tunnelAt(p[0],p[1]);return{x:+p[0].toFixed(2),y:ti.floor,z:+p[1].toFixed(2),yaw:Math.atan2(f.fx,f.fz)};}),
+  guardRoutes:[line(3,A.s+3),line(A.s+6,B.s+2),line(B.s+6,C.s-2)],
+  caveExit:{x:+exit.x.toFixed(2),y:exit.y,z:+exit.z.toFixed(2),yaw:Math.atan2(exit.dx,exit.dz)},
+  cove:CV?{x:(CV.ledge.x0+CV.ledge.x1)/2,y:CV.ledge.y,z:(CV.ledge.z0+CV.ledge.z1)/2}:null,
+  skis:fun.docks.filter(d=>d.cove).map(d=>({x:d.x,z:d.z,yaw:d.yaw})),
+  kit:null,
+ };
+ if(CV)H.guardPosts.push({x:CV.dock.x0+3,y:CV.dock.y,z:CV.dock.z,yaw:-Math.PI/2});
+ // Kit waits on the Hotel Serena terrace, between the hotel and the pool (the nearest free standing spot)
+ const free=(x,z,y0)=>{for(let r=0;r<8;r+=0.5)for(let a=0;a<16;a++){const px=x+Math.cos(a/16*Math.PI*2)*r,pz=z+Math.sin(a/16*Math.PI*2)*r,py=AF.surfaceBelow(px,pz,y0+3,8);if(!AF.boxBlocked(px,py+0.05,pz,0.45,1.9))return{x:+px.toFixed(2),y:py,z:+pz.toFixed(2)};if(!r)break;}return{x,y:y0,z};};
+ const kit=free(-150,Z(648),I.resort.y);kit.yaw=Math.PI;H.kit=kit;
+ S.spots.strip={x:(I.airstrip.x0+I.airstrip.x1)/2,y:I.airstrip.y,z:I.airstrip.z};
+ S.spots.tunnel=H.tunnelEntry;S.spots.cove=H.cove;S.spots.kit=kit;
 });
 // ---------------------------------------------------------------- Serena fun: a sunset beach party, bonfire, beach volleyball, umbrellas,
 // a swim raft with a slide, tiki torches, hammocks and the jet-ski hire. Static parts are merged outland props (built before the
@@ -66,7 +198,7 @@ const fire=AF.col(0xff7a2a,{emit:0xff6a1a,emitK:3,mode:'always',jitter:0.5,edge:
 const blue=paint(0x2f5f9e),yellow=paint(0xf2c84a),black=paint(0x1f2326),grey=paint(0x8f979c),net=AF.col(0xf4f1e6,{jitter:0.05,edge:0,solid:false});
 AF.onBuild('island-fun',496.35,()=>{
  // the party: stage + DJ booth on the sand with the sea behind it, a lit dance floor, speaker stacks, string lights on four poles
- const party=fun.party=site('Serena Sunset Party',-25,717,16,9,2.25);party.bank=6;
+ const party=fun.party=site('Serena Sunset Party',-25,Z(717),16,9,2.25);party.bank=6;
  prop(party,geometry('party-stage',40,18,12,m=>{m.box(0,0,0,40,2,12,wood);m.box(0,2,10,40,3,12,dark);for(const x of [0,38])m.box(x,2,8,x+2,16,12,dark);m.box(0,16,8,40,18,12,dark);for(let x=2;x<38;x+=2)m.box(x,15,8,x+1,16,9,[pink,cyan,lime,amber][(x/2)%4]);m.box(2,3,11,38,15,12,teal);for(let y=4;y<14;y+=3)m.box(4,y,10,36,y+1,11,[pink,cyan][(y/3)%2|0]);m.box(14,2,3,26,5,6,white);m.box(14,5,3,26,6,6,dark);m.box(15,3,2,25,4,3,cyan);for(const x of [1,33])for(let y=2;y<12;y++)m.box(x,y,1,x+6,y+1,6,y%3===0?grey:black);}),0,4);
  sign(party,'SERENA SUNSET PARTY',0,4.9,party.y+9.1,2);
  const floor=geometry('party-floor',64,1,40,m=>{for(let x=0;x<64;x+=8)for(let z=0;z<40;z+=8)m.box(x,0,z,x+8,1,z+8,[pink,cyan,lime,amber][((x+z)/8)%4]);},1/4);prop(party,floor,0,-4,{y:party.y+0.02});
@@ -74,43 +206,45 @@ AF.onBuild('island-fun',496.35,()=>{
  prop(party,geometry('party-drinks',10,6,4,m=>{m.box(0,0,0,10,4,4,coral);m.box(0,4,0,10,5,4,wood);for(let x=1;x<10;x+=2)m.box(x,5,1,x+1,6,2,[lime,amber,pink][x%3]);}),13,-6);
  AF.addLight({x:party.x,y:party.y+5,z:party.z+2,color:0xff6ad5,intensity:1.6,range:20,kind:'street'});AF.addLight({x:party.x,y:party.y+4,z:party.z-6,color:0x5fd8ff,intensity:1.3,range:18,kind:'street'});
  // bonfire on the beach: a stone ring, logs, flames; log benches round it
- const bonfire=fun.bonfire=site('Serena Bonfire',-85,719,6,6,1.75);
+ const bonfire=fun.bonfire=site('Serena Bonfire',-85,Z(719),6,6,1.75);
  prop(bonfire,geometry('bonfire',12,10,12,m=>{for(let x=0;x<12;x++)for(let z=0;z<12;z++){const d=Math.hypot(x-5.5,z-5.5);if(d>4.2&&d<5.8)m.set(x,0,z,rock);}m.box(3,0,5,9,1,7,wood);m.box(5,1,3,7,2,9,wood);for(let y=1;y<9;y++){const r=Math.max(0.6,2.6-y*0.3);for(let x=0;x<12;x++)for(let z=0;z<12;z++)if(Math.hypot(x-5.5,z-5.5)<r&&AF.hash3(x,y,z)<0.8-y*0.05)m.set(x,y,z,y<3?ember:fire);}}),0,0,{collide:false});
  const bench=geometry('log-bench',10,2,3,m=>{m.box(0,0,0,10,2,3,wood);});for(const [dx,dz,rot] of [[0,-4.5,0],[0,4.5,0],[-4.5,0,1],[4.5,0,1]])prop(bonfire,bench,dx,dz,{rot});
  AF.addLight({x:bonfire.x,y:bonfire.y+1.5,z:bonfire.z,color:0xff8a3a,intensity:1.8,range:16,kind:'street'});
  // beach volleyball: court lines (paint on the sand), net on two posts
- const court=fun.court=site('Serena Volleyball',-122,709,10,6,1.5);
+ const court=fun.court=site('Serena Volleyball',-122,Z(709),10,6,1.5);
  prop(court,geometry('volley-lines',64,1,32,m=>{m.box(0,0,0,64,1,1,white);m.box(0,0,31,64,1,32,white);m.box(0,0,0,1,1,32,white);m.box(63,0,0,64,1,32,white);m.box(31,0,0,33,1,32,white);},1/4),0,0,{y:court.y+0.03,collide:false});
  prop(court,geometry('volley-net',2,20,36,m=>{for(const z of [0,35])m.box(0,0,z,2,20,z+1,grey);for(let y=11;y<19;y++)for(let z=1;z<35;z++)if((y+z)%2===0||y===18)m.set(1,y,z,net);},1/8),0,0,{collide:false});
  // umbrellas, loungers and towels along the south beach; hammocks by the beach bar; tiki torches on the boardwalk
  const lounger=geometry('lounger',3,3,5,m=>{m.box(0,1,0,3,2,5,white);m.box(0,2,0,3,3,2,mint);m.box(0,0,1,1,1,4,wood);m.box(2,0,1,3,1,4,wood);}),towel=geometry('towel',4,1,8,m=>{for(let z=0;z<8;z++)m.box(0,0,z,4,1,z+1,z%2?white:coral);},1/4),umbrellaB=geometry('umbrella-b',9,7,9,m=>{m.box(4,0,4,5,6,5,wood);for(let l=0;l<3;l++)m.box(l,4+l,l,9-l,5+l,9-l,l%2?white:blue);});
- let placed=0;for(let x=-200;x<=-140;x+=10){const z=704+(x%20?2:0),y=Math.round(O.h(x,z)*4)/4;if(y<0.8||y>3)continue;O.addProp(umbrellaB,x,y,z,0,{tag:'island:beach',collide:false});O.addProp(placed%2?towel:lounger,x+2,y+(placed%2?0.03:0),z+1.5,1,{tag:'island:beach',collide:false});placed++;}
+ let placed=0;for(let x=-200;x<=-140;x+=10){const z=Z(704)+(x%20?2:0),y=Math.round(O.h(x,z)*4)/4;if(y<0.8||y>3)continue;O.addProp(umbrellaB,x,y,z,0,{tag:'island:beach',collide:false});O.addProp(placed%2?towel:lounger,x+2,y+(placed%2?0.03:0),z+1.5,1,{tag:'island:beach',collide:false});placed++;}
  const hammock=geometry('hammock',26,10,4,m=>{for(const x of [0,25])m.box(x,0,1,x+1,10,3,wood);for(let x=1;x<25;x++){const y=Math.round(7-Math.sin(x/25*Math.PI)*3);m.box(x,y,0,x+1,y+1,4,x%3?coral:white);}},1/8);
- for(const [x,z] of [[-238,676],[-232,684]])O.addProp(hammock,x,Math.round(O.h(x,z)*4)/4,z,0,{tag:'island:beach',collide:false});
+ for(const [x,z] of [[-238,Z(676)],[-232,Z(684)]])O.addProp(hammock,x,Math.round(O.h(x,z)*4)/4,z,0,{tag:'island:beach',collide:false});
  const torch=geometry('tiki-torch',3,16,3,m=>{m.box(1,0,1,2,13,2,wood);m.box(0,12,0,3,13,3,dark);m.box(0,13,0,3,15,3,amber);m.set(1,15,1,amber);},1/8);
- for(let x=-210;x<=-112;x+=14)for(const z of [674,684]){const y=Math.round(O.h(x,z)*4)/4;if(y>0.6)O.addProp(torch,x,y,z,0,{tag:'island:torch',collide:false});}
+ for(let x=-210;x<=-112;x+=14)for(const z of [Z(674),Z(684)]){const y=Math.round(O.h(x,z)*4)/4;if(y>0.6)O.addProp(torch,x,y,z,0,{tag:'island:torch',collide:false});}
  // the swim raft off the party beach: floats, a deck, a ladder and a slide
- O.addProp(geometry('swim-raft',14,12,14,m=>{for(const x of [0,10])for(const z of [0,10])m.box(x,0,z,x+4,2,z+4,blue);m.box(0,2,0,14,3,14,wood);m.box(1,3,1,5,10,2,white);m.box(1,10,1,5,11,5,wood);for(let i=0;i<8;i++)m.box(1,10-i,5+i,5,11-i,6+i,yellow);for(let y=0;y<3;y++)m.box(9,y,13,12,y+1,14,grey);}),-30,-2.25,758,0,{tag:'island:raft'});
+ O.addProp(geometry('swim-raft',14,12,14,m=>{for(const x of [0,10])for(const z of [0,10])m.box(x,0,z,x+4,2,z+4,blue);m.box(0,2,0,14,3,14,wood);m.box(1,3,1,5,10,2,white);m.box(1,10,1,5,11,5,wood);for(let i=0;i<8;i++)m.box(1,10-i,5+i,5,11-i,6+i,yellow);for(let y=0;y<3;y++)m.box(9,y,13,12,y+1,14,grey);}),-30,-2.25,Z(758),0,{tag:'island:raft'});
  // jet-ski hire on the south beach: hut, sign, kayaks, a surfboard rack; four docks round the island (land point + outward direction)
- const hire=fun.hire=site('Serena Jet Skis',8,721,6,4,1.75);
+ const hire=fun.hire=site('Serena Jet Skis',8,Z(721),6,4,1.75);
  openCanopy(hire,canopy('jetski-hut',yellow),0,0);sign(hire,'JET SKI HIRE',0,-2.6,hire.y+3.8,2);
  const kayak=geometry('kayak',3,2,12,m=>{m.box(0,0,1,3,1,11,coral);m.box(1,0,0,2,1,12,coral);m.box(1,1,4,2,2,7,dark);},1/4),board=geometry('surf-rack',12,9,3,m=>{m.box(0,0,1,12,1,2,wood);for(let x=1;x<12;x+=3)m.box(x,1,0,x+2,9,3,[coral,cyan,yellow,mint][(x/3)|0]);},1/4);
  for(let i=0;i<3;i++)prop(hire,kayak,-5+i*1.2,3.5,{collide:false});prop(hire,board,5,2,{collide:false});
  AF.addLight({x:hire.x,y:hire.y+3,z:hire.z,color:0xffd28a,intensity:1.1,range:12,kind:'street'});
- for(const [x,z,dx,dz] of [[8,727,0,1],[-70,471,0,-1],[150,650,1,0],[-286,600,-1,0]]){
+ for(const [x,z,dx,dz] of [[8,Z(727),0,1],[-70,Z(471),0,-1],[-286,Z(600),-1,0]]){
   let ox=x,oz=z;for(let i=0;i<60&&O.h(ox,oz)>-1.9;i++){ox+=dx;oz+=dz;}
   fun.docks.push({land:[x-dx*1.5,z-dz*1.5],y:Math.max(0.5,Math.round(O.h(x-dx*1.5,z-dz*1.5)*4)/4),x:ox+dx*2,z:oz+dz*2,yaw:Math.atan2(dx,dz)});
  }
+ // Moretti's cove: three skis moored along the dock (the heist's getaway), boarded from its deck
+ const CV=I.cove;if(CV){const D=CV.dock,side=D.w/2+1.25;for(const [x,z,lx,lz] of [[D.x0+4.5,D.z-side,D.x0+4.5,D.z-0.6],[D.x0+8.5,D.z+side,D.x0+8.5,D.z+0.6],[D.x1+2.4,D.z,D.x1-0.6,D.z]])fun.docks.push({land:[lx,lz],y:D.y,x,z,yaw:Math.PI/2,cove:true});}
 });
 AF.onBuild('island-life',666,()=>{
  function path(name,points,count,mode='loop',speed=0.9){const dense=[];for(let index=0;index<points.length-(mode==='loop'?0:1);index++){const from=points[index],to=points[(index+1)%points.length],steps=Math.max(1,Math.ceil(Math.hypot(to[0]-from[0],to[1]-from[1])/1.5));for(let part=0;part<steps;part++){const x=AF.lerp(from[0],to[0],part/steps),z=AF.lerp(from[1],to[1],part/steps);dense.push([x,feetY(x,z)+0.1,z]);}}if(mode!=='loop'){const [x,z]=points.at(-1);dense.push([x,feetY(x,z)+0.1,z]);}const entry=AF.walkers.addPath(name,dense,{count,speed,mode,activeRadius:150});S.paths.push(entry);S.walkers+=count;}
- path('Serena promenade',[[-209,679],[-115,679]],14,'pingpong');path('Serena beach',[[-214,686],[-170,695],[-100,695]],12,'pingpong');path('Serena hotel guests',[[-194,651],[-146,651],[-146,675],[-194,675]],12);path('Landing villagers',[[-25,486],[-25,500],[-15,500],[-15,486]],12);path('Serena fishermen',[[-21,430],[-21,456]],6,'pingpong',0.5);
+ path('Serena promenade',[[-209,Z(679)],[-115,Z(679)]],14,'pingpong');path('Serena beach',[[-214,Z(686)],[-170,Z(695)],[-100,Z(695)]],12,'pingpong');path('Serena hotel guests',[[-194,Z(651)],[-146,Z(651)],[-146,Z(675)],[-194,Z(675)]],12);path('Landing villagers',[[-25,Z(486)],[-25,Z(500)],[-15,Z(500)],[-15,Z(486)]],12);path('Serena fishermen',[[-21,Z(430)],[-21,Z(456)]],6,'pingpong',0.5);
  const deckhand={skin:0xd7a078,hair:0x463629,top:{col:0x326e75},bottom:{col:0xf2efdf},yaw:0},concierge={skin:0xa77754,hair:0x252a29,top:{col:0xf2efdf},bottom:{col:0x326e75},yaw:Math.PI};
- AF.walkers.addPath('Serena deckhand',[[2,AF.surfaceBelow(2,250,4,8),250]],{count:1,speed:0,activeRadius:150,looks:[deckhand]});AF.walkers.addPath('Serena concierge',[[-145,3,644]],{count:1,speed:0,activeRadius:150,looks:[concierge]});S.walkers+=2;
- AF.npc.spawn({id:'serena-deckhand',name:'Ellis',role:'Solace Belle deckhand',x:2,y:AF.surfaceBelow(2,250,4,8),z:250,visual:false,lines:[['Solace Belle waits twenty-five seconds at each pier. The crossing takes forty seconds. Serena is just across the water.']]});
- AF.npc.spawn({id:'serena-concierge',name:'Alma',role:'Hotel Serena concierge',x:-145,y:3,z:644,visual:false,lines:[['Welcome to Hotel Serena. The pool terrace faces the beach; the trail winds up to the crater pond. The airstrip is north of the hotel.']]});
+ AF.walkers.addPath('Serena deckhand',[[2,AF.surfaceBelow(2,250,4,8),250]],{count:1,speed:0,activeRadius:150,looks:[deckhand]}); AF.walkers.addPath('Serena concierge',[[-145,3,Z(644)]],{count:1,speed:0,activeRadius:150,looks:[concierge]});S.walkers+=2;
+  AF.npc.spawn({id:'serena-deckhand',name:'Ellis',role:'Solace Belle deckhand',x:2,y:AF.surfaceBelow(2,250,4,8),z:250,visual:false,lines:[['The Solace Belle waits twenty-five seconds at each pier, then it is a '+Math.round(route.crossing/60*10)/10+' minute run out to Serena Isle. Open sea all the way.']]});
+  AF.npc.spawn({id:'serena-concierge',name:'Alma',role:'Hotel Serena concierge',x:-145,y:3,z:Z(644),visual:false,lines:[['Welcome to Hotel Serena. The pool terrace faces the beach; the trail winds up to the crater rim and the falls are just past the bonfire. The airstrip is north of the hotel.']]});
  // a flyable Cub on the Serena apron (crashes tow it back here); the planes' approach guidance knows this strip too
- if(AF.planes.make){S.cub=AF.planes.make('cub',-140,555,Math.PI);AF.planes.runways.push(I.airstrip);}
+  if(AF.planes.make){S.cub=AF.planes.make('cub',-140,Z(555),Math.PI);AF.planes.runways.push(I.airstrip);}
  const original=AF.sea.lighthouses[0];if(original?.beam){const beam=original.beam.clone();beam.position.set(S.light.x,S.light.y+20,S.light.z);beam.traverse(mesh=>{if(mesh.isMesh)mesh.frustumCulled=true;});AF.scene.add(beam);S.beam=beam;}
  // the people of the fun spots (shared walker batches): dancers + DJ, a bonfire circle, bar patrons, volleyball, swimmers, hire staff
  const rng=AF.rng(6060),tops=[0xff6f61,0x2ec4b6,0xffbf47,0x9b5de5,0xf15bb5,0x00bbf9,0x43aa8b,0xfee440],bottoms=[0x1d3557,0xf1faee,0xe76f51,0x264653,0xffffff];
@@ -121,10 +255,10 @@ AF.onBuild('island-life',666,()=>{
  const B=fun.bonfire;for(let i=0;i<8;i++){const a=i/8*Math.PI*2+0.3,x=B.x+Math.cos(a)*3.3,z=B.z+Math.sin(a)*3.3;one('Serena bonfire '+i,x,B.y,z,look('stand',Math.atan2(B.x-x,B.z-z)));}
  const bar=S.sites.find(site=>site.name==='Palm Beach Bar');if(bar)for(let i=0;i<5;i++){const x=bar.x-4+i*2;one('Serena bar '+i,x,feetY(x,bar.z+3.8)+0.05,bar.z+3.8,look('stand',Math.PI));}
  const C=fun.court;for(const [dx,lane] of [[-4.5,0],[-10.5,1],[4.5,2],[10.5,3]]){const x=C.x+dx*0.6,pts=[[x,C.y,C.z-3+lane*0.4],[x,C.y,C.z+3-lane*0.4]];AF.walkers.addPath('Serena volleyball '+lane,pts,{count:1,speed:1.5,mode:'pingpong',activeRadius:170,dwell:[{i:0,t:0.6+lane*0.3},{i:1,t:0.4+lane*0.2}],looks:[look('stand',0)]});S.walkers++;}
- AF.walkers.addPath('Serena swimmers',[[-62,-2.45,748],[-36,-2.45,751],[-10,-2.45,747]],{count:8,speed:0.45,mode:'pingpong',activeRadius:170,looks:[look(),look(),look(),look()]});S.walkers+=8;
+ AF.walkers.addPath('Serena swimmers',[[-62,-2.45,Z(748)],[-36,-2.45,Z(751)],[-10,-2.45,Z(747)]],{count:8,speed:0.45,mode:'pingpong',activeRadius:170,looks:[look(),look(),look(),look()]});S.walkers+=8;
  one('Serena hire staff',fun.hire.x+2,fun.hire.y,fun.hire.z-1,look('stand',Math.PI));
  // jet skis: the rideable four (one per dock) and three riders racing the coast (AI hulls follow their walker seats)
- JS.mesh=new THREE.InstancedMesh(skiGeo(),AF.mat.voxelInst,8);JS.mesh.name='island-jetskis';JS.mesh.count=0;JS.mesh.frustumCulled=false;JS.mesh.castShadow=true;JS.mesh.receiveShadow=true;JS.mesh.customDepthMaterial=AF.mat.depthInst;JS.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);JS.mesh.layers.set(31);AF.scene.add(JS.mesh);
+ JS.mesh=new THREE.InstancedMesh(skiGeo(),AF.mat.voxelInst,12);JS.mesh.name='island-jetskis';JS.mesh.count=0;JS.mesh.frustumCulled=false;JS.mesh.castShadow=true;JS.mesh.receiveShadow=true;JS.mesh.customDepthMaterial=AF.mat.depthInst;JS.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);JS.mesh.layers.set(31);AF.scene.add(JS.mesh);
  fun.docks.forEach((d,i)=>JS.skis.push(new JetSki(d,i)));
  const lap=[];for(let a=-50;a<=230;a+=3){const r=a*Math.PI/180;let s=1+Math.sin(r*5)*0.04,x=0,z=0;for(let i=0;i<30;i++){x=I.cx+Math.cos(r)*290*s;z=I.cz+Math.sin(r)*190*s;if(O.h(x,z)<-2.4)break;s+=0.03;}lap.push([x,-1.12,z]);}
  JS.riders=AF.walkers.addPath('Serena jet-ski riders',lap,{count:3,speed:16*AF.vehicles.SPEED_K*0.7,mode:'pingpong',activeRadius:420,looks:[look('ride',0),look('ride',0),look('ride',0)]});S.walkers+=3;
@@ -137,44 +271,127 @@ function skiGeo(){const m=new AF.Model(9,9,26);for(let z=0;z<26;z++){const t=z>1
 const skiY=(k,t)=>SEA-0.1+Math.sin(t*2.1+k.ph)*0.05+Math.sin(t*3.3+k.ph*2)*0.02*Math.min(1,Math.abs(k.v)/4);
 const jm=new THREE.Matrix4(),jq=new THREE.Quaternion(),je=new THREE.Euler(0,0,0,'YXZ'),jp=new THREE.Vector3(),one1=new THREE.Vector3(1,1,1);
 function skiAt(index,x,y,z,yaw,pitch,roll){jp.set(x,y,z);je.set(-pitch,yaw,roll,'YXZ');jq.setFromEuler(je);jm.compose(jp,jq,one1);JS.mesh.setMatrixAt(index,jm);}
+// ride feel: nominal top speed 21.5 m/s (holds ~19.5 on throttle, ~24 on a burst; was 13.1 / 17 nominal, ~8.7 / 11.5 held),
+// punchy thrust, carving lean, chop + swell to skip over on open water (airtime off crests at speed), spray from the pooled AF.fx
+const SK={vmax:21.5,boost:1.28,acc:10.5,accB:13.5,g:9,pop:1.45,swell:0.46,drawR2:600*600};
+// the surface the hull rides: three swell trains with sharp crests (grouped, so some crests stand taller) + a little chop over the
+// flat sea (the flat water is the trough). Calm over the shelf near a shore (the floor slopes up within ~40 m of land). At ~19 m/s
+// a big crest throws the hull (0.5-0.7 s air every few seconds), on a burst more often and longer; slowly you just ride them.
+// skiOpen = how much swell a spot gets (the floor is voxel-stepped, so riders ease toward it rather than read it raw)
+const skiOpen=(x,z)=>AF.smooth(1.2,2.7,SEA-AF.W.groundY(x,z));
+function skiSea(x,z,t,open){
+ if(!(open>0.001))return SEA-0.1;
+ const p=x*0.62+z*0.78,q=z*0.56-x*0.83,r=z*0.95+x*0.31,
+  a=Math.max(0,Math.sin(p*0.19-t*0.65)),ga=0.25+0.75*Math.max(0,Math.sin(q*0.05+p*0.021-t*0.3)),
+  b=Math.max(0,Math.sin(q*0.21-t*0.7+2.1)),gb=0.25+0.75*Math.max(0,Math.sin(p*0.047-q*0.017-t*0.27+1.3)),
+  e=Math.max(0,Math.sin(r*0.17+t*0.6+4.4)),ge=0.25+0.75*Math.max(0,Math.sin(q*0.039+r*0.012+t*0.22+2.6)),
+  c=Math.max(0,Math.sin((x*0.95+z*0.31)*1.25-t*2.9+4.1));
+ return SEA-0.1+open*(SK.swell*Math.max(ga*a*a*a,gb*b*b*b,ge*e*e*e)+0.012*c);
+}
+// spray from the pooled AF.fx smoke points (dithered, no new draws or programs): a rooster tail from the jet and fans off a carve.
+// The wake + hull foam on the water come from the water shader (62) through the ski's hull proxy. Particles carry part of the ski's
+// own speed (the jet leaves at about hull speed), so the plume hangs behind the stern instead of streaking away; each one starts at
+// a random point of the frame interval so a low frame rate draws a stream, not clumps.
+function spray(k,dt){
+ const P=AF.fx&&AF.fx.smoke,G=AF.fx&&AF.fx.glow,cp=AF.camera.position;if(!P||!(dt>0)||(k.x-cp.x)**2+(k.z-cp.z)**2>25600)return;
+ const v=Math.abs(k.v),air=k===JS.cur?k.air>0:k.y>SEA+0.25;if(v<2.5||air){k.sprA=k.sprS=0;return;}
+ const hx=Math.sin(k.yaw),hz=Math.cos(k.yaw),rx=-hz,rz=hx,mob=AF.MOBILE?0.5:1,sp=AF.smooth(3,22,v),N=AF.time.night||0,L=0.98-0.7*N,cr=0.93*L,cg=0.96*L,cb=L,fv=k.v*0.55,mist=0.2-0.15*N;
+ // droplets (dithered smoke points) and, every other one, a soft additive mist puff (glow points) round the same stream
+ k.sprA+=dt*150*sp*mob;
+ while(k.sprA>=1){k.sprA--;const r=Math.random(),j=Math.random()-0.5,f=Math.random()*dt,vx=hx*(fv-1-r*1.5)+rx*j*2.4,vy=4+v*0.18+r*1.6,vz=hz*(fv-1-r*1.5)+rz*j*2.4,x=k.x-hx*1.3+rx*j*0.25+vx*f,y=k.y+0.2+vy*f,z=k.z-hz*1.3+rz*j*0.25+vz*f;
+  if(G&&r<0.35)G.spawn(x,y,z,vx,vy*0.85,vz,0.9+r,0.55+v*0.02,2.2,-6,mist,mist*1.03,mist*1.08);
+  else P.spawn(x,y,z,vx,vy,vz,0.7+r*0.5,0.3+v*0.014,1.1+r*0.7,-9.8,cr,cg,cb);}
+ const turn=k===JS.cur?k.w:k.roll*2,carve=Math.min(1,Math.abs(turn))*AF.smooth(5,18,v),side=turn>0?-1:1;
+ k.sprS+=dt*90*carve*mob;
+ while(k.sprS>=1){k.sprS--;const r=Math.random(),out=2.5+v*0.2+r*1.6,fw=v*0.6+(Math.random()-0.5),f=Math.random()*dt,vx=rx*side*out+hx*fw,vy=1.8+r*2.2+v*0.07,vz=rz*side*out+hz*fw,x=k.x+hx*(r*0.6-0.2)+rx*side*0.55+vx*f,z=k.z+hz*(r*0.6-0.2)+rz*side*0.55+vz*f;
+  if(G&&r<0.3)G.spawn(x,k.y+0.15,z,vx,vy,vz,0.7+r,0.5,1.8,-6,mist,mist*1.03,mist*1.08);
+  else P.spawn(x,k.y+0.12,z,vx,vy,vz,0.55+r*0.4,0.28,1.1+r*0.5,-9.8,cr,cg,cb);}
+}
+// a slap of water round the hull (landings, the shallows)
+function splashAt(k,impact){
+ const P=AF.fx&&AF.fx.smoke;if(!P)return;
+ const n=Math.min(30,6+impact*6)*(AF.MOBILE?0.5:1),L=0.94-0.66*(AF.time.night||0),hx=Math.sin(k.yaw),hz=Math.cos(k.yaw),f=k.v*0.4;
+ for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,r=Math.random(),out=1.5+impact*0.6+r*1.5;
+  P.spawn(k.x+Math.sin(a)*0.6,SEA+0.05,k.z+Math.cos(a)*0.9,Math.sin(a)*out+hx*f,1.8+impact*0.7+r*2,Math.cos(a)*out+hz*f,0.6+r*0.5,0.3,1.1,-9.8,0.86*L,0.91*L,0.95*L);}
+}
 AF.onTick('island-jetskis',307,(dt,t)=>{
  const M=JS.mesh;if(!M)return;const cp=AF.camera.position;
- if(!JS.cur&&((cp.x-I.cx)/520)**2+((cp.z-I.cz)/430)**2>1){if(M.count){M.count=0;M.layers.set(31);}return;}
  let n=0;
- for(const k of JS.skis){if(JS.cur!==k&&k.net==null)k.drift(dt);skiAt(n++,k.x,k.net!=null?k.y:skiY(k,t),k.z,k.yaw,k.pitch,k.roll);}
+ // each ski draws (and coasts) within 600 m of the camera: they can be left anywhere, the liner's pontoon included
+ for(const k of JS.skis){
+  const mine=JS.cur===k;if(!mine&&(k.x-cp.x)**2+(k.z-cp.z)**2>SK.drawR2)continue;
+  if(!mine&&k.net==null)k.drift(dt);
+  skiAt(n++,k.x,mine||k.net!=null?k.y:skiY(k,t),k.z,k.yaw,k.pitch,k.roll);
+  const W=k.wake;if(W&&(W.position.x!==k.x||W.position.z!==k.z||W.rotation.y!==k.yaw)){W.position.set(k.x,SEA,k.z);W.rotation.y=k.yaw;W.updateMatrixWorld();}
+  if(mine||k.net!=null)spray(k,dt);
+ }
  const R=JS.riders;if(R&&R.active)for(const a of R.actors)skiAt(n++,a.x,SEA-0.1+Math.sin(t*2.6+a.ph)*0.06,a.z,a.yaw,0.08,Math.sin(t*0.9+a.ph)*0.12);
- M.count=n;M.layers.set(n?0:31);M.instanceMatrix.needsUpdate=true;
+ if(!n&&!M.count)return;
+ M.count=n;M.layers.set(n?0:31);if(n)M.instanceMatrix.needsUpdate=true;
 });
 // a rideable jet ski (AF.Vehicle): boarded from its dock, or wherever it was left (the prompt follows it, reaching up the beach)
 class JetSki extends AF.Vehicle{
  constructor(d,i){super({name:'Serena jet ski',x:d.x,z:d.z,yaw:d.yaw});this.y=SEA;this.w=0;this.ph=i*1.7;this.home=d;
+  this.vy=0;this.sy=SEA-0.1;this.air=0;this.rpm=0;this.load=0;this.land=0;this.sprA=0;this.sprS=0;this.wt=0;this.open=0;
+  // an invisible hull proxy (never in the scene, never drawn): the water shader (62) gives it hull foam + a Kelvin wake (uniforms only)
+  this.wake=new THREE.Mesh(JS.wakeGeo||(JS.wakeGeo=new THREE.BoxGeometry(0.9,0.5,2.6)));this.wake.name='jetski-wake';this.wake.position.set(this.x,SEA,this.z);this.wake.rotation.y=this.yaw;this.wake.updateMatrixWorld();
+  if(AF.water2&&AF.water2.addBoat)AF.water2.addBoat(this.wake);
   this.attach({label:'Ride a jet ski',r:5,prio:0.3,can:()=>AF.mode==='walk'&&JS.cur!==this&&this.net==null,act:()=>AF.setMode('jetski',{ski:this})});this.sync();}
  sync(){const it=this.interact,d=this.home;if(Math.hypot(this.x-d.x,this.z-d.z)<4){it.x=d.land[0];it.z=d.land[1];it.y=d.y+1;it.r=5;}else{it.x=this.x;it.z=this.z;it.y=undefined;it.r=11;}}
  // coasting with nobody aboard
  drift(dt){if(Math.abs(this.v)<=0.05)return;this.v*=Math.exp(-dt*0.9);const nx=this.x+Math.sin(this.yaw)*this.v*dt,nz=this.z+Math.cos(this.yaw)*this.v*dt;if(wet(nx,nz)){this.x=nx;this.z=nz;}else this.v=0;this.roll*=Math.exp(-dt*2);this.pitch*=Math.exp(-dt*2);this.sync();}
  step(dt,inp){
-  const vmax=16*AF.vehicles.SPEED_K*(inp.boost?1.3:1),thr=inp.thr,steer=inp.steer;
-  if(thr>0)this.v+=thr*(inp.boost?9:6.5)*Math.max(0,1-Math.max(0,this.v)/vmax)*dt;else if(thr<0)this.v+=thr*(this.v>0?9:2.5)*dt;
-  this.v-=this.v*0.25*dt+(thr?0:Math.sign(this.v)*Math.min(Math.abs(this.v),0.8*dt));this.v=AF.clamp(this.v,-3,vmax);
-  this.w+=(steer-this.w)*Math.min(1,dt*5);this.yaw-=this.w*(0.5+Math.min(1,Math.abs(this.v)/7)*1.1)*dt*(this.v<-0.2?-1:1);
+  const air=this.air>0,top=SK.vmax*SK.boost,vmax=SK.vmax*(inp.boost?SK.boost:1),thr=inp.thr,steer=inp.steer,av=Math.abs(this.v),x=Math.max(0,this.v)/vmax;
+  // the jet only bites with the nozzle in the water; thrust falls off with the square of the speed fraction (a punchy launch)
+  if(!air){
+   if(thr>0)this.v+=thr*(inp.boost?SK.accB:SK.acc)*Math.max(0,1-x*x)*dt;else if(thr<0)this.v+=thr*(this.v>0?9:2.5)*dt;
+   this.v-=this.v*0.05*dt+(thr?0:Math.sign(this.v)*Math.min(Math.abs(this.v),(0.9+av*0.06)*dt));
+   this.v-=Math.sign(this.v)*Math.min(Math.abs(this.v),Math.abs(this.w)*AF.smooth(6,20,av)*1.4*dt);   // a hard carve scrubs speed
+  }else this.v-=this.v*0.02*dt;
+  this.v=AF.clamp(this.v,-4,top);
+  this.w+=(steer-this.w)*Math.min(1,dt*6);this.yaw-=this.w*(0.55+Math.min(1,av/7)*1.25)*(1-0.22*AF.smooth(16,26,av))*(air?0.25:1)*dt*(this.v<-0.2?-1:1);
   const hx=Math.sin(this.yaw),hz=Math.cos(this.yaw),s=this.v<0?-1:1,nx=this.x+hx*this.v*dt,nz=this.z+hz*this.v*dt,Bd=AF.PLAN.world.bounds;
-  JS.bumpT-=dt;
+  JS.bumpT-=dt;this.hitT=(this.hitT||0)-dt;
   if(wet(nx+hx*1.8*s,nz+hz*1.8*s)&&wet(nx,nz)&&nx>Bd.x0+20&&nx<Bd.x1-20&&nz>Bd.z0+20&&nz<Bd.z1-20){this.x=nx;this.z=nz;}
-  else{if(Math.abs(this.v)>4&&JS.bumpT<=0){AF.emit('toast','Bump! Too shallow \u2014 hop off with E or back out.');JS.bumpT=3;}this.v*=-0.3;}
-  this.roll+=(this.w*Math.min(1,Math.abs(this.v)/8)*0.4-this.roll)*Math.min(1,dt*4);this.pitch+=(Math.min(0.14,Math.max(0,this.v)*0.009)-this.pitch)*Math.min(1,dt*3);
-  this.y=skiY(this,AF.clock.t);this.sync();
+  else{
+   const hit=Math.abs(this.v);if(hit>4&&JS.bumpT<=0){AF.emit('toast','Bump! Too shallow \u2014 hop off with E or back out.');JS.bumpT=3;}
+   if(hit>3&&this.hitT<=0){this.hitT=0.6;splashAt(this,hit*0.3);if(AF.camfx)AF.camfx.shake(Math.min(0.06,hit*0.004),0.45,9);if(AF.audio)AF.audio.play('splash',{x:this.x,y:SEA,z:this.z,vol:Math.min(1,0.3+hit*0.04)});}
+   this.v*=-0.3;
+  }
+  // riding the chop: glued to the surface while it rises, ballistic once it falls away faster than gravity (crests at speed)
+  this.open+=(skiOpen(this.x,this.z)-this.open)*Math.min(1,dt*1.5);
+  const sea=skiSea(this.x,this.z,AF.clock.t,this.open),sr=AF.clamp((sea-this.sy)/Math.max(dt,1e-3),-6,6);this.sy=sea;
+  this.vy-=SK.g*dt;this.y+=this.vy*dt;
+  if(this.y<=sea){
+   if(this.air>0.08){const imp=sr-this.vy;if(imp>0.8)this.land=Math.max(this.land,imp);}
+   this.air=0;this.y=sea;this.vy=sr;this.wt+=dt;
+  }else{if(!this.air&&this.vy>0.8&&this.wt>0.15)this.vy=Math.min(4.5,this.vy*SK.pop);if(!this.air)this.wt=0;this.air+=dt;}   // the pop once per crest, whatever the frame rate
+  const plane=AF.smooth(3,9,av)*(1-0.45*AF.smooth(12,22,av)),slope=Math.atan(AF.clamp((this.air>0?this.vy:sr)/Math.max(4,av),-0.4,0.4));
+  const want=this.air>0?slope*0.8:0.02+plane*0.09+slope*0.9+(thr>0?0.035*Math.max(0,1-x):0);
+  this.pitch+=(want-this.pitch)*Math.min(1,dt*(this.air>0?2.5:6));
+  if(!this.air)this.roll+=(this.w*AF.smooth(1.5,14,av)*0.5-this.roll)*Math.min(1,dt*5);
+  // engine revs: load follows throttle + speed, the jet screams when it leaves the water
+  const rw=this.air>0?(thr>0?1.1:0.5):0.16+0.84*Math.max(Math.max(0,this.v)/top*1.08,thr>0?0.35+0.45*thr*(1-x*0.5):0);
+  this.rpm+=(rw-this.rpm)*Math.min(1,dt*(rw>this.rpm?6:2.5));this.load=!this.air&&thr>0?Math.max(0,1-x):0;
+  this.sync();
  }
 }
 const skiCam=new AF.Vehicle.Chase();
 AF.modes.jetski={
- enter(o={}){const k=o.ski;if(!k){AF.setMode('walk');return;}JS.cur=k;k.v=0;k.w=0;skiCam.set({dist:6.4,height:1.6,ahead:2,shadow:50,floor:()=>SEA+1.2});AF.player.setVisible(true);AF.emit('toast',AF.touch?'Push the stick to ride. Tap EXIT beside a beach to hop off.':'Jet ski! W throttle, A/D steer, Shift for a burst, E to hop off beside a beach.');AF.emit('hint',AF.touch?'':'W/S throttle \u00b7 A/D steer \u00b7 Shift burst \u00b7 E hop off at a beach');},
- exit(){const k=JS.cur;JS.cur=null;if(k)k.sync();AF.PL.seat=null;AF.emit('hud',{speed:null});AF.emit('hint','');},
+ enter(o={}){const k=o.ski;if(!k){AF.setMode('walk');return;}JS.cur=k;k.v=0;k.w=0;k.vy=0;k.air=0;k.land=0;k.open=skiOpen(k.x,k.z);k.sy=skiSea(k.x,k.z,AF.clock.t,k.open);k.y=k.sy;skiCam.set({dist:6.4,height:1.6,ahead:2,shadow:50,floor:()=>SEA+1.2});AF.player.setVisible(true);AF.emit('toast',AF.touch?'Push the stick to ride. Tap EXIT beside a beach to hop off.':'Jet ski! W throttle, A/D steer, Shift for a burst, E to hop off beside a beach.');AF.emit('hint',AF.touch?'':'W/S throttle \u00b7 A/D steer \u00b7 Shift burst \u00b7 E hop off at a beach');},
+ exit(){const k=JS.cur;JS.cur=null;if(k){k.vy=0;k.air=0;k.land=0;k.rpm=0;k.y=SEA;k.sync();}AF.PL.seat=null;AF.emit('hud',{speed:null});AF.emit('hint','');},
  update(dt){
   const k=JS.cur;if(!k)return;dt=Math.min(dt,0.05);
   const inp=AF.Vehicle.input();k.step(dt,inp);
   const hx=Math.sin(k.yaw),hz=Math.cos(k.yaw),seat=JS.seat;seat.x=k.x-hx*0.15;seat.y=k.y-0.05;seat.z=k.z-hz*0.15;seat.yaw=k.yaw;seat.roll=k.roll;seat.pitch=-k.pitch;AF.PL.seat=seat;
-  skiCam.update(dt,k.x,k.y,k.z,k.yaw);
-  AF.Vehicle.hud(k.v,k.name,(inp.boost?' \u00b7 burst':'')+' \u00b7 E hop off at a beach');
+  // the camera eases out with speed; shake, wind streaks and a wider view sell the pace
+  const av=Math.abs(k.v),sp=AF.smooth(6,24,av),CF=AF.camfx;skiCam.dist0=6.4+sp*2.4;
+  skiCam.update(dt,k.x,k.y,k.z,k.yaw,0,-k.roll*0.6);
+  if(CF){CF.rumble('ski',k.air>0?0.0012:0.0007+sp*0.0045,k.air>0?5:9+sp*7);CF.wind(AF.smooth(12,25,av)*0.6);CF.fov(sp*7);}
+  if(k.land){const L=k.land;k.land=0;k.v*=1-Math.min(0.08,L*0.016);splashAt(k,L);
+   if(CF)CF.shake(Math.min(0.045,0.006+L*0.007),0.3+Math.min(0.3,L*0.05),9);
+   if(AF.audio)AF.audio.play(L>2.2?'splash':'step_water',{x:k.x,y:SEA,z:k.z,vol:Math.min(1,0.35+L*0.15),rate:0.9+Math.random()*0.2});}
+  AF.Vehicle.hud(k.v,k.name,(inp.boost?' \u00b7 burst':'')+(k.air>0.25?' \u00b7 air!':'')+' \u00b7 E hop off at a beach');
   if(inp.exit){const spot=AF.Vehicle.landing(k.x,k.z,SEA+0.35);if(spot){k.v=0;AF.setMode('walk',{x:spot.x,y:spot.y,z:spot.z,yaw:k.yaw});}else AF.emit('toast','Ride up to a beach or a jetty to hop off.');}
  }
 };
@@ -186,10 +403,10 @@ F.off=0;F.P=2*(route.dwell+route.crossing);
 F.reset=dock=>{F.waiting=-1;F.acc=0;if(dock==null){F.off=0;}else{const P=F.P,want=dock?route.dwell+route.crossing:0;F.off=((want-AF.clock.w)%P+P)%P;}F.at(AF.clock.w);if(AF.harbour.ferry)place(AF.clock.w);return F;};
 F.at=w=>{const D=route.dwell,X=route.crossing,P=F.P,tau=((w+F.off)%P+P)%P,ship=AF.harbour.ferry;
  if(tau<D||(tau>=D+X&&tau<2*D+X)){const d=tau<D?0:1;F.dock=F.from=d;F.to=1-d;F.elapsed=0;F.speed=0;if(ship){ship.st.dwell=(d?2*D+X:D)-tau;ship.st.v=0;}}
- else{const back=tau>=2*D+X;F.dock=-1;F.from=back?1:0;F.to=1-F.from;F.elapsed=tau-(back?2*D+X:D);F.speed=Math.hypot(20,128)*6*(F.elapsed/X)*(1-F.elapsed/X)/X;if(ship){ship.st.dwell=0;ship.st.v=F.speed;}}};
+ else{const back=tau>=2*D+X;F.dock=-1;F.from=back?1:0;F.to=1-F.from;F.elapsed=tau-(back?2*D+X:D);F.speed=F.len*6*(F.elapsed/X)*(1-F.elapsed/X)/X;if(ship){ship.st.dwell=0;ship.st.v=F.speed;}}};
 F.board=dock=>{if(AF.mode==='ferry-ride')return;F.waiting=dock;if(F.dock===dock){F.waiting=-1;AF.setMode('ferry-ride');}else AF.emit('toast','Solace Belle is on her way.');};
-// skipping takes the rider across at once; the boat itself keeps the shared timetable
-F.skip=()=>{if(!F.rider||AF.stream.traveling)return;const dock=F.dock>=0?1-F.dock:F.to;AF.stream.travel({label:dock?'Serena Isle':'Port Solace',go:()=>land(dock)});};
+// skipping takes the rider across at once (never during a mission that forbids travel); the boat itself keeps the shared timetable
+F.skip=()=>{if(!F.rider||AF.stream.traveling)return;if(AF.noTravel&&AF.noTravel()){AF.emit('toast','No skipping the crossing right now \u2014 enjoy the ride.');return;}const dock=F.dock>=0?1-F.dock:F.to;AF.stream.travel({label:dock?'Serena Isle':'Port Solace',go:()=>land(dock)});};
 function place(time){
  const mesh=AF.harbour.ferry.mesh,progress=F.dock<0?AF.smooth(0,1,F.elapsed/route.crossing):0,start=route.path[F.from],end=route.path[F.to];
  F.x=F.dock<0?AF.lerp(start[0],end[0],progress):route.path[F.dock][0];F.z=F.dock<0?AF.lerp(start[1],end[1],progress):route.path[F.dock][1];
@@ -219,20 +436,24 @@ AF.modes['ferry-ride']={
 AF.onBuild('island-ferry',675,()=>{
  F.reset();
  const decorative=AF.sea.ships.find(ship=>ship.name==='island ferry');if(decorative){AF.scene.remove(decorative.grp);AF.sea.ships.splice(AF.sea.ships.indexOf(decorative),1);}
- // yachts lap the bay in a whole number of ferry cycles, timed to sail through her lane (x -50..30) only while she is alongside:
- // no runtime give-way, so every co-op player sees the same boats
- for(let index=0;index<AF.land.yachts.length;index++){const y=AF.land.yachts[index],k=[3,4,4,3,4][index%5],tc=(index%2?77.5:12.5)+index*F.P;y.z=318+index*12;y.v=(y.v<0?-1:1)*1400/(k*F.P);y.x0=-10-y.v*tc;}
+ // yachts lap the bay in whole fractions of the ferry cycle, timed to sail through her lane (x -50..30) only while she is far out
+ // (she is near their lane, z < 400, for the first / last F.nearT seconds of a crossing): no runtime give-way, so every co-op
+ // player sees the same boats
+ let near=0;for(let e=0;e<=route.crossing;e+=0.5){if(route.path[0][1]+(route.path[1][1]-route.path[0][1])*AF.smooth(0,1,e/route.crossing)>400)break;near=e+0.5;}F.nearT=near;
+ const lo=route.dwell+near,hi=F.P-near;
+ for(let index=0;index<AF.land.yachts.length;index++){const y=AF.land.yachts[index],m=index%2?1:2,period=F.P/m,v=1400/period,half=40/v+2,span=Math.max(0,hi-lo-2*half-(m-1)*period),tc=lo+half+span*((index*0.37+0.15)%1);y.z=318+index*12;y.v=(y.v<0?-1:1)*v;y.x0=-10-y.v*tc;}
  for(const dock of [0,1]){const point=dock?route.islandPier:route.cityPier,prompt=AF.addInteract({x:point[0],y:dockY(dock)+1,z:point[1],r:4,prio:0.7,label:'Board the ferry',can:()=>AF.mode==='walk',act:()=>F.board(dock)});if(dock)F.islandPrompt=prompt;else F.cityPrompt=prompt;}
 });
 AF.onTick('island-ferry',145,F.update);
-AF.test('island: yachts never sail through the ferry lane while she crosses',()=>{let bad=0;const saved=F.off;F.off=0;try{for(let t=0;t<F.P*20;t+=0.5){F.at(t);if(F.dock>=0||F.elapsed<6||F.elapsed>34)continue;for(const y of AF.land.yachts){const x=((y.x0+y.v*t+700)%1400+1400)%1400-700;if(x>-50&&x<30)bad++;}}}finally{F.off=saved;F.at(AF.clock.w);}return{ok:!bad,info:bad+' conflicting samples over '+Math.round(F.P*20)+' s'};});
-S.hotelWalk=[[-20,424],[-20,478],[-20,514],[-90,514],[-130,580],[-145,610],[-145,651]];
+AF.test('island: yachts never sail through the ferry lane while she crosses',()=>{let bad=0,checked=0;const saved=F.off;F.off=0;try{for(let t=0;t<F.P*20;t+=0.5){F.at(t);if(F.dock>=0||(F.from===0?F.elapsed>F.nearT:F.elapsed<route.crossing-F.nearT))continue;checked++;for(const y of AF.land.yachts){const x=((y.x0+y.v*t+700)%1400+1400)%1400-700;if(x>-50&&x<30)bad++;}}}finally{F.off=saved;F.at(AF.clock.w);}return{ok:!bad&&checked>0,info:bad+' conflicting of '+checked+' samples near the lane over '+Math.round(F.P*20)+' s (near '+F.nearT+' s)'};});
+S.hotelWalk=[[-20,Z(424)],[-20,Z(478)],[-20,Z(514)],[-90,Z(514)],[-130,Z(580)],[-145,Z(610)],[-145,Z(651)]];
 AF.test('island: sites have solid colliders and beach palms',()=>{const names=['Hotel Serena',"Fisher's Landing",'Serena Point Light','Serena Airstrip','Crater Lookout'],missing=names.filter(name=>!S.sites.find(site=>site.name===name)?.props.some(prop=>prop.col));return{ok:!missing.length&&S.palms>=100&&S.walkers<=120,info:S.palms+' palms, '+S.walkers+' actors, missing '+missing.join(',')};});
 AF.test('island: pier to hotel walk is unobstructed',()=>{let blocked=0,samples=0;const hits=[];for(let index=1;index<S.hotelWalk.length;index++){const from=S.hotelWalk[index-1],to=S.hotelWalk[index],steps=Math.ceil(Math.hypot(to[0]-from[0],to[1]-from[1])/0.5);for(let part=0;part<=steps;part++){const x=AF.lerp(from[0],to[0],part/steps),z=AF.lerp(from[1],to[1],part/steps),y=feetY(x,z);samples++;if(AF.boxBlocked(x,y+0.05,z,0.3,1.7)){blocked++;if(hits.length<5)hits.push([x,y,z]);}}}return{ok:!blocked,info:blocked+'/'+samples+' blocked '+JSON.stringify(hits)};});
 AF.test('island: party, bonfire, volleyball and jet-ski hire are furnished and lit',()=>{
  const spots=[fun.party,fun.bonfire,fun.court,fun.hire],bare=spots.filter(site=>!site||!site.props.length).length,lit=AF.lights.filter(light=>spots.some(site=>site&&Math.hypot(light.x-site.x,light.z-site.z)<12)).length;
  const dancers=AF.walkers.paths.filter(path=>/^Serena party/.test(path.name)&&path.actors[0].look.pose==='dance').length;
- return{ok:!bare&&lit>=4&&dancers>=20&&fun.docks.length===4&&fun.docks.every(d=>O.h(d.x,d.z)<-1.9&&O.h(d.land[0],d.land[1])>-1.25),info:'bare '+bare+', lights '+lit+', dancers '+dancers+', docks '+JSON.stringify(fun.docks.map(d=>[Math.round(d.x),Math.round(d.z),+O.h(d.land[0],d.land[1]).toFixed(1)]))};
+ const pub=fun.docks.filter(d=>!d.cove),cove=fun.docks.filter(d=>d.cove);
+ return{ok:!bare&&lit>=4&&dancers>=20&&pub.length===3&&cove.length===3&&pub.every(d=>O.h(d.x,d.z)<-1.9&&O.h(d.land[0],d.land[1])>-1.25)&&cove.every(d=>O.h(d.x,d.z)<-1.9&&Math.abs(AF.surfaceBelow(d.land[0],d.land[1],d.y+1,3)-d.y)<0.3),info:'bare '+bare+', lights '+lit+', dancers '+dancers+', docks '+JSON.stringify(fun.docks.map(d=>[Math.round(d.x),Math.round(d.z),+O.h(d.land[0],d.land[1]).toFixed(1)]))};
 });
 AF.test('island: jet ski rides on open water, bumps off the shallows, hops off at a beach',()=>{
  const k=JS.skis[0];if(!k)return{ok:false,info:'no jet skis'};
@@ -254,10 +475,20 @@ AF.test('island: Cub runway is flat and clear for takeoff',()=>{const strip=I.ai
 AF.test('island: island walkers stay on clear surfaces',()=>{const hits=[];for(const path of S.paths)for(const point of path.points)if(AF.boxBlocked(point[0],point[1]+0.1,point[2],0.18,1.4)&&hits.length<8)hits.push({path:path.name,point});return{ok:!hits.length&&S.walkers<=120,info:JSON.stringify(hits)};});
 AF.test('island: sea routes clear terrain and yield to ferry lane',()=>{let dry=0,samples=0;for(const ship of AF.sea.ships)for(let index=0;index<ship.route.N;index+=2){const x=ship.route.pts[index*2],z=ship.route.pts[index*2+1];samples++;if(O.h(x,z)>-1.25)dry++;}for(const yacht of AF.land.yachts)for(let x=-700;x<=700;x+=20){samples++;if(O.h(x,yacht.z+6)>-1.25)dry++;}return{ok:!dry&&AF.sea.ships.every(ship=>ship.name!=='island ferry'),info:dry+'/'+samples+' dry route samples; ornamental ferry removed, yachts hold outside lane during crossing'};});
 // the island kit for 44-key (Corsair Key): the same cached, LOD'd prop models, pads and palette
+AF.test('island: smugglers\u2019 tunnel walks end to end under a roof; posts, routes, cache and cove skis are usable',()=>{
+ const H=S.heist;if(!H)return{ok:false,info:'no heist spots'};
+ const clear=p=>{let g=-1e9;for(const dx of [-0.3,0,0.29])for(const dz of [-0.3,0,0.29])g=Math.max(g,AF.W.groundY(p[0]+dx,p[2]+dz));return!AF.boxBlocked(p[0],g+0.05,p[2],0.3,1.7);};
+ const body={x:H.tunnelEntry.x,y:H.tunnelEntry.y,z:H.tunnelEntry.z,vy:0,r:0.3,h:1.7,onGround:true};let stuck=0,roofed=0;
+ for(const p of [...H.tunnel,[H.caveExit.x+2,H.caveExit.y,H.caveExit.z],[H.cove.x+3,H.cove.y,H.cove.z]]){for(let k=0;k<240;k++){const dx=p[0]-body.x,dz=p[2]-body.z,d=Math.hypot(dx,dz);if(d<0.35)break;const sp=Math.min(d,0.15);AF.moveBody(body,dx/d*sp,dz/d*sp,1/30,{step:0.55});}if(Math.hypot(p[0]-body.x,p[2]-body.z)>0.6)stuck++;}
+ for(const p of H.tunnel.slice(2,-2))if([2.9,3.6,4.6,6].some(h=>AF.solidAt(p[0],p[1]+h,p[2])))roofed++;
+ const posts=H.guardPosts.filter(p=>!clear([p.x,p.y,p.z])).length,routes=H.guardRoutes.reduce((n,r)=>n+r.filter(p=>!clear(p)).length,0),stand=clear([H.cacheStand.x,H.cacheStand.y,H.cacheStand.z]);
+ const skis=H.skis.filter(k=>O.h(k.x,k.z)<-1.9).length,len=H.length;
+ return{ok:!stuck&&roofed===H.tunnel.length-4&&!posts&&!routes&&stand&&skis>=2&&len>=150&&len<=250&&!!H.kit&&!!S.spots.strip,info:Math.round(len)+' m, stuck '+stuck+', roofed '+roofed+'/'+(H.tunnel.length-4)+', blocked posts '+posts+' / route points '+routes+', cache stand '+stand+', wet skis '+skis};
+});
 S.kit={geometry,block,site,prop,sign,cottage,canopy,openCanopy,paint,cache,col:{white,mint,coral,teal,wood,rock,gold,dark,win,glow}};
 AF.test('island: ferry round trip and safe pier height',()=>{
  const saved={mode:AF.mode,x:AF.player.x,y:AF.player.y,z:AF.player.z,yaw:AF.player.yaw},rows=[];
- try{for(const dock of [0,1]){F.reset(dock);const point=dock?route.islandPier:route.cityPier;AF.setMode('walk',{x:point[0],y:dockY(dock),z:point[1],snap:true});F.board(dock);let frames=0;while(AF.mode==='ferry-ride'&&frames++<3600)AF.step(1,1/30);const end=dock?route.cityPier:route.islandPier;rows.push(AF.mode==='walk'&&Math.hypot(AF.player.x-end[0],AF.player.z-end[1])<0.5&&Math.abs(AF.player.y-dockY(1-dock))<0.1&&!AF.boxBlocked(AF.player.x,AF.player.y+0.05,AF.player.z,0.3,1.7));}return{ok:rows.every(Boolean),info:'outbound/return '+rows.join('/')};}
+ try{for(const dock of [0,1]){F.reset(dock);const point=dock?route.islandPier:route.cityPier;AF.setMode('walk',{x:point[0],y:dockY(dock),z:point[1],snap:true});F.board(dock);let t=AF.clock.w,steps=0;while(AF.mode==='ferry-ride'&&steps++<Math.ceil((route.dwell+route.crossing)*2)+20){t+=0.5;F.update(0.5,t);}const end=dock?route.cityPier:route.islandPier;rows.push(AF.mode==='walk'&&Math.hypot(AF.player.x-end[0],AF.player.z-end[1])<0.5&&Math.abs(AF.player.y-dockY(1-dock))<0.1&&!AF.boxBlocked(AF.player.x,AF.player.y+0.05,AF.player.z,0.3,1.7));}return{ok:rows.every(Boolean),info:'outbound/return '+rows.join('/')};}
  finally{F.reset();AF.setMode(saved.mode==='walk'?'walk':'aerial',saved);}
 });
 }catch(error){AF.partError('44-island.js',error);}

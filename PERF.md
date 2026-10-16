@@ -112,22 +112,37 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
 - Walkers (`54`): `AF.walkers.addPath` — every path pedestrian shares 4 instanced draws (512 cap), limbs 5 Hz beyond 60 m.
   Reactions (shoved / knocked flat / scared) are per-actor state on the same instances; only touched actors run `react`.
 - Air traffic (`53`): 7 instanced batches with per-instance livery; busy timetable only within 900 m.
-- Park actors, zoo far LOD (merged per species, dithered), island jet skis: shared instanced/merged meshes.
+- Park actors, zoo far LOD (merged per species, dithered), island jet skis: shared instanced/merged meshes. A ridden (or remote) ski's
+  spray reuses the 2 AF.fx Points draws (rooster tail + carve fans, ≤ ~250 live points), its wake + hull foam come from the water
+  shader through an invisible, never-drawn hull proxy (`AF.water2.addBoat`); camera feel (`AF.camfx`) is a quaternion / fov nudge
+  and a DOM overlay — no programs, no draws.
 - All ticks together cost 1.7–3.2 ms anywhere (`tools/tick-survey.js`). Keep new simulations distance/view gated.
 - Crowd (`55`): 70 / 140 / 170 ambient walkers (low / Balanced / High). Fights, cops, run-overs only step peds the player engaged
   (`w.agg`, ≤ `G.engagedMax` + 8 cops), drawn through the same instanced frames (lying = a rotated instance, no new geometry).
 - Gameplay (`76–78`): FX = 2 Points draws (glow additive, smoke dithered opaque), hidden while empty (programs compiled at
   `preloaded`); job marker (2 draws), autogyro (2) and squad cars exist only while in use; police / run-over checks at 15 Hz within
   60 m, the wanted scan skipped while nobody is on duty. A driver seated in a closed car casts no shadow.
-- The liner (`48`): one hull mesh (+ its glass) and one InstancedMesh per furniture kind (1/8 m), the furniture drawn only within
-  140 m of the ship; its ~66 passengers, dealers and dancers are path walkers (shared draws). The heist (`81`) adds a gate, two key
-  boxes, a hatch and four bags (hidden outside the mission); its guards are path walkers, the mob reuses 55's pooled `goon` walkers.
+- The liner (`48`, anchored 1.2 km offshore): one hull mesh (hull, outboard stages and every sign merged; + its glass, ~72 k tris) and
+  one InstancedMesh per furniture kind (1/8 m, 20 kinds), the furniture drawn only within 120 m of the hull; the two shore launches +
+  Silas's launch are one 3-instance InstancedMesh (on the world clock). ~29 draws / ~150 k tris aboard (the city is out of view, so
+  a pose aboard is ~170 draws / 0.45 M tris in all); its ~90 passengers, dealers, dancers, crew and launch pilots are path walkers
+  (shared draws; 44-sites' test keeps every path walker within capacity - 160). The heist (`81`) shows each scene's people and props only while that scene is on (doors, gate,
+  key boxes, cage, bags, 7 laser beams and 9 camera housings in the bank, drawn within 70 m at night); every guard is a path walker
+  (shared draws), the mob reuses 55's pooled `goon` walkers. Stealth (`80-stealth`) senses at 15 Hz, only in the active zone,
+  only within its radius, and only on the zone's authority client; alert markers are pooled DOM. While a heist is on `AF.quiet`
+  binds 60 % of the ambient crowd (55), so a busy story frame costs no more than free roam.
 - Audio (`75`): one AudioContext; samples (`assets/sfx`, mono MP3: one-shots 32 kHz / 48 kbps, loops + beds 24 kHz / 40 kbps,
   voice 16 kHz / 24 kbps; ~2.3 MB for 167 files) decode on first use, the core set at unlock; ≤ 32 voices (20 on phones); loops
   fade by distance and are reaped after 120 s unused; the context suspends while the page is hidden. Ambience beds are weighted by
   zone in a 4 Hz tick and each weight eases (~1.3 s) so zones crossfade; one master compressor glues the mix. Per frame only the
   player's own vehicle / wind / footsteps; nearby cars, sirens, flights at 15 Hz; water + farm machines + tram at 4 Hz. Nothing
   allocates per frame.
+- Heist voices + music (`75`, block "spoken lines + heist music"): lines = `assets/vo/<id>.mp3` (Kokoro TTS, `tools/vo-build.mjs`;
+  mono 24 kHz / 32 kbps CBR, -16 LUFS, silence-trimmed; ~4 KB a second) + `assets/vo/index.json` (durations, fetched at unlock).
+  Decoded on demand, ≤ 32 cached (16 phones), reaped after 90 s unused; they share the ≤ 32 voice cap at high priority; one radio and
+  one plain line at a time, ≤ 3 positional barks. Music = `assets/music/<id>.mp3` (`tools/music-build.mjs`; mono 32 kHz / 48 kbps,
+  -22 LUFS, 60–96 s loops, ~4.5 MB for 9) fetched only when first asked for; ≤ 2 tracks stay decoded (~18 MB each at 48 kHz). Speech
+  ducks music (×0.4) and the ambience bus (×0.67) from a 15 Hz tick; nothing new per frame.
 
 ## 8. Content rules (locked)
 1. Static → voxels (`W.fill`) or `AF.placeStatic`; outland → `AF.outland.addProp`.

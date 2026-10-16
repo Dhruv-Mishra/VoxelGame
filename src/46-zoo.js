@@ -13,7 +13,7 @@ try {
       sign: ['White rhinos graze with broad, square lips.', 'Their horns are made of keratin, like our fingernails.'] },
     { id: 'primates', name: 'Primate Island', rect: [-594, -81, -562, -30], side: 'w', ground: [0x598643, 0x426f39, 0x8a9a55], animals: [['gorilla', 2], ['monkey', 5]],
       sign: ['Gorillas live in family groups led by a silverback.', 'The monkeys use their tails for balance on the climbing frames.'] },
-    { id: 'lions', name: 'Pride Rock', rect: [-536, -140, -496, -90], side: 'w', ground: [0xc0a860, 0xa89a58, 0xd0b878], animals: [['lion', 1], ['lioness', 2]],
+    { id: 'lions', name: 'Pride Rock', rect: [-536, -140, -496, -90], roam: [-536, -140, -496, -103], side: 'w', ground: [0xc0a860, 0xa89a58, 0xd0b878], animals: [['lion', 1], ['lioness', 2]],   // roam: clear of the night house (46-zoo-den)
       sign: ['The pride lounges on the warm rock for most of the day.', 'Lions sleep up to twenty hours a day. Relatable.', 'A lion\u2019s roar carries eight kilometres.'] },
     { id: 'tigers', name: 'Tiger Forest', rect: [-536, -82, -496, -30], side: 'w', ground: [0x4f7a34, 0x3f6a2e, 0x5a8a3a], animals: [['tiger', 3]],
       sign: ['Tigers love water \u2014 watch for them near the stream.', 'No two tigers have the same stripes.', 'Tigers are the largest of all the big cats.'] },
@@ -293,7 +293,7 @@ try {
     if (TK) {
       const plant = (rect, n, sp, seed) => { const [a, b, c, d] = rect; for (let k = 0; k < n; k++) { const x = a + 3 + R() * (c - a - 6), z = b + 3 + R() * (d - b - 6); if (POOLS.some((q) => Math.hypot((x - q.cx) / (q.rx + 3), (z - q.cz) / (q.rz + 3)) < 1)) continue; TK.place(x, z, sp, (k % 3), seed + k); } };
       const byId = (id) => HAB.find((h) => h.id === id).rect;
-      plant(byId('tigers'), 14, 'autumn', 100); plant(byId('deer'), 18, 'autumn', 200); plant(byId('bears'), 12, 'evergreen', 300); plant(byId('lions'), 2, 'oak', 400);
+      plant(byId('tigers'), 14, 'autumn', 100); plant(byId('deer'), 18, 'autumn', 200); plant(byId('bears'), 12, 'evergreen', 300); plant([-536, -140, -496, -110], 2, 'oak', 400);   // lions: clear of the night house (46-zoo-den)
       for (let z = -40; z > -280; z -= 30) { if (Math.abs(z + 153) > 9) TK.place(-547, z, 'street', 1, z); }
       // shade trees on the brook banks + along the south walk
       for (const [x, z] of [[-630, -159.8], [-575, -147.2], [-520, -159.8], [-470, -147.2], [-620, -19], [-580, -19], [-500, -19], [-460, -19]]) TK.place(x, z, 'any', 0, (x * 7 + z) | 0);
@@ -731,7 +731,7 @@ try {
       for (let k = 0; k < n; k++) {
         const pad = H.id === 'primates' ? 6 : 4.5;
         const x = a + pad + R() * (c - a - pad * 2), z = b + pad + R() * (d - b - pad * 2);
-        const an = { uid: Z.list.length + 1, sp, H, hab: H.id, rect: H.rect, pad, x, z, y: W.groundY(x, z), yaw: R() * PI * 2, tx: x, tz: z,
+        const an = { uid: Z.list.length + 1, sp, H, hab: H.id, rect: H.roam || H.rect, pad, x, z, y: W.groundY(x, z), yaw: R() * PI * 2, tx: x, tz: z,
           phase: R() * 6, clock: R() * 20, v: 0, scale: id === 'giraffe' ? 0.94 + R() * 0.06 : 0.92 + R() * 0.08,
           state: 'wander', next: 'graze', timer: 25, elapsed: 0, seed: (R() * 4294967296) >>> 0, leader,
           fl: (k % 2 ? -1 : 1) * (2 + k * 0.6), fb: -2 - k * 1.5, frame: k % H.frames.length,

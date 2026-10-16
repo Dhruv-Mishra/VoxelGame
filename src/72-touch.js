@@ -2,7 +2,8 @@
 try {
 // ===== 72-touch: phone + tablet controls — a floating stick on the left (push it to the rim to run), drag-to-look on the right, pinch to
 //       zoom from the sky, and ONE context cluster bottom-right: a big primary action plus up to three secondaries picked from what the
-//       player is doing (fists / melee, a gun drawn, driving, flying, riding, skydiving), with small utilities (camera, job) beside it.
+//       player is doing (fists / melee, a gun drawn: FIRE / AIM / CROUCH, driving, flying, riding, skydiving), with small utilities (camera,
+//       job, bag) beside it. Weapons switch from the weapon HUD (77-combat: tap its ▸, hold it for the wheel).
 //       Everything feeds AF.input, so the modes don't care.  (OWNER: player) =====
 {
   if (AF.touch) {
@@ -39,15 +40,16 @@ try {
       job: '<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V5h6v3M3 13h18"/>', plus: '<path d="M12 5v14M5 12h14"/>', minus: '<path d="M5 12h14"/>',
       walk: '<circle cx="12" cy="4.5" r="2"/><path d="M12 7v7M12 14l-3 6M12 14l3 6M8 10h8"/>', chute: '<path d="M3 11a9 7 0 0 1 18 0zM4 11l8 8 8-8M12 11v8"/>',
       bag: '<path d="M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2"/>',
+      crouch: '<circle cx="12" cy="6" r="2"/><path d="M11 9l-3 4 4 1-1 6M8 13l-2 5M12 14l5-1"/>',
     };
     // id: [icon, label, key, kind ('tap' one-frame press | 'hold' while touched | 'thr' throttle), aria]
     const DEF = {
       hit: [P.fist, 'HIT', 'KeyQ', 'hold', 'Attack'], fire: [P.fire, 'FIRE', 'KeyQ', 'hold', 'Fire'], aim: [P.aim, 'AIM', 'KeyZ', 'tap', 'Aim'],
-      wpn: [P.gun, 'WPN', 'KeyX', 'tap', 'Switch weapon'], jump: [P.up, '', 'Space', 'tap', 'Jump'], stop: [P.stop, 'STOP', 'KeyE', 'tap', 'Stop the needle'],
+      crouch: [P.crouch, 'CROUCH', 'KeyC', 'tap', 'Crouch'], jump: [P.up, '', 'Space', 'tap', 'Jump'], stop: [P.stop, 'STOP', 'KeyE', 'tap', 'Stop the needle'],
       brake: [P.stop, 'BRAKE', 'Space', 'hold', 'Brake'], exit: [P.exit, 'EXIT', 'KeyE', 'tap', 'Get out'], fexit: [P.exit, 'EXIT', 'KeyF', 'tap', 'Get out of the plane'],
       thrU: [P.plus, 'THR', 'thr+', 'thr', 'Increase throttle'], thrD: [P.minus, 'THR', 'thr-', 'thr', 'Decrease throttle'], wbrake: [P.stop, 'BRAKE', 'KeyB', 'hold', 'Wheel brakes'],
       walk: [P.walk, 'WALK', 'Tab', 'tap', 'Walk'], chute: [P.chute, 'CHUTE', 'Space', 'tap', 'Deploy parachute'],
-      cam: [P.cam, 'CAM', 'KeyC', 'tap', 'Camera view'], job: [P.job, 'JOB', 'KeyJ', 'tap', 'Job'], bag: [P.bag, 'BAG', 'KeyI', 'tap', 'Bag'],
+      cam: [P.cam, 'CAM', 'KeyV', 'tap', 'Camera view'], job: [P.job, 'JOB', 'KeyJ', 'tap', 'Job'], bag: [P.bag, 'BAG', 'KeyI', 'tap', 'Bag'],
     };
     const UTIL = new Set(['cam', 'job', 'bag']), B = {};
     for (const id in DEF) {
@@ -63,35 +65,9 @@ try {
       b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
       B[id] = b;
     }
-    // WPN: a tap is the next weapon; held, it opens the weapon wheel (77-combat): slide toward one and lift to take it
-    {
-      const b = B.wpn, fresh = b.cloneNode(true); b.replaceWith(fresh); B.wpn = fresh;
-      let pid = null, holdT = 0, px = 0, py = 0;
-      const tapNext = () => { I.pressed.add('KeyX'); I.released.add('KeyX'); };
-      fresh.addEventListener('pointerdown', (e) => {
-        e.preventDefault(); e.stopPropagation(); if (pid != null) return;
-        pid = e.pointerId; px = e.clientX; py = e.clientY; try { fresh.setPointerCapture(pid); } catch (err) { /* old browsers */ }
-        holdT = setTimeout(() => { holdT = 0; const CB = AF.combat; if (CB && CB.wheelOpen && CB.wheelOpen()) fresh.classList.add('on'); }, 260);
-      });
-      fresh.addEventListener('pointermove', (e) => {
-        if (e.pointerId !== pid) return;
-        const CB = AF.combat; if (CB && CB.wheel && CB.wheel.open) CB.wheelAim((e.clientX - px) * 1.6, (e.clientY - py) * 1.6);
-        px = e.clientX; py = e.clientY;
-      });
-      const end = (e) => {
-        if (e.pointerId !== pid) return; e.preventDefault(); pid = null;
-        const CB = AF.combat, open = CB && CB.wheel && CB.wheel.open;
-        if (holdT) { clearTimeout(holdT); holdT = 0; if (e.type === 'pointerup') tapNext(); }
-        else if (open) CB.wheelClose(e.type === 'pointerup');
-        fresh.classList.remove('on');
-      };
-      fresh.addEventListener('pointerup', end); fresh.addEventListener('pointercancel', end);
-    }
-
     // ---------------------------------------------------------------- context: which buttons the current action needs (5 Hz, DOM only on change)
     const RIDES = new Set(['row', 'ride', 'funride', 'jetski', 'carousel', 'passenger']), CAM_MODES = new Set(['walk', 'drive', 'fly', 'jetski', 'passenger']);
     const JOB_CAR = (T) => !!(T && (T.cab || T.id === 'bus' || T.kind === 'van' || T.id === 'firetruck' || T.kind === 'bike'));
-    const hasGuns = () => { const g = AF.save && AF.save.guns; if (g) for (const k in g) if (g[k]) return true; return false; };
     const act = [], use = [];
     const pick = () => {
       const m = AF.mode, CB = AF.combat, HUD = AF.hud, J = AF.jobs;
@@ -99,7 +75,7 @@ try {
       if (m === 'walk') {
         const gal = CB && CB.gallery, gun = CB && (gal || CB.gun());
         if (HUD && HUD.meterOn && HUD.meterOn()) act.push('stop');
-        else { act.push(gun ? 'fire' : 'hit', 'jump'); if (gun && !gal) act.push('aim'); if (!gal && (hasGuns() || (CB.owned && CB.owned().length > 1))) act.push('wpn'); }
+        else { act.push(gun ? 'fire' : 'hit', 'jump'); if (gun && !gal) act.push('aim'); if (!gal) act.push('crouch'); }
       } else if (m === 'drive') act.push('brake', 'exit');
       else if (m === 'fly') { const pl = AF.planes && AF.planes.cur; act.push('thrU', 'thrD', 'fexit'); if (pl && pl.onGround) act.push('wbrake'); }
       else if (m === 'aerial') act.push('walk');
@@ -118,7 +94,7 @@ try {
         for (const id in B) { const b = B[id], i = act.indexOf(id); if (UTIL.has(id)) b.classList.toggle('u', use.includes(id)); else b.className = 'tc pe' + (i >= 0 ? ' s' + i : ''); }
         I.down.delete('KeyQ'); I.down.delete('Space'); I.down.delete('KeyB'); I.throttle = 0;   // a button that vanished mid-hold must not stay held
       }
-      const CB = AF.combat; B.aim.classList.toggle('on', !!(CB && CB.aimToggle));
+      const CB = AF.combat; B.aim.classList.toggle('on', !!(CB && CB.aimToggle)); B.crouch.classList.toggle('on', !!(AF.player && AF.player.crouch));
     };
     AF.on('mode', sync); sync();
     let syncT = 0;
@@ -176,7 +152,7 @@ try {
       try {
         if (AF.mode !== 'walk') AF.setMode('walk', {});
         CB.slot = 0; sync(); const fists = act[0] === 'hit' && !act.includes('aim');
-        S.guns.revolver = true; CB.slot = CB.owned().indexOf('revolver'); sync(); const gun = act[0] === 'fire' && act.includes('aim') && act.includes('wpn');
+        S.guns.revolver = true; CB.slot = CB.owned().indexOf('revolver'); sync(); const gun = act[0] === 'fire' && act.includes('aim') && act.includes('crouch') && !act.includes('wpn');
         const max = act.length <= 4;
         return { ok: fists && gun && max && B.fire.classList.contains('s0'), info: `fists ${fists}, gun ${gun}, <=4 ${max}: ${act.join()}` };
       } finally { CB.slot = slot; if (!had) delete S.guns.revolver; if (was && was !== AF.mode) AF.setMode(was); sync(); }

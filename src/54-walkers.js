@@ -1,7 +1,7 @@
 try {
 {
   // Reusable local pedestrian paths: explicit [x,y,z] waypoints, shared articulated peopleKit bodies and rolling luggage.
-  const WK = AF.walkers = { paths: [], meshes: [], stats: { active:0, visible:0, draws:0 }, capacity:512 };
+  const WK = AF.walkers = { paths: [], meshes: [], stats: { active:0, visible:0, draws:0 }, capacity:640 };
   const matrix=new THREE.Matrix4(), rotation=new THREE.Quaternion(), euler=new THREE.Euler(0,0,0,'YXZ'), position=new THREE.Vector3(), scale=new THREE.Vector3();
   let ready=false, material, bodyPlan, visibleBefore=false;
   const palette=(look)=>new Float32Array([AF.col(look.skin??0xefc19f),AF.col(look.top?.col??0x3f7f7c),AF.col(look.bottom?.col??0x45464b),AF.col(look.hair??0x3f2a1c)]);
@@ -42,6 +42,8 @@ try {
     return path.tl={t:Float64Array.from(t),s0:Float64Array.from(s0),s1:Float64Array.from(s1),dur:Float64Array.from(dur),dc:Float64Array.from(dc),T};
   }
   function placeAt(path,actor,W){
+    // actor.ctl = {x,y,z,yaw,moving,ph}: someone else steers this actor (82-stealth guards investigating / chasing); the timetable waits
+    if(actor.ctl){const c=actor.ctl;actor.x=c.x;actor.y=c.y;actor.z=c.z;actor.yaw=c.yaw;actor.moving=!!c.moving;actor.ph=c.ph||0;actor.gap=0;actor.wait=0;return;}
     actor.moving=false;
     if(!path.speed||!path.length){locate(path,actor);return;}
     const tl=timeline(path),P=tl.T+(path.mode==='flow'?actor.gap0:0),ph0=AF.whash(path.idx,54)*tl.T;
@@ -141,6 +143,11 @@ try {
           put(WK.meshes[2],count*2,actor,leg,hip,0,-1.2);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-1.2);count++;continue;
         }
         const stride=actor.stride||0,hip=bodyPlan.lh/16,shoulder=hip+bodyPlan.th/16,arm=(bodyPlan.tw+bodyPlan.aw)/32,leg=(bodyPlan.lw+1)/32,work=actor.look.pose==='marshal',cower=actor.rxOn&&actor.rx.fear>0&&!actor.moving&&!actor.tilt;
+        // actor.aim (82-stealth): an armed guard raises a pistol two-handed (0 = lowered .. 1 = aimed); actor.torch: a lamp held out
+        const aim=actor.tilt?0:(actor.aim||0);
+        if(aim>0){put(WK.meshes[0],count,actor,0,hip,0);put(WK.meshes[1],count*2,actor,arm*0.8,shoulder,0,-0.35-1.15*aim);put(WK.meshes[1],count*2+1,actor,-arm*0.75,shoulder,0,-0.3-1.2*aim);
+          put(WK.meshes[2],count*2,actor,leg,hip,0,stride);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-stride);
+          const reach=0.15+0.42*aim;put(WK.meshes[3],bags++,actor,0.06,shoulder-0.45+0.33*aim,reach,-Math.PI/2*aim,0.07,0.16,0.09);count++;continue;}
         put(WK.meshes[0],count,actor,0,hip,0);put(WK.meshes[1],count*2,actor,arm,shoulder,0,cower?-2.9:work?-1.5+(actor.wave||0):-stride*0.8);put(WK.meshes[1],count*2+1,actor,-arm,shoulder,0,cower?-2.9:work?-1.5-(actor.wave||0):actor.bag?-0.22:stride*0.8);
         put(WK.meshes[2],count*2,actor,leg,hip,0,stride);put(WK.meshes[2],count*2+1,actor,-leg,hip,0,-stride);
         if(actor.bag&&!(actor.lift>0.03))put(WK.meshes[3],bags++,actor,-0.48,0,-0.45,-0.18);

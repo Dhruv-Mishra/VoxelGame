@@ -129,9 +129,10 @@ try {
     const cont = geoOf(containerShip(), 0.5), fer = geoOf(ferry(), 0.25);
     const sails = [sailboat(col(0xf2ede2), col(0xf6f0e2, { jitter: 0.1 })), sailboat(col(0x1f3a5b), col(0xc8643a, { jitter: 0.12 }))].map((m) => geoOf(m, 1 / 8));
     const trawls = [trawler(col(0xa83a2a)), trawler(col(0x2f5a8a))].map((m) => geoOf(m, 1 / 8));
-    // routes stay 150–700 m offshore, clear of the rig (600, 240), the harbour ferry/tug loops and the yachts' lane (z 324..566)
+    // routes stay 150–700 m offshore, clear of the rig (600, 240), the harbour ferry/tug loops, the yachts' lane (z 312..372), the
+    // Serena ferry lane (x -20..0, z 277..2905) and the Solace Queen's anchorage (-225, 1450)
     const SPEC = [
-      { name: 'container ship', geo: cont, route: loop(ellipse(-180, 1040, 1100, 190, 0, 0, -1)), speed: 6.5, len: 72, beam: 12, draft: 2.4, bob: 0.12, roll: 0.01, bw: 0.4 },
+      { name: 'container ship', geo: cont, route: loop(ellipse(-760, 1000, 420, 170, 0, 0, -1)), speed: 6.5, len: 72, beam: 12, draft: 2.4, bob: 0.12, roll: 0.01, bw: 0.4 },
       { name: 'island ferry', geo: fer, route: loop(ellipse(-430, 650, 80, 190, 0, 0, 1)), speed: 5, len: 40, beam: 10, draft: 1.6, bob: 0.16, roll: 0.018, bw: 0.55 },
       { name: 'sailboat', geo: sails[0], route: loop(ellipse(-980, 430, 120, 80, 0.4, 0.08, 1)), speed: 3.2, len: 10, beam: 3, draft: 0.45, bob: 0.22, roll: 0.09, bw: 0.9 },
       { name: 'sailboat', geo: sails[1], route: loop(ellipse(260, 610, 60, 100, -0.2, 0.1, -1)), speed: 2.8, len: 10, beam: 3, draft: 0.45, bob: 0.22, roll: 0.09, bw: 0.85 },

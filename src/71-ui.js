@@ -230,9 +230,9 @@ try {
   const help = h('div', 'sheet pe', ''); help.id = 'm-help';
   const K = (k, d) => `<div class="k"><span>${d}</span><span>${k.split('+').map((x) => '<kbd>' + x + '</kbd>').join(' ')}</span></div>`;
   help.innerHTML = `<div class="panel"><h2>Controls</h2>${TOUCH ? `<div class="cols"><div><h3>Moving</h3><div class="k"><span>Walk / drive / fly</span><span>left stick</span></div><div class="k"><span>Look around</span><span>drag the right side</span></div><div class="k"><span>Run</span><span>push the stick to its edge</span></div><div class="k"><span>Camera \u00b7 job \u00b7 bag</span><span>small buttons</span></div></div>
-    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Main action</span><span>big button (HIT, FIRE, BRAKE, THR\u2026)</span></div><div class="k"><span>More</span><span>buttons around it change with what you do</span></div><div class="k"><span>Weapon wheel</span><span>hold WPN, slide, lift</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>beside the minimap</span></div></div></div>`
-    : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('I', 'Bag: snacks, pet treats, job items')}${K('C', 'Camera: first person / near / far')}${K('Tab', 'Aerial view')}</div>
-    <div><h3>Fighting</h3>${K('Click+Q', 'Attack / shoot')}${K('Right-drag+Z', 'Aim (hold / toggle)')}${K('Wheel+1-5+X', 'Switch weapon')}${K('Hold X', 'Weapon wheel')}${K('R', 'Reload')}<h3>Work</h3>${K('J', 'Start / quit a job (taxi, bus, van, fire engine, on foot: courier)')}</div>
+    <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Main action</span><span>big button (HIT, FIRE, BRAKE, THR\u2026)</span></div><div class="k"><span>More</span><span>buttons around it change with what you do</span></div><div class="k"><span>Crouch</span><span>CROUCH button</span></div><div class="k"><span>Next weapon</span><span>tap \u25b8 by its name (top right)</span></div><div class="k"><span>Weapon wheel</span><span>hold the weapon name, slide, lift</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>beside the minimap</span></div></div></div>`
+    : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('I', 'Bag: snacks, pet treats, job items')}${K('C', 'Crouch (toggle) \u00b7 sneak')}${K('V', 'Camera: first person / near / far')}${K('Tab', 'Aerial view')}</div>
+    <div><h3>Fighting</h3>${K('Click+Q', 'Attack / shoot')}${K('Right-drag+Z', 'Aim (hold / toggle)')}${K('Wheel+1-5+X', 'Switch weapon (or the \u25b8 by its name)')}${K('Hold X', 'Weapon wheel')}${K('R', 'Reload')}<h3>Work</h3>${K('J', 'Start / quit a job (taxi, bus, van, fire engine, on foot: courier)')}</div>
     <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('F', 'Get out (on the ground) \u00b7 bail out (high)')}</div>
     <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}<h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}${K('Space', 'Skip a cutscene')}</div></div>`}
     <div class="stack"><button class="btn primary" data-k="closehelp">Got it</button></div></div>`;
@@ -240,7 +240,7 @@ try {
   // ------------------------------------------------------------------ state + public api
   const S = UI.state = { title: true, map: false, help: false, menu: false, dlg: null, bannerB: null, bannerT: 0, hudT: -9, hud: null, toasts: [], pick: null };
   UI.titleOpen = () => S.title;
-  UI.modalOpen = () => S.map || S.help || S.menu || S.title || !!S.shop || !!S.casino || !!S.inv;
+  UI.modalOpen = () => S.map || S.help || S.menu || S.title || !!S.shop || !!S.casino || !!S.inv || !!(AF.minigame && AF.minigame.open);
   UI.dialogueOpen = () => !!S.dlg;
   const show = (el, on, disp = 'block') => { const v = on ? disp : 'none'; if (el.style.display !== v) el.style.display = v; };
   const text = (el, value) => { value = String(value); if (el.textContent !== value) el.textContent = value; };
@@ -544,6 +544,7 @@ try {
   UI.resume = () => { if (S.menu) toggleMenu(false); };
   AF.on('pointerunlock', (intentional) => { if (!intentional && !S.title && !UI.modalOpen() && !S.dlg) toggleMenu(true); });
   AF.on('escape', () => {
+    if (AF.minigame && AF.minigame.open) { AF.minigame.cancel(); return; }
     if (S.title) return;
     if (S.casino) AF.casino.close();
     else if (S.shop) AF.shop.close();
@@ -579,7 +580,7 @@ try {
   menu.querySelector('[data-k=lod]').addEventListener('input', (e) => text(menu.querySelector('.lv'), '\u00d7' + (+e.target.value).toFixed(1)));
   help.addEventListener('click', (e) => { if (e.target === help || e.target.closest('[data-k=closehelp]')) toggleHelp(false); });
   mm.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); else if (b.dataset.k === 'full') goFull(!isFull()); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
-  prompt.addEventListener('click', () => AF.input.tap(AF.mode==='ferry-ride'?'Space':'KeyE'));
+  prompt.addEventListener('click', () => AF.input.tap(AF.mode==='ferry-ride'||AF.mode==='tender'?'Space':'KeyE'));
 
   const focus = () => AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes && AF.planes.cur ? AF.planes.cur : AF.player;
   const toggleMap = (...args) => UI.toggleMap && UI.toggleMap(...args);
@@ -595,7 +596,9 @@ try {
     const lot = AF.PLAN.lotAt(pl.x, pl.z), id = lot && lot.id, K2 = AF.PLAN.world.key;
     if (id === 'w-zoo' || id === 'w-zoo-annex') return 'Solace Zoo'; if (id === 'w-airfield') return 'Westgate Airfield';
     if (K2 && Math.abs(pl.x - K2.cx) < K2.rx * 1.3 && Math.abs(pl.z - K2.cz) < K2.rz * 1.3) return K2.name;
-    if (pl.z > 300) return 'Serena Isle'; if (pl.z < -300) return 'Solace Range'; if (pl.x < -660) return 'Westmoor'; if (pl.x > 460) return 'Eastwood';
+    const SI = AF.PLAN.world.island;
+    if (AF.liner && Math.abs(pl.x - AF.liner.x) < 110 && Math.abs(pl.z - AF.liner.z) < 40) return 'SS Solace Queen';
+    if (pl.z > 300) return Math.hypot((pl.x - SI.cx) / SI.rx, (pl.z - SI.cz) / SI.rz) < 1.4 ? 'Serena Isle' : 'Open sea'; if (pl.z < -300) return 'Solace Range'; if (pl.x < -660) return 'Westmoor'; if (pl.x > 460) return 'Eastwood';
     const nr = AF.PLAN.nearestRoad(pl.x, pl.z); return nr.road && nr.d < 12 ? nr.road.name : pl.x < -300 ? 'The West Side' : 'Port Solace';
   };
   const district = (x, z) => { const K2 = AF.PLAN.world.key; if (K2 && Math.abs(x - K2.cx) < K2.rx * 1.3 && Math.abs(z - K2.cz) < K2.rz * 1.3) return 'Private island';
@@ -621,8 +624,8 @@ try {
       if (S.dlg && AF.mode === 'walk' && AF.player && S.dlgFrom && Math.hypot(AF.player.x - S.dlgFrom.x, AF.player.z - S.dlgFrom.z) > 6) closeDlg();
     }
     try { bubbleTick(dt); } catch (e) { show(bubbleEl, false); }
-    const it = (AF.mode === 'walk'||AF.mode==='ferry-ride') && !S.dlg && !UI.modalOpen() ? AF.interactTarget : null;
-    if (it && (prompt._target !== it || prompt._label !== it.label)) { prompt._target = it; prompt._label = it.label; const lab = `<b>${TOUCH ? '&#9995;' : AF.mode==='ferry-ride'?'Space':'E'}</b>` + esc(it.label || 'Use'); if (prompt._l !== lab) { prompt.innerHTML = lab; prompt._l = lab; } }
+    const it = (AF.mode === 'walk'||AF.mode==='ferry-ride'||AF.mode==='tender') && !S.dlg && !UI.modalOpen() ? AF.interactTarget : null;
+    if (it && (prompt._target !== it || prompt._label !== it.label)) { prompt._target = it; prompt._label = it.label; const lab = `<b>${TOUCH ? '&#9995;' : AF.mode==='ferry-ride'||AF.mode==='tender'?'Space':'E'}</b>` + esc(it.label || 'Use'); if (prompt._l !== lab) { prompt.innerHTML = lab; prompt._l = lab; } }
     show(prompt, !!it, 'flex');
     const now = performance.now();
     for (let i = S.toasts.length - 1; i >= 0; i--) { const o = S.toasts[i]; if (now > o.until) { if (!o.gone) { o.gone = true; o.el.classList.add('out'); o.until = now; } else if (now > o.until + 320) { o.el.remove(); S.toasts.splice(i, 1); } } }
@@ -637,7 +640,7 @@ try {
       if (!clock.classList.contains('dim') && now - LOC.t > 7000) clock.classList.add('dim');
       if (S.menu) syncMenu();
     }
-    const d = (AF.mode === 'drive' || AF.mode === 'fly'||AF.mode==='ferry-ride') && AF.clock.t - S.hudT < 1.0 ? S.hud : null;
+    const d = (AF.mode === 'drive' || AF.mode === 'fly'||AF.mode==='ferry-ride'||AF.mode==='tender') && AF.clock.t - S.hudT < 1.0 ? S.hud : null;
     show(speed, !!d);
     if (d && frameN % 3 === 0) {
       text(speedValue, Math.round(d.speed || 0));

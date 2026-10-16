@@ -6,7 +6,7 @@ try {
 // play and refunds the rest. House rules: single-zero roulette; 6-deck blackjack, dealer peeks and stands on soft 17, naturals pay
 // 3:2, double on any two, split once (split aces take one card); craps pass / don't pass (bar 12) + the one-roll field (2 and 12
 // pay double); punto banco baccarat (full tableau, 5% on banker, tie 8:1); three-reel slots returning ~94%. Main floor $5–$500,
-// the Gilded Room (x -250..-238) $100–$5,000, slots $1–$25. Outcomes use Math.random: they are the player's own gameplay, never
+// the High Rollers' Salon (tables with room 'gilded'; Mr Prescott's table is noPlay) $100–$5,000, slots $1–$25. Outcomes use Math.random: they are the player's own gameplay, never
 // ambient world state. AF.casino.can(table) lets the heist close the tables; AF.casino.g is the game on screen.
 {
   const UI = AF.ui, root = document.getElementById('ui'), LN = AF.liner;
@@ -403,9 +403,10 @@ try {
   AF.onBuild('casino', 892, () => {
     if (!LN || !LN.tables.length) return;
     for (const t of LN.tables) {
-      const gilded = t.x > -250 && t.x < -238, room = t.kind === 'slot' ? 'slots' : gilded ? 'gilded' : 'floor', R = ROOMS[room];
+      if (t.noPlay) continue;
+      const gilded = t.room ? t.room === 'gilded' : t.x > -250 && t.x < -238, room = t.kind === 'slot' ? 'slots' : gilded ? 'gilded' : 'floor', R = ROOMS[room];
       const ix = t.kind === 'craps' ? t.x - t.w / 2 - 0.6 : t.x, iz = t.kind === 'slot' ? t.z + t.face * 0.8 : t.kind === 'craps' ? t.z : t.z + t.d / 2 + 0.6;
-      const T = { kind: t.kind, src: t, ix, iz, y: t.y, room, title: NAME[t.kind], sub: t.kind === 'slot' ? 'Three reels' : gilded ? 'The Gilded Room \u00b7 high stakes' : 'Main floor', hello: HELLO[t.kind] };
+      const T = { kind: t.kind, src: t, ix, iz, y: t.y, room, title: NAME[t.kind], sub: t.kind === 'slot' ? 'Three reels' : gilded ? 'High Rollers\u2019 Salon \u00b7 high stakes' : 'Main floor', hello: HELLO[t.kind] };
       T.it = AF.addInteract({ x: ix, y: t.y + 1, z: iz, r: t.kind === 'slot' ? 1.0 : 1.8, prio: 1.4,
         label: (t.kind === 'slot' ? 'Play the slots' : 'Play ' + NAME[t.kind].toLowerCase()) + ' \u00b7 ' + cash(R.min) + '\u2013' + cash(R.max),
         can: () => AF.mode === 'walk' && !CZ.g && (!CZ.can || CZ.can(T)), act: () => CZ.open(T) });

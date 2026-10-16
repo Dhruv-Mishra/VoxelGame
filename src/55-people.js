@@ -1482,8 +1482,9 @@ try {
       }
     }
     CAND.sort((p, q) => p.d2 - q.d2);
-    KEEP.clear(); let used = 0;
-    for (const g of CAND) { const need = 1 + (g.fol ? g.fol.length : 0); if (used + need > CR.NW) continue; used += need; KEEP.add(g); }
+    // AF.quiet (a heist is on): bind only 60 % of the ambient crowd — fewer draws + less tick while the story needs the frame time
+    KEEP.clear(); let used = 0; const capN = AF.quiet ? Math.round(CR.NW * 0.6) : CR.NW;
+    for (const g of CAND) { const need = 1 + (g.fol ? g.fol.length : 0); if (used + need > capN) continue; used += need; KEEP.add(g); }
     for (let i = 0; i < CR.NW; i++) { const w = CR.walkers[i]; if (w.gid >= 0 && !w.agg && !KEEP.has(GW[w.gid])) unbind(w); }
     for (const g of KEEP) if (!g.slot) bind(g, W);
     candN = CAND.length;
@@ -1546,6 +1547,12 @@ try {
     a[o] = c; a[o + 1] = 0; a[o + 2] = -sn; a[o + 3] = 0; a[o + 4] = -sn; a[o + 5] = 0; a[o + 6] = -c; a[o + 7] = 0;
     a[o + 8] = 0; a[o + 9] = s; a[o + 10] = 0; a[o + 11] = 0; a[o + 12] = x; a[o + 13] = y + 0.14 * s; a[o + 14] = z; a[o + 15] = 1;
   }
+  // tipped about the feet by angle a: Ry(yaw) * Rx(a); -PI/2 = putLie (on the back), +PI/2 face down, small = a flinch (77-combat)
+  function putFall(im, i, x, y, z, yaw, s, a) {
+    const c = Math.cos(yaw) * s, sn = Math.sin(yaw) * s, ca = Math.cos(a), sa = Math.sin(a), m = im.instanceMatrix.array, o = i * 16;
+    m[o] = c; m[o + 1] = 0; m[o + 2] = -sn; m[o + 3] = 0; m[o + 4] = sn * sa; m[o + 5] = s * ca; m[o + 6] = c * sa; m[o + 7] = 0;
+    m[o + 8] = sn * ca; m[o + 9] = -s * sa; m[o + 10] = c * ca; m[o + 11] = 0; m[o + 12] = x; m[o + 13] = y + 0.14 * s * Math.abs(sa); m[o + 14] = z; m[o + 15] = 1;
+  }
   const crossingAxis = [0, 0];
   // group members keep station beside / behind their leader (a bound global walker)
   function stepWalker(w, dt) {
@@ -1598,7 +1605,7 @@ try {
     const gx0 = Math.floor((c.x - R) / 16), gx1 = Math.floor((c.x + R) / 16), gz0 = Math.floor((c.z - R) / 16), gz1 = Math.floor((c.z + R) / 16);
     for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
       const a = exGrid.get(gx * 1000 + gz); if (!a) continue;
-      for (const s of a) { const d = Math.hypot(s.x - c.x, s.z - c.z, ((s.y ?? 0.25) - c.y) * 1.5); if (d < R && occupied(s, h)) cand.push([d, s]); }
+      for (const s of a) { const d = Math.hypot(s.x - c.x, s.z - c.z, ((s.y ?? 0.25) - c.y) * 1.5); if (d < R && occupied(s, h) && !(s.building && AF.closedAt && AF.closedAt(s.building))) cand.push([d, s]); }
     }
     cand.sort((p, q) => p[0] - q[0]);
     CR.extras.length = 0;
@@ -1648,7 +1655,7 @@ try {
           const V = CR.V[w.v], A = w.agg; let f = A.f;
           if (!V.im[f]) f = f === 'runA' || f === 'runB' ? WALK_FRAMES[Math.floor(w.ph) & 3] : 'p';
           const im = V.im[f] || V.im.p, c = cnt[w.v];
-          if (c[f] < im.instanceMatrix.count) { if (!c[f]) draws++; if (A.lie) putLie(im, c[f]++, w.x, w.y, w.z, w.yaw, w.s); else putInst(im, c[f]++, w.x, w.y + (A.dy || 0), w.z, w.yaw, w.s, w.width); }
+          if (c[f] < im.instanceMatrix.count) { if (!c[f]) draws++; if (A.lie || A.tilt) putFall(im, c[f]++, w.x, w.y, w.z, w.yaw + (A.twist || 0), w.s, A.lie ? (A.fallA ?? -1.5708) : A.tilt); else putInst(im, c[f]++, w.x, w.y + (A.dy || 0), w.z, w.yaw, w.s, w.width); }
           act++; continue;
         }
         const wasDown = w.agg.st === 'down';

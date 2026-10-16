@@ -8,6 +8,10 @@ gun_reload: "Machine gun reload" by SamsterBirdies — CC0 — https://freesound
 gun_dry: "A rifle being dry fired once" by serøutōnin--deprivəd — CC0 — https://freesound.org/people/serøutōnin--deprivəd/sounds/725402/
 ricochet: "bullet ricochet.wav" by aust_paul — CC0 — https://freesound.org/people/aust_paul/sounds/30932/
 bullet_hit: "bullet zip and hit.wav" by TheLittleCrow — CC0 — https://freesound.org/people/TheLittleCrow/sounds/496509/
+gun_sil: "silenced pistol shot" by Clutvh — CC0 — https://freesound.org/people/Clutvh/sounds/627087/
+gun_lmg: "Machine Gun 001 - single shot.ogg" by pgi — CC0 — https://freesound.org/people/pgi/sounds/212601/
+hit_tick: Kenney "interface" pack, tick_002 — CC0 (kenney.nl)
+hit_head: Kenney "interface" pack, glass_002 — CC0 (kenney.nl)
 punch_0: Kenney "impact" pack, impactPunch_medium_000 — CC0 (kenney.nl)
 punch_1: Kenney "impact" pack, impactPunch_medium_001 — CC0 (kenney.nl)
 punch_2: Kenney "impact" pack, impactPunch_heavy_002 — CC0 (kenney.nl)
@@ -37,6 +41,7 @@ prop_loop: "Prop Plane" by Mozfoo — CC0 — https://freesound.org/people/Mozfo
 jet_pass: "Airplane Flyby" by oscaraudiogeek — CC0 — https://freesound.org/people/oscaraudiogeek/sounds/431206/
 boat_loop: "River boat with outboard engine (bow breaking through water)" by nomadas — CC0 — https://freesound.org/people/nomadas/sounds/690162/
 jetski_loop: "Jetski.wav" by wjauch — CC0 — https://freesound.org/people/wjauch/sounds/212441/
+ski_spray: "Sailing boat, bow wave (close perspective)" by Pfannkuchn — CC0 — https://freesound.org/people/Pfannkuchn/sounds/360631/
 ship_horn: "ship horn very close" by tierrafilm@gmail.com — CC0 — https://freesound.org/people/tierrafilm@gmail.com/sounds/420716/
 tram_bell: "11-3 Tram bell" by 16HPanskaWillheimova_Sara — CC0 — https://freesound.org/people/16HPanskaWillheimova_Sara/sounds/497561/
 train_whistle: "Steam Whistle.mp3" by Bidone — CC0 — https://freesound.org/people/Bidone/sounds/71778/

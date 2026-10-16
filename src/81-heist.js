@@ -1,93 +1,80 @@
 // ================================================================ 81-heist.js
 try {
 // ===== 81-heist: THE HARBOUR TRUST JOB — a co-op story mission for a crew of two to four, across the whole map  (OWNER: game) =====
-// Vera Lark (the Blue Heron) plans it; Kit Morrow (Hotel Serena) is the inside man; Mr Prescott (the Gilded Room) carries the second
-// vault key; Silas Crane (the Solace Queen's casino) fences the take on Corsair Key, his private island; the Moretti mob wants a cut.
-//   I   the briefing (cutscene) -> a plane at Westgate -> Serena Isle -> Kit (cutscene) -> the Moretti ambush -> jet skis to the Queen
-//   II  evening wear -> one talks the house detective round while the other lifts Prescott's key -> Silas in the purser's cage (cutscene)
-//   III midnight: parachute onto the Harbour Trust roof (or climb the service ladder on Park Row) -> the hatch (cutscene) -> three
-//       guards with vision cones -> hold both vault keys at once -> the thermal charge -> four cash bags
-//   IV  Vera's car on Charter Street, the police, a roadblock -> a plane at Westgate -> fly the cash to Corsair Key (the police can't
-//       follow over the sea) -> the hangar -> Vera and Silas (cutscene) -> HEIST PASSED, $25,000 each
-// A crew of two is needed to start (Vera offers to host one). Nothing ever waits on a partner: any crew member completes a step, the
-// two-person moments have a solo path (hold one key and run to the other; talk to the detective, then hurry), and a partner who
-// drops out just leaves the rest to finish. The host owns the step index + checkpoint ('heist' {op:'st'}); each client checks its
-// own player and reports 'done'. Checkpoint steps pull far-away crew to the spot behind the travel veil, cutscenes gather the crew
-// and play on every client, and failing (spotted, felt, knocked out) sends everyone back to the last checkpoint.
+// Vera Lark (the Blue Heron) plans it; Kit Morrow is the inside man on Serena Isle; Mr Prescott (the Solace Queen's high-roller salon)
+// carries the second vault key; Silas Crane runs the Queen's casino and Corsair Key; the Moretti family wants it all.
+//   I   Papers: Vera's briefing -> two pilot uniforms from Kovac's tailor (a clerk watches) -> pilot IDs from Ezra Quill (stamp
+//       minigame) -> the Westgate crew gate -> a plane -> 3 km south to Serena Isle
+//   II  Serena Isle: Kit (cutscene) -> the Moretti smugglers' tunnel (stealth) -> the arms cache (lockpick): silenced pistols + a drill
+//       -> the sea cave -> Moretti's men in the cove -> jet skis 1.5 km to the Solace Queen
+//   III The Queen (evening): knock out a waiter + a dealer for their uniforms -> the salon -> the sting: the dealer deals Prescott a
+//       rotten hand while the waiter serves his drink and lifts the key -> Silas (cutscene) -> his launch runs the crew ashore
+//   IV  Midnight, two roles: the HACKER (zoo keeper's uniform, the lion den, the bunker + sewer, the Kestrel terminal, then CCTV) and
+//       the INFILTRATOR (the bank roof, the keypad door, the back offices + hall past guards and cameras, keys under a time-lock
+//       override, the laser grid, the drill, four bags). Solo: the hack first, then the bank with the Kestrel tablet (T).
+//   V   Getaway: the fire exit -> Vera's car -> the police + a roadblock -> Westgate -> 3 km to Corsair Key
+//   VI  Corsair Key: the hangar -> the betrayal (cutscene) -> an all-out gunfight with Silas's own LMG -> the finale (cutscene)
+// No teleports: every move is the player's own, a cutscene, or a retry from a checkpoint. A crew of two is needed to start (or the
+// solo flag); every two-person moment has a solo way through. The host owns the step index, the Act IV tracks and the checkpoint
+// ('heist' {op:'st'}); each client checks its own player and reports 'done' / 'tdone'.
 {
-  const PI = Math.PI, LN = AF.liner, VV = AF.vehicles, N = AF.net, UI = AF.ui, MI = AF.mission;
-  const CB = () => AF.combat;
-  const say = (id, vol) => { if (AF.audio) AF.audio.play(id, vol != null ? { vol } : undefined); };
+  const PI = Math.PI, VV = AF.vehicles, N = AF.net, UI = AF.ui, MI = AF.mission, S = AF.stealth, HB = AF.heistBank, HS = AF.heistSets;
+  const CB = () => AF.combat, LN = () => AF.liner;
+  const A = HS ? HS.at : {};
+  const sfx = (id, o) => { if (AF.audio) AF.audio.play(id, o); };
   const note = (text, kind = 'mission') => AF.emit('toast', { text, kind });
-  const me = () => (AF.mode === 'walk' || AF.mode === 'cutscene' || !AF.player.mesh ? AF.player : AF.player.mesh.position);
+  const me = () => (AF.mode === 'walk' || AF.mode === 'cutscene' || AF.mode === 'cctv' || !AF.player.mesh ? AF.player : AF.player.mesh.position);
   const dist = (a, b) => (a && b ? Math.hypot(a.x - b.x, a.z - b.z) : 1e9);
   const online = () => !!N && N.role !== 'off';
   const host = () => !online() || N.role === 'host';
   const crewN = () => (online() ? 1 + N.peers.size : 1);
   const mySlot = () => (online() ? Math.max(0, N.me) : 0);
   const send = (m, to) => { if (online()) N.send('heist', m, to); };
-  const NEED = 2, GRIP = 8, CHAT = 14;
-  const H = AF.heist = { on: false, i: -1, cp: 0, t: 0, flag: {}, sus: 0, seen: false, bags: [false, false, false, false], grip: [0, 0], fuse: 0, chat: 0, alarm: false,
-    lifting: false, failing: false, sentFor: -1, cutting: false, cutOn: false, later: null, after: null, afterT: 0, roadblock: null, car: null, dressed: false, goonsN: 0,
-    pay: 25000, runs: 0, need: NEED, solo: false, hud: { title: 'The Harbour Trust Job', line: '', t: null, pay: null } };
-  const P = H.at = {};      // places (filled at build)
-  const B = H.obj = { bags: [], keys: [] };   // meshes, NPCs, colliders
-  const GD = H.guards = [];  // { path, bank, casino }
-
-  // ---------------------------------------------------------------- the cast
-  const LOOKS = {
-    vera: { female: true, skin: 0xe8b894, hair: 0x9a2a16, hairStyle: 'wavy', lips: 0xc8202a, top: { col: 0x1d6a5a, col2: 0xd8b04a, style: 'dress' }, bottom: { col: 0x1d6a5a, style: 'skirt' }, shoe: 0x141414, height: 1.0 },
-    kit: { skin: 0xc68a5e, hair: 0x2a1a10, hairStyle: 'short', glasses: 0x2a2a2e, top: { col: 0xf2efe4, col2: 0x2a4a9a, style: 'shirt' }, bottom: { col: 0x3a3a40, style: 'jeans' }, shoe: 0x4a3020, hat: 'straw', hatCol: 0xe8d8a8, height: 1.02 },
-    silas: { skin: 0xefc19f, hair: 0x9a9a9a, hairStyle: 'short', top: { col: 0x6a1a24, col2: 0xf2efe4, style: 'vest' }, bottom: { col: 0x1a1a1e, style: 'jeans' }, shoe: 0x141414, extra: 'chain', height: 1.06 },
-    prescott: { skin: 0xf0c8a8, hair: 0xe0dcd0, hairStyle: 'short', glasses: 0xd8b04a, top: { col: 0x22253a, col2: 0xf2efe4, style: 'shirt' }, bottom: { col: 0x22253a, style: 'jeans' }, shoe: 0x141414, height: 1.0 },
-  };
-  const radio = (who, text, id) => { if (id) say(id); AF.emit('toast', { title: who, text, kind: 'radio', look: LOOKS[who.split(' ')[0].toLowerCase()] || null }); };
+  const play = (kind, o) => (AF.minigame && AF.minigame.play ? AF.minigame.play(kind, o) : new Promise((r) => setTimeout(() => r({ ok: true }), 900)));
+  const NEED = 2, GRIP = 8, LOCK = 25;
+  const H = AF.heist = { on: false, i: -1, cp: 0, t: 0, flag: {}, got: {}, tr: { h: 0, n: 0 }, roles: [], role: null, wear: null, wears: [], took: {}, anger: 0, angerN: 0, strikes: 0, tray: false,
+    lifting: false, dealing: false, drilling: false, lockT: 0, grip: [0, 0], bags: [false, false, false, false], failing: false, sentFor: -1, sentTr: '', cutting: false, cutOn: false, later: null,
+    after: null, afterT: 0, roadblock: null, car: null, goonsN: 0, waves: 0, bosses: [], pay: 40000, runs: 0, need: NEED, solo: false, hud: { title: 'The Harbour Trust Job', line: '', t: null, pay: null } };
+  AF.noTravel = () => H.on;
+  const LOOKS = (HS && HS.looks) || {};
   { const prev = UI.lookOf; UI.lookOf = (name) => LOOKS[String(name).split(' ')[0].toLowerCase()] || (prev ? prev(name) : null); }
-  const LINES = {
-    pitch: ['Walk with me a minute, both of you. You look like people who are tired of small change.',
-      'The Harbour Trust. Eighteen inches of steel and the fattest vault on the coast. By sunrise it\u2019s ours.',
-      'My inside man, Kit Morrow, is lying low at Hotel Serena. Take a plane from Westgate and fly out to meet him.',
-      'Then the Solace Queen, the vault at midnight, and a quiet flight to Corsair Key. Silas Crane will be waiting.',
-      'My driver will drop you at the airfield. Go.'],
-    kit: ['So you\u2019re Vera\u2019s crew. Keep your voices down \u2014 half this island drinks with the Moretti family.',
-      'The vault takes two keys, turned at the same moment. Mine\u2019s right here \u2014 take it.',
-      'The other never leaves old Prescott. He plays baccarat every night aboard the Solace Queen.',
-      'One of you keeps his house detective busy, the other lifts the key. I\u2019ll leave the roof hatch on the latch at midnight.',
-      'Now go, before\u2014 oh no. Moretti\u2019s boys!'],
-    silas: ['Prescott\u2019s key already? Vera said you were good.',
-      'Here\u2019s the deal. You fly the Harbour Trust\u2019s money to Corsair Key \u2014 my island, my airstrip, no questions asked.',
-      'Midnight. Jump onto the bank\u2019s roof; Kit\u2019s hatch is on the east side. And don\u2019t get greedy.'],
-    hatch: ['Kit kept his word \u2014 the hatch is open.', 'Three guards on the night shift. Stay out of their sight \u2014 a punch from behind puts one to sleep.',
-      'Two keys, either side of the vault door. Hold both at once and the time-lock lets go.'],
-    finale: ['Right on time. Let\u2019s see it.', 'Four bags. The whole city\u2019s looking for us and nobody knows a thing.',
-      'Corsair Key keeps its secrets. Your cuts have been wired \u2014 every last cent.', 'Lay low a while. There\u2019s always another job.'],
-    again: ['Look who\u2019s back. The papers are still guessing.', 'Fancy doing it again? Bring your crew.'],
+
+  // ---------------------------------------------------------------- voices: radio lines queue (one at a time), NPCs speak in place
+  const VO = (id) => (AF.voLine ? AF.voLine(id) : null);
+  const RQ = []; let rqT = 0;
+  const radio = (id, first) => { if (!VO(id)) return; if (RQ.includes(id)) return; if (first) RQ.unshift(id); else RQ.push(id); };
+  const radioNow = () => {
+    if (rqT > 0 || !RQ.length) return;
+    const id = RQ.shift(), L = VO(id); if (!L) return;
+    const len = AF.audio && AF.audio.voice ? AF.audio.voice(id, { radio: true }) : 0;
+    rqT = (len || Math.max(2.2, L[2].length * 0.065)) + 0.4;
+    AF.emit('toast', { title: L[1], text: L[2], kind: 'radio', look: UI.lookOf(L[1]) });
   };
+  const speak = (id, who, dur) => {
+    const L = VO(id); if (!L || !who) return 0;
+    const len = AF.audio && AF.audio.voice ? AF.audio.voice(id, { x: who.x, y: who.y + 1.6, z: who.z }) : 0;
+    AF.emit('bubble', { who, name: L[1], text: L[2], dur: dur || Math.max(2.4, len + 0.4) });
+    return len;
+  };
+  H.radio = radio; H.speak = speak;
 
   // ---------------------------------------------------------------- places + checks
-  const SC = { x: 0, y: 0, z: 0 };   // scratch for moving targets (no per-frame garbage)
+  const SC = { x: 0, y: 0, z: 0 };
   const isPlane = (v) => !!v && !!AF.planes && AF.planes.list.includes(v);
   const rideVeh = () => (AF.mode === 'passenger' && AF.coop && AF.coop.ride ? AF.coop.ride.veh : null);
   const flying = () => AF.mode === 'fly' || isPlane(rideVeh());
   const inCar = () => AF.mode === 'drive' || (AF.mode === 'passenger' && !!rideVeh() && !isPlane(rideVeh()));
   const landed = () => { const pl = AF.mode === 'fly' && AF.planes.cur; return !!pl && pl.onGround && Math.abs(pl.v) < 8; };
-  const near = (p, r) => { const q = AF.player; return AF.mode === 'walk' && !!p && Math.hypot(q.x - p.x, q.z - p.z) < r && Math.abs(q.y - (p.y ?? q.y)) < 2.6; };
+  const near = (p, r, dy = 2.6) => { const q = AF.player; return AF.mode === 'walk' && !!p && Math.hypot(q.x - p.x, q.z - p.z) < r && Math.abs(q.y - (p.y ?? q.y)) < dy; };
   const inEll = (E) => { const p = me(); return !!E && ((p.x - E.cx) / E.rx) ** 2 + ((p.z - E.cz) / E.rz) ** 2 < 1.1; };
   const onIsland = () => inEll(AF.PLAN.world.island);
   const onKey = () => inEll(AF.PLAN.world.key);
-  const onQueen = () => AF.mode === 'walk' && !!LN && LN.where(AF.player.x, AF.player.y, AF.player.z) !== '';
-  const inHall = () => { const p = AF.player; return AF.mode === 'walk' && p.x > 11 && p.x < 49.5 && p.z > -137 && p.z < -113 && p.y < 5; };
-  const onRoof = () => { const p = AF.player; return AF.mode === 'walk' && p.y > 12 && p.x > 9 && p.x < 51 && p.z > -148 && p.z < -103; };
-  const nearestSki = () => { const S = AF.island && AF.island.jetski && AF.island.jetski.skis, p = me(); let b = null, bd = 1e18; for (const k of S || []) { const d = (k.x - p.x) ** 2 + (k.z - p.z) ** 2; if (d < bd) { bd = d; b = k; } } if (!b) return P.pontoon; SC.x = b.x; SC.y = null; SC.z = b.z; return SC; };
-  const nextBag = () => { for (let k = 0; k < 4; k++) if (!H.bags[k]) return P.bags[k]; return P.gate; };
-  const planeAt = () => { for (const pl of P.planes || []) if (pl !== AF.planes.cur && pl.net == null && !pl.ghost && pl.onGround) { SC.x = pl.x; SC.y = pl.y; SC.z = pl.z; return SC; } return P.plane; };
-  const free = (x, z, yTop = 20, depth = 40) => {
-    for (let r = 0; r < 14; r += 1.5) for (let a = 0; a < (r ? 8 : 1); a++) {
-      const px = x + Math.sin(a * PI / 4) * r, pz = z + Math.cos(a * PI / 4) * r, y = AF.surfaceBelow(px, pz, yTop, depth);
-      if (Number.isFinite(y) && y > -1.1 && !AF.boxBlocked(px, y + 0.05, pz, 0.3, 1.7)) return { x: px, y, z: pz };
-    }
-    const y = AF.surfaceBelow(x, z, yTop, depth); return { x, y: Number.isFinite(y) ? y : 0.5, z };
-  };
+  const onQueen = () => AF.mode === 'walk' && !!LN() && LN().where(AF.player.x, AF.player.y, AF.player.z) !== '';
+  const onRoof = () => { const p = AF.player; return AF.mode === 'walk' && p.y > 13.5 && p.x > 9 && p.x < 51 && p.z > -148 && p.z < -103; };
+  const inStair = () => { const p = AF.player; return AF.mode === 'walk' && p.x > 44.7 && p.x < 49.3 && p.z > -112.8 && p.z < -105.2 && p.y < 13.9; };
+  const inBank = () => { const p = AF.player; return AF.mode === 'walk' && p.x > 10.5 && p.x < 49.6 && p.z > -137.5 && p.z < -105 && p.y < 13.9; };
+  const inVaultFar = () => { const p = AF.player; return AF.mode === 'walk' && p.x > 47.35 && p.x < 49.4 && p.z > -132 && p.z < -118 && p.y < 4; };
+  const free = (x, z, yTop, depth) => HS.free(x, z, yTop, depth);
   const kerbAt = (x, z, along = 0) => {
     const nr = AF.PLAN.nearestRoad(x, z), R = nr && nr.road; if (!R) return null;
     const dx = R.b[0] - R.a[0], dz = R.b[1] - R.a[1], L = Math.hypot(dx, dz) || 1, t = AF.clamp(nr.t + along / L, 0, 1);
@@ -95,491 +82,709 @@ try {
     const o = R.w / 2 - 1.8, kx = cx + nx * o, kz = cz + nz * o;
     return { x: kx, z: kz, y: AF.W.groundY(kx, kz), yaw: Math.atan2(dx, dz), nx, nz, cx, cz, road: R };
   };
-  // a point fwd metres ahead of / right metres beside / up metres above someone at o facing yaw (cutscene cameras)
   const rel = (o, yaw, fwd, right, up) => [o.x + Math.sin(yaw) * fwd - Math.cos(yaw) * right, o.y + up, o.z + Math.cos(yaw) * fwd + Math.sin(yaw) * right];
   const head = (n, up = 1.55) => [n.x, n.y + up, n.z];
-  // each crew member gets their own spot beside a checkpoint (slot 0 on it, the others 1.3 m apart)
   const spotFor = (at, k = mySlot()) => {
     if (!at || !k) return at;
     const yaw = at.yaw || 0, side = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 1.3, p = free(at.x - Math.cos(yaw) * side, at.z + Math.sin(yaw) * side, at.y + 2, 4);
     return { x: p.x, y: p.y, z: p.z, yaw };
   };
-
-  // ---------------------------------------------------------------- moving the crew: the travel veil for long hops, cutscenes
+  const planeAt = () => { for (const pl of A.planes || []) if (pl !== AF.planes.cur && pl.net == null && !pl.ghost && pl.onGround) { SC.x = pl.x; SC.y = pl.y; SC.z = pl.z; return SC; } return A.plane; };
+  const resetPlanes = () => { for (const pl of A.planes || []) if (pl !== AF.planes.cur && pl.net == null && !pl.ghost && Math.hypot(pl.x - pl.home.x, pl.z - pl.home.z) > 3) AF.planes.reset(pl); };
   const leaveFlight = () => { const pl = AF.planes && AF.planes.cur; if (AF.mode === 'fly' && pl && !pl.onGround) pl.ghost = true; };
   const place = (s) => AF.setMode('walk', { x: s.x, y: s.y, z: s.z, yaw: s.yaw || 0, snap: true });
+  // a checkpoint retry (only after a failure or from the menu) moves the crew behind the travel veil — never a step transition
   const goTo = (at, label) => {
     if (!at || AF.mode === 'dead') return;
     if (MI.cut.on) MI.cut.finish(true);
+    if (AF.mode === 'cctv' && AF.cctv) AF.cctv.close();
     const s = spotFor(at); leaveFlight();
     if (dist(me(), s) > 120 && AF.stream && AF.stream.travel) AF.stream.travel({ label, go: () => place(s) }); else place(s);
   };
-  // a checkpoint pulls crew who are far away (after their cutscene, if one is playing)
-  const gather = (at, label) => {
-    if (!at || AF.mode === 'dead' || dist(me(), at) < 150) return;
-    if (MI.cut.on || H.cutting) { H.later = () => gather(at, label); return; }
-    goTo(at, label);
-  };
-  const cutscene = (at, label, build) => {
-    const step = H.i, s = spotFor(at);
-    if (!s) { H.flag.cut = true; return; }
-    H.cutting = true; H.cutOn = false;
-    const run = () => {
-      if (!H.on || H.i !== step) { H.cutting = false; return; }
-      const fin = () => { H.cutting = false; if (H.on && H.i === step) H.flag.cut = true; const f = H.later; H.later = null; if (f) f(); };
-      const o = build(s); o.pose = s; o.onEnd = fin;
-      leaveFlight();
-      if (AF.mode === 'dead' || !MI.cut.play(o)) fin(); else H.cutOn = true;
-    };
-    if (!AF.TEST && AF.mode !== 'dead' && dist(me(), s) > 120 && AF.stream && AF.stream.travel) { leaveFlight(); AF.stream.travel({ label, go: () => place(s) }).then(run); }
-    else run();
-  };
-  // a cutscene step is done when one plays to its end (or is skipped); one cut short by something else (a co-op join's travel) waits
-  // for a crewmate's, alone or after 40 s it counts too
-  const cutDone = () => H.flag.cut || (H.cutOn && !MI.cut.on && (crewN() < 2 || H.t > 40));
 
-  const cutBrief = () => cutscene(P.c0, 'the Blue Heron', (at) => {
-    const v = P.vera, f = P.veraYaw;
-    return { title: 'The Harbour Trust Job', sub: 'Act I \u00b7 The Island', end: at, shots: [
-      { cam: rel(v, f, 1.1, 4.2, 1.65), cam2: rel(v, f, 1.1, 3.6, 1.6), look: rel(v, f, 1.1, 0, 1.4), d: 5.5, say: ['Vera', LINES.pitch[0]] },
-      { cam: [-24, 44, -38], cam2: [-14, 50, -50], look: [30, 58, -125], d: 6, say: ['Vera', LINES.pitch[1]] },
-      { cam: rel(v, f, 1.9, -0.7, 1.62), look: head(v), d: 6, say: ['Vera', LINES.pitch[2]] },
-      { cam: [-196, 22, 252], cam2: [-210, 25, 262], look: [-250, 9, 305], d: 6, say: ['Vera', LINES.pitch[3]] },
-      { cam: rel(v, f, -1.0, 0.55, 1.75), look: rel(v, f, 2.2, 0, 1.5), d: 3.5, say: ['Vera', LINES.pitch[4]] },
+  // ---------------------------------------------------------------- cutscenes: played where they happen; a crewmate far away hears them on the radio
+  const cutscene = (at, build, o = {}) => {
+    const step = H.i;
+    H.cutting = true; H.cutOn = false;
+    const fin = () => { H.cutting = false; if (H.on && H.i === step) H.flag.cut = true; if (o.after) o.after(); const f = H.later; H.later = null; if (f) f(); };
+    const c = build(at);
+    if (AF.TEST || AF.mode === 'dead' || (!o.always && dist(me(), at) > 150)) {
+      for (const sh of c.shots) if (sh.vo) radio(sh.vo);
+      fin(); return;
+    }
+    c.onEnd = fin; if (!c.end) c.end = null;
+    leaveFlight(); if (AF.mode === 'cctv' && AF.cctv) AF.cctv.close();
+    if (!MI.cut.play(c)) fin(); else H.cutOn = true;
+  };
+  const cutDone = () => H.flag.cut || (H.cutOn && !MI.cut.on && (crewN() < 2 || H.t > 40));
+  const shot = (cam, look, vo, d = 3.2, x) => Object.assign({ cam, look, vo, d }, x);
+  const cutBrief = () => cutscene(A.vera, (at) => {
+    const v = at, f = A.veraYaw;
+    return { title: 'The Harbour Trust Job', sub: 'Act I \u00b7 Papers', shots: [
+      shot(rel(v, f, 1.1, 4.2, 1.65), rel(v, f, 1.1, 0, 1.4), 'vera.b1', 4, { cam2: rel(v, f, 1.1, 3.6, 1.6) }),
+      shot([-24, 44, -38], [30, 58, -125], 'vera.b2', 4, { cam2: [-14, 50, -50] }),
+      shot([-60, 70, 250], [-60, 10, 1600], 'vera.b3', 4, { cam2: [-60, 90, 300] }),
+      shot([-400, 36, 30], [-500, 4, 100], 'vera.b4', 4, { cam2: [-420, 30, 40] }),
+      shot(rel(v, f, 1.9, -0.7, 1.62), head(v), 'vera.b5', 3.5),
     ] };
   });
-  const cutKit = () => cutscene(P.kitMeet, 'Hotel Serena', (at) => {
-    const k = P.kit, f = P.kitYaw;
-    return { end: at, shots: [
-      { cam: rel(k, f, 1.1, 4.0, 1.6), cam2: rel(k, f, 1.1, 3.5, 1.6), look: rel(k, f, 1.1, 0, 1.4), d: 5, say: ['Kit', LINES.kit[0]] },
-      { cam: rel(k, f, 2.1, -0.6, 1.6), look: head(k), d: 5, say: ['Kit', LINES.kit[1]], act: () => say('click_metal') },
-      { cam: rel(k, f, -1.1, 0.6, 1.8), look: rel(k, f, 2.2, 0, 1.5), d: 5, say: ['Kit', LINES.kit[2]] },
-      { cam: rel(k, f, 2.1, 0.6, 1.6), look: head(k), d: 5.5, say: ['Kit', LINES.kit[3]] },
-      { cam: rel(k, f, 1.4, -1.6, 1.5), look: rel(k, f, -8, 0, 1.2), d: 2.6, say: ['Kit', LINES.kit[4]] },
+  const cutKit = () => cutscene(A.kit, (at) => {
+    const k = at, f = A.kitYaw;
+    return { title: 'Serena Isle', sub: 'Act II', shots: [
+      shot(rel(k, f, 1.1, 4.0, 1.6), rel(k, f, 1.1, 0, 1.4), 'kit.k1', 4, { cam2: rel(k, f, 1.1, 3.5, 1.6) }),
+      shot(rel(k, f, 2.1, -0.6, 1.6), head(k), 'kit.k2', 4, { act: () => sfx('click_metal') }),
+      shot(rel(k, f, -1.1, 0.6, 1.8), rel(k, f, 2.2, 0, 1.5), 'kit.k3', 4),
+      shot(rel(k, f, 2.1, 0.6, 1.6), head(k), 'kit.k4', 4),
+      shot([A.tunnelEntry.x + 18, A.tunnelEntry.y + 14, A.tunnelEntry.z - 18], [A.tunnelEntry.x, A.tunnelEntry.y + 1, A.tunnelEntry.z], 'kit.k5', 4),
     ] };
   });
-  const cutSilas = () => cutscene(P.silasMeet, 'the Solace Queen', (at) => {
-    const s = P.silas, f = P.silasYaw;
-    return { end: at, shots: [
-      { cam: rel(s, f, 2.0, 0.7, 1.6), look: head(s), d: 4.5, say: ['Silas', LINES.silas[0]] },
-      { cam: rel(s, f, 1.1, 2.3, 1.7), cam2: rel(s, f, 1.1, 1.9, 1.7), look: rel(s, f, 1.1, 0, 1.45), d: 6.5, say: ['Silas', LINES.silas[1]] },
-      { cam: rel(s, f, 2.0, -0.7, 1.6), look: head(s), d: 5, say: ['Silas', LINES.silas[2]] },
-      { cam: [-170, 30, 200], cam2: [-150, 62, 160], look: [30, 50, -125], d: 4.5, say: ['', 'Midnight.'], act: () => { if (host()) AF.time.set({ hours: 0.25 }); } },
+  const cutSilas = () => cutscene(A.silas, (at) => {
+    const s = at, f = at.yaw || 0, L0 = LN(), lx = L0 ? L0.x : -225, lz = L0 ? L0.z : 1450;
+    return { title: 'The Solace Queen', sub: 'Act III', shots: [
+      shot(rel(s, f, 2.0, 0.7, 1.6), head(s), 'silas.s1', 3.5),
+      shot(rel(s, f, 1.1, 2.3, 1.7), rel(s, f, 1.1, 0, 1.45), 'silas.s2', 5, { cam2: rel(s, f, 1.1, 1.9, 1.7) }),
+      shot(rel(s, f, 2.0, -0.7, 1.6), head(s), 'silas.s3', 4),
+      shot(rel(s, f, 1.4, 1.4, 1.5), head(s), 'silas.s4', 4),
+      { cam: [lx + 40, 18, lz - 60], cam2: [lx + 10, 30, lz - 200], look: [lx, 4, lz - 300], d: 5, say: ['', 'Midnight. Silas\u2019s launch runs the crew ashore.'], act: () => { if (host()) AF.time.set({ hours: 0.2, paused: true }); } },
+      { cam: [A.c5.x + 30, 14, A.c5.z + 60], cam2: [A.c5.x + 12, 8, A.c5.z + 24], look: [A.c5.x, 2, A.c5.z], d: 4, say: ['', 'The Pleasure Pier.'] },
     ] };
-  });
-  const cutHatch = () => cutscene(P.c4, 'the Harbour Trust', () => {
-    const h = P.hatch;
-    return { end: spotFor(P.drop), shots: [
-      { cam: [h.x + 2.5, h.y + 3.2, h.z - 6.5], cam2: [h.x + 2, h.y + 2.4, h.z - 4.8], look: [h.x, h.y + 0.4, h.z], d: 3.6, say: ['Vera', LINES.hatch[0]], act: () => say('latch') },
-      { cam: [13.5, 9.5, -114], cam2: [15.5, 9, -116.5], look: [28, 0.5, -124], d: 6, say: ['Vera', LINES.hatch[1]] },
-      { cam: [35, 2.8, -119.5], cam2: [36.2, 2.4, -121.5], look: [42, 1.5, -125], d: 5.5, say: ['Vera', LINES.hatch[2]] },
+  }, { always: true, after: () => { if (dist(me(), A.c5) > 30 && AF.stream && AF.stream.travel) { const s = spotFor(A.c5); AF.stream.travel({ label: 'the Pleasure Pier', go: () => place(s) }); } } });
+  const cutBetray = () => cutscene(A.stash, (at) => {
+    const s = at, v = HS.npc.vera2, c = HS.npc.silas2, k = HS.npc.kit2, t = HS.npc.tony;
+    return { title: 'Corsair Key', sub: 'Act VI', shots: [
+      shot([s.x + 16, s.y + 9, s.z - 18], [s.x, s.y + 2, s.z + 3], 'silas.k1', 3.5, { cam2: [s.x + 10, s.y + 5, s.z - 12] }),
+      shot(rel(c, c.yaw, 2.1, -0.7, 1.6), head(c), 'silas.k2', 4),
+      shot(rel(k, k.yaw, 2.0, 0.6, 1.6), head(k), 'kit.t1', 2.2),
+      shot(rel(c, c.yaw, 1.6, 1.0, 1.6), head(c), 'silas.k3', 4),
+      shot(rel(t, t.yaw, 2.0, 0.5, 1.6), head(t), 'tony.k1', 3.5, { act: () => sfx('gun_reload') }),
+      shot(rel(v, v.yaw, 1.8, 0.8, 1.6), head(v), 'vera.k2', 3.5),
     ] };
-  });
-  const cutFinale = () => cutscene(P.finaleMeet, 'Corsair Key', (at) => {
-    const s = P.stash, v = B.vera2, c = B.silas2;
-    return { end: at, shots: [
-      { cam: [s.x + 16, s.y + 9, s.z - 18], cam2: [s.x + 10, s.y + 5, s.z - 12], look: [s.x, s.y + 2, s.z + 3], d: 4.5, say: ['Silas', LINES.finale[0]] },
-      { cam: rel(v, v.yaw, 2.1, 0.7, 1.6), look: head(v), d: 5, say: ['Vera', LINES.finale[1]] },
-      { cam: rel(c, c.yaw, 2.1, -0.7, 1.6), look: head(c), d: 5.5, say: ['Silas', LINES.finale[2]], act: () => say('money') },
-      { cam: rel(v, v.yaw, 1.5, 1.6, 1.5), look: [s.x, s.y + 1.5, s.z], d: 4.5, say: ['Vera', LINES.finale[3]] },
+  }, { after: () => { HS.showNpc('silas2', false); HS.showNpc('kit2', false); HS.showNpc('tony', false); HS.showNpc('vera2', false); } });
+  const cutFinale = () => cutscene(A.finaleMeet, (at) => {
+    const s = A.stash, v = HS.npc.vera2;
+    return { shots: [
+      shot(rel(v, v.yaw, 2.1, 0.7, 1.6), head(v), 'vera.f1', 3.5),
+      shot([s.x + 6, s.y + 3, s.z - 8], [s.x, s.y + 1.2, s.z], 'vera.f2', 4, { act: () => sfx('money') }),
+      shot(rel(v, v.yaw, 1.5, 1.6, 1.5), head(v), 'vera.f3', 4),
       { cam: [s.x - 6, s.y + 3, s.z - 10], cam2: [s.x - 26, s.y + 34, s.z - 44], look: [s.x + 4, s.y + 3, s.z + 10], d: 5 },
     ] };
-  });
+  }, { always: true });
 
   // ---------------------------------------------------------------- the story, step by step
-  // cp: reaching this step saves checkpoint cp · gather: crew further than 150 m are brought here · cut: a cutscene step ·
-  // tag: the marker's label · mark(): the objective's position (allocation-free)
+  // cp: reaching this step saves checkpoint cp · cut: a cutscene step · tag: the marker's label · mark(): the objective position ·
+  // mu: the music · hostOnly: only the host decides it's done · time: hours to hold (host sets)
   const ST = [
-    { id: 'brief', cp: 0, act: 'Act I \u00b7 The Island', line: 'Vera\u2019s briefing', cut: () => cutBrief() },
-    { id: 'plane', tag: 'Plane', line: 'Steal a {plane} at Westgate Airfield \u2014 one of you flies, the crew rides along', gather: () => P.c3, where: 'Westgate Airfield', mark: () => planeAt(),
-      enter: () => { resetPlanes(); radio('Vera', 'The planes on the Westgate apron are fuelled. One of you flies \u2014 the other rides along.', 'r_plane'); }, done: () => flying() },
-    { id: 'fly', tag: 'Serena Isle', line: 'Fly to {Serena Isle} and land on the airstrip', mark: () => P.strip, done: () => onIsland() && (AF.mode === 'walk' || landed()) },
-    { id: 'kit', cp: 1, tag: 'Kit', line: 'Meet {Kit Morrow} on the terrace of Hotel Serena', gather: () => P.c1, where: 'Serena Isle', mark: () => P.kit, enter: () => showKit(true), done: () => H.flag.kit || (AF.mode === 'walk' && dist(AF.player, P.kit) < 5 && Math.abs(AF.player.y - P.kit.y) < 4) },
-    { id: 'kitcut', line: 'Kit Morrow', cut: () => cutKit(), enter: () => showKit(true) },
-    { id: 'ambush', tag: 'Jet skis', line: 'Moretti\u2019s men! Fight them off \u2014 or run for {the jet skis}', mark: () => nearestSki(), enter: (r) => ambush(r), done: () => ambushOver() },
-    { id: 'ski', tag: 'Pontoon', line: 'Ride a jet ski to the {Solace Queen} \u2014 her pontoon is on the south side', mark: () => P.pontoon,
-      enter: () => { showKit(false); const C = CB(); if (C) C.clearGoons(); radio('Vera', 'There\u2019s a pontoon on the Queen\u2019s south side. Come aboard there.', 'r_boat'); }, done: () => onQueen() || near(P.pontoon, 7) },
-    { id: 'dress', cp: 2, act: 'Act II \u00b7 The Queen', tag: 'Cloakroom', line: 'Pick up {evening wear} at the cloakroom', gather: () => P.c2, where: 'the Solace Queen', mark: () => P.cloak, done: () => H.flag.dress },
-    { id: 'lift', tag: 'Prescott', line: () => (crewN() > 1 ? '{Talk to} the house detective while your partner lifts {Prescott\u2019s key} from behind' : 'Lift {Prescott\u2019s key} from behind \u2014 talk the house detective round first, then be quick'),
-      mark: () => P.prescott, enter: () => radio('Vera', crewN() > 1 ? 'Prescott\u2019s at the head of the baccarat table. One of you chats up the house detective, the other lifts the key.' : 'Prescott\u2019s at the head of the baccarat table. Keep the house detective talking, then be quick.', 'r_guard'), done: () => H.flag.lift },
-    { id: 'silas', tag: 'Silas', line: 'See {Silas Crane} in the purser\u2019s cage, behind the Gilded Room', mark: () => P.silas, enter: () => { if (LN) LN.openStaff(true); }, done: () => near(P.silas, 3.4) || H.flag.silas },
-    { id: 'silascut', line: 'Silas Crane', cut: () => cutSilas() },
-    { id: 'jump', cp: 3, act: 'Act III \u00b7 The Vault', tag: 'Roof', line: 'Midnight. Fly over the {Harbour Trust} and parachute onto its roof \u2014 or climb the service ladder on Park Row',
-      gather: () => P.c3, where: 'Westgate Airfield', mark: () => P.hatch, enter: () => night(), done: () => onRoof() || inHall() },
-    { id: 'hatch', cp: 4, line: 'The service hatch', cut: () => cutHatch() },
-    { id: 'keys', tag: 'Vault key', line: () => (crewN() > 1 ? 'Hold {both vault keys} at the same time \u2014 one each' : 'Hold {both vault keys} \u2014 grab one, then reach the other within ' + GRIP + ' seconds'),
-      mark: () => P.keys[H.grip[0] > 0 ? 1 : 0], done: () => H.grip[0] > 0 && H.grip[1] > 0 },
-    { id: 'charge', tag: 'Vault gate', line: 'Plant the {thermal charge} on the vault gate \u2014 then get clear', mark: () => P.gate, enter: (r) => { if (!r) { say('vault'); note('Both keys turn \u2014 the time-lock lets go.', 'ok'); } }, done: () => H.flag.charge },
-    { id: 'cash', tag: 'Cash', line: 'Grab the {cash bags}', mark: () => nextBag(), enter: (r) => blowGate(r), done: () => H.bags.every(Boolean) },
-    { id: 'car', cp: 5, act: 'Act IV \u00b7 The Getaway', tag: 'Car', line: 'Get to {Vera\u2019s car} on Charter Street', gather: () => P.c5, where: 'Charter Street', mark: () => P.car, enter: (r) => getaway(r), done: () => inCar() },
-    { id: 'run', tag: 'Plane', line: 'Lose the police on the way to {Westgate Airfield} \u2014 a plane is waiting', mark: () => planeAt(), enter: () => run(), done: () => flying() || dist(me(), planeAt()) < 30 },
-    { id: 'escape', tag: 'Corsair Key', line: 'Fly the cash to {Corsair Key} \u2014 the police can\u2019t follow you over the sea', mark: () => P.keyStrip,
-      enter: () => { resetPlanes(); radio('Vera', 'Head south-east, out over the water. Corsair Key has an airstrip \u2014 Silas is waiting.', 'r_plane'); }, done: () => onKey() && (AF.mode === 'walk' || landed()) },
-    { id: 'stash', cp: 6, tag: 'Hangar', line: 'Carry the cash into {the hangar}', gather: () => P.c6, where: 'Corsair Key', mark: () => P.stash, enter: () => showFinale(true), done: () => near(P.stash, 4) },
-    { id: 'finale', line: 'Corsair Key', cut: () => cutFinale(), enter: () => showFinale(true) },
+    { id: 'brief', cp: 0, act: 'Act I \u00b7 Papers', line: 'Vera\u2019s briefing', cut: () => cutBrief(), mu: 'mu_brief', time: 10.5 },
+    { id: 'uniform', tag: 'Kovac\u2019s', line: () => (H.got.uniform ? 'Get out of the tailor\u2019s' : near(A.shopDoor, 30) ? 'Take the {pilot uniforms} from the rail behind the counter \u2014 unseen' : 'Steal pilot uniforms from {Kovac\u2019s tailor shop}'),
+      mark: () => (dist(me(), A.rail) < 30 ? A.rail : A.shopDoor), enter: (r) => { scene('shop'); if (!r) radio('vera.shop'); }, done: () => !!H.got.uniform, mu: 'mu_plan' },
+    { id: 'forger', cp: 1, tag: 'Ezra', line: 'Get pilot papers from {Ezra Quill} in the back of Harbour Stationers', mark: () => A.ezra, enter: (r) => { scene('ezra'); if (!r) radio('vera.shop2'); }, done: () => !!H.got.papers, mu: 'mu_plan' },
+    { id: 'gate', tag: 'Crew gate', line: 'Show your papers at the {Westgate crew gate}', mark: () => A.gate, enter: (r) => { scene('gate'); if (!r) radio('vera.ezra'); }, done: () => !!H.got.cleared, mu: 'mu_plan' },
+    { id: 'plane', tag: 'Plane', line: 'Take a {plane} from the apron \u2014 one flies, the others ride along', mark: () => planeAt(), enter: () => { resetPlanes(); }, done: () => flying(), mu: 'mu_plan' },
+    { id: 'fly', tag: 'Serena Isle', line: 'Fly 3 km south to {Serena Isle} and land on the airstrip', mark: () => A.strip, enter: (r) => { if (!r) { radio('tower.t1'); radio('vera.plane'); } }, done: () => onIsland() && (AF.mode === 'walk' || landed()), mu: 'mu_island' },
+    { id: 'kit', cp: 2, act: 'Act II \u00b7 Serena Isle', tag: 'Kit', line: 'Meet {Kit Morrow} on the terrace of Hotel Serena', mark: () => A.kit, enter: (r) => { scene('kit'); if (!r) radio('vera.kit'); }, done: () => near(A.kit, 5, 4), mu: 'mu_island', time: 11 },
+    { id: 'kitcut', line: 'Kit Morrow', cut: () => cutKit(), enter: () => scene('kit'), mu: 'mu_island' },
+    { id: 'tunnel', tag: 'Tunnel', line: 'Find the {smugglers\u2019 tunnel} on the volcano\u2019s flank', mark: () => A.tunnelEntry, enter: () => { scene('tunnel'); H.got.kitkey = true; }, done: () => near(A.tunnelEntry, 6, 6), mu: 'mu_tension' },
+    { id: 'cache', cp: 3, tag: 'Cache', line: 'Sneak to the {arms cache} and pick its lock \u2014 crouch (C), stay out of sight', mark: () => A.cache, enter: (r) => { scene('tunnel'); if (!r) radio('vera.tunnel'); }, done: () => !!H.got.cache, mu: 'mu_tension' },
+    { id: 'cave', tag: 'Sea cave', line: 'Slip out through the {sea cave}', mark: () => A.caveExit, enter: (r) => { scene('tunnel'); if (!r) radio('vera.gear'); }, done: () => near(A.caveExit, 7, 6) || near(A.cove, 10, 6), mu: 'mu_tension' },
+    { id: 'ambush', tag: 'Jet skis', line: 'Moretti\u2019s men! Fight your way to {the jet skis}', mark: () => nearestSki(), enter: (r) => ambush(r), done: () => ambushOver(), mu: 'mu_action' },
+    { id: 'ski', tag: 'Solace Queen', line: 'Ride 1.5 km to the {Solace Queen} \u2014 her pontoon is on the port side', mark: () => A.pontoon,
+      enter: (r) => { const C = CB(); if (C) C.clearGoons(); if (!r) { radio('vera.ski'); radio('vera.ski2'); } }, done: () => onQueen() || near(A.pontoon, 8), mu: 'mu_island' },
+    { id: 'uniforms', cp: 4, act: 'Act III \u00b7 The Queen', tag: 'Staff', line: () => (H.wear === 'waiter' || H.wear === 'dealer' ? (crewN() > 1 ? 'Wait for your partner to get the other uniform' : 'Uniform on') : crewN() > 1 ? 'Knock out the {waiter} in the pantry and the {dealer} in the crew lounge \u2014 take a uniform each' : 'Knock out the {waiter} in the pantry and take his uniform'),
+      mark: () => (H.took.waiter && H.wear !== 'waiter' ? A.crewLounge : A.pantry), enter: (r) => { scene('queen'); if (!r) { radio('vera.q1'); radio(crewN() > 1 ? 'vera.q2' : 'vera.qsolo'); } },
+      done: () => !!H.took.waiter && (crewN() < 2 || !!H.took.dealer), mu: 'mu_casino', time: 19.6 },
+    { id: 'salon', tag: 'Salon', line: 'Take the {crew stairs} up to the high-roller salon', mark: () => A.salonDoor, enter: (r) => { scene('queen'); if (!r) radio('vera.q3'); }, done: () => near(A.salon, 7, 3), mu: 'mu_casino' },
+    { id: 'sting', tag: 'Prescott', line: () => stingLine(), mark: () => stingMark(), enter: (r) => { scene('queen'); if (!r) { radio('vera.q4'); radio('vera.q5'); } H.anger = 0; H.strikes = 0; H.tray = false; }, done: () => !!H.got.key, mu: 'mu_casino' },
+    { id: 'silas', tag: 'Silas', line: 'See {Silas Crane} in his office behind the purser\u2019s cage', mark: () => A.silas, enter: (r) => { scene('queen'); if (!r) radio('vera.got'); if (LN() && LN().openStaff) LN().openStaff(true); }, done: () => near(A.silas, 3.6, 3), mu: 'mu_casino' },
+    { id: 'silascut', line: 'Silas Crane', cut: () => cutSilas(), enter: () => scene('queen'), mu: 'mu_casino' },
+    { id: 'split', cp: 5, act: 'Act IV \u00b7 Midnight', tag: 'Roles', line: () => (crewN() > 1 ? 'Choose your roles \u2014 {hacker} or {inside man}' : 'Midnight. The hack first, then the bank'), mark: () => null,
+      enter: (r) => { scene('night'); if (!r) { radio('vera.m1'); radio(crewN() > 1 ? 'vera.m2' : 'vera.msolo'); } chooseRoles(); }, done: () => !!H.roles.length, mu: 'mu_stealth', time: 0.2 },
+    { id: 'night', tag: '', line: () => trackLine(), mark: () => trackMark(), enter: (r) => { scene('night'); trackEnter(r); }, done: () => H.tr.n >= INF.length, mu: 'mu_stealth', hostOnly: true },
+    { id: 'escape', cp: 6, act: 'Act V \u00b7 The Getaway', tag: () => (myRole() === 'hack' ? 'Westgate' : 'Car'), line: () => (myRole() === 'hack' ? 'Get out of the sewer and make for {Westgate Airfield}' : 'Out through the {fire exit} \u2014 Vera\u2019s car is on Charter Street'),
+      mark: () => (myRole() === 'hack' ? planeAt() : H.car && !H.car.dead ? H.car : A.car), enter: (r) => getaway(r), done: () => inCar() || flying(), mu: 'mu_chase' },
+    { id: 'run', tag: 'Plane', line: 'Lose the police on the way to {Westgate Airfield} \u2014 a plane is waiting', mark: () => planeAt(), enter: () => run(), done: () => flying(), mu: 'mu_chase' },
+    { id: 'away', tag: 'Corsair Key', line: 'Fly the cash 3 km out to {Corsair Key} \u2014 the police can\u2019t follow you over the sea', mark: () => A.keyStrip,
+      enter: (r) => { resetPlanes(); if (!r) radio('vera.g5'); }, done: () => onKey() && (AF.mode === 'walk' || landed()), mu: 'mu_tension' },
+    { id: 'stash', cp: 7, act: 'Act VI \u00b7 Corsair Key', tag: 'Hangar', line: 'Carry the cash into {the hangar}', mark: () => A.stash, enter: (r) => { scene('key'); if (!r) radio('vera.k1'); }, done: () => near(A.stash, 4, 3), mu: 'mu_tension', time: 1.5 },
+    { id: 'betray', line: 'Corsair Key', cut: () => cutBetray(), enter: () => scene('key'), mu: 'mu_tension' },
+    { id: 'fight', tag: 'Crate', line: () => (CB() && CB().has && CB().has('lmg') ? 'Take down {Silas}, {Kit}, {Tony Moretti} and their men' : 'Grab the {LMG} from Silas\u2019s crate and fight!'), mark: () => (CB() && CB().has && CB().has('lmg') ? bossMark() : A.crate),
+      enter: (r) => fight(r), done: () => fightOver(), mu: 'mu_finale', hostOnly: true },
+    { id: 'finale', line: 'Corsair Key', cut: () => cutFinale(), enter: () => { scene('key'); HS.showNpc('vera2', true); }, mu: 'mu_brief' },
   ];
   const IDX = {}; ST.forEach((s, i) => { IDX[s.id] = i; });
-  // where a checkpoint restarts: step + spot
-  const CPS = [
-    { step: 'plane', label: 'Westgate Airfield', at: () => P.c3 }, { step: 'kit', label: 'Serena Isle', at: () => P.c1 }, { step: 'dress', label: 'the Solace Queen', at: () => P.c2 },
-    { step: 'jump', label: 'Westgate Airfield', at: () => P.c3, night: true }, { step: 'keys', label: 'the Harbour Trust', at: () => P.drop, night: true },
-    { step: 'car', label: 'Charter Street', at: () => P.c5, night: true }, { step: 'stash', label: 'Corsair Key', at: () => P.c6, night: true },
+  // Act IV runs as two tracks (the host keeps both indices): the hacker's and the inside man's. Solo walks the hacker's first.
+  const HACK = [
+    { id: 'keeper', tag: 'Lockers', line: 'Borrow a {keeper\u2019s uniform} from the zoo\u2019s service yard', mark: () => A.locker, done: () => !!H.got.keeper || H.wear === 'keeper' },
+    { id: 'den', tag: 'Hatch', line: 'Sneak through the {lion house} to the old hatch \u2014 don\u2019t wake the lions', mark: () => A.hatch, done: () => near(A.hatch, 2.2, 2.5) || belowZoo() },
+    { id: 'bunker', tag: 'Kestrel', line: 'Follow the bunker and the sewer to the {Kestrel junction}', mark: () => A.server, done: () => near(A.server, 3, 2.5) },
+    { id: 'hack', tag: 'Terminal', line: 'Jack into the {Kestrel terminal}', mark: () => A.server, done: () => !!H.got.hacked },
+    { id: 'cctv', tag: '', line: () => (AF.mode === 'cctv' ? 'Guide your partner: loop cameras, kill lights, make noise' : 'Sit at the {terminal} and watch the cameras'), mark: () => (AF.mode === 'cctv' ? null : A.server), done: () => false },
   ];
+  const INF = [
+    { id: 'roof', tag: 'Roof', line: 'Get onto the {Harbour Trust roof} \u2014 parachute in, or climb the service ladder on Park Row', mark: () => (dist(me(), HB.spots.ladder) < 160 ? HB.spots.ladder : HB.spots.roof), done: () => onRoof() || inStair() || inBank() },
+    { id: 'door', tag: 'Roof door', line: () => (H.got.hatch ? 'Through the {roof door} and down the stairs' : 'The {roof door} has a Kestrel keypad \u2014 ' + (crewN() > 1 ? 'your hacker can open it' : 'open it with the tablet (T)')), mark: () => HB.spots.bulkhead, done: () => inStair() || inBank() },
+    { id: 'vault', tag: 'Vault', line: 'Reach the {vault door} \u2014 guards and cameras everywhere', mark: () => HB.spots.gate, done: () => near(HB.spots.gate, 2.8, 2) },
+    { id: 'keys', tag: 'Vault key', line: () => (H.lockT > 0 ? 'Turn {both keys} \u2014 ' + Math.ceil(H.lockT) + ' s left on the override' : 'Time lock engaged \u2014 ' + (crewN() > 1 ? 'your hacker must override it' : 'override it with the tablet (T)')), mark: () => HB.spots.keys[H.grip[0] > 0 ? 1 : 0], done: () => !!H.got.gate },
+    { id: 'lasers', tag: 'Cage', line: 'Through the {laser grid} to the deposit cage \u2014 crouch under, time the sweepers', mark: () => HB.spots.cage, done: () => inVaultFar() || !!H.got.cage },
+    { id: 'drill', tag: 'Drill', line: 'Drill the {deposit cage} \u2014 keep the bit cool', mark: () => HB.spots.cage, done: () => !!H.got.cage },
+    { id: 'cash', tag: 'Cash', line: 'Grab the {cash bags}', mark: () => nextBag(), done: () => H.bags.every(Boolean) },
+  ];
+  // checkpoints: the step, where, the facts already earned, the Act IV track state
+  const CPS = [
+    { step: 'uniform', label: 'Kovac\u2019s tailor shop', at: () => A.shopDoor, got: [] },
+    { step: 'forger', label: 'Harbour Stationers', at: () => A.ezraDoor, got: ['uniform'] },
+    { step: 'kit', label: 'Serena Isle', at: () => A.c2, got: ['uniform', 'papers', 'cleared'] },
+    { step: 'cache', label: 'the smugglers\u2019 tunnel', at: () => A.tunnelEntry, got: ['uniform', 'papers', 'cleared', 'kitkey'] },
+    { step: 'uniforms', label: 'the Solace Queen', at: () => A.c4, got: ['uniform', 'papers', 'cleared', 'kitkey', 'cache'] },
+    { step: 'split', label: 'the Pleasure Pier', at: () => A.c5, got: ['uniform', 'papers', 'cleared', 'kitkey', 'cache', 'key'] },
+    { step: 'escape', label: 'the Harbour Trust', at: () => (myRole() === 'hack' ? A.street : HB.spots.fire), got: ['uniform', 'papers', 'cleared', 'kitkey', 'cache', 'key', 'hacked', 'hatch', 'gate', 'cage'], cash: true },
+    { step: 'stash', label: 'Corsair Key', at: () => A.c8, got: ['uniform', 'papers', 'cleared', 'kitkey', 'cache', 'key', 'hacked', 'hatch', 'gate', 'cage'], cash: true },
+  ];
+  // inside Act IV: once the hack is done the checkpoint keeps it (the inside man restarts at the ladder, the hacker at the terminal)
+  const NIGHT_CP = { label: 'the Harbour Trust', inf: () => HB.spots.ladder, hack: () => A.server };
   const is = (id) => H.on && H.i === IDX[id];
-  const stealth = () => H.on && H.i >= IDX.hatch && H.i <= IDX.charge;
   const lineOf = (s) => (typeof s.line === 'function' ? s.line() : s.line);
+  const tagOf = (s) => (typeof s.tag === 'function' ? s.tag() : s.tag);
   const actOf = (i) => { for (let k = i; k >= 0; k--) if (ST[k].act) return ST[k].act; return ''; };
+  // ---------------------------------------------------------------- roles + Act IV tracks
+  const myRole = () => { if (crewN() < 2 && (!H.roles.length || H.roles[0] === 'solo')) return H.tr.h < HACK.length ? 'hack' : 'infil'; return H.roles[mySlot()] || 'infil'; };
+  H.myRole = myRole;
+  const curT = () => (myRole() === 'hack' ? HACK[H.tr.h] : INF[H.tr.n]);
+  const trackLine = () => { const s = curT(); return s ? lineOf(s) : myRole() === 'hack' ? 'Keep watching the cameras' : 'Hold tight'; };
+  const trackMark = () => { const s = curT(); return s && s.mark ? s.mark() : null; };
+  const belowZoo = () => { const p = AF.player, d = A.server; return AF.mode === 'walk' && !!d && p.y < (A.hatch ? A.hatch.y - 2.5 : -2) && dist(p, A.hatch) < 60; };
+  let rolePick = null;
+  const chooseRoles = () => {
+    if (crewN() < 2) { if (host()) { H.roles = ['solo']; send({ op: 'roles', r: H.roles }); } return; }
+    if (H.roles.length) return;
+    rolePick = null;
+    AF.shop.open({ title: 'Midnight \u00b7 who does what?', sub: 'One of you hacks Kestrel\u2019s cameras from under the zoo, the other goes into the bank', items: () => [
+      { name: 'The hacker', desc: 'Keeper\u2019s uniform, the lion den, the bunker \u2014 then the cameras, lights and locks', tag: rolePick === 'hack' ? 'Picked' : 'Pick', act: () => pickRole('hack') },
+      { name: 'The inside man', desc: 'The roof, the guards, the vault, the lasers, the drill, the cash', tag: rolePick === 'infil' ? 'Picked' : 'Pick', act: () => pickRole('infil') },
+    ] });
+  };
+  const pickRole = (r) => { rolePick = r; AF.shop.close(); if (host()) assignRole(mySlot(), r); else send({ op: 'role', r }, 0); note('You asked to be the ' + (r === 'hack' ? 'hacker' : 'inside man') + '.', 'ok'); };
+  const want = new Map();
+  const assignRole = (slot, r) => {   // host
+    want.set(slot, r);
+    const slots = [0, ...(online() ? [...N.peers.keys()] : [])];
+    if (slots.some((s) => !want.has(s)) && H.t < 25) return;
+    const roles = []; let hacker = -1;
+    for (const s of slots) if (want.get(s) === 'hack' && hacker < 0) hacker = s;
+    if (hacker < 0) hacker = slots.find((s) => s !== 0) ?? 0;
+    for (const s of slots) roles[s] = s === hacker ? 'hack' : 'infil';
+    H.roles = roles; send({ op: 'roles', r: roles }); rolesSet();
+  };
+  const rolesSet = () => { if (AF.shop && AF.shop.isOpen && AF.shop.isOpen()) AF.shop.close(); const r = myRole(); note(r === 'hack' ? 'You\u2019re the hacker. Get to the zoo.' : 'You\u2019re the inside man. Get to the Harbour Trust.', 'mission'); radio(r === 'hack' ? 'vera.m3' : 'vera.roof'); };
+  // track changes (every client): the bank's state follows the facts
+  const applyNight = () => {
+    if (!HB || !HB.ready) return;
+    const night = is('night');
+    HB.door('bulkhead', !!H.got.hatch); HB.door('gate', !!H.got.gate); HB.cage(!!H.got.cage);
+    HB.lasers(night && H.tr.n >= 4 && !H.bags.every(Boolean));
+    let mask = 0; for (let k = 0; k < 4; k++) if (!H.bags[k] && (night || is('escape'))) mask |= 1 << k; HB.bagsShow(H.got.cage || (night && H.tr.n >= 4) ? mask : 0);
+    if (AF.den && AF.den.setActive) AF.den.setActive(night && (myRole() === 'hack' || crewN() < 2));
+  };
+  let trSeen = '';
+  const trackEnter = (r) => { trSeen = ''; if (!r && crewN() < 2) radio('vera.z1'); applyNight(); };
+  const trackTick = () => {
+    const key = H.tr.h + ':' + H.tr.n;
+    if (key !== trSeen) {
+      const was = trSeen; trSeen = key; applyNight();
+      const r = myRole(), s = curT();
+      if (was && s) { sfx('ui_check'); hudT = 0; markers(); }
+      if (r === 'hack' && s) ({ den: () => radio('vera.z2'), bunker: () => radio('vera.z3'), cctv: () => { radio('vera.h1'); openCams(); } })[s.id]?.();
+      if (r === 'infil' && s) ({ door: () => radio(H.got.hatch ? 'vera.hatch2' : 'vera.hatch'), vault: () => { radio('vera.tip'); radio('vera.cams'); }, keys: () => radio('vera.keys'), lasers: () => radio('vera.laser'), drill: () => radio('vera.drill'), cash: () => radio('vera.cash') })[s.id]?.();
+    }
+    if (H.failing) return;
+    const r = myRole(), s = curT(); if (!s) return;
+    const t = r === 'hack' ? 'h' : 'n', k = r === 'hack' ? H.tr.h : H.tr.n, sig = t + k;
+    if (s.done() && H.sentTr !== sig) { H.sentTr = sig; if (host()) trDone(t, k); else send({ op: 'tdone', t, k }, 0); }
+  };
+  const trDone = (t, k) => {   // host
+    if (!is('night')) return;
+    if (t === 'h' && k === H.tr.h) { H.tr.h = k + 1; if (HACK[k].id === 'hack' && (crewN() < 2 || H.roles[0] === 'solo')) H.tr.h = HACK.length; }
+    else if (t === 'n' && k === H.tr.n) H.tr.n = k + 1;
+    else return;
+    if (H.got.hacked) H.nightCp = true;
+    send({ op: 'tr', h: H.tr.h, n: H.tr.n, g: gotList() });
+  };
+  const gotList = () => Object.keys(H.got).filter((k) => H.got[k]);
 
-  // ---------------------------------------------------------------- props that follow the story
-  const myLook = () => (AF.save.looks && AF.friends.current && AF.save.looks[AF.friends.current.id]) || (AF.friends.current && AF.friends.current.look);
-  const dress = (on) => {
-    if (on === H.dressed || !AF.player || !AF.player.setLook || !myLook()) return;
-    H.dressed = on;
-    if (!on) { AF.player.setLook(myLook()); return; }
-    const L = JSON.parse(JSON.stringify(myLook()));
-    if (L.female) { L.top = { style: 'dress', col: 0x8a1424, col2: 0xd8b04a }; L.bottom = { style: 'skirt', col: 0x8a1424 }; }
-    else { L.top = { style: 'shirt', col: 0x17171b, col2: 0xf2efe4 }; L.bottom = { style: 'jeans', col: 0x17171b }; }
-    delete L.hat; L.shoe = 0x111114; AF.player.setLook(L);
+  // ---------------------------------------------------------------- uniforms + who wears what
+  const myLook = () => (AF.save.looks && AF.friends.current && AF.save.looks[AF.friends.current.id]) || (AF.friends.current && AF.friends.current.look) || AF.player.look;
+  const dress = (kind) => {
+    if (kind === H.wear || !AF.player || !AF.player.setLook) return;
+    H.wear = kind || null; H.wears[mySlot()] = H.wear;
+    AF.player.setLook(kind && HS ? HS.uniform(myLook(), kind) : myLook());
+    send({ op: 'wear', k: H.wear || '' });
   };
-  AF.on('friend', () => { H.dressed = false; if (H.on && H.i > IDX.dress) dress(true); });
-  const showKit = (on) => { if (B.kit) AF.npc.setHidden(B.kit, !on); };
-  const showFinale = (on) => { if (B.vera2) { AF.npc.setHidden(B.vera2, !on); AF.npc.setHidden(B.silas2, !on); } };
-  const resetPlanes = () => { for (const pl of P.planes || []) if (pl !== AF.planes.cur && pl.net == null && !pl.ghost && Math.hypot(pl.x - pl.home.x, pl.z - pl.home.z) > 3) AF.planes.reset(pl); };
-  const talk = (n, lines, then) => { AF.emit('dialogue', { name: n.name, role: n.role, lines, look: LOOKS[n.id.replace('heist-', '').replace(/2$/, '')] }); n.greetT = AF.clock.t; H.after = then || null; H.afterT = 0.3; };
-  const veraBlip = () => { if (!P.vera) return; if (H.on) MI.unblip('heist'); else MI.blip('heist', { x: P.vera.x, y: P.vera.y, z: P.vera.z, kind: 'heist', label: 'Heist \u00b7 Vera' }); };
-  // the objective's markers: the primary one + a second (the other key, the detective, the ladder)
-  const MK2 = { keys: () => P.keys[H.grip[0] > 0 ? 0 : 1], lift: () => DET(), jump: () => P.ladder };
-  const MK2L = { keys: 'Vault key', lift: 'Detective', jump: 'Service ladder' };
-  const markers = (s) => {
-    if (!s || !s.mark) MI.unblip('heist-obj');
-    else MI.blip('heist-obj', { at: s.mark, on: () => H.on && !H.failing, kind: 'objective', label: s.tag || '', primary: true, marker: true, r: 1.8, y: null });
-    const m2 = s && MK2[s.id];
+  const wears = (slot) => (slot === mySlot() ? H.wear : H.wears[slot]);
+  AF.on('friend', () => { const k = H.wear; H.wear = null; if (H.on && k) dress(k); });
+
+  // ---------------------------------------------------------------- scenes: which set is live (people, zones, music beds)
+  const scene = (name) => {
+    if (!HS || !HS.ready) return;
+    const on = (k) => name === k;
+    HS.show('clerk', on('shop')); if (HS.props.rail) HS.props.rail.visible = on('shop');
+    HS.showNpc('ezra', on('ezra')); HS.showNpc('gate', on('gate') || on('ezra'));
+    HS.showNpc('kit', on('kit'));
+    for (const k in HS.walkers) if (/^(tunnel|post)/.test(k)) HS.show(k, on('tunnel'));
+    for (const k of ['steward', 'waiter', 'dealer', 'detective']) HS.show(k, on('queen'));
+    for (const k of ['door', 'prescott', 'celeste', 'pit']) HS.showNpc(k, on('queen'));
+    HS.show('watchman', on('night'));
+    for (const k of ['vera2', 'silas2', 'kit2', 'tony']) HS.showNpc(k, on('key') && H.i <= IDX.betray);
+    if (HS.props.crate) HS.props.crate.visible = on('key');
+    if (HB && HB.ready && HB.on !== on('night')) HB.night(on('night'));
+    if (!on('night') && AF.den && AF.den.setActive) AF.den.setActive(false);
+    const zone = on('shop') ? 'shop' : on('tunnel') ? 'tunnel' : on('queen') ? 'queen' : on('night') ? (myRole() === 'hack' && H.tr.h < 3 ? 'zoo' : 'bank') : null;
+    if (S && (!S.zone || S.zone.id !== zone)) { if (zone) S.reset(zone); S.activate(zone); }
+    H.scene = name;
+  };
+  // music: the step's bed, the action track while a fight or an alarm is on
+  let muCur = null;
+  const music = () => {
+    let id = null;
+    if (H.on) { const s = ST[H.i]; id = s ? s.mu || null : null; if ((S && S.zone && S.zone.alarm && S.zone.mode === 'fight') || (is('ambush') && H.goonsN)) id = 'mu_action'; }
+    if (id !== muCur) { muCur = id; if (AF.audio && AF.audio.music) AF.audio.music(id, { fade: 2.5 }); }
+  };
+  // ---------------------------------------------------------------- markers + HUD
+  const MK2 = { sting: () => (myStingRole() === 'dealer' ? A.dealer : null), uniforms: () => (crewN() > 1 && !H.took.dealer ? A.crewLounge : null) };
+  const markers = () => {
+    const s = ST[H.i];
+    if (!s || (!s.mark && !s.cut)) { MI.unblip('heist-obj'); MI.unblip('heist-2'); return; }
+    if (!s.mark) MI.unblip('heist-obj');
+    else MI.blip('heist-obj', { at: () => (H.on && ST[H.i] && ST[H.i].mark ? ST[H.i].mark() : null), on: () => H.on && !H.failing && !!(ST[H.i] && ST[H.i].mark && ST[H.i].mark()), kind: 'objective', label: tagOf(s) || '', primary: true, marker: true, r: 1.8, y: null });
+    const m2 = MK2[s.id];
     if (!m2) MI.unblip('heist-2');
-    else MI.blip('heist-2', { at: m2, on: () => H.on && !H.failing && !(s.id === 'keys' && H.grip[0] > 0 && H.grip[1] > 0) && !(s.id === 'lift' && H.chat > 0), kind: s.id === 'lift' ? 'crew' : 'objective', label: MK2L[s.id], marker: true, r: 1.4, y: null });
+    else MI.blip('heist-2', { at: m2, on: () => H.on && !H.failing && !!m2(), kind: 'objective', label: 'Partner', marker: true, r: 1.4, y: null });
   };
+  let hudT = 0;
 
   // ---------------------------------------------------------------- step engine
   const enter = (i, restored) => {
-    H.i = i; H.t = 0; H.flag = {}; H.sus = 0; H.lifting = false; H.sentFor = -1; H.cutting = false; H.cutOn = false; H.later = null;
+    H.i = i; H.t = 0; H.flag = {}; H.sentFor = -1; H.sentTr = ''; H.cutting = false; H.cutOn = false; H.later = null; H.lifting = false;
     const s = ST[i]; if (s.cp != null) H.cp = s.cp;
-    guardsOn(stealth()); syncProps(); dress(i > IDX.dress);
+    if (s.time != null && host() && !restored) AF.time.set({ hours: s.time, paused: true });
     if (s.act && !s.cut) MI.shard('The Harbour Trust Job', s.act, 'start', 3600);
-    if (!restored && i > 0) { say(s.cp != null ? 'jg_pass' : 'ui_check'); if (s.cp != null) note('Checkpoint \u2014 ' + CPS[s.cp].label + '.', 'ok'); }
-    markers(s); hudT = 0;
-    if (s.cut) { if (restored) H.flag.cut = true; else s.cut(); }
-    else if (!restored && s.gather) gather(s.gather(), s.where || '');
+    if (!restored && i > 0) { sfx(s.cp != null ? 'jg_pass' : 'ui_check'); if (s.cp != null) note('Checkpoint \u2014 ' + CPS[s.cp].label + '.', 'ok'); }
+    hudT = 0;
     if (s.enter) s.enter(!!restored);
-    if (B.prescott) B.prescott.interact.label = is('lift') ? 'Lift the key from Prescott\u2019s jacket' : 'Talk to Mr Prescott';
+    if (s.cut) { if (restored) H.flag.cut = true; else s.cut(); }
+    markers(); applyNight(); music();
     AF.emit('heist', H);
   };
   const advance = (from) => {   // host
     if (!H.on || from !== H.i || H.failing) return;
     if (H.i + 1 >= ST.length) { finish(true); return; }
-    enter(H.i + 1, false); send({ op: 'st', i: H.i, cp: H.cp });
+    enter(H.i + 1, false); send({ op: 'st', i: H.i, cp: H.cp, g: gotList(), h: H.tr.h, n: H.tr.n });
   };
-  const complete = () => { if (H.sentFor === H.i) return; H.sentFor = H.i; if (host()) advance(H.i); else send({ op: 'done', i: H.i }, 0); };
+  const complete = () => { if (H.sentFor === H.i) return; H.sentFor = H.i; if (host()) advance(H.i); else if (!ST[H.i].hostOnly) send({ op: 'done', i: H.i }, 0); };
   const fail = (why) => {
     if (!H.on || H.failing) return;
     if (host()) { doFail(why); send({ op: 'fail', cp: H.cp, why }); }
     else { H.failing = true; send({ op: 'fail', why }, 0); setTimeout(() => { if (H.failing === true) H.failing = false; }, 4000); }
   };
+  H.fail = fail;
   const doFail = (why) => {
     H.failing = 'restore'; if (AF.hud.meterCancel) AF.hud.meterCancel(); H.lifting = false;
-    say('jg_fail'); setTimeout(() => say('v_failed'), 900); MI.shard('Mission failed', why || 'The job went sideways.', 'fail', 2800);
+    if (AF.minigame && AF.minigame.open) AF.minigame.cancel();
+    sfx('jg_fail'); setTimeout(() => sfx('v_failed'), 900); MI.shard('Mission failed', why || 'The job went sideways.', 'fail', 2800);
     setTimeout(() => {
       H.failing = false; if (!H.on) return;
-      restore(H.cp); if (host()) send({ op: 'st', i: H.i, cp: H.cp, r: 1 });
-      setTimeout(() => radio('Vera', 'Okay. Regroup and try that again.', 'r_checkpoint'), 1600);
+      // the host restores and tells the crew ('rs', ordered before any later 'st'); a guest waits for that message
+      if (host()) { restore(H.cp, true); send({ op: 'rs', cp: H.cp, night: H.nightCp ? 1 : 0 }); }
+      setTimeout(() => radio(Math.random() < 0.5 ? 'vera.fail' : 'vera.fail2'), 1600);
     }, AF.TEST ? 0 : 2600);
   };
   const resetWorld = (i) => {
-    const C = CB(); if (C) { C.clearWanted(); C.clearGoons(); }
-    resetGuards(); H.alarm = false; H.grip[0] = H.grip[1] = 0; H.fuse = 0; H.chat = 0;
-    for (let k = 0; k < 4; k++) H.bags[k] = i > IDX.cash;
-    if (LN && LN.openStaff) LN.openStaff(i === IDX.silas || i === IDX.silascut);
-    dress(i > IDX.dress); showKit(i === IDX.kit || i === IDX.kitcut); showFinale(i >= IDX.stash);
+    const C = CB(); if (C) { C.clearWanted(); C.clearGoons(); if (C.unlend) C.unlend(); }
+    H.grip[0] = H.grip[1] = 0; H.lockT = 0; H.anger = 0; H.strikes = 0; H.tray = false; H.goonsN = 0; H.waves = 0; H.bosses = [];
+    if (HB && HB.ready) { HB.reset(); }
+    if (S) for (const z of ['shop', 'tunnel', 'queen', 'zoo', 'bank']) S.reset(z);
+    if (AF.den && AF.den.reset) AF.den.reset();
+    H.took = {}; H.tray = false; H.busy = false; H.drilling = false; H.dealing = false; H.drillR = false; AF.PL.still = false;
+    if (LN() && LN().openStaff) LN().openStaff(i === IDX.silas || i === IDX.silascut);
     if (H.roadblock) { for (const c of H.roadblock.cars) c.temp = true; H.roadblock = null; }
+    for (const k of ['celeste']) HS.showNpc(k, false);
   };
-  const restore = (cp) => {
-    const C = CPS[cp], i = IDX[C.step]; H.cp = cp;
+  // the wardrobe + loadout a checkpoint implies
+  const outfit = () => {
+    const i = H.i;
+    if (i >= IDX.split && i <= IDX.night) dress(myRole() === 'hack' && H.got.keeper ? 'keeper' : 'night');
+    else if (i > IDX.uniform && i <= IDX.kitcut) dress('pilot');
+    else if (i >= IDX.escape) dress('night');
+    else if (i < IDX.uniforms || i > IDX.silascut) dress(null);
+    const C = CB(); if (C && C.lend) { if (H.got.cache && i < IDX.fight) C.lend('spistol', 60); }
+  };
+  const restore = (cp, failed) => {
+    const C = CPS[cp]; let i = IDX[C.step]; H.cp = cp;
     resetWorld(i);
-    if (host() && C.night) AF.time.set({ hours: 0.25 });
-    if (i <= IDX.jump || i >= IDX.car) resetPlanes();
+    H.got = {}; for (const k of C.got) H.got[k] = true;
+    H.bags = [0, 1, 2, 3].map(() => !!C.cash);
+    H.tr = { h: 0, n: 0 };
+    let at = C.at(), label = C.label;
+    // inside Act IV with the hack done: keep it; the inside man goes back to the ladder, the hacker to the terminal
+    if (H.nightCp && i === IDX.split) {
+      i = IDX.night; H.got.hacked = true; H.tr = { h: crewN() > 1 ? 4 : HACK.length, n: 0 }; label = NIGHT_CP.label;
+      at = myRole() === 'hack' && crewN() > 1 ? NIGHT_CP.hack() : NIGHT_CP.inf();
+    }
+    if (host() && (C.cash || i >= IDX.split)) AF.time.set({ hours: i >= IDX.stash ? 1.5 : 0.2, paused: true });
+    resetPlanes();
     AF.health.heal(AF.health.max);
-    goTo(C.at(), C.label);
+    goTo(at, label);
     enter(i, true);
+    outfit();
+    if (i === IDX.night) trackEnter(true);
+    void failed;
   };
   const begin = () => {
     const J = AF.jobs; if (J && J.cur) J.cur.end('You clock off \u2014 there\u2019s a bigger job tonight.');
-    H.on = true; H.cp = 0; H.failing = false; resetWorld(0); veraBlip(); say('jg_start'); enter(0, false);
+    H.on = true; H.cp = 0; H.failing = false; H.got = {}; H.roles = []; H.tr = { h: 0, n: 0 }; H.nightCp = false; H.bags = [false, false, false, false]; H.wears = [];
+    resetWorld(0); veraBlip(); sfx('jg_start'); enter(0, false);
   };
   const start = () => {
     if (H.on) return;
-    if (crewN() < NEED && !H.solo) { note('The Harbour Trust Job needs a crew of two. Host a co-op game and bring a friend.', 'warn'); return; }
+    if (crewN() < NEED && !H.solo) { note('The Harbour Trust Job needs a crew of two. Host a co-op game and bring a friend \u2014 or pick "Go alone".', 'warn'); return; }
     if (!host()) { send({ op: 'go' }, 0); return; }
-    begin(); send({ op: 'st', i: H.i, cp: H.cp });
+    begin(); send({ op: 'st', i: H.i, cp: H.cp, g: [], h: 0, n: 0 });
   };
   const end = (ok, quiet) => {
     if (!H.on) return;
-    H.on = false; H.i = -1; H.failing = false; H.after = null; H.later = null; H.cutting = false;
+    H.on = false; H.i = -1; H.failing = false; H.after = null; H.later = null; H.cutting = false; RQ.length = 0;
     if (MI.cut.on) MI.cut.finish(true);
-    const C = CB(); if (C) { C.clearGoons(); if (ok) C.clearWanted('Corsair Key keeps its secrets. The police lose the trail.'); }
-    guardsOn(false); resetGuards(); H.alarm = false; dress(false); showKit(false); showFinale(false); H.grip[0] = H.grip[1] = 0; H.fuse = 0; H.chat = 0; for (let k = 0; k < 4; k++) H.bags[k] = false;
+    if (AF.mode === 'cctv' && AF.cctv) AF.cctv.close();
+    if (AF.minigame && AF.minigame.open) AF.minigame.cancel();
+    const C = CB(); if (C) { C.clearGoons(); if (C.unlend) C.unlend(); if (ok) C.clearWanted('Corsair Key keeps its secrets. The police lose the trail.'); }
+    scene('none'); if (S) S.activate(null); if (HB && HB.ready) { HB.reset(); HB.night(false); }
+    dress(null); H.grip[0] = H.grip[1] = 0; H.bags = [false, false, false, false]; H.roles = [];
     if (AF.hud.meterCancel) AF.hud.meterCancel(); H.lifting = false;
-    if (LN && LN.openStaff) LN.openStaff(false);
+    if (LN() && LN().openStaff) LN().openStaff(false);
     if (H.car) { H.car.temp = true; H.car = null; }
     if (H.roadblock) { for (const c of H.roadblock.cars) c.temp = true; H.roadblock = null; }
     MI.unblip('heist-obj'); MI.unblip('heist-2'); MI.clearBars('heist'); if (AF.hud.job === H.hud) AF.hud.job = null;
+    if (host()) AF.time.set({ paused: false });
     if (ok) {
       H.runs++; AF.money.add(H.pay); AF.saveSoon();
-      say('jg_win'); setTimeout(() => say('v_complete'), 1300); MI.shard('Heist passed', 'The Harbour Trust Job \u00b7 your cut ' + AF.cash(H.pay), 'pass', 7000);
-      setTimeout(() => radio('Silas', 'Pleasure doing business. Fly home whenever you like \u2014 the Cub by the hangar is yours to borrow.', 'r_good'), 3500);
+      sfx('jg_win'); setTimeout(() => sfx('v_complete'), 1300); MI.shard('Heist passed', 'The Harbour Trust Job \u00b7 your cut ' + AF.cash(H.pay), 'pass', 7000);
+      setTimeout(() => note('Silas\u2019s Cub by the hangar is yours to borrow. Fly home whenever you like.', 'ok'), 3500);
     } else if (!quiet) note('The job is off. Vera will be at the Blue Heron if you change your mind.', 'warn');
-    syncProps(); veraBlip();
+    veraBlip(); music();
     AF.emit('heist', H);
   };
   const finish = (ok) => { if (!H.on) return; if (host()) send({ op: 'end', ok: ok ? 1 : 0 }); end(ok); };
-  const retry = () => { if (!H.on || H.failing) return; if (host()) { restore(H.cp); send({ op: 'rs', cp: H.cp }); } else send({ op: 'retry' }, 0); };
+  const retry = () => { if (!H.on || H.failing) return; if (host()) { restore(H.cp); send({ op: 'rs', cp: H.cp, night: H.nightCp ? 1 : 0 }); } else send({ op: 'retry' }, 0); };
   H.start = start; H.retry = retry; H.quit = () => (host() ? finish(false) : send({ op: 'quit' }, 0));
-  H.dbg = { IDX, ST, CPS, begin, enter, restore, skip: () => advance(H.i), solo: (on = true) => { H.solo = on; } };   // harnesses (host / solo)
-  H.dbg.jump = (cp) => { if (!host()) return; if (!H.on) begin(); restore(cp); send({ op: 'st', i: H.i, cp: H.cp, r: 1 }); send({ op: 'rs', cp }); };
+  H.dbg = { IDX, ST, CPS, HACK, INF, begin, enter, restore, skip: () => advance(H.i), trDone, solo: (on = true) => { H.solo = on; } };
+  H.dbg.jump = (cp) => { if (!host()) return; if (!H.on) begin(); restore(cp); send({ op: 'rs', cp }); };
+  // ---------------------------------------------------------------- shared facts (got) + their side effects on every client
+  const setGot = (k, remote) => {
+    if (H.got[k]) return; H.got[k] = true;
+    if (!remote) send({ op: 'got', k });
+    if (k === 'uniform') { dress('pilot'); note('Pilot uniform on. Very dashing.', 'ok'); }
+    if (k === 'cache') { const C = CB(); if (C && C.lend) C.lend('spistol', 60); note('Silenced pistols and a diamond-core drill. Headshots are quiet and final.', 'ok'); }
+    if (k === 'key') { H.lifting = false; note('Prescott\u2019s key is yours.', 'ok'); }
+    if (k === 'hacked') { radio('kestrel.in'); if (crewN() < 2) note('Kestrel tablet unlocked \u2014 press T (or the TABLET button) for the bank\u2019s cameras.', 'ok'); }
+    if (k === 'hatch') { radio('kestrel.hatch'); if (HB) HB.door('bulkhead', true); }
+    if (k === 'gate') { sfx('vault'); note('Both keys turn \u2014 the time lock lets go.', 'ok'); if (HB) HB.door('gate', true); }
+    if (k === 'cage') { sfx('latch'); if (HB) HB.cage(true); }
+    applyNight();
+  };
+  H.setGot = setGot;
 
-  // ---------------------------------------------------------------- act I: the island
+  // ---------------------------------------------------------------- act I: the tailor's, Ezra, the crew gate
+  const WKs = () => AF.walkers;
+  const clerkA = () => HS.walkers.clerk && HS.walkers.clerk.actors[0];
+  const chatClerk = (from) => {
+    const a = clerkA(); if (!a) return;
+    const r = from != null && AF.coop ? AF.coop.players.get(from) : null, p = r && r.seen ? r : AF.player;
+    WKs().hold(a, Math.atan2(p.x - a.x, p.z - a.z), 14);
+    speak(H.chatN++ % 2 ? 'mabel.chat2' : 'mabel.chat1', a);
+  };
+  H.chatN = 0;
+  const ezraPapers = () => {
+    const n = HS.npc.ezra; if (H.got.papers || H.busy) return;
+    H.busy = true; speak('ezra.e1', n);
+    setTimeout(() => {
+      speak('ezra.e2', n);
+      play('stamp', { title: 'Forging a pilot\u2019s licence', sub: 'Ezra Quill \u00b7 Harbour Stationers', diff: 0.4 }).then((r) => {
+        H.busy = false;
+        if (r && r.ok) { speak('ezra.done', n); setGot('papers'); } else if (!(r && r.cancelled)) speak('ezra.fail', n);
+      });
+    }, AF.TEST ? 0 : 2600);
+  };
+  const showPapers = () => {
+    const n = HS.npc.gate; if (H.got.cleared) return;
+    if (H.wear !== 'pilot' || !H.got.papers) { speak('gate.no', n); return; }
+    speak('gate.g1', n);
+    setTimeout(() => { speak('gate.g2', n); setGot('cleared'); }, AF.TEST ? 0 : 2400);
+  };
+
+  // ---------------------------------------------------------------- act II: the cache, the cove
+  const pickCache = () => {
+    if (H.got.cache || H.busy) return;
+    H.busy = true; sfx('click_metal');
+    play('lockpick', { title: 'The Moretti arms cache', sub: 'A padlocked crate \u2014 pick it quietly', diff: 0.5, time: 60 }).then((r) => { H.busy = false; if (r && r.ok) { sfx('latch'); setGot('cache'); radio('vera.cache'); } });
+  };
+  const nearestSki = () => {
+    const J = AF.island && AF.island.jetski; let best = null, bd = 1e9; const p = me();
+    if (J) for (const s of J.skis) { if (s.net != null) continue; const d = dist(p, s); if (d < bd) { bd = d; best = s; } }
+    if (best) { SC.x = best.x; SC.y = best.y + 0.5; SC.z = best.z; return SC; }
+    return A.cove;
+  };
   const ambush = (restored) => {
-    radio('Kit', 'Those are Moretti\u2019s boys \u2014 they followed you from the airstrip! Run!', 'v_lookout');
-    setTimeout(() => { if (H.on && H.i >= IDX.ambush) showKit(false); }, 2500);
+    radio('vera.cove'); radio('tony.cove');
     const C = CB(), p = AF.player; H.goonsN = 0;
-    if (restored || !C || !C.spawnGoon || !P.kit || dist(p, P.kit) > 150) return;
-    const n = Math.max(3, Math.ceil(6 / crewN()));
+    if (restored || !C || !C.spawnGoon || dist(p, A.cove) > 160) return;
+    const n = Math.max(3, Math.ceil(7 / crewN()));
     for (let k = 0; k < n; k++) {
-      const a = (k + mySlot() * 0.5) / n * PI * 2 + 0.4, r = 14 + (k % 2) * 7, x = P.kit.x + Math.sin(a) * r, z = P.kit.z + Math.cos(a) * r, y = AF.surfaceBelow(x, z, P.kit.y + 12, 24);
+      const a = (k + mySlot() * 0.5) / n * PI * 2 + 0.4, r = 16 + (k % 2) * 8, x = A.cove.x + Math.sin(a) * r, z = A.cove.z + Math.cos(a) * r, y = AF.surfaceBelow(x, z, A.cove.y + 14, 30);
       if (!Number.isFinite(y) || y < -0.9 || AF.boxBlocked(x, y + 0.05, z, 0.3, 1.7)) continue;
-      if (C.spawnGoon(x, y, z, { kind: k % 3 === 2 ? 'brawl' : 'gun' })) H.goonsN++;
+      if (C.spawnGoon(x, y, z, { kind: k % 3 === 2 ? 'brawl' : 'gun', weapon: k === 1 ? 'smg' : 'pistol' })) H.goonsN++;
     }
-    if (H.goonsN) say('v_cover');
   };
   const ambushOver = () => {
-    if (AF.mode === 'jetski' || (P.kit && dist(me(), P.kit) > 170)) return true;
-    if (!H.goonsN) return H.t > 5;
+    if (AF.mode === 'jetski' || dist(me(), A.cove) > 220) return true;
+    if (!H.goonsN) return H.t > 6;
     const C = CB(); return !C || C.goons().every((w) => w.agg && w.agg.st === 'down');
   };
 
-  // ---------------------------------------------------------------- act II: the lift (one talks to the detective, one lifts)
-  const DET = () => { const g = GD.find((q) => q.casino); return g && g.path.actors[0]; };
-  const chat = (from) => {
-    const a = DET(); if (!a) return;
-    const r = from != null && AF.coop ? AF.coop.players.get(from) : null, p = r && r.seen ? r : AF.player;
-    H.chat = CHAT; if (AF.walkers.hold) AF.walkers.hold(a, Math.atan2(p.x - a.x, p.z - a.z), CHAT);
+  // ---------------------------------------------------------------- act III: the Queen — uniforms, the salon, the sting
+  const myStingRole = () => (H.wear === 'dealer' ? 'dealer' : H.wear === 'waiter' ? 'waiter' : null);
+  const stingLine = () => {
+    const r = myStingRole();
+    if (r === 'dealer') return H.dealing ? 'Deal Prescott a {rotten hand} the moment the drink arrives (3 sloppy deals and you\u2019re out)' : 'Take over {Prescott\u2019s table} from Celeste';
+    if (r === 'waiter') return !H.tray ? 'Pick up a {drink tray} at the salon bar' : H.anger > 0 ? 'He\u2019s ranting \u2014 {serve his drink} and lift the key NOW' : 'Serve {Mr Prescott} his drink while he\u2019s ranting at the dealer';
+    return 'Help your crew lift {Prescott\u2019s key}';
   };
-  const distract = () => {
-    if (!is('lift') || H.chat > 0) return;
-    chat(null); send({ op: 'chat' }); say('ui_check', 0.5);
-    const a = DET(); if (a) AF.emit('bubble', { who: a, name: 'Detective', text: 'Evening. Lovely night for it, isn\u2019t it?', dur: 3 });
-    note(crewN() > 1 ? 'You have the detective\u2019s ear for ' + CHAT + ' seconds \u2014 your partner can lift the key now.' : 'You have the detective\u2019s ear for ' + CHAT + ' seconds \u2014 quick, get behind Prescott.', 'ok');
+  const stingMark = () => { const r = myStingRole(); return r === 'dealer' && !H.dealing ? A.dealer : r === 'waiter' && !H.tray ? A.salonBar : A.prescott; };
+  const ANGRY = ['prescott.angry1', 'prescott.angry2', 'prescott.angry3'];
+  const anger = (secs, remote) => {
+    H.anger = secs; if (!remote) send({ op: 'anger', s: secs });
+    const n = HS.npc.prescott; if (n) { speak(ANGRY[H.angerN++ % 3], n); n.yaw = (A.prescott.yaw || 0) + 0.6; }
   };
-  const lift = () => {
-    const p = AF.player, n = B.prescott, dx = p.x - n.x, dz = p.z - n.z, d = Math.hypot(dx, dz) || 1;
-    if ((dx * Math.sin(n.yaw) + dz * Math.cos(n.yaw)) / d > -0.3) { note('He\u2019d see you coming. Get behind him.', 'warn'); return; }
-    if (H.chat <= 0 && sees(DET(), p) > 0) { note('Not now \u2014 the house detective is looking this way.', 'warn'); return; }
-    H.lifting = true; H.sus = 0;
-    AF.hud.meter({ label: 'Lift the key from his jacket', sub: AF.touch ? 'Tap when the needle is in the green' : 'Click, E or Q when the needle is in the green', speed: 1.25, zone: [0.6, 0.74] }, (v, ok) => {
-      H.lifting = false; if (!is('lift')) return;
-      if (ok) { say('zip_bag'); note('Got it. Prescott never felt a thing.', 'ok'); H.flag.lift = true; return; }
-      if (Math.abs(v - 0.67) < 0.2) { AF.emit('bubble', { who: n, name: 'Prescott', text: 'Hm? \u2014 Banco!', dur: 2 }); note('Prescott shifts in his seat\u2026 easy. Try again.', 'warn'); return; }
-      AF.emit('bubble', { who: n, name: 'Prescott', text: 'Thief! Security!', dur: 2.5 }); fail('Prescott felt your hand in his pocket.');
+  const strike = (remote) => {
+    H.strikes++; if (!remote) send({ op: 'strike' });
+    const n = HS.npc.pit;
+    if (H.strikes >= 3) { speak('pit.fire', n); if (!remote) fail('The pit boss pulled you off the table.'); }
+    else speak('pit.warn', n);
+  };
+  const takeTable = () => {
+    if (H.dealing || myStingRole() !== 'dealer') return;
+    H.dealing = true; send({ op: 'table' }); HS.showNpc('celeste', false);
+    speak('pit.relieve', HS.npc.pit); setTimeout(() => speak('prescott.greet', HS.npc.prescott), 1800);
+    AF.PL.still = true;
+    play('deal', { title: 'Baccarat \u00b7 Mr Prescott', sub: 'Deal clean \u2014 or slip him a rotten hand when the drink arrives', diff: 0.5, noCatch: true, hands: 999, need: 999,
+      onBad: () => { if (is('sting')) anger(7); }, onSloppy: () => { if (is('sting')) strike(); } }).then(() => { H.dealing = false; AF.PL.still = false; });
+  };
+  const serve = () => {
+    const n = HS.npc.prescott; if (!n || myStingRole() !== 'waiter' || !H.tray || H.lifting || H.got.key) return;
+    if (!(H.anger > 0)) { speak('prescott.drink', n); H.tray = false; note('He\u2019s watching his drink. Wait until he\u2019s ranting at the dealer, then serve.', 'warn'); return; }
+    H.lifting = true;
+    AF.hud.meter({ label: 'Lift the key from his jacket', sub: AF.touch ? 'Tap when the needle is in the green' : 'Click, E or Q when the needle is in the green', speed: 1.35, zone: [0.56, 0.73] }, (v, ok) => {
+      H.lifting = false; H.tray = false; if (!is('sting')) return;
+      if (ok) { sfx('zip_bag'); setGot('key'); return; }
+      if (Math.abs(v - 0.645) < 0.2) { speak('prescott.calm', n); note('He shifts in his seat\u2026 easy. Fetch another tray.', 'warn'); return; }
+      speak('prescott.caught', n); fail('Prescott felt a hand in his pocket.');
     });
   };
-
-  // ---------------------------------------------------------------- act III: the bank
-  const night = () => {
-    if (LN && LN.openStaff) LN.openStaff(false);
-    if (host()) AF.time.set({ hours: 0.25 });
-    resetPlanes();
-    radio('Vera', 'Midnight. Take a plane, bail out over the Harbour Trust (F) and open your chute (Space) \u2014 the hatch is on the east roof.', 'r_plane');
+  // ---------------------------------------------------------------- act IV: the hack, the cameras, the bank
+  const hackTerminal = () => {
+    if (H.busy) return;
+    if (H.got.hacked) { openCams(); return; }
+    H.busy = true; radio('kestrel.auth');
+    play('signal', { title: 'Kestrel Systems \u00b7 authentication', sub: 'Match the carrier to slip past the handshake', diff: 0.55, time: 50 }).then((r) => {
+      H.busy = false;
+      if (r && r.ok) setGot('hacked'); else if (!(r && r.cancelled)) radio('kestrel.fail');
+    });
   };
-  const guardsOn = (on) => { for (const g of GD) if (g.bank) g.path.enabled = on; };
-  const resetGuards = () => { for (const g of GD) for (const a of g.path.actors) { a.rx = null; a.rxOn = false; a.lag = 0; a.tilt = a.lift = 0; a.hp = undefined; a.hm = 0; } };
-  const los = (x0, y0, z0, x1, y1, z1) => { for (let i = 1; i < 8; i++) { const u = i / 8; if (AF.solidAt(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, z0 + (z1 - z0) * u)) return false; } return true; };
-  // how fast a guard's suspicion of p rises (0 = can't see p): a 50-degree cone out to 13 m, line of sight, anyone brushing past
-  const sees = (a, p) => {
-    if (!a || a.gap > 0 || AF.walkers.isDown(a)) return 0;
-    const dx = p.x - a.x, dz = p.z - a.z, d = Math.hypot(dx, dz);
-    if (d > 13 || Math.abs(p.y - a.y) > 3) return 0;
-    const c = (dx * Math.sin(a.yaw) + dz * Math.cos(a.yaw)) / (d || 1);
-    if (d > 1.7 && c < 0.64) return 0;
-    if (!los(a.x, a.y + 1.6, a.z, p.x, p.y + 1.3, p.z)) return 0;
-    return d < 1.7 ? 1.3 : 0.4 + 1.6 * (1 - d / 13);
+  const lockOn = (remote) => { H.lockT = LOCK; if (!remote) send({ op: 'lock' }); radio('kestrel.lock'); };
+  const cutLasers = (remote) => { if (HB) HB.cutLasers(8); if (!remote) send({ op: 'laser' }); radio('kestrel.laser'); };
+  const camActions = () => {
+    const out = [];
+    if (!is('night')) return out;
+    if (!H.got.hatch) out.push({ kind: 'mission', mission: true, label: 'Unlock the roof door', game: 'keypad', diff: 0.45, run: () => setGot('hatch') });
+    if (H.tr.n === 3 && !H.got.gate) out.push({ kind: 'mission', mission: true, label: H.lockT > 0 ? 'Time lock open \u2014 ' + Math.ceil(H.lockT) + ' s' : 'Override the time lock', game: 'circuit', diff: 0.6, disabled: H.lockT > 0, run: () => lockOn() });
+    if (H.tr.n === 4 && !H.got.cage) out.push({ kind: 'mission', mission: true, label: HB && HB.laserCut > 0 ? 'Lasers down' : 'Cut the laser grid (8 s)', game: 'flow', diff: 0.45, disabled: HB && HB.laserCut > 0, run: () => cutLasers() });
+    if (S && S.zone && S.zone.alarm && S.zone.id === 'bank') out.push({ kind: 'mission', mission: true, label: 'Reset the alarm', game: 'signal', diff: 0.6, run: () => { S.act('reset', 0, 1); } });
+    return out;
   };
-  H.sees = sees;
-  let qT = 0;
-  const watch = (dt, casino) => {
-    const p = AF.player; let best = 0, who = null;
-    for (const g of GD) { if (!!g.casino !== casino || !g.path.active) continue; for (const a of g.path.actors) { const r = sees(a, p); if (r > best) { best = r; who = a; } } }
-    H.seen = best > 0; qT -= dt;
-    if (best > 0) { H.sus = Math.min(1, H.sus + best * dt); if (who && H.sus > 0.3 && qT <= 0) { qT = 3; AF.emit('bubble', { who, name: casino ? 'Detective' : 'Guard', text: 'Hm? Who\u2019s there?', dur: 1.6 }); } }
-    else H.sus = Math.max(0, H.sus - dt * 0.45);
-    if (H.sus >= 1) { if (who) AF.emit('bubble', { who, name: 'Guard', text: 'Hey! You there!', dur: 2 }); say('jg_spot'); say('r_spotted'); fail(casino ? 'The house detective caught you at it.' : 'A guard spotted you.'); }
+  const openCams = (tablet) => {
+    if (!AF.cctv || !H.got.hacked || AF.mode === 'cctv') return;
+    if (S && (!S.zone || S.zone.id !== 'bank')) { S.reset('bank'); S.activate('bank'); }
+    AF.cctv.open({ zone: 'bank', sit: !tablet, tablet: !!tablet, actions: camActions, feed: tablet ? 2 : 0 });
   };
-  const guardOf = (a) => GD.findIndex((g) => g.path.actors.includes(a));
-  const ko = (g, fx = 0, fz = 1) => { const a = GD[g] && GD[g].path.actors[0]; if (a && !AF.walkers.isDown(a)) AF.walkers.knock(a, fx, fz, 1.5, 1e6); };
-  const onWalkerHit = (a, kind, fx, fz) => {
-    const g = guardOf(a); if (g < 0 || !GD[g].bank || !stealth()) return false;
-    if (kind === 'melee' && H.sus < 0.6 && !H.seen) { ko(g, fx || 0, fz || 1); send({ op: 'ko', g }); note('Lights out. He\u2019ll sleep till morning.', 'ok'); return true; }
-    ko(g, fx || 0, fz || 1); fail(kind === 'melee' ? 'The guard saw it coming and hit the alarm.' : 'Gunfire in the banking hall \u2014 the alarm is up.'); return true;
+  const tabletOk = () => H.on && is('night') && H.got.hacked && myRole() === 'infil' && AF.mode === 'walk' && !(S && S.zone && S.zone.alarm && S.zone.seen);
+  // the service ladder: climbed, rung by rung (a small 'climb' mode, no teleport)
+  const CL = { o: null, y: 0, t: 0 };
+  AF.modes.climb = {
+    enter(o) { CL.o = o; CL.y = o.y0; CL.t = 0; const P = AF.player; P.teleport(o.x, o.y0, o.z, o.yaw); AF.interactTarget = null; },
+    exit() { const P = AF.player; if (P.parts) { P.parts.armL.rotation.x = P.parts.armR.rotation.x = 0; } },
+    update(dt) {
+      const o = CL.o, I = AF.input, P = AF.player; if (!o) { AF.setMode('walk'); return; }
+      const up = (I.key('KeyS') || I.key('ArrowDown') ? -1 : 1) * 1.7;
+      CL.y = Math.max(o.y0, CL.y + up * dt); CL.t += dt * Math.abs(up);
+      if (up < 0 && CL.y <= o.y0 + 0.01) { AF.setMode('walk', { x: o.x, y: o.y0, z: o.z - Math.cos(o.yaw) * 0.8, yaw: o.yaw + PI }); return; }
+      if (CL.y >= o.y1) { AF.setMode('walk', { x: o.top.x, y: o.top.y, z: o.top.z, yaw: o.top.yaw, snap: true }); return; }
+      P.x = o.x; P.y = CL.y; P.z = o.z;
+      if (P.mesh) { P.mesh.position.set(o.x, CL.y, o.z); P.mesh.rotation.set(0, o.yaw, 0); }
+      if (P.parts) { const s = Math.sin(CL.t * 3.4); P.parts.armL.rotation.x = -2.7 + s * 0.35; P.parts.armR.rotation.x = -2.7 - s * 0.35; if (P.parts.legL) { P.parts.legL.rotation.x = -0.5 - s * 0.4; P.parts.legR.rotation.x = -0.5 + s * 0.4; } }
+      const c = AF.camera, bx = -Math.sin(o.yaw) * 3.6, bz = -Math.cos(o.yaw) * 3.6;
+      c.position.set(o.x + bx, CL.y + 1.2, o.z + bz); AF.camTarget.set(o.x, CL.y + 1.3, o.z); c.lookAt(AF.camTarget); AF.shadowFocus.set(o.x, 0, o.z);
+      if ((CL.t % 0.6) < dt * 1.8) sfx('step_concrete_0', { vol: 0.5 });
+    },
+  };
+  const climbLadder = () => { const L = HB.spots.ladder; AF.setMode('climb', { x: L.x, z: L.z, y0: L.y, y1: HB.spots.ladderTop.y - 0.2, yaw: PI, top: HB.spots.ladderTop }); };
+  const keypad = () => {
+    if (H.got.hatch) return;
+    if (!H.got.hacked) { note('A Kestrel keypad. Without the hack it won\u2019t take a code.', 'warn'); return; }
+    if (crewN() > 1 && myRole() === 'infil') { note('Locked. Your hacker can pop it from the cameras.', 'warn'); return; }
+    if (H.busy) return; H.busy = true;
+    play('keypad', { title: 'Roof door keypad', sub: 'Kestrel shows you the worn keys', diff: 0.35 }).then((r) => { H.busy = false; if (r && r.ok) setGot('hatch'); });
   };
   const KEYN = ['north', 'south'];
   const grip = (k, remote) => {
-    if (!is('keys') || H.grip[k] > 0) return;
-    H.grip[k] = GRIP; say('click_metal');
-    if (remote) return;
-    send({ op: 'grip', k });
-    if (!(H.grip[1 - k] > 0)) note(crewN() > 1 ? 'You hold the ' + KEYN[k] + ' key. Your partner takes the ' + KEYN[1 - k] + ' one \u2014 together!' : 'You hold the ' + KEYN[k] + ' key. ' + GRIP + ' seconds to reach the ' + KEYN[1 - k] + ' one!', 'ok');
+    if (!is('night') || H.tr.n !== 3 || H.grip[k] > 0) return;
+    if (!(H.lockT > 0)) { if (!remote) note('The time lock is engaged. ' + (crewN() > 1 ? 'Your hacker has to override it first.' : 'Override it with the Kestrel tablet (T).'), 'warn'); return; }
+    H.grip[k] = GRIP; sfx('click_metal');
+    if (!remote) { send({ op: 'grip', k }); if (!(H.grip[1 - k] > 0)) note('You turn the ' + KEYN[k] + ' key. ' + GRIP + ' seconds to turn the ' + KEYN[1 - k] + ' one!', 'ok'); }
+    if (H.grip[0] > 0 && H.grip[1] > 0 && host()) setGot('gate');
   };
-  const plant = (remote) => { if (!is('charge') || H.fuse > 0) return; H.fuse = 5; say('zip_bag'); if (!remote) { send({ op: 'plant' }); note('Charge set \u2014 five seconds. Get clear!', 'warn'); } };
-  const gateShut = () => H.on && H.i <= IDX.charge;
-  const syncProps = () => {
-    if (B.gate) { const shut = gateShut(); if (B.gate.visible !== shut) { B.gate.visible = shut; B.gateCol.y1 = shut ? B.gateCol.y0 + 3.5 : B.gateCol.y0; } }
-    for (let k = 0; k < B.bags.length; k++) { const v = H.on && H.i <= IDX.cash && !H.bags[k]; if (B.bags[k].visible !== v) B.bags[k].visible = v; }
+  const drill = () => {
+    if (H.drilling || H.got.cage || H.tr.n !== 5) return;
+    H.drilling = true; send({ op: 'drill', on: 1 });
+    play('drill', { title: 'Diamond-core drill', sub: 'Keep the pressure in the green \u2014 an overheating bit screams', diff: 0.5, time: 30 }).then((r) => {
+      H.drilling = false; send({ op: 'drill', on: 0 });
+      if (r && r.ok) setGot('cage'); else if (!(r && r.cancelled)) note('The bit jammed. Set it up again.', 'warn');
+    });
   };
-  const blowGate = (restored) => {
-    if (!restored && P.gate) { AF.fx.boom(P.gate.x, P.gate.y + 1, P.gate.z, 0.8); const C = CB(); if (C) C.blast(P.gate.x, P.gate.y + 1, P.gate.z, 4.5, false); }
-    H.alarm = true; const C = CB(); if (C) C.crime(160);
-    radio('Vera', 'The vault is open. Grab the cash and go.', 'r_vault');
+  const nextBag = () => { for (let k = 0; k < 4; k++) if (!H.bags[k]) return HB.spots.bags[k]; return HB.spots.fire; };
+  const bag = (k, remote) => {
+    if (H.bags[k]) return; H.bags[k] = true; sfx('zip_bag'); sfx('money');
+    if (!remote) send({ op: 'bag', k });
+    const n = H.bags.filter(Boolean).length; note(n < 4 ? 'Cash bag ' + n + ' of 4.' : 'That\u2019s the lot!', 'money'); applyNight();
+    if (n === 4 && S && S.zone && S.zone.id === 'bank') { S.raiseAlarm('Silent alarm'); radio('vera.alarm', true); }
   };
-  const bag = (k) => { if (H.bags[k]) return; H.bags[k] = true; say('zip_bag'); say('money'); const n = H.bags.filter(Boolean).length; note(n < 4 ? 'Cash bag ' + n + ' of 4.' : 'That\u2019s the lot. Move!', 'money'); };
-  const takeBag = (k) => { if (!is('cash') || H.bags[k]) return; bag(k); send({ op: 'bag', k }); };
 
-  // ---------------------------------------------------------------- act IV: the getaway
+  // ---------------------------------------------------------------- act V: the getaway
   const getaway = (restored) => {
     const C = CB(); if (C) C.crime(Math.max(0, 270 - C.heat));
-    radio('Vera', 'The police scanner is lit up. My car\u2019s on Charter Street \u2014 run!', 'r_cops');
-    const K = P.carSpot; if (!K || !VV || !VV.makeCar) return;
+    if (HB && HB.ready) { for (const d of ['fire', 'hallEast', 'c4', 'gate']) HB.door(d, true); }
+    if (myRole() === 'hack') radio('vera.g4'); else radio('vera.g1');
+    const K = A.carSpot; if (!K || !VV || !VV.makeCar) return;
     if (H.car && !H.car.dead && !(restored && dist(H.car, K) > 10)) return;
     if (H.car) { H.car.temp = true; H.car = null; }
-    // every client parks the same car on the same kerb, so co-op matches it (one drives, the others ride along)
     const type = VV.TYPES.find((t) => t.id === 'duesy') ? 'duesy' : VV.TYPES.find((t) => t.kind === 'car').id;
-    try { const car = VV.makeCar(type, 0, K.x, K.z, K.yaw); car.temp = false; car.parked = true; H.car = car; P.car = { x: car.x, y: car.y, z: car.z }; } catch (e) { AF.warnOnce('heist car', e); }
+    try { const car = VV.makeCar(type, 0, K.x, K.z, K.yaw); car.temp = false; car.parked = true; H.car = car; A.car = { x: car.x, y: car.y, z: car.z }; } catch (e) { AF.warnOnce('heist car', e); }
   };
   const run = () => {
-    radio('Vera', 'Go, go, go! Westgate Airfield \u2014 there\u2019s a plane fuelled and waiting.', 'v_go');
-    resetPlanes();
-    if (H.roadblock || !P.carSpot || !P.plane || !VV || !VV.makeCar) return;
-    const S = P.carSpot, G = P.plane, k = kerbAt(S.x + (G.x - S.x) * 0.4, S.z + (G.z - S.z) * 0.4); if (!k) return;
+    radio('vera.g2'); resetPlanes();
+    if (H.roadblock || !A.carSpot || !A.plane || !VV || !VV.makeCar) return;
+    const Sp = A.carSpot, G = A.plane, k = kerbAt(Sp.x + (G.x - Sp.x) * 0.4, Sp.z + (G.z - Sp.z) * 0.4); if (!k) return;
     const cars = [];
     for (const s of [-1.5, 1.5]) { try { const c = VV.makeCar('police', 0, k.cx + k.nx * s, k.cz + k.nz * s, Math.atan2(k.nx, k.nz) + (s > 0 ? 0 : PI)); c.temp = true; c.parked = true; c.v = c.vx = c.vz = 0; cars.push(c); } catch (e) { AF.warnOnce('heist roadblock', e); } }
     H.roadblock = { x: k.cx, z: k.cz, cars, blown: false };
   };
 
-  // ---------------------------------------------------------------- props: the vault gate, key boxes, cash bags, the roof hatch, the ladder
-  const props = () => {
-    const c = (h, o) => AF.col(h, Object.assign({ jitter: 0.15, edge: 0.3 }, o)), steel = c(0x6a7078, { metal: 0.85, rough: 0.35 }), dark = c(0x2a2c30, { metal: 0.6 }), brass = c(0xc9a24a, { metal: 0.9, rough: 0.3 });
-    const mesh = (m, vs, anchor, x, y, z, yaw = 0) => { const g = AF.meshModel(m, { vs, anchor }); delete g.userData.src; const o = AF.modelMesh(g); o.position.set(x, y, z); o.rotation.y = yaw; o.castShadow = false; AF.scene.add(o); return o; };
-    // vault gate (bars across the round doorway, x 42.4)
-    const g = new AF.Model(2, 28, 28); for (let z = 0; z < 28; z += 3) g.box(0, 0, z, 2, 28, z + 1, steel); for (const y of [0, 9, 18, 27]) g.box(0, y, 0, 2, y + 1, 28, steel); g.box(0, 12, 12, 2, 16, 16, brass);
-    B.gate = mesh(g, 1 / 8, [0, 0, 0.5], 42.35, 0.5, -125); B.gate.visible = false;
-    B.gateCol = AF.addCollider(42.3, 0.5, -126.75, 42.65, 0.5, -123.25, 'heist-gate');
-    // key boxes on the hall's east wall either side of the doorway
-    const kb = new AF.Model(2, 5, 4); kb.box(0, 0, 0, 2, 5, 4, brass); kb.box(0, 1, 1, 1, 4, 3, dark); kb.set(0, 2, 2, steel);
-    P.keys = [{ x: 41.0, y: 0.5, z: -128.6 }, { x: 41.0, y: 0.5, z: -121.4 }];
-    P.keys.forEach((k, i) => {
-      B.keys.push(mesh(kb, 1 / 8, [1, 0, 0.5], 41.75, 1.1, k.z));
-      AF.addInteract({ x: k.x, y: 1.5, z: k.z, r: 1.5, label: 'Hold the ' + KEYN[i] + ' vault key', prio: 2, can: () => AF.mode === 'walk' && is('keys') && !(H.grip[i] > 0), act: () => grip(i) });
-    });
-    P.gate = { x: 41.3, y: 0.5, z: -125 };
-    AF.addInteract({ x: 41.3, y: 1.5, z: -125, r: 1.6, label: 'Plant the thermal charge', prio: 2, can: () => AF.mode === 'walk' && is('charge') && H.fuse <= 0, act: () => plant(false) });
-    // four cash bags in the vault
-    const bm = new AF.Model(7, 4, 4), canvas = c(0x3a4a2e), strap = c(0xb89a60); bm.box(0, 0, 0, 7, 3, 4, canvas); bm.box(0, 3, 1, 7, 4, 3, canvas); bm.box(1, 0, 0, 2, 4, 4, strap); bm.box(5, 0, 0, 6, 4, 4, strap); bm.set(3, 2, 3, brass);
-    P.bags = [{ x: 44.6, y: 0.5, z: -126.6 }, { x: 44.6, y: 0.5, z: -123.4 }, { x: 47.9, y: 0.5, z: -126.6 }, { x: 47.9, y: 0.5, z: -123.4 }];
-    P.bags.forEach((b, k) => {
-      const o = mesh(bm, 1 / 8, [0.5, 0, 0.5], b.x, b.y, b.z, k * 0.7); o.visible = false; B.bags.push(o);
-      AF.addInteract({ x: b.x, y: 1.2, z: b.z, r: 1.4, label: 'Grab the cash bag', prio: 2, can: () => AF.mode === 'walk' && is('cash') && !H.bags[k], act: () => takeBag(k) });
-    });
-    // the roof hatch: on the banking-hall podium's east roof, drops you into the hall's quiet south-east corner
-    const hp = free(47, -116, 30, 22); P.hatch = hp; P.c4 = { x: hp.x, y: hp.y, z: hp.z - 2.2, yaw: 0 }; P.drop = { x: 38.6, y: 0.5, z: -114.3, yaw: PI };
-    const hm = new AF.Model(10, 8, 10); hm.box(0, 0, 0, 10, 6, 10, dark); hm.box(1, 6, 1, 9, 7, 9, steel); hm.box(2, 7, 4, 8, 8, 6, brass); B.hatch = mesh(hm, 1 / 8, [0.5, 0, 0.5], hp.x, hp.y, hp.z);
-    AF.addCollider(hp.x - 0.625, hp.y, hp.z - 0.625, hp.x + 0.625, hp.y + 0.75, hp.z + 0.625, 'heist-hatch');
-    AF.addInteract({ x: hp.x, y: hp.y + 1, z: hp.z, r: 1.9, label: 'Climb down the service hatch', prio: 2, can: () => AF.mode === 'walk' && H.on && H.i >= IDX.keys && H.i <= IDX.cash && Math.abs(AF.player.y - hp.y) < 2.5,
-      act: () => { say('latch'); const s = spotFor(P.drop); AF.player.teleport(s.x, s.y, s.z, s.yaw); } });
-    // the service ladder on the podium's Park Row face: nobody is stranded in the street after a bad jump
-    const lx = 49.25, lz = -147.2, top = free(lx - 1.5, -145.4, 20, 10), lm = new AF.Model(6, 112, 1);
-    lm.box(0, 0, 0, 1, 112, 1, steel); lm.box(5, 0, 0, 6, 112, 1, steel); for (let y = 4; y < 112; y += 6) lm.box(1, y, 0, 5, y + 1, 1, steel);
-    B.ladder = mesh(lm, 1 / 8, [0.5, 0, 0], lx, 0.25, lz - 0.125);
-    P.ladder = { x: lx, y: 0.25, z: lz - 1.2 }; P.ladderTop = { x: top.x, y: top.y, z: top.z, yaw: 0 };
-    AF.addInteract({ x: lx, y: 1.3, z: lz - 0.9, r: 1.8, label: 'Climb the service ladder to the roof', prio: 2, can: () => AF.mode === 'walk' && H.on && H.i >= IDX.jump && H.i <= IDX.cash,
-      act: () => { say('click_metal'); const s = P.ladderTop; AF.player.teleport(s.x, s.y, s.z, s.yaw); } });
+  // ---------------------------------------------------------------- act VI: the betrayal fight
+  const WAVES = [4, 4, 5];
+  const fight = (restored) => {
+    H.waves = 0; H.bosses = []; H.fightT = 0;
+    const C = CB(); if (C) C.clearGoons();
+    if (!restored) radio('tony.k2');
   };
-
-  // ---------------------------------------------------------------- build: guards (before the walkers build at 670), then the cast
-  AF.onBuild('heist-guards', 600, () => {
-    const WK = AF.walkers; if (!WK || !WK.addPath || !AF.peopleKit) return;
-    const rng = AF.rng(8128), look = (col, yaw) => { const L = AF.peopleKit.makeLook('police', 'm', 'adult', rng); L.top = Object.assign({}, L.top, { col }); L.bottom = Object.assign({}, L.bottom, { col }); if (yaw != null) L.yaw = yaw; return L; };
-    const add = (name, pts, o, tag) => { try { const p = WK.addPath(name, pts, Object.assign({ count: 1, activeRadius: 95, looks: [look(tag.casino ? 0x2a2a30 : 0x1f2a44, o.yaw)] }, o)); p.enabled = !tag.bank; GD.push(Object.assign({ path: p }, tag)); } catch (e) { AF.warnOnce('heist guards', e); } };
-    add('heist guard hall', [[13.5, 0.5, -128.5], [24, 0.5, -128.5], [24, 0.5, -115.6], [13.5, 0.5, -115.6]], { speed: 1.0, mode: 'loop' }, { bank: true });
-    add('heist guard aisle', [[14, 0.5, -122], [37, 0.5, -122]], { speed: 0.9, mode: 'pingpong', dwell: [{ i: 0, t: 4 }, { i: 1, t: 5 }] }, { bank: true });
-    add('heist guard vault', [[40.2, 0.5, -125]], { speed: 0, yaw: -PI / 2 }, { bank: true });
-    // the Solace Queen's house detective walks the Gilded Room (always)
-    add('liner detective', [[-249, 1.5, 299.6], [-239.4, 1.5, 299.6], [-239.4, 1.5, 312.6], [-249, 1.5, 312.6]], { speed: 0.7, mode: 'loop', activeRadius: 110 }, { casino: true });
+  const spawnWave = () => {
+    const C = CB(); if (!C || !C.spawnGoon) return;
+    const n = Math.max(2, Math.ceil(WAVES[H.waves] / crewN())), P = AF.player, spots = A.goonSpawns.filter((s) => dist(s, P) > 14);
+    for (let k = 0; k < n; k++) { const s = spots[(k * 3 + H.waves + mySlot()) % spots.length] || A.goonSpawns[k % A.goonSpawns.length]; C.spawnGoon(s.x + (k % 2) * 1.2, s.y, s.z, { kind: 'gun', weapon: H.waves === 2 && k === 0 ? 'lmg' : k % 2 ? 'smg' : 'pistol', hp: 120 }); }
+    if (host() && H.waves === 1) {
+      const sp = (s, name, wpn, hp) => { const w = C.spawnGoon(s.x, s.y, s.z, { kind: 'gun', weapon: wpn, hp, name }); if (w) H.bosses.push(w); };
+      sp(A.goonSpawns[0], 'Kit Morrow', 'smg', 320); sp(A.goonSpawns[Math.min(3, A.goonSpawns.length - 1)], 'Tony Moretti', 'smg', 340);
+      radio('kit.boss');
+    }
+    if (host() && H.waves === 2) { const s = A.silasRun[0]; const w = C.spawnGoon(s[0], s[1], s[2], { kind: 'gun', weapon: 'lmg', hp: 480, name: 'Silas Crane' }); if (w) H.bosses.push(w); radio('silas.boss'); radio('vera.k4'); }
+    H.waves++;
+  };
+  const downed = (w) => !w.act || (w.agg && w.agg.st === 'down');
+  const bossMark = () => { const b = H.bosses.find((w) => !downed(w)); if (b) { SC.x = b.x; SC.y = b.y; SC.z = b.z; return SC; } return A.fight; };
+  const fightOver = () => H.waves >= WAVES.length && H.t > 8 && (!CB() || CB().goons().every(downed)) && H.bosses.every(downed);
+  const fightTick = (dt) => {
+    if (!is('fight')) return;
+    const C = CB(); if (!C) return;
+    const armed = C.has && C.has('lmg');
+    if (!armed && H.t < 25) return;            // the fight starts when someone opens the crate (or 25 s on)
+    H.fightT = (H.fightT || 0) + dt;
+    const alive = C.goons().filter((w) => !downed(w)).length;
+    if (H.waves < WAVES.length && (H.waves === 0 || (alive <= 1 && H.fightT > 4))) { H.fightT = 0; spawnWave(); }
+    for (const b of H.bosses) if (!b.said && downed(b)) { b.said = true; const id = /Kit/.test(b.agg && b.agg.name || '') ? 'kit.down' : /Tony/.test(b.agg && b.agg.name || '') ? 'tony.down' : 'silas.down'; radio(id, true); }
+  };
+  // ---------------------------------------------------------------- build: Vera, interacts, the places only the story needs
+  const veraBlip = () => { if (!A.vera) return; if (H.on) MI.unblip('heist'); else MI.blip('heist', { x: A.vera.x, y: A.vera.y, z: A.vera.z, kind: 'heist', label: 'Heist \u00b7 Vera' }); };
+  const walkOk = () => AF.mode === 'walk';
+  const follow = (it, getA) => { it._follow = getA; return it; };
+  const FOLLOW = [];
+  AF.onBuild('heist', 950, () => {
+    const NP = AF.npc; if (!NP || !HS || !HS.ready) return;
+    H.vera = NP.spawn({ id: 'heist-vera', name: 'Vera Lark', role: 'Planner \u00b7 The Harbour Trust Job', look: LOOKS.vera, x: A.vera.x, y: A.vera.y, z: A.vera.z, yaw: A.veraYaw, greet: ['Psst. Got a minute?', 'Looking for work? Bring a friend.'], lines: [['Walk with me a minute.']] });
+    const vi = H.vera.interact; vi.label = 'Talk to Vera Lark \u00b7 The Harbour Trust Job (co-op)'; vi.prio = 1.2; vi.act = vera;
+    A.planes = (AF.planes.list || []).filter((p) => p.home && p.home.x < -400);
+    const pl0 = A.planes[0]; A.plane = pl0 ? { x: pl0.home.x, y: AF.W.groundY(pl0.home.x, pl0.home.z), z: pl0.home.z } : { x: -520, y: 0.5, z: 80 };
+    A.carSpot = kerbAt(30, -98); if (A.carSpot) A.car = { x: A.carSpot.x, y: A.carSpot.y, z: A.carSpot.z };
+    const LS = (LN() && LN().spots) || {};
+    A.c5 = LS.tender ? { x: LS.tender.x, y: LS.tender.y, z: LS.tender.z, yaw: PI } : Object.assign(free(-230, 262, 4, 8), { yaw: PI });
+    const add = (o) => AF.addInteract(Object.assign({ prio: 2 }, o));
+    // act I
+    add({ x: A.rail.x, y: A.rail.y + 1, z: A.rail.z, r: 1.7, label: 'Take two pilot uniforms off the rail', can: () => walkOk() && is('uniform') && !H.got.uniform, act: () => { sfx('cloth'); setGot('uniform'); radio('vera.shop2'); } });
+    FOLLOW.push(follow(add({ x: 0, y: -999, z: 0, r: 2.2, label: 'Chat with the clerk (keeps her busy)', prio: 2.2, can: () => walkOk() && is('uniform') && !H.got.uniform && !(clerkA() && clerkA().rxOn && clerkA().rx.hold > 0), act: () => { chatClerk(null); send({ op: 'chat' }); } }), clerkA));
+    add({ x: A.ezra.x, y: A.ezra.y + 1, z: A.ezra.z, r: 2.4, label: 'Get your pilot papers from Ezra', prio: 2.4, can: () => walkOk() && is('forger') && !H.got.papers && !H.busy, act: ezraPapers });
+    add({ x: A.gate.x, y: A.gate.y + 1, z: A.gate.z, r: 2.6, label: 'Show your papers at the crew gate', prio: 2.4, can: () => walkOk() && is('gate') && !H.got.cleared, act: showPapers });
+    // act II
+    add({ x: A.cache.x, y: A.cache.y + 1, z: A.cache.z, r: 2.0, label: 'Pick the cache\u2019s padlock', can: () => walkOk() && is('cache') && !H.got.cache && !H.busy, act: pickCache });
+    // act III
+    FOLLOW.push(follow(add({ x: 0, y: -999, z: 0, r: 1.8, label: 'Take the waiter\u2019s uniform', can: () => walkOk() && is('uniforms') && HS.waiterG && HS.waiterG.down && !H.took.waiter && !myStingRole(), act: () => { H.took.waiter = true; send({ op: 'took', k: 'waiter' }); dress('waiter'); sfx('cloth'); } }), () => HS.waiterG && HS.waiterG.a));
+    FOLLOW.push(follow(add({ x: 0, y: -999, z: 0, r: 1.8, label: 'Take the dealer\u2019s uniform', can: () => walkOk() && is('uniforms') && HS.dealerG && HS.dealerG.down && !H.took.dealer && !myStingRole(), act: () => { H.took.dealer = true; send({ op: 'took', k: 'dealer' }); dress('dealer'); sfx('cloth'); } }), () => HS.dealerG && HS.dealerG.a));
+    add({ x: A.dealer.x, y: A.dealer.y + 1, z: A.dealer.z, r: 2.0, label: 'Take over Prescott\u2019s table', prio: 2.5, can: () => walkOk() && is('sting') && myStingRole() === 'dealer' && !H.dealing, act: takeTable });
+    add({ x: A.salonBar.x, y: A.salonBar.y + 1, z: A.salonBar.z, r: 2.0, label: 'Pick up a drink tray', can: () => walkOk() && is('sting') && myStingRole() === 'waiter' && !H.tray, act: () => { H.tray = true; sfx('glass'); } });
+    if (HS.npc.prescott) { const pi = HS.npc.prescott.interact; pi.r = 2.2; pi.prio = 2.6; const t0 = pi.act; pi.act = () => { if (is('sting') && myStingRole() === 'waiter' && H.tray) serve(); else t0(); }; }
+    if (HS.npc.silas) { const si = HS.npc.silas.interact; const t0 = si.act; si.act = () => { if (!is('silas')) t0(); }; }
+    // act IV
+    add({ x: A.locker.x, y: A.locker.y + 1, z: A.locker.z, r: 1.8, label: 'Borrow a keeper\u2019s uniform', can: () => walkOk() && is('night') && myRole() === 'hack' && !H.got.keeper, act: () => { sfx('cloth'); dress('keeper'); setGot('keeper'); } });
+    add({ x: A.server.x, y: A.server.y + 1, z: A.server.z, r: 2.0, label: 'Jack into the Kestrel terminal', prio: 2.6, can: () => walkOk() && is('night') && myRole() === 'hack' && !H.busy && (!H.got.hacked || crewN() > 1), act: hackTerminal });
+    add({ x: HB.spots.ladder.x, y: 1.3, z: HB.spots.ladder.z, r: 1.6, label: 'Climb the service ladder to the roof', can: () => walkOk() && H.on && (is('night') || is('split')), act: climbLadder });
+    add({ x: HB.spots.bulkhead.x, y: HB.spots.bulkhead.y + 1.2, z: HB.spots.bulkhead.z, r: 1.6, label: 'Roof door keypad', can: () => walkOk() && is('night') && !H.got.hatch, act: keypad });
+    HB.spots.keys.forEach((k, i) => add({ x: k.x, y: 1.5, z: k.z, r: 1.5, label: 'Turn the ' + KEYN[i] + ' vault key', can: () => walkOk() && is('night') && H.tr.n === 3 && !(H.grip[i] > 0), act: () => grip(i) }));
+    add({ x: HB.spots.cage.x, y: 1.3, z: HB.spots.cage.z, r: 1.3, label: 'Set up the drill on the cage lock', can: () => walkOk() && is('night') && H.tr.n === 5 && !H.drilling && !H.got.cage, act: drill });
+    HB.spots.bags.forEach((b, k) => add({ x: b.x, y: 1.0, z: b.z, r: 1.2, label: 'Grab the cash bag', can: () => walkOk() && is('night') && H.tr.n === 6 && !H.bags[k], act: () => bag(k) }));
+    // act VI
+    add({ x: A.crate.x, y: A.crate.y + 1, z: A.crate.z, r: 2.0, label: 'Take the LMG from Silas\u2019s crate', prio: 2.6, can: () => walkOk() && is('fight') && !(CB() && CB().has && CB().has('lmg')), act: () => { const C = CB(); if (C && C.lend) C.lend('lmg', 300); sfx('gun_reload'); note('Light machine gun \u2014 300 rounds. Give them hell.', 'ok'); } });
+    // zone rules: disguises, alarms
+    const z = (id) => S && S.zones.get(id);
+    if (z('shop')) { z('shop').disguise = () => false; }
+    if (z('queen')) { const q = z('queen'); const STAFF = new Set(['crew', 'pantry', 'crewLounge', 'stairs', 'salon', 'vestibule', 'office', 'vault', 'cage']);
+      q.disguise = (slot) => { if (slot === mySlot() && H.lifting) return false; if (wears(slot) === 'waiter' || wears(slot) === 'dealer') return true; const p = slot === mySlot() ? AF.player : AF.coop && AF.coop.players.get(slot); return !!p && !!LN() && !!LN().room && !STAFF.has(LN().room(p.x, p.y, p.z)); }; q.onAlarm = () => fail('Ship\u2019s security caught you.'); }
+    if (z('zoo')) { const q = z('zoo'); q.disguise = (slot) => wears(slot) === 'keeper'; q.onAlarm = () => fail('The night watchman raised the alarm.'); }
+    if (z('tunnel')) z('tunnel').onAlarm = () => { radio('vera.spotted', true); };
+    if (z('bank')) z('bank').onAlarm = (why) => { if (!H.bags.every(Boolean)) radio(/Gunfire|loud/i.test(why || '') ? 'vera.loud' : 'vera.spotted', true); };
+    veraBlip();
   });
-  let chatIt = null;
-  AF.onBuild('heist', 895, () => {
-    const NP = AF.npc; if (!NP || !LN || !LN.ready) return;
-    // Vera outside the Blue Heron, by the club door, facing the street (the club itself is packed)
-    const bh = AF.buildings.find((b) => b.id === 'blue-heron'), d = bh && bh.doors[0];
-    const vx = d ? d.x - Math.sin(d.yaw) * 1.6 : -20, vz = d ? d.z - Math.cos(d.yaw) * 1.6 : 100, vp = free(vx, vz, (d ? d.y : 0.5) + 2, 4), vyaw = d ? d.yaw + PI : 0;
-    B.vera = NP.spawn({ id: 'heist-vera', name: 'Vera Lark', role: 'Planner \u00b7 The Harbour Trust Job', look: LOOKS.vera, x: vp.x, y: vp.y, z: vp.z, yaw: vyaw, greet: ['Psst. Got a minute?', 'Looking for work? Bring a friend.'], lines: [LINES.pitch] });
-    P.vera = vp; P.veraYaw = vyaw;
-    const c0 = free(vp.x + Math.sin(vyaw) * 2.2, vp.z + Math.cos(vyaw) * 2.2, vp.y + 2, 4); P.c0 = { x: c0.x, y: c0.y, z: c0.z, yaw: vyaw + PI };
-    const vi = B.vera.interact; vi.label = 'Talk to Vera Lark \u00b7 The Harbour Trust Job (co-op)'; vi.prio = 1.2; vi.act = vera;
-    // Kit at Hotel Serena (hidden until he is needed)
-    P.kit = free(-149, 646, 12, 24); P.kitYaw = PI;
-    B.kit = NP.spawn({ id: 'heist-kit', name: 'Kit Morrow', role: 'Harbour Trust clerk \u00b7 on holiday', look: LOOKS.kit, x: P.kit.x, y: P.kit.y, z: P.kit.z, yaw: PI, greet: ['Over here. Quietly.'], lines: [LINES.kit] });
-    B.kit.interact.act = () => { if (is('kit')) H.flag.kit = true; };
-    const km = free(P.kit.x + Math.sin(PI) * 2.2, P.kit.z + Math.cos(PI) * 2.2, P.kit.y + 2, 4); P.kitMeet = { x: km.x, y: km.y, z: km.z, yaw: 0 };
-    showKit(false);
-    // Silas in the purser's cage (facing its staff door), Prescott at the head of the Gilded Room's second baccarat table
-    P.silas = { x: -253.5, y: 1.5, z: 306 }; P.silasYaw = 0;
-    B.silas = NP.spawn({ id: 'heist-silas', name: 'Silas Crane', role: 'Owner \u00b7 the Grand Casino', look: LOOKS.silas, x: P.silas.x, y: P.silas.y, z: P.silas.z, yaw: 0, greet: ['The house always wins, friend.'], lines: [['The Queen\u2019s tables are honest. Mostly.', 'If you ever need something kept safe, come and see me.']] });
-    B.silas.interact.act = () => { if (is('silas')) H.flag.silas = true; else AF.npc.talk(B.silas); };
-    P.silasMeet = { x: P.silas.x, y: P.silas.y, z: P.silas.z + 2.2, yaw: PI };
-    P.prescott = { x: -246.3, y: 1.5, z: 308.8 };
-    B.prescott = NP.spawn({ id: 'heist-prescott', name: 'Mr Prescott', role: 'Manager \u00b7 the Harbour Trust', look: LOOKS.prescott, x: P.prescott.x, y: P.prescott.y, z: P.prescott.z, yaw: PI / 2, greet: ['Banco!'], lines: [['Eighteen inches of steel, my vault. Safest place on the coast.', 'Now if you\u2019ll excuse me \u2014 the shoe is hot tonight.']] });
-    B.prescott.pose = 'still';
-    const pi = B.prescott.interact; pi.act = () => { if (is('lift')) lift(); else AF.npc.talk(B.prescott); }; pi.r = 2.2;
-    // the house detective: talk to him to hold his attention (the interact follows him round the room)
-    chatIt = AF.addInteract({ x: 0, y: -999, z: 0, r: 2.2, label: 'Talk to the house detective (distract him)', prio: 2.2, can: () => AF.mode === 'walk' && is('lift') && H.chat <= 0, act: distract });
-    // the cloakroom, the places, the checkpoints
-    AF.addInteract({ x: -235.5, y: 2.5, z: 300.4, r: 2.2, label: 'Cloakroom \u00b7 evening wear', prio: 2, can: () => AF.mode === 'walk' && is('dress'), act: () => { say('cloth'); note('A dinner jacket for the gentlemen, gowns for the ladies \u2014 compliments of Vera. The whole crew is dressed.', 'ok'); H.flag.dress = true; } });
-    P.cloak = { x: -235.5, y: 1.5, z: 300.4 };
-    P.planes = (AF.planes.list || []).filter((p) => p.home && p.home.x < -400);
-    const pl0 = P.planes[0]; P.plane = pl0 ? { x: pl0.home.x, y: AF.W.groundY(pl0.home.x, pl0.home.z), z: pl0.home.z } : { x: -520, y: 0.5, z: 80 };
-    // the Westgate checkpoint: on the apron in front of the first plane's nose, facing it
-    const py = pl0 ? pl0.home.yaw : PI; P.c3 = free(P.plane.x + Math.sin(py) * 9, P.plane.z + Math.cos(py) * 9, 12, 20); P.c3.yaw = py + PI;
-    const I = AF.PLAN.world.island, strip = I && I.airstrip;
-    P.strip = strip ? { x: (strip.x0 + strip.x1) / 2, y: AF.W.groundY((strip.x0 + strip.x1) / 2, strip.z), z: strip.z } : { x: -70, y: 2, z: 560 };
-    P.c1 = free(-150, strip ? strip.z + 14 : 575, 14, 24); P.c1.yaw = 0;
-    P.pontoon = LN.spots.pontoon; P.c2 = { x: LN.spots.pontoon.x, y: LN.spots.pontoon.y, z: LN.spots.pontoon.z, yaw: PI };
-    P.carSpot = kerbAt(30, -98); if (P.carSpot) { P.car = { x: P.carSpot.x, y: P.carSpot.y, z: P.carSpot.z }; P.c5 = free(P.carSpot.x + P.carSpot.nx * 2.6, P.carSpot.z + P.carSpot.nz * 2.6, P.carSpot.y + 1.2, 3); P.c5.yaw = P.carSpot.yaw; }
-    else P.c5 = free(30, -100, 4, 8);
-    // Corsair Key: the strip, the stash outside the hangar, Vera and Silas waiting (hidden until the cash arrives)
-    const K = AF.PLAN.world.key, KS = AF.key && AF.key.spots;
-    P.keyStrip = K ? { x: (K.airstrip.x0 + K.airstrip.x1) / 2, y: K.airstrip.y, z: K.airstrip.z } : { x: 560, y: 2, z: 676 };
-    P.stash = KS && KS.stash ? KS.stash : { x: 606, y: 2, z: 683 };
-    P.c6 = KS && KS.land ? KS.land : { x: P.keyStrip.x, y: P.keyStrip.y, z: P.keyStrip.z + 14, yaw: PI / 2 };
-    const sv = free(P.stash.x - 1.3, P.stash.z + 0.8, P.stash.y + 3, 6), ss = free(P.stash.x + 1.3, P.stash.z + 0.8, P.stash.y + 3, 6);
-    B.vera2 = NP.spawn({ id: 'heist-vera2', name: 'Vera Lark', role: 'Planner', look: LOOKS.vera, x: sv.x, y: sv.y, z: sv.z, yaw: PI, greet: ['There they are.'], lines: [LINES.again] });
-    B.silas2 = NP.spawn({ id: 'heist-silas2', name: 'Silas Crane', role: 'Corsair Key', look: LOOKS.silas, x: ss.x, y: ss.y, z: ss.z, yaw: PI, greet: ['Welcome to my island.'], lines: [['Nobody asks questions on Corsair Key.', 'Borrow the Cub by the hangar whenever you like.']] });
-    const fm = free(P.stash.x, P.stash.z - 2.6, P.stash.y + 3, 6); P.finaleMeet = { x: fm.x, y: fm.y, z: fm.z, yaw: 0 };
-    showFinale(false);
-    props(); veraBlip();
+  // the shop zone (the clerk is a path walker from 81-heist-sets): public floor = fine, behind the counter = trespassing
+  AF.onBuild('heist-shop-zone', 945, () => {
+    if (!S || !HS || !HS.ready || !HS.walkers.clerk) return;
+    const b = A.shopBox, zz = S.define('shop', { box: b, mode: 'fail', voice: 'mabel', reflexS: 2.2, radius: 60 });
+    const g = S.guard('shop', { path: HS.walkers.clerk, voice: 'mabel', name: 'Clerk', range: 11, armed: false });
+    const counterX = b[0] + 1 + 9.0;
+    zz.disguise = (slot) => { const p = slot === mySlot() ? AF.player : AF.coop && AF.coop.players.get(slot); return !!p && p.x < counterX; };
+    zz.onAlarm = () => { speak('mabel.spot', g.a); fail('The clerk caught you behind the counter.'); };
   });
 
-  // ---------------------------------------------------------------- Vera: the offer (a crew of two), the menu mid-job
+  // ---------------------------------------------------------------- Vera: the offer, the menu mid-job, the pause-menu buttons
   let sheetOpen = false;
-  const vera = () => {
-    const n = B.vera;
+  function vera() {
     if (H.on) { menu(); return; }
-    talk(n, H.runs ? LINES.again : [LINES.pitch[0], 'There\u2019s a job. The biggest this town has ever seen. But it needs a crew \u2014 two of you, at least.'], offer);
-  };
+    const L = VO(H.runs ? 'vera.a1' : 'vera.offer');
+    if (AF.audio && AF.audio.voice) AF.audio.voice(H.runs ? 'vera.a1' : 'vera.offer', { x: A.vera.x, y: A.vera.y + 1.6, z: A.vera.z });
+    AF.emit('dialogue', { name: 'Vera Lark', role: 'Planner', lines: [L ? L[2] : 'There\u2019s a job.'], look: LOOKS.vera });
+    H.after = offer; H.afterT = 0.3;
+  }
   const copyInvite = () => { const url = N.inviteUrl(); try { navigator.clipboard.writeText(url).then(() => note('Invite link copied \u2014 send it to your crew.', 'ok'), () => note('Invite link: ' + url, 'info')); } catch (e) { note('Invite link: ' + url, 'info'); } };
   const hostCrew = () => {
     if (!N || !N.host) return;
@@ -588,46 +793,53 @@ try {
   };
   const offer = () => {
     sheetOpen = true;
-    AF.shop.open({ title: 'The Harbour Trust Job', sub: 'Co-op heist \u00b7 a crew of 2\u20134 \u00b7 ' + AF.cash(H.pay) + ' each', onClose: () => { sheetOpen = false; }, items: () => {
+    AF.shop.open({ title: 'The Harbour Trust Job', sub: 'Co-op heist \u00b7 a crew of 2\u20134 \u00b7 ' + AF.cash(H.pay) + ' each \u00b7 about an hour', onClose: () => { sheetOpen = false; }, items: () => {
       const n = crewN();
       if (n >= NEED || H.solo) return [
-        { name: H.runs ? 'Pull it again' : 'Take the job', desc: 'Starts for the whole crew (' + n + (n === 1 ? ' player' : ' players') + ') \u2014 plane, island, casino, vault, getaway', tag: 'Go', act: () => { AF.shop.close(); start(); } },
+        { name: H.runs ? 'Pull it again' : 'Take the job', desc: 'Starts for the whole crew (' + n + (n === 1 ? ' player' : ' players') + ') \u2014 papers, the island, the Queen, the bank, the getaway', tag: 'Go', act: () => { AF.shop.close(); start(); } },
         { name: 'Not tonight', desc: 'She\u2019ll be here', tag: ' ', act: () => AF.shop.close() },
       ];
       return [
         online() ? { name: 'Waiting for your crew', desc: 'Share code ' + (N.code || '') + ' \u2014 friends pick Join co-op on the title screen', tag: 'Copy link', act: copyInvite }
           : { name: 'Host a crew', desc: 'Opens a co-op lobby; share the code with a friend', tag: 'Host', act: hostCrew },
-        { name: 'Not tonight', desc: 'The job needs two', tag: ' ', act: () => AF.shop.close() },
+        { name: 'Go alone', desc: 'Every two-person moment has a solo way through \u2014 harder', tag: 'Solo', act: () => { H.solo = true; AF.shop.close(); start(); } },
+        { name: 'Not tonight', desc: 'The job wants two', tag: ' ', act: () => AF.shop.close() },
       ];
     } });
   };
-  const menu = () => AF.shop.open({ title: 'The Harbour Trust Job', sub: ST[H.i] ? lineOf(ST[H.i]).replace(/[{}]/g, '') : '', items: () => [
+  const menu = () => AF.shop.open({ title: 'The Harbour Trust Job', sub: ST[H.i] ? (ST[H.i].id === 'night' ? trackLine() : lineOf(ST[H.i])).replace(/[{}]/g, '') : '', items: () => [
     { name: 'Keep going', desc: 'Vera taps her watch', tag: ' ', act: () => AF.shop.close() },
     { name: 'Retry from the last checkpoint', desc: CPS[H.cp].label, tag: ' ', act: () => { AF.shop.close(); retry(); } },
     { name: 'Call off the job', desc: 'Everyone goes home empty-handed', tag: ' ', act: () => { AF.shop.close(); H.quit(); } },
   ] });
-  // the pause menu gets the same two buttons while a job is on (nobody has to walk back to Vera)
   const MN = document.createElement('div'); MN.className = 'coop-m heist-m'; MN.style.display = 'none';
   MN.innerHTML = '<div class="row"><label>Heist</label><div class="acts"><button class="btn" data-h="retry">Retry checkpoint</button><button class="btn" data-h="quit">Call it off</button></div></div>';
   { const menuEl = document.querySelector('#m-menu .panel'), stack = menuEl && menuEl.querySelector('.stack'); if (stack) menuEl.insertBefore(MN, stack); }
   MN.addEventListener('click', (e) => { e.stopPropagation(); const b = e.target.closest('[data-h]'); if (!b) return; if (UI.resume) UI.resume(); if (b.dataset.h === 'retry') retry(); else H.quit(); });
+  // the Kestrel tablet button (solo inside man; also T)
+  const TB = document.createElement('button'); TB.id = 'heist-tablet'; TB.textContent = '\u25a3 TABLET (T)';
+  TB.style.cssText = 'position:fixed;left:50%;top:64px;transform:translateX(-50%);z-index:6;display:none;font:700 12px/1 system-ui,sans-serif;letter-spacing:.1em;color:#cfe9d4;background:rgba(8,30,18,.78);border:1px solid rgba(160,230,180,.5);border-radius:4px;padding:8px 14px;cursor:pointer';
+  TB.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (tabletOk()) openCams(true); });
+  document.body.appendChild(TB);
 
   // ---------------------------------------------------------------- the bag lends the crew's gear while the job is on
   if (AF.inv) AF.inv.extra.push(() => {
     if (!H.on) return null;
-    const i = H.i, out = [];
-    if (i > IDX.kitcut && i <= IDX.keys) out.push({ name: 'Kit\u2019s vault key', desc: 'Turns the north lock', icon: 'key', tag: 'Key' });
-    if (i > IDX.lift && i <= IDX.keys) out.push({ name: 'Prescott\u2019s vault key', desc: 'Turns the south lock \u2014 lifted at baccarat', icon: 'key', tag: 'Key' });
-    if (i > IDX.dress) out.push({ name: 'Evening wear', desc: 'Compliments of Vera', icon: 'wear', tag: 'Worn' });
-    if (i >= IDX.jump && i <= IDX.hatch) out.push({ name: 'Parachute', desc: 'F bails out of a plane, Space opens it', icon: 'chute', tag: 'Gear' });
-    if (i > IDX.silascut && i <= IDX.charge) out.push({ name: 'Thermal charge', desc: 'Five-second fuse', icon: 'charge', tag: 'Gear' });
-    const n = H.bags.filter(Boolean).length; if (n) out.push({ name: 'Cash bags', desc: 'The Harbour Trust\u2019s money', icon: 'cash', tag: 'Loot', n });
+    const g = H.got, out = [];
+    if (g.papers && H.i < IDX.kit) out.push({ name: 'Pilot\u2019s licence', desc: 'Ezra\u2019s finest forgery', icon: 'card', tag: 'Papers' });
+    if (g.kitkey && !g.gate) out.push({ name: 'Kit\u2019s vault key', desc: 'Turns the north lock', icon: 'key', tag: 'Key' });
+    if (g.key && !g.gate) out.push({ name: 'Prescott\u2019s vault key', desc: 'Turns the south lock', icon: 'key', tag: 'Key' });
+    if (g.cache && !g.cage) out.push({ name: 'Diamond-core drill', desc: 'For the deposit cage', icon: 'drill', tag: 'Gear' });
+    if (g.hacked && crewN() < 2 && !g.cage) out.push({ name: 'Kestrel tablet', desc: 'T \u2014 the bank\u2019s cameras, lights and locks', icon: 'card', tag: 'Gear' });
+    if (H.wear) out.push({ name: { pilot: 'Pilot\u2019s uniform', waiter: 'Waiter\u2019s jacket', dealer: 'Dealer\u2019s vest', keeper: 'Keeper\u2019s overalls', night: 'Night clothes' }[H.wear] || 'Uniform', desc: 'Borrowed', icon: 'wear', tag: 'Worn' });
+    const n = H.bags.filter(Boolean).length; if (n && H.i >= IDX.night) out.push({ name: 'Cash bags', desc: 'The Harbour Trust\u2019s money', icon: 'cash', tag: 'Loot', n });
     return out;
   });
-
   // ---------------------------------------------------------------- co-op
-  const OPS = new Set(['go', 'st', 'done', 'fail', 'end', 'quit', 'retry', 'rs', 'grip', 'chat', 'plant', 'bag', 'ko']);
+  const OPS = new Set(['go', 'st', 'done', 'fail', 'end', 'quit', 'retry', 'rs', 'got', 'roles', 'role', 'tr', 'tdone', 'wear', 'took', 'anger', 'strike', 'table', 'chat', 'lock', 'laser', 'grip', 'bag', 'drill']);
   const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+  const GOT = new Set(['uniform', 'papers', 'cleared', 'kitkey', 'cache', 'key', 'keeper', 'hacked', 'hatch', 'gate', 'cage']);
+  const adoptGot = (g) => { if (!Array.isArray(g)) return; for (const k of g) if (GOT.has(k) && !H.got[k]) setGot(k, true); };
   if (N && N.on) {
     N.on('heist', (m, from) => {
       if (!m || typeof m.op !== 'string' || !OPS.has(m.op)) return;
@@ -636,107 +848,147 @@ try {
         case 'go': if (host() && !H.on) start(); break;
         case 'st':
           if (!fromHost || host() || !int(m.i, 0, ST.length - 1) || !int(m.cp, 0, CPS.length - 1)) break;
-          if (!H.on) { H.on = true; H.failing = false; resetWorld(m.i); veraBlip(); say('jg_start'); }
-          H.cp = m.cp; if (m.i !== H.i) enter(m.i, m.r === 1); break;
-        case 'done': if (host() && int(m.i, 0, ST.length - 1)) advance(m.i); break;
+          if (!H.on) { H.on = true; H.failing = false; H.got = {}; H.roles = []; H.bags = [false, false, false, false]; resetWorld(m.i); veraBlip(); sfx('jg_start'); }
+          H.cp = m.cp; if (int(m.h, 0, 9)) H.tr.h = m.h; if (int(m.n, 0, 9)) H.tr.n = m.n;
+          adoptGot(m.g); if (m.i !== H.i) enter(m.i, m.r === 1); break;
+        case 'done': if (host() && int(m.i, 0, ST.length - 1) && !ST[m.i].hostOnly) advance(m.i); break;
         case 'fail':
           if (host()) { if (H.on && !H.failing) { doFail(why || 'The crew was made.'); send({ op: 'fail', cp: H.cp, why }); } }
           else if (fromHost && H.on && int(m.cp, 0, CPS.length - 1)) { H.cp = m.cp; doFail(why); }
           break;
         case 'end': if (fromHost && !host()) end(m.ok === 1); break;
         case 'quit': if (host() && H.on) finish(false); break;
-        case 'retry': if (host() && H.on && !H.failing) { restore(H.cp); send({ op: 'rs', cp: H.cp }); } break;
-        case 'rs': if (fromHost && !host() && H.on && int(m.cp, 0, CPS.length - 1)) restore(m.cp); break;
+        case 'retry': if (host() && H.on && !H.failing) { restore(H.cp); send({ op: 'rs', cp: H.cp, night: H.nightCp ? 1 : 0 }); } break;
+        case 'rs': if (fromHost && !host() && H.on && int(m.cp, 0, CPS.length - 1)) { H.nightCp = m.night === 1; restore(m.cp); } break;
+        case 'got': if (H.on && GOT.has(m.k)) setGot(m.k, true); break;
+        case 'roles': if (fromHost && Array.isArray(m.r) && m.r.length <= 4 && m.r.every((x) => x == null || ['hack', 'infil', 'solo'].includes(x))) { H.roles = m.r.slice(); if (!host()) rolesSet(); if (is('night') || is('split')) { outfit(); scene('night'); } } break;
+        case 'role': if (host() && ['hack', 'infil'].includes(m.r)) assignRole(from, m.r); break;
+        case 'tr': if (fromHost && int(m.h, 0, 9) && int(m.n, 0, 9)) { H.tr.h = m.h; H.tr.n = m.n; adoptGot(m.g); if (H.got.hacked) H.nightCp = true; } break;
+        case 'tdone': if (host() && (m.t === 'h' || m.t === 'n') && int(m.k, 0, 9)) trDone(m.t, m.k); break;
+        case 'wear': if (typeof m.k === 'string' && m.k.length < 10) H.wears[from] = m.k || null; break;
+        case 'took': if (m.k === 'waiter' || m.k === 'dealer') H.took[m.k] = true; break;
+        case 'anger': if (is('sting')) anger(AF.clamp(+m.s || 5, 1, 9), true); break;
+        case 'strike': if (is('sting')) strike(true); break;
+        case 'table': HS.showNpc('celeste', false); break;
+        case 'chat': if (is('uniform')) chatClerk(from); break;
+        case 'lock': if (is('night')) lockOn(true); break;
+        case 'laser': if (is('night')) cutLasers(true); break;
         case 'grip': if (int(m.k, 0, 1)) grip(m.k, true); break;
-        case 'chat': if (is('lift')) chat(from); break;
-        case 'plant': plant(true); break;
-        case 'bag': if (int(m.k, 0, 3) && is('cash')) bag(m.k); break;
-        case 'ko': if (int(m.g, 0, GD.length - 1)) ko(m.g); break;
+        case 'bag': if (int(m.k, 0, 3) && (is('night') || is('escape'))) bag(m.k, true); break;
+        case 'drill': H.drillR = m.on === 1; break;
       }
     });
-    N.on('join', (p) => { if (host() && H.on && p && Number.isInteger(p.slot)) send({ op: 'st', i: H.i, cp: H.cp }, p.slot); if (sheetOpen) AF.shop.refresh(); });
-    N.on('left', () => { if (sheetOpen) AF.shop.refresh(); if (H.on && crewN() < NEED) note('Your partner left the crew. You can still finish \u2014 every step has a way through alone.', 'warn'); });
-    N.on('end', () => { if (sheetOpen) AF.shop.refresh(); if (H.on) note('The crew split up. You\u2019re on your own now \u2014 finish the job, or call it off from the pause menu.', 'warn'); });
+    N.on('join', (p) => { if (host() && H.on && p && Number.isInteger(p.slot)) { send({ op: 'st', i: H.i, cp: H.cp, g: gotList(), h: H.tr.h, n: H.tr.n }, p.slot); if (H.roles.length) send({ op: 'roles', r: H.roles }, p.slot); } if (sheetOpen) AF.shop.refresh(); });
+    N.on('left', () => { if (sheetOpen) AF.shop.refresh(); if (H.on && crewN() < NEED) { note('Your partner left the crew. You can still finish \u2014 every step has a way through alone.', 'warn'); if (H.roles.length && host()) { H.roles = ['solo']; send({ op: 'roles', r: H.roles }); } } });
+    N.on('end', () => { if (sheetOpen) AF.shop.refresh(); if (H.on) { note('The crew split up. You\u2019re on your own now \u2014 finish the job, or call it off from the pause menu.', 'warn'); if (H.roles.length) H.roles = ['solo']; } });
   }
   AF.on('died', () => { if (H.on && !H.failing) fail((AF.friends.current ? AF.friends.current.name : 'Someone') + ' was knocked out.'); });
   AF.respawnAt = () => { if (!H.on) return null; const at = spotFor(CPS[H.cp].at()); return at ? { label: CPS[H.cp].label, x: at.x, y: at.y, z: at.z, yaw: at.yaw || 0 } : null; };
-  if (AF.combat) AF.combat.onWalkerHit = onWalkerHit;
-  // the casino closes its tables to anyone mid-lift
-  if (AF.casino) AF.casino.can = () => !H.lifting;
-  Object.assign(H.dbg, { grip, plant, takeBag, distract, lift });
+  if (AF.combat) AF.combat.onWalkerHit = (a, kind, fx, fz, info) => (S && H.on ? S.hit(a, kind, fx, fz, info) : false);
+  if (AF.casino) AF.casino.can = () => !H.lifting && !H.dealing;
+  // stealth events -> Vera on the radio
+  AF.on('stealth', (e) => {
+    if (!H.on || !e) return;
+    if (e.type === 'reflex') { radio('vera.reflex', true); sfx('jg_spot'); }
+    else if (e.type === 'reflexOk' || (e.type === 'ko' && Math.random() < 0.35)) radio('vera.nice');
+  });
+  Object.assign(H.dbg, { grip, bag, setGot, lockOn, cutLasers, serve, takeTable, anger, openCams, myRole, scene, fail,
+    setRoles: (r) => { if (!host()) return; H.roles = r.slice(); send({ op: 'roles', r: H.roles }); rolesSet(); } });
+
+  // ---------------------------------------------------------------- quiet city while the job is on (fewer ambient draws + ticks)
+  const quiet = (on) => { AF.quiet = !!on; AF.emit('quiet', !!on); };
 
   // ---------------------------------------------------------------- tick
-  let hudT = 0;
   const bars = () => {
-    const bankWatch = stealth() && inHall(), liftWatch = H.lifting && is('lift') && H.chat <= 0;
-    MI.bar('heist-sus', bankWatch || liftWatch ? { label: H.sus > 0.66 ? 'They\u2019re onto you' : H.seen ? 'Seen' : 'Suspicion', pct: H.sus, hot: H.sus > 0.66 } : null);
-    MI.bar('heist-chat', is('lift') && H.chat > 0 ? { label: 'Detective busy', value: MI.time(H.chat), ok: true } : null);
-    for (let k = 0; k < 2; k++) MI.bar('heist-k' + k, is('keys') ? { label: KEYN[k] + ' key', value: H.grip[k] > 0 ? 'Held ' + Math.ceil(H.grip[k]) : 'Free', pct: H.grip[k] / GRIP, ok: H.grip[k] > 0 } : null);
-    MI.bar('heist-fuse', H.fuse > 0 ? { label: 'Charge', value: H.fuse.toFixed(1) + ' s', hot: true } : null);
+    MI.bar('heist-anger', is('sting') && H.anger > 0 ? { label: 'Prescott is ranting', value: H.anger.toFixed(1) + ' s', hot: true } : null);
+    MI.bar('heist-strikes', is('sting') && H.strikes > 0 ? { label: 'Pit boss', value: H.strikes + ' / 3', hot: H.strikes > 1 } : null);
+    MI.bar('heist-lock', is('night') && H.tr.n === 3 && H.lockT > 0 ? { label: 'Time lock open', value: MI.time(H.lockT), ok: true } : null);
+    for (let k = 0; k < 2; k++) MI.bar('heist-k' + k, is('night') && H.tr.n === 3 ? { label: KEYN[k] + ' key', value: H.grip[k] > 0 ? 'Turned ' + Math.ceil(H.grip[k]) : 'Free', pct: H.grip[k] / GRIP, ok: H.grip[k] > 0 } : null);
+    MI.bar('heist-laser', is('night') && H.tr.n === 4 && HB && HB.laserCut > 0 ? { label: 'Lasers down', value: HB.laserCut.toFixed(1) + ' s', ok: true } : null);
     const n = H.bags.filter(Boolean).length;
-    MI.bar('heist-bags', H.on && H.i >= IDX.cash && H.i <= IDX.stash ? { label: 'Cash bags', value: n + ' / 4', ok: n === 4 } : null);
+    MI.bar('heist-bags', H.on && H.i >= IDX.night && H.i <= IDX.stash && (n || H.tr.n >= 6) ? { label: 'Cash bags', value: n + ' / 4', ok: n === 4 } : null);
+    MI.bar('heist-wave', is('fight') && H.waves ? { label: 'Moretti\u2019s men', value: 'wave ' + Math.min(H.waves, WAVES.length) + ' / ' + WAVES.length, hot: true } : null);
   };
+  let natT = 0, laserT = 0, drillNT = 0, warnT = 0;
   AF.onTick('heist', 425, (dt) => {
-    syncProps();
-    if (AF.audio) AF.audio.hold('heist-alarm', 'alarm_loop', H.on && H.alarm && H.i <= IDX.car ? 1 : 0, 1, 30, 6, -125);
-    // a follow-up once a dialogue closes (Vera's offer after her pitch)
+    radioNow(); if (rqT > 0) rqT -= dt;
     if (H.after) { H.afterT -= dt; if (H.afterT <= 0 && !(UI.dialogueOpen && UI.dialogueOpen())) { const f = H.after; H.after = null; f(); } }
     const mn = H.on ? '' : 'none'; if (MN.style.display !== mn) MN.style.display = mn;
-    if (!H.on) return;
+    const tb = tabletOk() && crewN() < 2 ? '' : 'none'; if (TB.style.display !== tb) TB.style.display = tb;
+    if (AF.quiet !== H.on) quiet(H.on);
+    if (!H.on) { if (muCur) music(); return; }
     H.t += dt;
     const s = ST[H.i]; if (!s) return;
-    // the objective line + bars at 6 Hz (the markers follow by themselves)
-    if ((hudT -= dt) <= 0) { hudT = 0.16; H.hud.title = 'The Harbour Trust Job \u00b7 ' + actOf(H.i).replace(/^Act \w+ \u00b7 /, ''); H.hud.line = s.cut ? '' : lineOf(s); bars(); }
-    if (!(AF.combat && AF.combat.gallery)) AF.hud.job = s.cut ? null : H.hud;
-    if (chatIt) { const a = is('lift') && DET(); if (a) { chatIt.x = a.x; chatIt.y = a.y + 1; chatIt.z = a.z; } else chatIt.y = -999; }
+    if ((hudT -= dt) <= 0) { hudT = 0.16; H.hud.title = 'The Harbour Trust Job \u00b7 ' + actOf(H.i).replace(/^Act \w+ \u00b7 /, ''); H.hud.line = s.cut ? '' : lineOf(s); bars(); music(); }
+    if (!(AF.combat && AF.combat.gallery)) AF.hud.job = s.cut || AF.mode === 'cctv' ? null : H.hud;
+    for (const it of FOLLOW) { const a = it._follow(); if (a && (it.can ? it.can() : true)) { it.x = a.x; it.y = a.y + 1; it.z = a.z; } else it.y = -999; }
+    if (A.salonRope) A.salonRope.y1 = A.salonRope.y0 + ((is('salon') || is('sting')) && !myStingRole() ? 2.6 : 1e-6);
+    // the doorman greets staff at the salon door once
+    if ((is('salon') || is('sting')) && myStingRole() && !H.flag.doorSaid && near(A.salonDoor, 3.5, 3)) { H.flag.doorSaid = true; speak('door.in', HS.npc.door); }
     if (H.failing) return;
-    // stealth: the bank's night guards, the casino's detective while your hand is in Prescott's pocket
-    if (stealth() && inHall()) watch(dt, false); else if (H.lifting && is('lift') && H.chat <= 0) watch(dt, true); else { H.sus = Math.max(0, H.sus - dt); H.seen = false; }
-    // timers: the detective's chat, the key grips, the fuse
-    if (H.chat > 0 && (H.chat -= dt) <= 0) { H.chat = 0; if (is('lift')) note('The detective is done chatting.', 'warn'); }
-    for (let k = 0; k < 2; k++) if (H.grip[k] > 0 && (H.grip[k] -= dt) <= 0) { H.grip[k] = 0; if (is('keys')) note('The ' + KEYN[k] + ' key springs back \u2014 they have to be held together.', 'warn'); }
-    if (H.fuse > 0) { const was = H.fuse; H.fuse -= dt; if (Math.floor(was * 2) !== Math.floor(H.fuse * 2)) say('click_metal', 0.7); if (was > 1.6 && H.fuse <= 1.6) say('v_fire'); if (H.fuse <= 0) { H.fuse = 0; H.flag.charge = true; } }
-    // calls on the way: the jump, the roadblock, open water
-    if (is('jump') && !H.flag.jumpSaid && flying() && dist(me(), P.hatch) < 170) { H.flag.jumpSaid = true; radio('Vera', 'Green light! Jump, jump, jump!', 'r_jump'); if (UI.help) UI.help(AF.touch ? 'Tap OUT to bail out, then CHUTE' : '[F] bail out \u00b7 [Space] open the parachute', 7000); }
+    // timers
+    if (H.anger > 0 && (H.anger -= dt) <= 0) { H.anger = 0; const n = HS.npc.prescott; if (n) n.yaw = A.prescott.yaw || 0; }
+    if (is('sting') && !H.dealing && !H.drillR && (crewN() < 2 || !H.took.dealer)) { if ((natT += dt) > 24) { natT = 0; speak('dealer.hand', HS.npc.celeste); setTimeout(() => { if (is('sting')) anger(4.8, true); }, 1200); } } else natT = 0;
+    if (H.lockT > 0) H.lockT -= dt;
+    for (let k = 0; k < 2; k++) if (H.grip[k] > 0 && (H.grip[k] -= dt) <= 0) { H.grip[k] = 0; if (is('night') && !H.got.gate) note('The ' + KEYN[k] + ' key springs back \u2014 they have to turn together.', 'warn'); }
+    // no papers, no plane: Westgate calls the police on a crew that skips the gate
+    if (H.i > IDX.brief && H.i < IDX.plane && flying() && !H.flag.towerSaid) { H.flag.towerSaid = true; radio('tower.t3', true); const C = CB(); if (C) C.crime(120); note('No papers \u2014 Westgate called the police. Land and get cleared at the crew gate.', 'bad'); }
+    if (is('fly') && !H.flag.leftSaid && dist(me(), A.plane) > 900) { H.flag.leftSaid = true; radio('tower.t2'); }
+    if (is('fly') && !H.flag.isleSaid && dist(me(), A.strip) < 700) { H.flag.isleSaid = true; radio('vera.island'); }
+    // Act IV
+    if (is('night')) {
+      trackTick();
+      if (H.trKey !== H.tr.h + ':' + H.tr.n) { H.trKey = H.tr.h + ':' + H.tr.n; scene('night'); }
+      if (AF.input.hit('KeyT') && tabletOk() && crewN() < 2) openCams(true);
+      if (H.tr.n === 4 && HB && HB.touch() && (laserT -= dt) <= 0) { laserT = 3; sfx('ui_alert'); if (S) S.raiseAlarm('The laser grid tripped'); note('You broke a beam! The alarm\u2019s up.', 'bad'); }
+      if (laserT > 0) laserT -= dt;
+      const drilling = H.drilling || H.drillR;
+      if (AF.audio) AF.audio.hold('heist-drill', 'drill_loop', drilling ? 0.9 : 0, 1, HB.spots.cage.x + 0.6, 1.4, HB.spots.cage.z);
+      if (drilling && (drillNT -= dt) <= 0) { drillNT = 4; if (S) S.noiseAt(HB.spots.cage.x, 0.5, HB.spots.cage.z, 9, 'noise'); }
+      if (myRole() === 'hack' && H.tr.h >= 1 && H.tr.h < 3 && AF.den && AF.den.awake && AF.den.awake() && (warnT -= dt) <= 0) { warnT = 8; radio('vera.go'); }
+    }
+    if (AF.audio) AF.audio.hold('heist-alarm', 'alarm_loop', (is('night') && S && S.zone && S.zone.id === 'bank' && S.zone.alarm) || (is('escape') && myRole() !== 'hack') ? 1 : 0, 1, 30, 6, -125);
+    fightTick(dt);
     const R = H.roadblock;
     if (R && !R.blown && inCar() && dist(me(), R) < 55) {
-      R.blown = true; radio('Vera', 'Roadblock! Fire in the hole!', 'v_fire');
-      setTimeout(() => { const C = CB(); for (const c of R.cars) if (!c.dead) { AF.fx.boom(c.x, c.y + 0.5, c.z, 1); if (C) C.dmgCar(c, 999); } }, 900);
+      R.blown = true; radio('vera.g3', true);
+      setTimeout(() => { const C = CB(); for (const c of R.cars) if (!c.dead) { AF.fx.boom(c.x, c.y + 0.5, c.z, 1); if (C) C.dmgCar(c, 999); } if (AF.camfx) AF.camfx.shake(0.04, 0.8); }, 900);
     }
-    if (is('escape') && !H.flag.water && dist(me(), P.keyStrip) < 520) { H.flag.water = true; const C = CB(); if (C && C.stars) C.clearWanted('Out over open water \u2014 the police lose your trail.'); }
+    if (is('away') && !H.flag.water && dist(me(), A.keyStrip) < 2400) { H.flag.water = true; const C = CB(); if (C && C.stars) C.clearWanted('Out over open water \u2014 the police lose your trail.'); }
     if (s.cut ? cutDone() : s.done()) complete();
   });
 
   // ---------------------------------------------------------------- tests
-  AF.test('heist: a crew of two starts it, every step completes, checkpoints restore, keys hold together, guards see in a cone', () => {
-    if (!B.vera || !B.prescott || !B.silas || !B.kit || !B.vera2 || !B.silas2) return { ok: false, info: 'cast missing' };
+  AF.test('heist: solo starts, every step + both Act IV tracks complete, checkpoints restore, keys need the time lock, guards + zones exist', () => {
+    if (!H.vera || !HS || !HS.ready || !HB || !HB.ready) return { ok: false, info: 'cast/sets missing' };
     const bad = CPS.map((c, i) => { const a = c.at(); return a && [a.x, a.y, a.z].every(Number.isFinite) ? null : i; }).filter((i) => i != null);
-    const G3 = GD.find((g) => g.bank && g.path.speed === 0), a = G3 && G3.path.actors[0];
-    let cone = false;
-    if (a) { const f = { x: a.x + Math.sin(a.yaw) * 5, y: a.y, z: a.z + Math.cos(a.yaw) * 5 }, b = { x: a.x - Math.sin(a.yaw) * 5, y: a.y, z: a.z - Math.cos(a.yaw) * 5 }; cone = sees(a, f) > 0 && sees(a, b) === 0; }
-    const role = N ? N.role : 'off', m0 = AF.money.v, mode = AF.mode, p = AF.player, keep = { x: p.x, y: p.y, z: p.z, yaw: p.yaw }, hours = AF.time.hours, solo0 = H.solo;
-    let refused = false, walked = 0, checkpoint = false, keys = false, gate = false, cuts = 0, gear = 0, oneKey = true;
+    const role = N ? N.role : 'off', m0 = AF.money.v, mode = AF.mode, p = AF.player, keep = { x: p.x, y: p.y, z: p.z, yaw: p.yaw }, solo0 = H.solo;
+    let refused = false, walked = 0, cuts = 0, keysLocked = false, keysOk = false, restored = false, hackT = 0, infT = 0;
+    const nCuts = ST.filter((s) => s.cut).length;
     try {
-      H.solo = false; start(); refused = !H.on && crewN() < NEED;   // alone, Vera wants a crew
-      H.solo = true; begin(); const first = H.i === 0;
-      for (let n = 0; n < 60 && H.on; n++) {
-        if (ST[H.i].cut && cutDone()) cuts++;   // cutscenes never play in ?test: their step completes at once
-        if (H.i === IDX.keys) {
-          if (AF.inv) gear = AF.inv.extra.reduce((s, f) => s + ((f() || []).length), 0);
-          grip(0); oneKey = !ST[H.i].done(); grip(1); keys = ST[H.i].done();
-          if (!checkpoint) { restore(H.cp); checkpoint = H.i === IDX.keys && H.cp === 4 && dist(AF.player, P.drop) < 3 && H.grip[0] === 0; grip(0); grip(1); }
+      H.solo = false; start(); refused = !H.on && crewN() < NEED;
+      H.solo = true; begin();
+      for (let n = 0; n < 80 && H.on; n++) {
+        if (ST[H.i].cut && cutDone()) cuts++;
+        if (H.i === IDX.split && !H.roles.length) { H.roles = ['solo']; }
+        if (H.i === IDX.night) {
+          for (let k = 0; k < 30 && H.tr.n < INF.length; k++) {
+            if (H.tr.h < HACK.length) { if (HACK[H.tr.h].id === 'hack') setGot('hacked'); trDone('h', H.tr.h); hackT++; continue; }
+            if (INF[H.tr.n].id === 'keys') { grip(0, true); keysLocked = !(H.grip[0] > 0); lockOn(true); grip(0, true); grip(1, true); keysOk = !!H.got.gate;
+              if (!restored) { H.nightCp = true; restore(H.cp); restored = H.i === IDX.night && H.tr.n === 0 && !!H.got.hacked; H.tr.n = 3; H.grip[0] = H.grip[1] = 0; lockOn(true); grip(0, true); grip(1, true); } }
+            if (INF[H.tr.n].id === 'cash') for (let b = 0; b < 4; b++) bag(b, true);
+            trDone('n', H.tr.n); infT++;
+          }
         }
-        if (H.i === IDX.charge) gate = gateShut() && B.gateCol.y1 > B.gateCol.y0 + 1;
         walked++; advance(H.i);
       }
-      walked = first && !H.on ? walked : -walked;
     } finally {
       if (H.on) end(false, true);
-      H.solo = solo0; AF.money.add(m0 - AF.money.v); AF.setMode(mode === 'walk' ? 'walk' : 'aerial', keep); AF.time.set({ hours });
+      H.solo = solo0; AF.money.add(m0 - AF.money.v); AF.setMode(mode === 'walk' ? 'walk' : 'aerial', keep);
     }
-    const nCuts = ST.filter((s) => s.cut).length;
-    return { ok: refused && !bad.length && cone && walked === ST.length && checkpoint && keys && oneKey && gate && cuts === nCuts && gear >= 4 && GD.length >= 4 && !H.on && role === (N ? N.role : 'off'),
-      info: `refused solo ${refused}, ${ST.length} steps walked ${walked}, cutscenes ${cuts}/${nCuts}, checkpoints ${CPS.length} (bad ${bad.join(',') || 'none'}), cone ${cone}, restore ${checkpoint}, keys ${keys} (one alone ${oneKey}), gate ${gate}, gear ${gear}, guards ${GD.length}` };
+    const zones = ['shop', 'tunnel', 'queen', 'zoo', 'bank'].filter((z) => S && S.zones.get(z) && S.zones.get(z).guards.length);
+    return { ok: refused && !bad.length && walked === ST.length && cuts === nCuts && keysLocked && keysOk && restored && hackT >= 4 && infT >= INF.length && zones.length === 5 && !H.on && role === (N ? N.role : 'off'),
+      info: `refused solo ${refused}, ${ST.length} steps walked ${walked}, cutscenes ${cuts}/${nCuts}, bad checkpoints ${bad.join(',') || 'none'}, keys locked ${keysLocked} ok ${keysOk}, night restore ${restored}, tracks h${hackT} n${infT}, zones ${zones.join('/')}` };
   });
 }
 } catch (e) { AF.partError('81-heist.js', e); }

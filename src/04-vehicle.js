@@ -6,7 +6,7 @@ try {
 // - Vehicle.input(): keyboard + touch stick read once into a shared object (no per-frame allocation): thr -1..1, steer -1..1 (right +),
 //   brake, boost, exit (E/F pressed), modal (a menu is open: everything zero)
 // - Vehicle.Chase: the chase camera (rigid position, smoothed heading / height / boom, mouse orbit, pulled in front of walls); AF.view picks
-//   first person (eye = seat offset) / near / far for every camera owner (walk, chase, planes) — C cycles it
+//   first person (eye = seat offset) / near / far for every camera owner (walk, chase, planes) — V cycles it (C is crouch on foot)
 // - Vehicle.seat(v, local, o): seats the player avatar at a local offset of a vehicle (AF.PL.seat, read by 70-player)
 // - Vehicle.landing(x, z, ...): nearest dry, unblocked spot to hop off onto
 // - Vehicle.all: every vehicle, for central queries
@@ -16,7 +16,7 @@ try {
   try { const s = localStorage.getItem('portSolace.view'), v = +s; if (s != null && s !== '' && v >= 0 && v <= 2) VIEW.i = v | 0; } catch (e) { /* storage blocked */ }
   VIEW.cycle = () => { VIEW.i = (VIEW.i + 1) % 3; try { localStorage.setItem('portSolace.view', String(VIEW.i)); } catch (e) { /* storage blocked */ } AF.emit('toast', VIEW.names[VIEW.i]); };
   VIEW.fp = () => VIEW.i === 0;
-  AF.onTick('view-key', 148, () => { if (AF.input.hit('KeyC') && AF.mode !== 'photo' && !(AF.ui && AF.ui.modalOpen && AF.ui.modalOpen())) VIEW.cycle(); });
+  AF.onTick('view-key', 148, () => { if (AF.input.hit('KeyV') && AF.mode !== 'photo' && !(AF.ui && AF.ui.modalOpen && AF.ui.modalOpen())) VIEW.cycle(); });
   class Vehicle {
     constructor(o = {}) {
       this.name = o.name || 'vehicle'; this.x = o.x ?? 0; this.y = o.y ?? 0; this.z = o.z ?? 0; this.yaw = o.yaw ?? 0;

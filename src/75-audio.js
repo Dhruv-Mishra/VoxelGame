@@ -17,6 +17,7 @@ try {
   const LIB = {
     rev: [['gun_rev'], 0.9, 'sfx', 14], shotgun: [['gun_shotgun'], 1, 'sfx', 14], smg: [['gun_smg'], 0.7, 'sfx', 14], rifle: [['gun_rifle'], 1, 'sfx', 18],
     reload: [['gun_reload'], 0.55, 'sfx', 3], dry: [['gun_dry'], 0.6, 'sfx', 3], ricochet: [['ricochet'], 0.45, 'sfx', 6], bullet_hit: [['bullet_hit'], 0.5, 'sfx', 5],
+    sil: [['gun_sil'], 0.55, 'sfx', 4], lmg: [['gun_lmg'], 0.75, 'sfx', 18], hit_tick: [['hit_tick'], 0.35, 'ui', 1], hit_head: [['hit_head'], 0.4, 'ui', 1],
     punch: [['punch_0', 'punch_1', 'punch_2'], 0.85, 'sfx', 4], swing: [['swing'], 0.4, 'sfx', 3],
     grunt_m: [['grunt_m'], 0.65, 'voice', 4], grunt_f: [['grunt_f'], 0.65, 'voice', 4], scream_f: [['scream_f'], 0.55, 'voice', 8], scream_m: [['scream_m'], 0.55, 'voice', 8],
     whistle: [['whistle'], 0.5, 'sfx', 10], boom: [['boom'], 1, 'sfx', 30], boom_far: [['boom_far'], 0.9, 'sfx', 80], crash: [['crash'], 0.85, 'sfx', 10],
@@ -27,7 +28,7 @@ try {
     // loops
     fire_loop: [['fire_loop'], 0.6, 'sfx', 5, 1], siren_loop: [['siren_loop'], 0.55, 'veh', 25, 1], alarm_loop: [['alarm_loop'], 0.55, 'sfx', 20, 1],
     heli_loop: [['heli_loop'], 0.7, 'veh', 30, 1], eng_idle: [['eng_idle'], 0.45, 'veh', 6, 1], eng_run: [['eng_run'], 0.5, 'veh', 8, 1],
-    prop_loop: [['prop_loop'], 0.5, 'veh', 20, 1], boat_loop: [['boat_loop'], 0.5, 'veh', 15, 1], jetski_loop: [['jetski_loop'], 0.5, 'veh', 10, 1],
+    prop_loop: [['prop_loop'], 0.5, 'veh', 20, 1], boat_loop: [['boat_loop'], 0.5, 'veh', 15, 1], jetski_loop: [['jetski_loop'], 0.5, 'veh', 10, 1], ski_spray: [['ski_spray'], 0.5, 'veh', 8, 1],
     wind_loop: [['wind_loop'], 0.6, 'amb', 1, 1], drill_loop: [['drill_loop'], 0.5, 'sfx', 6, 1], torch_loop: [['torch_loop'], 0.5, 'sfx', 6, 1],
     fall_loop: [['fall_loop'], 0.75, 'amb', 1, 1], canopy_loop: [['canopy_loop'], 0.5, 'amb', 1, 1],
     stream_loop: [['stream_loop'], 0.55, 'amb', 7, 1], falls_loop: [['falls_loop'], 0.75, 'amb', 25, 1], fountain_loop: [['fountain_loop'], 0.5, 'amb', 6, 1], lap_loop: [['lap_loop'], 0.5, 'amb', 8, 1],
@@ -62,7 +63,7 @@ try {
     r_checkpoint: [['r_checkpoint'], 0.75, 'voice', 1],
   };
   A.LIB = LIB;
-  const CORE = ['rev', 'shotgun', 'smg', 'rifle', 'punch', 'swing', 'dry', 'reload', 'crash', 'crash_light', 'boom', 'ui_click', 'ui_deny', 'ui_ding', 'cash', 'step_concrete', 'step_grass', 'grunt_m', 'eng_idle', 'eng_run', 'door_car'];
+  const CORE = ['rev', 'shotgun', 'smg', 'rifle', 'sil', 'lmg', 'hit_tick', 'punch', 'swing', 'dry', 'reload', 'crash', 'crash_light', 'boom', 'ui_click', 'ui_deny', 'ui_ding', 'cash', 'step_concrete', 'step_grass', 'grunt_m', 'eng_idle', 'eng_run', 'door_car'];
   const BUS_GAIN = { sfx: 0.9, amb: 0.75, veh: 0.8, ui: 0.7, voice: 1 };
   let ctx = null, master = null, ambLP = null;
   const bus = {};
@@ -375,7 +376,11 @@ try {
     const pl = mode === 'fly' && AF.planes && AF.planes.cur;
     A.hold('plane', 'prop_loop', pl && pl.engine ? 0.5 + pl.throttle * 0.5 : 0, pl ? 0.75 + pl.throttle * 0.55 + Math.max(0, pl.v) * 0.004 : 1);
     const ski = mode === 'jetski' && AF.island && AF.island.jetski && AF.island.jetski.cur;
-    A.hold('ski', 'jetski_loop', ski ? 0.4 + Math.min(0.6, Math.abs(ski.v) / 14) : 0, ski ? 0.8 + Math.abs(ski.v) / 22 : 1);
+    // jet ski: revs follow the throttle + speed (and scream when the jet leaves the water), the hull hisses through the water at speed
+    const rpm = ski ? (ski.rpm != null ? ski.rpm : Math.min(1, Math.abs(ski.v) / 14)) : 0, wake = ski && !(ski.air > 0) ? AF.smooth(2, 22, Math.abs(ski.v)) : 0;
+    A.hold('ski', 'jetski_loop', ski ? 0.32 + rpm * 0.5 + (ski.load || 0) * 0.18 : 0, ski ? 0.7 + rpm * 0.62 : 1);
+    A.hold('ski-wake', 'ski_spray', wake * 0.85, 0.85 + wake * 0.35);
+    A.hold('ski-wind', 'wind_loop', ski ? AF.smooth(12, 26, Math.abs(ski.v)) * 0.35 : 0, 0.9 + AF.smooth(12, 26, ski ? Math.abs(ski.v) : 0) * 0.3);
     A.hold('ferry', 'boat_loop', mode === 'ferry-ride' ? 0.7 : 0, 0.9);
     // rushing air: freefall roars, the open canopy flaps, an open cockpit hisses (one wind family, crossfaded by speed)
     const sky = mode === 'skydive', fp = AF.view && AF.view.fp && AF.view.fp();
@@ -383,8 +388,8 @@ try {
     if (sky) { VT.fallT += dt; const rig = VT.rig || (VT.rig = AF.scene.getObjectByName('parachute') || null); if (rig && rig.visible && !VT.chute) { VT.chute = true; A.play('chute'); } }
     else VT.chute = false;
     const fall = sky && !VT.chute, canopy = sky && VT.chute;
-    A.hold('wind', 'wind_loop', mode === 'fly' ? AF.smooth(12, 50, LS.speed) * (fp ? 1 : 0.7) : canopy ? 0.25 + AF.smooth(4, 12, LS.speed) * 0.3 : fall ? 0.3 : 0, 0.8 + AF.smooth(20, 60, LS.speed) * 0.4);
-    A.hold('fall', 'fall_loop', fall ? 0.35 + AF.smooth(10, 50, LS.speed) * 0.65 : 0, 0.85 + AF.smooth(15, 55, LS.speed) * 0.3);
+    A.hold('wind', 'wind_loop', mode === 'fly' ? AF.smooth(12, 50, LS.speed) * (fp ? 1 : 0.7) : canopy ? 0.25 + AF.smooth(4, 12, LS.speed) * 0.3 : fall ? 0.15 + AF.smooth(12, 50, LS.speed) * 0.5 : 0, 0.8 + AF.smooth(20, 60, LS.speed) * 0.4);
+    A.hold('fall', 'fall_loop', fall ? 0.25 + AF.smooth(8, 50, LS.speed) * 0.75 : 0, 0.8 + AF.smooth(12, 55, LS.speed) * 0.45);
     A.hold('canopy', 'canopy_loop', canopy ? 0.55 + AF.smooth(3, 10, LS.speed) * 0.45 : 0, 0.9 + AF.smooth(3, 10, LS.speed) * 0.2);
     if (VT.prevMode === 'skydive' && mode === 'walk' && AF.player && AF.player.z > 206 && AF.player.y < -0.5) A.play('splash');
     VT.prevMode = mode;
@@ -513,6 +518,207 @@ try {
     row.querySelector('input').addEventListener('input', (e) => { A.setVolume(+e.target.value); e.stopPropagation(); });
     stack.parentNode.insertBefore(row, stack); sync();
   });
+
+  // ================================================================ spoken lines + heist music (OWNER: audio)
+  // AF.audio.voice(id, { x, y, z, vol, ref, radio }) -> seconds   a line from AF.VO (assets/vo/<id>.mp3, Kokoro TTS via tools/vo-build.mjs).
+  //   Channels: radio (band-passed, squelch clicks), plain (non-positional), positional (x/y/z; up to 3 barks overlap). A new radio or
+  //   plain line replaces the one on its channel. Returns the length from assets/vo/index.json (fetched at unlock; before that an
+  //   estimate from the text), 0 for an unknown id; the duration is returned even while the sound is off (subtitles time on it).
+  // AF.audio.voiceLen(id) -> seconds · AF.audio.voicePreload([ids]) -> Promise (fetch + decode ahead) · AF.audio.stopVoice(channel?)
+  // AF.audio.music(id | null, { fade = 2, vol = 1 })   crossfades heist loops (assets/music/<id>.mp3, tools/music-build.mjs), fetched
+  //   on first request; muted with Sound off; its own gain (AF.audio.musicVol, menu slider) ducked under speech, as are the beds.
+  // Decoded lines live in a small LRU (reaped after 90 s unused); music keeps at most the playing + previous track decoded.
+  {
+    const VO_BASE = 'assets/vo/', MU_BASE = 'assets/music/';
+    let voMan = null, voManP = null, muMan = null;
+    A.musicVol = 0.6;
+    try { const v = localStorage.getItem('portSolace.musicVol'); if (v !== null && +v >= 0 && +v <= 1) A.musicVol = +v; } catch (e) { /* storage blocked */ }
+    const getJSON = (u) => fetch(u).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+    const loadMan = () => voManP || (voManP = Promise.all([getJSON(VO_BASE + 'index.json'), getJSON(MU_BASE + 'index.json')]).then(([v, m]) => { voMan = v || {}; muMan = m || {}; return voMan; }));
+    const onUnlock = () => loadMan();
+    for (const ev of ['pointerdown', 'keydown', 'touchend']) addEventListener(ev, onUnlock, { capture: true, once: true });
+    const lineOf = (id) => (AF.VO && AF.VO[id]) || null;
+    A.voiceLen = (id) => {
+      if (voMan && voMan[id] != null) return voMan[id];
+      const L = lineOf(id); if (!L) return 0;
+      return Math.max(0.8, Math.round((String(L[2]).length / 14.5 + 0.3) * 100) / 100);
+    };
+    // ---- graph: voice lines -> bus.voice; music tracks -> mus (setting) -> duck -> master
+    let mus = null, musDuck = null, radioCurve = null, squelch = null;
+    const graph = () => {
+      if (!make()) return null;
+      if (!mus) {
+        mus = ctx.createGain(); mus.gain.value = A.musicVol; musDuck = ctx.createGain(); musDuck.gain.value = 1; mus.connect(musDuck).connect(master);
+        radioCurve = new Float32Array(1024); for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; radioCurve[i] = Math.tanh(2.4 * x) / Math.tanh(2.4); }
+        // the squelch: 70 ms of decaying noise, band-passed on the way out like the line itself
+        const n = Math.round(ctx.sampleRate * 0.07); squelch = ctx.createBuffer(1, n, ctx.sampleRate);
+        const d = squelch.getChannelData(0); let s = 0x9e37; for (let i = 0; i < n; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; d[i] = (s / 0x3fffffff - 1) * Math.exp(-i / (n * 0.28)) * (i < 24 ? i / 24 : 1); }
+      }
+      return ctx;
+    };
+    // ---- decoded line cache (LRU)
+    const vo = new Map();           // id -> { buf, p, used, bytes }
+    const VO_KEEP = AF.MOBILE ? 16 : 32;
+    const loadVo = (id) => {
+      let f = vo.get(id); if (f) { f.used = AF.clock.t; return f.p; }
+      if (!graph()) return Promise.resolve(null);
+      f = { buf: null, p: null, used: AF.clock.t, bytes: 0 }; vo.set(id, f);
+      f.p = fetch(VO_BASE + encodeURIComponent(id) + '.mp3').then((r) => { if (!r.ok) throw new Error(r.status + ' ' + id); return r.arrayBuffer(); }).then(decode).then((buf) => {
+        f.buf = buf; f.bytes = buf.length * buf.numberOfChannels * 4; A.stats.bytes += f.bytes; return buf;
+      }).catch((e) => { AF.warnOnce('voice load ' + id, e); vo.delete(id); return null; });
+      if (vo.size > VO_KEEP) { let old = null; for (const [k, g] of vo) if (g.buf && !playing(k) && (!old || g.used < old[1].used)) old = [k, g]; if (old) { A.stats.bytes -= old[1].bytes; vo.delete(old[0]); } }
+      return f.p;
+    };
+    A.voicePreload = (ids) => { if (!A.on || !graph()) return Promise.resolve([]); loadMan(); return Promise.all((ids || []).filter(lineOf).map(loadVo)); };
+    // ---- playing lines: { id, ch, src, gn, pan, nodes, pos, ref, vol, k, end, sq }
+    const lines = [];
+    const playing = (id) => { for (const l of lines) if (l.id === id) return true; return false; };
+    const kill = (l, fade) => {
+      const i = lines.indexOf(l); if (i >= 0) lines.splice(i, 1);
+      voices.delete(l); A.stats.voices = voices.size;
+      if (!l.src || !ctx) { l.dead = true; return; }
+      const t = ctx.currentTime, f = fade || 0.06;
+      try { l.gn.gain.cancelScheduledValues(t); l.gn.gain.setTargetAtTime(0, t, f / 3); l.src.stop(t + f + 0.02); if (l.sq) l.sq.stop(t + 0.001); } catch (e) { /* ended */ }
+      if (l.ch === 'radio' && !l.ended) chirp(t + 0.02, 0.25);
+    };
+    A.stopVoice = (ch) => { for (let i = lines.length - 1; i >= 0; i--) if (!ch || lines[i].ch === ch) kill(lines[i], 0.08); };
+    const chirp = (t, g) => {
+      if (!squelch || !ctx) return null;
+      try {
+        const s = ctx.createBufferSource(), hp = ctx.createBiquadFilter(), gn = ctx.createGain();
+        s.buffer = squelch; hp.type = 'bandpass'; hp.frequency.value = 1800; hp.Q.value = 0.7; gn.gain.value = g;
+        s.connect(hp).connect(gn).connect(bus.voice); s.onended = () => { try { gn.disconnect(); } catch (e) { /* gone */ } }; s.start(t); return s;
+      } catch (e) { return null; }
+    };
+    const start = (l, buf) => {
+      if (l.dead || !ctx) return;
+      if (voices.size >= MAX_VOICES) { let q = null; for (const v of voices) if (!q || v.k < q.k) q = v; if (q && q.k < l.k) { try { q.src.stop(); } catch (e) { /* ended */ } voices.delete(q); } else { const i = lines.indexOf(l); if (i >= 0) lines.splice(i, 1); return; } }
+      const src = ctx.createBufferSource(), gn = ctx.createGain(); src.buffer = buf; gn.gain.value = 0;
+      let head = gn;
+      if (l.ch === 'radio') {
+        // a hand radio: 350 Hz - 3.2 kHz, a little drive, squelch clicks either side
+        const hp = ctx.createBiquadFilter(), lp = ctx.createBiquadFilter(), ws = ctx.createWaveShaper(), mk = ctx.createGain();
+        hp.type = 'highpass'; hp.frequency.value = 350; hp.Q.value = 0.8; lp.type = 'lowpass'; lp.frequency.value = 3200; lp.Q.value = 1.1;
+        ws.curve = radioCurve; ws.oversample = 'none'; mk.gain.value = 0.75;
+        src.connect(hp).connect(ws).connect(lp).connect(mk).connect(gn); l.nodes = [hp, ws, lp, mk];
+      } else src.connect(gn);
+      if (l.pos && ctx.createStereoPanner) { l.pan = ctx.createStereoPanner(); gn.connect(l.pan); head = l.pan; }
+      head.connect(bus.voice);
+      const t = ctx.currentTime + (l.ch === 'radio' ? 0.06 : 0.01);
+      l.src = src; l.gn = gn; l.tail = head; l.end = t + buf.duration;
+      gain(l, true);
+      src.onended = () => { l.ended = true; const i = lines.indexOf(l); if (i >= 0) lines.splice(i, 1); voices.delete(l); A.stats.voices = voices.size; try { head.disconnect(); } catch (e) { /* gone */ } };
+      src.start(t);
+      if (l.ch === 'radio') { chirp(t - 0.06, 0.3); l.sq = chirp(l.end + 0.01, 0.25); }
+      voices.add(l); A.stats.voices = voices.size;
+    };
+    // gain + pan from the listener (positional lines follow the listener at the audio tick rate)
+    const gain = (l, now) => {
+      let g = l.vol, pan = 0;
+      if (l.pos) { const P = place(l.pos.x, l.pos.y, l.pos.z, l.ref); g *= P.g; pan = P.pan; }
+      if (now) { l.gn.gain.value = g; if (l.pan) l.pan.pan.value = pan; }
+      else { l.gn.gain.setTargetAtTime(g, ctx.currentTime, 0.08); if (l.pan) l.pan.pan.setTargetAtTime(pan, ctx.currentTime, 0.1); }
+    };
+    A.voice = (id, o) => {
+      const L = lineOf(id); if (!L) return 0;
+      const d = A.voiceLen(id);
+      loadMan();
+      if (!A.on || !graph() || ctx.state !== 'running') return d;
+      const pos = o && o.x != null, ch = o && o.radio ? 'radio' : pos ? 'pos' : 'line';
+      // one line per channel; positional barks overlap up to three (the oldest makes way)
+      if (ch !== 'pos') A.stopVoice(ch);
+      else { let n = 0, old = null; for (const q of lines) if (q.ch === 'pos') { n++; if (!old) old = q; } if (n >= 3) kill(old, 0.1); }
+      const l = { id, ch, src: null, gn: null, pan: null, nodes: null, pos: pos ? { x: o.x, y: o.y ?? LS.y, z: o.z } : null, ref: (o && o.ref) || 7, vol: (o && o.vol != null ? o.vol : 1) * (ch === 'radio' ? 1.1 : 1), k: 4, end: 0, sq: null, dead: false, ended: false, t0: ctx.currentTime };
+      lines.push(l);
+      const f = vo.get(id);
+      if (f && f.buf) { f.used = AF.clock.t; start(l, f.buf); }
+      else loadVo(id).then((buf) => {
+        // a line still loading after a beat is dropped for barks (they would land late); story lines start late instead
+        if (!buf || l.dead || lines.indexOf(l) < 0 || (ch === 'pos' && ctx.currentTime - l.t0 > 0.7) || ctx.currentTime - l.t0 > 3) { const i = lines.indexOf(l); if (i >= 0) lines.splice(i, 1); return; }
+        start(l, buf);
+      });
+      return d;
+    };
+
+    // ---- music: one looping source per track, crossfaded; the loop seam gets a 10 ms blend at decode so it never clicks
+    const mu = new Map();           // id -> { buf, p, used, bytes }
+    const MU = { want: null, vol: 1, fade: 2, cur: null, old: [] };   // cur/old = { id, src, g }
+    const seam = (buf) => {
+      const N = Math.min(512, buf.length >> 3);
+      for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c), n = d.length; for (let i = 0; i < N; i++) { const w = i / N; d[n - N + i] = d[n - N + i] * (1 - w) + d[i] * w; } }
+      return N / buf.sampleRate;
+    };
+    const loadMu = (id) => {
+      let f = mu.get(id); if (f) { f.used = AF.clock.t; return f.p; }
+      f = { buf: null, p: null, used: AF.clock.t, bytes: 0, s0: 0 }; mu.set(id, f);
+      f.p = fetch(MU_BASE + encodeURIComponent(id) + '.mp3').then((r) => { if (!r.ok) throw new Error(r.status + ' ' + id); return r.arrayBuffer(); }).then(decode).then((buf) => {
+        f.s0 = seam(buf); f.buf = buf; f.bytes = buf.length * buf.numberOfChannels * 4; A.stats.bytes += f.bytes; return buf;
+      }).catch((e) => { AF.warnOnce('music load ' + id, e); mu.delete(id); return null; });
+      return f.p;
+    };
+    const fadeOut = (m, fade) => {
+      if (!m || !ctx) return;
+      const t = ctx.currentTime; try { m.g.gain.cancelScheduledValues(t); m.g.gain.setValueAtTime(m.g.gain.value, t); m.g.gain.linearRampToValueAtTime(0, t + Math.max(0.05, fade)); m.src.stop(t + Math.max(0.05, fade) + 0.05); } catch (e) { /* stopped */ }
+      MU.old.push(m); m.src.onended = () => { const i = MU.old.indexOf(m); if (i >= 0) MU.old.splice(i, 1); try { m.g.disconnect(); } catch (e) { /* gone */ } };
+    };
+    const startMu = (id) => {
+      const f = mu.get(id); if (!f || !f.buf || !graph() || ctx.state !== 'running') return false;
+      const src = ctx.createBufferSource(), g = ctx.createGain(), t = ctx.currentTime;
+      src.buffer = f.buf; src.loop = true; src.loopStart = f.s0; src.loopEnd = f.buf.duration;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(MU.vol, t + Math.max(0.05, MU.fade));
+      src.connect(g).connect(mus); src.start(t);
+      MU.cur = { id, src, g }; A.stats.music = id;
+      // keep the playing + the previous track decoded; drop the rest
+      const keep = [...mu.entries()].filter(([, q]) => q.buf).sort((a, b) => b[1].used - a[1].used);
+      for (let i = 2; i < keep.length; i++) if (keep[i][0] !== id) { A.stats.bytes -= keep[i][1].bytes; mu.delete(keep[i][0]); }
+      return true;
+    };
+    A.music = (id, o) => {
+      const fade = o && o.fade != null ? o.fade : 2, vol = o && o.vol != null ? o.vol : 1;
+      MU.fade = fade;
+      if (!id) { MU.want = null; if (MU.cur) { fadeOut(MU.cur, fade); MU.cur = null; A.stats.music = ''; } return; }
+      if (MU.cur && MU.cur.id === id) { if (vol !== MU.vol && ctx) MU.cur.g.gain.setTargetAtTime(vol, ctx.currentTime, Math.max(0.05, fade) / 3); MU.vol = vol; MU.want = id; return; }
+      MU.want = id; MU.vol = vol;
+      if (MU.cur) { fadeOut(MU.cur, fade); MU.cur = null; }
+      if (!A.on || !graph()) return;
+      loadMu(id).then(() => { if (MU.want === id && !MU.cur) startMu(id); });
+    };
+    A.musicId = () => MU.want;
+    A.setMusicVol = (v) => { A.musicVol = AF.clamp(+v || 0, 0, 1); if (mus && ctx) mus.gain.setTargetAtTime(A.musicVol, ctx.currentTime, 0.05); try { localStorage.setItem('portSolace.musicVol', String(A.musicVol)); } catch (e) { /* storage blocked */ } };
+
+    // ---- 15 Hz: positional lines follow the listener; speech ducks the music and the ambience beds
+    let duckT = 0, duckK = -1, reapVoT = 0;
+    AF.onTick('audio-voice', 966, (dt) => {
+      if (!ctx || !A.on || ctx.state !== 'running' || (duckT += dt) < 1 / 15) return;
+      const step = duckT; duckT = 0;
+      let k = 1;
+      for (let i = 0; i < lines.length; i++) { const l = lines[i]; if (!l.src) continue; if (l.pos) gain(l, false); k = Math.min(k, l.ch === 'pos' ? 0.75 : 0.4); }
+      if (k !== duckK) {
+        // dip fast (0.12 s), recover slowly (0.6 s) once the line has ended
+        const tc = k < duckK ? 0.12 : 0.6; duckK = k;
+        if (musDuck) musDuck.gain.setTargetAtTime(k, ctx.currentTime, tc);
+        if (bus.amb) bus.amb.gain.setTargetAtTime(BUS_GAIN.amb * (0.45 + 0.55 * k), ctx.currentTime, tc);
+      }
+      // a track asked for before the context ran (or while it was still loading) starts now
+      if (MU.want && !MU.cur) { const f = mu.get(MU.want); if (!f) loadMu(MU.want); else if (f.buf) startMu(MU.want); }
+      if ((reapVoT += step) > 20) { reapVoT = 0; for (const [id, f] of vo) if (f.buf && AF.clock.t - f.used > 90 && !playing(id)) { A.stats.bytes -= f.bytes; vo.delete(id); } }
+    });
+
+    // ---- menu: a music volume slider under the Sound row
+    AF.on('ready', () => {
+      const stack = document.querySelector('#m-menu .stack'); if (!stack) return;
+      const row = document.createElement('div'); row.className = 'row';
+      row.innerHTML = '<label>Music</label><input data-k="musicVol" type="range" min="0" max="1" step="0.05" aria-label="Music volume">';
+      const inp = row.querySelector('input'); inp.value = String(A.musicVol);
+      inp.addEventListener('input', (e) => { A.setMusicVol(+e.target.value); e.stopPropagation(); });
+      row.addEventListener('click', (e) => e.stopPropagation());
+      stack.parentNode.insertBefore(row, stack);
+    });
+    AF.test('audio: voice lines resolve to lengths, unknown ids to 0', () => {
+      const ids = AF.VO ? Object.keys(AF.VO) : [], n = ids.filter((id) => A.voiceLen(id) > 0).length;
+      return { ok: ids.length > 0 && n === ids.length && A.voiceLen('no.such.line') === 0 && A.voice('no.such.line') === 0, info: n + '/' + ids.length + ' lines, manifest ' + (voMan ? Object.keys(voMan).length : 'not loaded') };
+    });
+  }
 
   AF.test('audio: library ids are wired and the zone weights stay in range', () => {
     const bad = Object.entries(LIB).filter(([, L]) => !Array.isArray(L[0]) || !L[0].length || !(L[1] > 0) || !BUS_GAIN[L[2]]).map(([k]) => k);

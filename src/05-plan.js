@@ -208,22 +208,38 @@ AF.PLAN = (() => {
   // ---- THE WEST SIDE layout (x -660..-300). Plots face Friends Lane (x -372); the zoo fills the north-west corner; the airfield
   // runs east-west along the coast so planes climb out over the sea.
   P.bounds = { x0: -660, z0: -300, x1: 460, z1: 300 };
+  // SERENA ISLE lies 2.8 km out to sea (a 3 km flight south from Westgate, a fast ferry from the city pier). Its coordinates are
+  // absolute; IZ is its offset from where it was first authored (z 600), so `600 + IZ` reads as the old local layout.
+  const IZ = 2500;
   P.world = {
     play: { x0: -1220, x1: 1020, z0: -900, z1: 300 }, margin: 12,
-    bounds: { x0: -1476, x1: 1276, z0: -1708, z1: 940 },
+    // z1 sits on an outland root edge (-1708 + 10 x 512): the deep sea between the coast and the islands has no terrain tiles
+    bounds: { x0: -1476, x1: 1276, z0: -1708, z1: 3412 },
     lake: { name: 'Lake Tamsin', cx: -40, cz: -650, rx: 90, rz: 55, waterY: 22 },
-    island: { name: 'Serena Isle', cx: -60, cz: 600, rx: 220, rz: 130,
-      cone: { x: -10, z: 625, r: 85, y: 55, craterR: 13 },
-      airstrip: { x0: -230, x1: 90, z: 540, w: 22, y: 2 },
-      resort: { x: -170, z: 640, r: 45, y: 3 },
-      ferry: { cityPier: [0,260], islandPier: [-20,424], path: [[0,277],[-20,405]], dwell: 25, crossing: 40 },
-      landing: { x: -20, z: 478, r: 20, y: 2, pier: { x0: -24, x1: -16, z0: 420, z1: 478 } } },
+    island: { name: 'Serena Isle', cx: -60, cz: 600 + IZ, rx: 220, rz: 130,
+      cone: { x: -10, z: 625 + IZ, r: 85, y: 55, craterR: 13 },
+      airstrip: { x0: -230, x1: 90, z: 540 + IZ, w: 22, y: 2 },
+      resort: { x: -170, z: 640 + IZ, r: 45, y: 3 },
+      // the Solace Belle: a fast ferry on the shared world clock (44-island); the lane (x -20..0) passes 200 m east of the Queen
+      ferry: { cityPier: [0, 260], islandPier: [-20, 424 + IZ], path: [[0, 277], [-20, 405 + IZ]], dwell: 25, crossing: 200 },
+      landing: { x: -20, z: 478 + IZ, r: 20, y: 2, pier: { x0: -24, x1: -16, z0: 420 + IZ, z1: 478 + IZ } },
+      // the Moretti smugglers' lava tube (07-outland cuts it out of the ground, 44-island lines it): from a cleft on the cone's
+      // north-east flank (pts[0], the mouth faces away from pts[1]) to a sea cave on the cove's ledge (last point, floor exitY).
+      // chambers: [point index, half-width, height]; hw / h = the plain tube
+      tunnel: { pts: [[26, 3086], [18, 3092], [12, 3102], [16, 3114], [30, 3118], [44, 3112], [58, 3114], [68, 3124], [66, 3138], [74, 3150], [86, 3148], [90, 3138], [94, 3146], [103, 3150]],
+        hw: 1.8, h: 3.5, exitY: 1, chambers: [[3, 4.6, 5.5], [6, 4.4, 5], [11, 5.2, 5.5]] },
+      // Moretti's cove: a cliff-ringed basin on the east coast, a dog-leg channel out to sea, the cave ledge + a wooden dock
+      cove: { x: 120, z: 3150, r: 16, rim: 11, channel: [[136, 3150], [146, 3142], [168, 3136]], channelHW: 6,
+        ledge: { x0: 102, x1: 106, z0: 3145, z1: 3155, y: 1 }, dock: { x0: 105.5, x1: 116, z: 3150, w: 2.5, y: 1.5 } },
+      // a spring-fed stream down the south flank, over a basalt terrace (the falls) to the party beach
+      stream: { pts: [[-32, 3160], [-38, 3166], [-44, 3174], [-46, 3180], [-48, 3184], [-54, 3196], [-62, 3210], [-66, 3224], [-66, 3242]], w: 3 },
+      reef: { x: -230, z: 3228, rx: 30, rz: 10 } },
     // CORSAIR KEY (44-key): Silas Crane's private island, 300 m east of Serena Isle — a short airstrip, a hangar, a villa on the
     // hill, a jetty and a lighthouse. The heist's finale lands here.
-    key: { name: 'Corsair Key', cx: 560, cz: 692, rx: 130, rz: 76,
-      hill: { x: 515, z: 726, r: 48, y: 15 },
-      airstrip: { x0: 465, x1: 655, z: 676, w: 20, y: 2 },
-      hangar: { x: 610, z: 698, y: 2 }, villa: { x: 512, z: 726, y: 13 }, dock: { x: 676, z: 712, y: 2 } },
+    key: { name: 'Corsair Key', cx: 560, cz: 692 + IZ, rx: 130, rz: 76,
+      hill: { x: 515, z: 726 + IZ, r: 48, y: 15 },
+      airstrip: { x0: 465, x1: 655, z: 676 + IZ, w: 20, y: 2 },
+      hangar: { x: 610, z: 698 + IZ, y: 2 }, villa: { x: 512, z: 726 + IZ, y: 13 }, dock: { x: 676, z: 712 + IZ, y: 2 } },
     roads: [
       { name: 'Coast Road', w: 10, surface: 'asphalt', points: [[-660, 0], [-820, -10], [-1000, -40]], heights: [0, 5, 10] },
       { name: 'Eastwood Road', w: 10, surface: 'asphalt', joinsRing: true, points: [[460, 0], [700, -40], [965, -142]], heights: [0, 10, 19] },   // T into the ring's side (Eastwood Loop runs straight on into the ring)

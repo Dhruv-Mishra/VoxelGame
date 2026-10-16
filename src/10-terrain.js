@@ -286,7 +286,7 @@ try {
     // the open ocean all around the island, out past the camera's far plane (50 m tiles near the coast, 300 m beyond)
     const band = (x0, z0, x1, z1, st) => { for (let x = x0; x < x1; x += st) for (let z = z0; z < z1; z += st) q(x, z, Math.min(x1, x + st), Math.min(z1, z + st)); };
     const ring = (h, o, st) => { band(o[0], o[1], o[2], h[1], st); band(o[0], h[3], o[2], o[3], st); band(o[0], h[1], h[0], h[3], st); band(h[2], h[1], o[2], h[3], st); };
-    const MAPR = [W.X0, ZN, XE, W.z1], NEAR = [W.X0 - 300, ZN - 300, XE + 300, W.z1 + 300], FAR = [W.X0 - 2640, ZN - 2640, XE + 2640, W.z1 + 2640];
+    const MAPR = [W.X0, ZN, XE, W.z1], NEAR = [W.X0 - 300, ZN - 300, XE + 300, W.z1 + 300], FAR = [W.X0 - 2640, ZN - 2640, XE + 2640, Math.max(W.z1, AF.PLAN.world.bounds.z1) + 2640];
     ring(MAPR, NEAR, 50); ring(NEAR, FAR, 300);
     const sea = fin('lake', sp, sn, si, sN, SEA_Y); sea.userData.sea = true;
     // sea bed under the ocean (y -4, the in-map bed level), so the translucent water never shows the void

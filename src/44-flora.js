@@ -23,6 +23,7 @@ F.add=(kind,x,z,opts={})=>{
  const design=F.kinds[kind];if(!design)throw new Error('Unknown flora kind: '+kind);
  if(!Number.isFinite(x)||!Number.isFinite(z)||!Number.isFinite(opts.scale??1)||(opts.scale??1)<=0||!Number.isFinite(opts.rot??0)||!Number.isFinite(opts.y??0))throw new Error('Invalid flora position/scale');
  if(O.roadDistance(x,z)<14||O.waterY(x,z)!==null)return null;
+ if(AF.island&&AF.island.noFlora&&AF.island.noFlora(x,z))return null;
  const beach=x<-660&&x-O.coastX(z)<55;
  if(opts.planted!==true&&(O.pads.some(pad=>Math.abs(x-pad.x)<pad.rx+4&&Math.abs(z-pad.z)<pad.rz+4)||!beach&&O.biome(x,z)==='farmland'&&O.fieldEdge(x,z)>5&&!(design.shape===5&&O.fieldMeadow(x,z))))return null;
  const y=opts.y??(W.col(x,z)>=0?W.groundY(x,z):Math.round(O.h(x,z)*4)/4),biome=opts.biome??O.biome(x,z);

@@ -22,6 +22,11 @@ try {
     vehHp: 100, vehDmgMin: 3, vehDmgK: 3.2, vehSmoke: 45, vehBurnS: 7, boomR: 8, boomDmg: 95,
     forgetD: 220, forgetS: 40, wreckS: 60,
     pedHp: 30, copHp: 60, engagedMax: 12, pedForgetD: 85, panicR: 26,
+    // gunplay (77): headshot multiplier, stance spread multipliers, recoil recovery; silenced shots only panic / report within these
+    headK: 2.5, aimSpreadK: 0.45, crouchSpreadK: 0.65, moveSpreadK: 0.9, sprintSpreadK: 2.2, airSpreadK: 2.6, adsKickK: 0.6,
+    silencedPanicR: 7, witnessR: 22, copWitnessR: 45,
+    // the mob / police guns: [dmg per hit, base hit chance, burst min, burst max, s between shots in a burst, s between bursts]
+    npcGun: { pistol: [7, 0.42, 1, 3, 0.28, 1.3], smg: [5, 0.32, 3, 6, 0.1, 1.5], lmg: [8, 0.3, 6, 11, 0.08, 2.2] },
     heat: { assault: 22, ko: 30, kill: 60, shots: 8, copHit: 50, copKill: 120, runOver: 45, carBoom: 40, trespass: 25 },
     stars: [20, 70, 150, 260, 400], evadeS: [0, 10, 14, 18, 24, 30], cops: [0, 2, 3, 4, 6, 8], squad: [0, 0, 1, 2, 3, 3],
     price: { ride: 2, game: 1, ticket: 40, repairBase: 25, repairK: 4, repaint: 120, sellK: 0.3, sellCooldown: 300 },
@@ -295,8 +300,10 @@ try {
     ding: (t) => { tone(t, 0.9, 1568, 1560, 0.3); tone(t, 0.9, 2093, 2090, 0.14); }, click: (t) => tone(t, 0.04, 900, 880, 0.2, 'square'),
   };
   PLAY.smg = PLAY.shot;
+  PLAY.sil = (t, k) => { hiss(t, 0.09, 2600, 500, 0.32 * k); tone(t, 0.05, 260, 110, 0.22 * k); };
+  PLAY.lmg = (t, k) => { hiss(t, 0.26, 3800, 240, k); tone(t, 0.12, 130, 45, 0.8 * k); };
   // synth kind -> recorded sample (75-audio); explosions far off use the muffled take
-  const SAMPLE = { shot: 'rev', smg: 'smg', shotgun: 'shotgun', rifle: 'rifle', punch: 'punch', swing: 'swing', boom: 'boom', crash: 'crash', cash: 'cash', deny: 'ui_deny', ding: 'ui_ding', click: 'ui_click', hurt: 'grunt_m' };
+  const SAMPLE = { shot: 'rev', smg: 'smg', shotgun: 'shotgun', rifle: 'rifle', sil: 'sil', lmg: 'lmg', punch: 'punch', swing: 'swing', boom: 'boom', crash: 'crash', cash: 'cash', deny: 'ui_deny', ding: 'ui_ding', click: 'ui_click', hurt: 'grunt_m' };
   SFX.play = (kind, x, z) => {
     let id = SAMPLE[kind];
     if (id && AU && AU.ctxOk()) {

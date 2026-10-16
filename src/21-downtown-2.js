@@ -194,6 +194,63 @@ try {
       spot(B, 40, 0.5, -122, Y3, 'stand', [[8.5, -125], [13, -125], [38, -122], [40, -122]]);  // guard
       spot(B, 46, 0.5, -125, Y1, 'work'); spot(B, 26.5, 0.5, -123, Y0, 'stand', [[8.5, -125], [26.5, -123]]);
       W.clear(9.5, 0.5, -127, 11.5, 5, -123);
+      // ---------------------------------------------------------- BACK OFFICES + ROOF STAIR (the heist's night route, 81-heist-bank)
+      // roof bulkhead (keypad door, west face) -> a six-flight switchback stair (x 44.75..49.25) -> the security corridor C1 (z -107.25..
+      // -105.25) -> the C3 jog or the records room -> the staff corridor C2 (z -112.75..-110.75) -> the staff door into the hall's
+      // south-west corner. Between the corridors: the security office, the records room, the manager's office. Fire exit + the
+      // hall's east door + the C4 connector are doors the heist locks (81-heist-bank).
+      {
+        const lino = c(0x8d9288, { rough: 0.6, jitter: 0.1 }), wallO = c(0xd9d2bf, { jitter: 0.08 }), wallD = c(0x6b6f6a, { jitter: 0.1 }), conc = c(0x9c9a92, { jitter: 0.18, pat: 'stone' }), rail = I.steel, ceil = c(0xe8e4d8, { jitter: 0.05 });
+        const X0 = 11.25, X1 = 44.5, ZS = -112.75, ZN = -105.25, Y0 = 0.5, YC = 4.25;
+        W.clear(X0, Y0, ZS, X1, YC, ZN);
+        W.fill(X0, 0.25, ZS, X1, Y0, ZN, lino); W.fill(X0, YC, ZS, X1, YC + 0.25, ZN, ceil);
+        W.fill(11, 0.25, -113, 44.75, YC + 0.25, ZS, wallO); W.fill(11, 0.25, ZN, 44.75, YC + 0.25, -105, wallO); W.fill(11, 0.25, -113, X0, YC + 0.25, -105, wallO); W.fill(X1, 0.25, -113, 44.75, YC + 0.25, -105, wallD);
+        // P1 (C1 | rooms) and P2 (rooms | C2) with door gaps; room separators
+        const wallX = (z0, gaps, col = wallO) => { let a = X0; for (const [g0, g1] of gaps) { if (g0 > a) W.fill(a, Y0, z0, g0, YC, z0 + 0.25, col); W.fill(g0, 2.75, z0, g1, YC, z0 + 0.25, col); a = g1; } if (a < X1) W.fill(a, Y0, z0, X1, YC, z0 + 0.25, col); };
+        wallX(-107.5, [[23, 24.5], [31.25, 33], [34, 35.25], [43, 44.5]]);
+        wallX(-110.75, [[19, 20.5], [28, 29.5], [31.25, 33], [43, 44.5]]);
+        for (const x of [22, 31, 33, 42.75]) W.fill(x, Y0, -110.5, x + 0.25, YC, -107.5, wallO);
+        W.fill(22, Y0, -107.5, 22.25, YC, ZN, wallO);                       // C1 ends at x 22.25 (the manager's office takes the corner)
+        // observation slots from the security office onto both corridors
+        W.clear(36, 1.25, -107.5, 38, 2.25, -107.25); W.clear(38.5, 1.25, -110.75, 40.5, 2.25, -110.5);
+        for (const [x0, x1, z] of [[36, 38, -107.5], [38.5, 40.5, -110.75]]) W.fill(x0, 1.0, z, x1, 1.25, z + 0.25, I.walnut);
+        // the staff door into the hall (south-west corner) + the hall's east door to C2 (locked by the heist) + a fire exit to Charter Street
+        W.clear(13.75, Y0, -113.25, 15, 2.75, ZS); W.clear(38.5, Y0, -113.25, 39.75, 2.75, ZS); W.clear(39, Y0, ZN, 40.25, 2.75, -103.75);
+        for (const [x0, x1, z0, z1] of [[13.5, 15.25, -113.5, -112.5], [38.25, 40, -113.5, -112.5]]) { W.fill(x0, 2.75, z0, x1, 3, z1, I.walnut); W.fill(x0, Y0, z0, x0 + 0.25, 2.75, z1, I.walnut); W.fill(x1 - 0.25, Y0, z0, x1, 2.75, z1, I.walnut); }
+        W.fill(38.75, 2.75, -105.5, 40.5, 3, -103.75, c(0x2e8a3e, { emit: 0x40ff60, emitK: 1.2, mode: 'always' }));   // green FIRE EXIT lintel
+        // furniture: the security desk with monitors, filing cabinets in records, the manager's desk, crates in the corridors
+        const monG = G('hmon', 16, 10, 6, (m) => { m.box(0, 0, 0, 16, 4, 6, I.walnut); for (let k = 0; k < 3; k++) { m.box(1 + k * 5, 4, 2, 5 + k * 5, 9, 5, p.black); m.box(2 + k * 5, 5, 2, 4 + k * 5, 8, 2, c(0x66d0a0, { emit: 0x80ffc0, emitK: 1.6, mode: 'always', jitter: 0 })); } });
+        put(monG, 42.2, Y0, -109, 3);
+        const cab = G('hcab', 6, 12, 5, (m) => { m.box(0, 0, 0, 6, 12, 5, c(0x5d6a5f, { metal: 0.5, rough: 0.5 })); for (let y = 2; y < 12; y += 3) m.box(1, y, 5, 5, y + 1, 5, p.brass); });
+        for (const x of [25.25, 26.75]) put(cab, x, Y0, -109, 0);
+        put(G('hmdesk', 16, 7, 8, (m) => { m.box(0, 6, 0, 16, 7, 8, I.walnut); m.box(0, 0, 0, 3, 6, 8, I.walnut); m.box(13, 0, 0, 16, 6, 8, I.walnut); m.box(6, 7, 3, 9, 8, 5, I.paperA); }), 15, Y0, -108.5, 0);
+        const crate = G('hcrate', 8, 8, 8, (m) => { m.box(0, 0, 0, 8, 8, 8, c(0x9a7a4a, { pat: 'plank' })); m.box(0, 3, 0, 8, 4, 8, c(0x6a5230)); });
+        for (const [x, z] of [[28, -106.75], [37.5, -112.25], [17, -112.25], [41, -106.75]]) put(crate, x, Y0, z, 0);
+        for (const [x, z] of [[19.5, -106.2], [12.5, -110]]) put(palm(), x, Y0, z, 0);
+        // ---- the stair shaft: lanes A (x 44.75..46.75) and B (47.25..49.25), landings N (z -106.75..-105.25) and S (z -112.75..-111.25)
+        const SX0 = 44.75, SX1 = 49.25, SA = [44.75, 46.75], SB = [47.25, 49.25], ZLN = -106.75, ZLS = -111.25;
+        W.clear(SX0, Y0, ZS, SX1, 14, ZN);
+        W.fill(44.5, 0.25, -113, 49.5, 14, ZS, wallD); W.fill(44.5, 0.25, ZN, 49.5, 14, -105, wallD); W.fill(SX1, 0.25, -113, 49.5, 14, -105, wallD);
+        W.fill(SX0, 0.25, ZS, SX1, Y0, ZN, conc);
+        W.fill(46.75, Y0, ZLS, 47.25, 14, ZLN, wallD);                       // the divider between the lanes
+        const levels = [14, 11.75, 9.5, 7.25, 5.0, 2.75, 0.5];
+        for (let f = 0; f < 6; f++) {
+          const yA = levels[f], lane = f % 2 ? SB : SA, south = f % 2 === 0;   // even flights go south (-z) in lane A, odd ones north in lane B
+          for (let s = 0; s < 9; s++) {
+            const top = yA - 0.25 * (s + 1), z0 = south ? ZLN - 0.5 * (s + 1) : ZLS + 0.5 * s, z1 = z0 + 0.5;
+            W.fill(lane[0], top - 0.5, z0, lane[1], top, z1, conc);
+            W.clear(lane[0], top, z0, lane[1], top + 2.5, z1);
+          }
+        }
+        for (const y of [14, 9.5, 5.0]) W.fill(SX0, y - 0.25, ZLN, SX1, y, ZN, conc);
+        for (const y of [11.75, 7.25, 2.75]) W.fill(SX0, y - 0.25, ZS, SX1, y, ZLS, conc);
+        W.fill(SB[0], 14, ZLN - 0.25, SB[1], 15.0, ZLN, rail);             // rail on the top landing over lane B's drop
+        W.clear(X1, Y0, -106.75, SX0, 2.75, -105.5);                         // stair -> C1 door
+        // the roof bulkhead over the shaft: walls, a roof, a door (west face) onto the north roof
+        W.fill(44.5, 14, -113, 49.5, 16.75, -105, wallD); W.clear(SX0, 14, ZS, SX1, 16.75, ZN); W.fill(44.5, 16.75, -113, 49.5, 17, -105, conc);
+        W.clear(44.5, 14, -106.75, 44.75, 16.25, -105.5); W.fill(44.25, 16.25, -107, 44.75, 16.5, -105.25, I.steel);
+        light(47, 13, -106, 6, 0xd8e8ff, 0.8); light(47, 6, -109, 6, 0xd8e8ff, 0.8);
+      }
       AF.test('downtown: bank doorway + vault reachable', () => { let ok = true, bad = ''; for (let x = 8.5; x < 48; x += 0.5) if (AF.solidAt(x, 1.3, -125) || AF.solidAt(x, 2.2, -125)) { ok = false; bad = x; break; } return { ok, info: ok ? 'door -> hall -> vault clear' : 'blocked at x ' + bad }; });
     } catch (e) { DT_FAIL.push('harbour-trust: ' + (e && e.message)); console.warn('[downtown] interior harbour-trust failed', e); }
 

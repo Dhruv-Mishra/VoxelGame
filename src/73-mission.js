@@ -246,6 +246,7 @@ try {
   CUT.finish = (silent) => {
     if (!CUT.on) return;
     const o = CUT.o; CUT.on = false;
+    if (AF.audio && AF.audio.stopVoice) AF.audio.stopVoice();
     const P = AF.player, end = (o && o.end) || { x: P.x, y: P.y, z: P.z, yaw: P.yaw };
     if (AF.mode === 'cutscene') AF.setMode('walk', { x: end.x, y: end.y, z: end.z, yaw: end.yaw ?? P.yaw, snap: true });
     if (o && o.onEnd && !silent) o.onEnd(true);
@@ -275,7 +276,11 @@ try {
       const cam = AF.camera; cam.position.copy(CUT.a); cam.up.set(0, 1, 0); cam.lookAt(CUT.b); AF.camTarget.copy(CUT.b);
       const fov = sh.fov || 42; if (Math.abs(cam.fov - fov) > 0.01) { cam.fov = fov; cam.updateProjectionMatrix(); }
       AF.shadowFocus.set(CUT.b.x, 0, CUT.b.z); AF.shadowRadius = 40;
-      if (CUT.t < dt * 1.5) subtitle(sh.say);
+      if (CUT.t < dt * 1.5) {
+        // shot.vo: a voiced line (81-heist-lines) — subtitle from the table, the shot lasts at least as long as the line
+        if (sh.vo && !sh.voDid) { sh.voDid = true; const L = AF.voLine && AF.voLine(sh.vo); if (L && !sh.say) sh.say = [L[1], L[2]]; const len = AF.audio && AF.audio.voice ? AF.audio.voice(sh.vo) : 0; if (len > 0 && sh.d < len + 0.45) sh.d = len + 0.45; }
+        subtitle(sh.say);
+      }
       const P = AF.player; if (P.parts) AF.avatar.animate(P.parts, CUT.st, dt, 0, true);
       if (sh.act && !sh.did) { sh.did = true; try { sh.act(); } catch (e) { console.warn('[af] cutscene act', e); } }
     },
