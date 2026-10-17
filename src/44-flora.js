@@ -133,9 +133,13 @@ function* generate(){
   const px=x+(hash(x,z+5)-0.5)*5,pz=z+(hash(x+9,z)-0.5)*5,height=O.h(px,pz);
   if(height<1.6||height>40||Math.abs(pz-strip.z)<strip.w/2+12&&px>strip.x0-24&&px<strip.x1+24||blocked(px,pz)||trail.has(Math.floor(px/4)*10000+Math.floor(pz/4))||(px-isle.resort.x)**2+(pz-isle.resort.z)**2<(isle.resort.r+6)**2)continue;
   const rnd=hash(x+47,z),size=0.7+hash(x,z+38)*0.45;
-  if(height<5){if(rnd<0.3)F.add('palm',px,pz,{scale:size,biome:'island'});else if(rnd<0.4)F.add('shrub',px,pz,{scale:0.6+size*0.3,biome:'island'});}
-  else if(height<24){if(rnd<0.24)F.add('palm',px,pz,{scale:size+0.1,biome:'island'});else if(rnd<0.4)F.add('elm-green',px,pz,{scale:size,biome:'island'});else if(rnd<0.62)F.add(rnd<0.5?'shrub':'shrub-berry',px,pz,{scale:0.7+size*0.4,biome:'island'});}
-  else if(rnd<0.1)F.add('dry-bush',px,pz,{scale:0.6+size*0.3,biome:'island'});else if(rnd<0.16)F.add('rock',px,pz,{scale:0.5+size,biome:'island'});
+  // 49-outland draws the isle as a smooth slope (07 meshSlopedG): stand on the exact ground, sunk by the fall across a trunk, and leave
+  // the bare rock faces bare
+  const slope=(Math.abs(O.h(px+1,pz)-O.h(px-1,pz))+Math.abs(O.h(px,pz+1)-O.h(px,pz-1)))/2;if(slope>1.15)continue;
+  const y=height-Math.min(0.5,slope*0.3),o=(scale)=>({scale,biome:'island',y});
+  if(height<5){if(rnd<0.3)F.add('palm',px,pz,o(size));else if(rnd<0.4)F.add('shrub',px,pz,o(0.6+size*0.3));}
+  else if(height<24){if(rnd<0.24)F.add('palm',px,pz,o(size+0.1));else if(rnd<0.4)F.add('elm-green',px,pz,o(size));else if(rnd<0.62)F.add(rnd<0.5?'shrub':'shrub-berry',px,pz,o(0.7+size*0.4));}
+  else if(rnd<0.1)F.add('dry-bush',px,pz,o(0.6+size*0.3));else if(rnd<0.16)F.add('rock',px,pz,o(0.5+size));
  }
  // Corsair Key: palms along the beach and the lowland, broadleaves and berry shrubs on the hill; never on the strip or the pads
  const key=AF.PLAN.world.key;

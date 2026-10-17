@@ -26,7 +26,24 @@ try {
   const north = document.createElement('div'); north.className = 'map-north'; north.innerHTML = 'N &uarr;'; stage.appendChild(north);
   const sea = '#779ca7', TAU = Math.PI * 2, DIR = new THREE.Vector3();
   const map = UI.map = { bounds: B, ready: false, revision: 0, x: (B.x0 + B.x1) / 2, z: (B.z0 + B.z1) / 2, scale: 1, tx: 0, tz: 0, ts: 1, width: 1, height: 1, fitScale: 1 };
-  const focus = () => AF.mode === 'aerial' ? AF.camTarget : AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes.cur ? AF.planes.cur : AF.player || AF.camTarget;
+  // what the map follows: the aerial camera's target, the car / plane being driven, else wherever the avatar actually is. Riding modes
+  // (jet ski, launch, ferry, passenger, skydive, rowing, rides) move the avatar mesh but not AF.player's walk body, which stays where the
+  // ride began (the minimap froze out at sea and around the islands)
+  const FOC = { x: 0, z: 0, yaw: 0 };
+  const focus = () => {
+    const m = AF.mode === 'photo' && AF.photo && AF.photo.prev ? AF.photo.prev : AF.mode, p = AF.player;
+    if (m === 'aerial') return AF.camTarget;
+    if (m === 'drive' && AF.vehicles.player) return AF.vehicles.player;
+    if (m === 'fly' && AF.planes.cur) return AF.planes.cur;
+    if (!p) return AF.camTarget;
+    if (m === 'walk' || m === 'cctv' || !p.mesh) return p;
+    const ride = m === 'jetski' ? AF.island && AF.island.jetski && AF.island.jetski.cur : m === 'row' ? AF.east && AF.east.cur : null;
+    if (ride && Number.isFinite(ride.x)) return ride;
+    const q = p.mesh.position; if (!Number.isFinite(q.x) || !Number.isFinite(q.z)) return p;
+    FOC.x = q.x; FOC.z = q.z; FOC.yaw = AF.PL && AF.PL.seat ? AF.PL.seat.yaw : p.mesh.rotation.y;
+    return FOC;
+  };
+  map.focus = focus;
   // the world and city layers are static images baked offline (`node tools/map-bake.mjs`, rerun after world changes); decoded
   // after `ready` so they never compete with boot
   const layer = (bounds, src) => ({ bounds, src, img: null, px: 1 });

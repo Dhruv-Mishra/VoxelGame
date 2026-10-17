@@ -10,6 +10,7 @@ try {
   WQ.addBoat = (m) => { (WQ.extra = WQ.extra || []).push(m); WQ.boats = null; };
   const tier = () => (AF.GFX && AF.GFX.tier) || 'ultra';
   const NL = 16;   // max light streaks
+  const SEA_DEEP = new THREE.Color(0x0b2c45);   // the sea's deep colour (linear), also the open sea past the world's rim
 
   // ------------------------------------------------------------ tileable wave normal map (sum of integer-frequency waves)
   function makeNormalTex() {
@@ -308,7 +309,7 @@ try {
       const isSea = !!ud.sea, kind = isSea ? 'sea' : (ud.kind || 'basin');
       const small = kind === 'basin';
       const cfg = {
-        sea: { deep: 0x0b2c45, shallow: 0x2f9a9a, flow: [0.05, 0.03], chop: 1.0, alpha: 0.82, dmax: 6 },
+        sea: { deep: SEA_DEEP.getHex(), shallow: 0x2f9a9a, flow: [0.05, 0.03], chop: 1.0, alpha: 0.82, dmax: 6 },
         lake: { deep: 0x16404e, shallow: 0x2f6c68, flow: [0.02, 0.01], chop: 0.7, alpha: 0.86, dmax: 3, dk: 1.3 },
         pond: { deep: 0x14302e, shallow: 0x345e52, flow: [0.01, 0.01], chop: 0.55, alpha: 0.86, dmax: 2, dk: 1.1 },
         basin: { deep: 0x1d6a78, shallow: 0x58c0c4, flow: [0.02, 0.02], chop: 0.9, alpha: 0.6, dmax: 0.8 },
@@ -414,6 +415,10 @@ try {
     const s = sv.y;
     const k = 0.1 + 0.95 * AF.smooth(-0.06, 0.4, s);
     WQ.light.value = k * (1 - T.night * 0.55) + 0.06 * T.night;
+    { // the open sea past the world's rim (60-atmos afFarSea) uses the same lit deep-water colour
+      const S = AF.sky && AF.sky.U && AF.sky.U.afSea;
+      if (S) { const v = S.value, L = WQ.light.value; v.x = SEA_DEEP.r * L; v.y = SEA_DEEP.g * L; v.z = SEA_DEEP.b * L; }
+    }
     const oct = tier() === 'ultra' ? 4 : tier() === 'high' ? 3 : 2;
     if (WQ.boatsU) updateBoats(dt);
     for (const m of WQ.mats) m.uniforms.uOct.value = oct;

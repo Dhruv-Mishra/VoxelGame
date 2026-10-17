@@ -60,13 +60,15 @@ try {
     else i = RQ.length;
     RQ.splice(i, 0, q);
   };
-  const radio = (id, first) => { if (VO(id)) queue({ id, who: null, urgent: !!first, t: AF.clock.t }); };
+  const radio = (id, first, when) => { if (VO(id)) queue({ id, who: null, urgent: !!first, t: AF.clock.t, when: when || null }); };
   const speak = (id, who, dur) => { if (VO(id) && who) queue({ id, who, dur, urgent: false, t: AF.clock.t }); };
   const voiceNow = () => {
     const now = AF.clock.t;
     if (!RQ.length || now < talkEnd || MI.cut.on) return;
     if (!RQ[0].who && now < personEnd + RADIO_GAP) return;
     const q = RQ.shift(), L = VO(q.id); if (!L) return;
+    // a conditional line is checked when it would play, not when it was queued (Vera never says "clean" after the alarm went up)
+    if (q.when && !q.when()) return;
     if (q.who) {
       if (now - q.t > STALE) return;
       const w = q.who, len = (AF.audio && AF.audio.voice ? AF.audio.voice(q.id, { x: w.x, y: w.y + 1.6, z: w.z }) : 0) || Math.max(2.2, L[2].length * 0.065);
@@ -200,23 +202,26 @@ try {
     { id: 'brief', cp: 0, act: 'Act I \u00b7 Papers', line: 'Vera\u2019s briefing', cut: () => cutBrief(), mu: 'mu_brief', time: 22.75 },
     { id: 'uniform', tag: () => (H.got.uniform ? 'Out' : H.got.grille ? 'Rail' : 'Grille'), line: () => uniformLine(),
       mark: () => (H.got.uniform ? A.shopDoor : H.got.grille ? A.rail : A.grille || A.shopDoor), enter: (r) => { scene('shop'); if (!r) radio('vera.shop'); }, done: () => !!H.got.uniform && !inShop(), mu: 'mu_stealth', time: 23.25 },
-    { id: 'forger', cp: 1, tag: 'Ezra', line: 'Get pilot papers from {Ezra Quill} in the back of Harbour Stationers', mark: () => A.ezra, enter: (r) => { scene('ezra'); if (!r) radio('vera.shop2'); }, done: () => !!H.got.papers, mu: 'mu_plan' },
+    { id: 'forger', cp: 1, tag: 'Ezra', line: () => (mgDone('papers') ? 'Ezra is forging the rest of the crew\u2019s licences' + mgTag('papers') : 'Get your pilot papers from {Ezra Quill} in the back of Harbour Stationers' + mgTag('papers')), mark: () => A.ezra, enter: (r) => { scene('ezra'); if (!r) radio('vera.shop2'); }, done: () => !!H.got.papers, mu: 'mu_plan' },
     { id: 'gate', tag: 'Crew gate', line: 'Show your papers at the {Westgate crew gate}', mark: () => A.gate, enter: (r) => { scene('gate'); if (!r) radio('vera.ezra'); }, done: () => !!H.got.cleared, mu: 'mu_plan' },
     { id: 'plane', tag: 'Plane', line: 'Take a {plane} from the apron \u2014 one flies, the others ride along', mark: () => planeAt(), enter: () => { resetPlanes(); }, done: () => flying(), mu: 'mu_plan' },
     { id: 'fly', tag: 'Serena Isle', line: () => (RADAR.on ? 'Fly under the coast radar \u2014 hold the {green band} \u2014 to {Serena Isle}' : 'Fly 3 km south to {Serena Isle} and land on the airstrip'), mark: () => A.strip, enter: (r) => { if (!r) { radio('tower.t1'); radio('vera.plane'); } }, done: () => onIsland() && (AF.mode === 'walk' || landed()), mu: 'mu_island' },
     { id: 'kit', cp: 2, act: 'Act II \u00b7 Serena Isle', tag: 'Kit', line: 'Meet {Kit Morrow} on the terrace of Hotel Serena', mark: () => A.kit, enter: (r) => { scene('kit'); if (!r) radio('vera.kit'); }, done: () => near(A.kit, 5, 4), mu: 'mu_island', time: 11 },
     { id: 'kitcut', line: 'Kit Morrow', cut: () => cutKit(), enter: () => scene('kit'), mu: 'mu_island' },
     { id: 'tunnel', tag: 'Tunnel', line: 'Find the {smugglers\u2019 tunnel} on the volcano\u2019s flank', mark: () => A.tunnelEntry, enter: () => { scene('tunnel'); H.got.kitkey = true; }, done: () => near(A.tunnelEntry, 6, 6), mu: 'mu_tension' },
-    { id: 'cache', cp: 3, tag: 'Cache', line: 'Sneak to the {arms cache} and pick its lock \u2014 crouch (C), stay out of sight', mark: () => A.cache, enter: (r) => { scene('tunnel'); if (!r) radio('vera.tunnel'); }, done: () => !!H.got.cache, mu: 'mu_tension' },
+    { id: 'cache', cp: 3, tag: 'Cache', line: () => (H.got.cache ? 'The cache is open' : H.siege ? (H.crackOn && H.cracker !== mySlot() ? 'Hold them off while your crew cracks the {arms cache} \u2014 grab a loud gun off the {rack}' : 'Crack the {arms cache} \u2014 lock ' + Math.min(CRACK_N, H.crack + 1) + ' of ' + CRACK_N + (crewN() > 1 ? ', your crew covers you' : '')) : 'Sneak through the {stash maze} to the arms cache \u2014 crouch (C), stay out of sight'),
+      mark: () => A.cache, enter: (r) => { scene('tunnel'); if (!r) { radio('vera.tunnel'); radio('vera.maze'); } }, done: () => !!H.got.cache, mu: 'mu_tension' },
     { id: 'cave', tag: 'Sea cave', line: 'Slip out through the {sea cave}', mark: () => A.caveExit, enter: (r) => { scene('tunnel'); if (!r) radio('vera.gear'); }, done: () => near(A.caveExit, 7, 6) || near(A.cove, 10, 6), mu: 'mu_tension' },
     { id: 'ambush', tag: 'Jet skis', line: 'Moretti\u2019s men! Fight your way to {the jet skis}', mark: () => nearestSki(), enter: (r) => ambush(r), done: () => ambushOver(), mu: 'mu_action' },
+    { id: 'chase', tag: 'Chasers', line: () => 'Moretti\u2019s men are after you on jet skis \u2014 ride and shoot (aim + fire from the saddle), take them all down' + (CH.list.length ? ' (' + chaseLeft() + ' left)' : ''), mark: () => chaseMark(),
+      enter: (r) => { const C = CB(); if (C) C.clearGoons(); scene('sea'); if (host()) chaseStart(); if (!r) { radio('tony.chase', true); radio('vera.chase'); } }, done: () => chaseOver(), mu: 'mu_chase', hostOnly: true },
     { id: 'ski', tag: 'Solace Queen', line: 'Ride 1.5 km to the {Solace Queen} \u2014 her pontoon is on the port side', mark: () => A.pontoon,
       enter: (r) => { const C = CB(); if (C) C.clearGoons(); if (!r) { radio('vera.ski'); radio('vera.ski2'); } }, done: () => onQueen() || near(A.pontoon, 8), mu: 'mu_island' },
-    { id: 'uniforms', cp: 4, act: 'Act III \u00b7 The Queen', tag: 'Staff', line: () => (H.wear === 'waiter' || H.wear === 'dealer' ? (crewN() > 1 ? 'Wait for your partner to get the other uniform' : 'Uniform on') : crewN() > 1 ? 'Knock out the {waiter} in the pantry and the {dealer} in the crew lounge \u2014 take a uniform each' : 'Knock out the {waiter} in the pantry and take his uniform'),
-      mark: () => (H.took.waiter && H.wear !== 'waiter' ? A.crewLounge : A.pantry), enter: (r) => { scene('queen'); if (!r) { radio('vera.q1'); radio(crewN() > 1 ? 'vera.q2' : 'vera.qsolo'); } },
-      done: () => !!H.took.waiter && (crewN() < 2 || !!H.took.dealer), mu: 'mu_casino', time: 19.6 },
+    { id: 'uniforms', cp: 4, act: 'Act III \u00b7 The Queen', tag: 'Staff', line: () => uniformsLine(),
+      mark: () => (myStingRole() ? null : !H.took.waiter ? A.pantry : crewN() > 1 && !H.took.dealer ? A.crewLounge : secMark()), enter: (r) => { scene('queen'); holster(); if (!r) { radio('vera.q1'); radio(crewN() > 1 ? 'vera.q2' : 'vera.qsolo'); if (crewN() > 2) radio('vera.q2b'); radio('vera.qsec'); } },
+      done: () => allUniformed(), mu: 'mu_casino', time: 19.6 },
     { id: 'salon', tag: 'Salon', line: 'Take the {crew stairs} up to the high-roller salon', mark: () => A.salonDoor, enter: (r) => { scene('queen'); if (!r) radio('vera.q3'); }, done: () => near(A.salon, 7, 3), mu: 'mu_casino' },
-    { id: 'sting', tag: 'Prescott', line: () => stingLine(), mark: () => stingMark(), enter: (r) => { scene('queen'); if (!r) { radio('vera.q4'); radio('vera.q5'); } H.anger = 0; H.strikes = 0; H.tray = false; }, done: () => !!H.got.key, mu: 'mu_casino' },
+    { id: 'sting', tag: 'Prescott', line: () => stingLine(), mark: () => stingMark(), enter: (r) => { scene('queen'); if (!r) { radio('vera.q4'); radio('vera.q5'); if (crewN() > 2) radio('vera.q4b'); } H.anger = 0; H.strikes = 0; H.tray = false; }, done: () => !!H.got.key, mu: 'mu_casino' },
     { id: 'silas', tag: 'Silas', line: 'See {Silas Crane} in his office behind the purser\u2019s cage', mark: () => A.silas, enter: (r) => { scene('queen'); if (!r) radio('vera.got'); if (LN() && LN().openStaff) LN().openStaff(true); }, done: () => near(A.silas, 3.6, 3), mu: 'mu_casino' },
     { id: 'silascut', line: 'Silas Crane', cut: () => cutSilas(), enter: () => scene('queen'), mu: 'mu_casino' },
     { id: 'split', cp: 5, act: 'Act IV \u00b7 Midnight', tag: 'Roles', line: () => (crewN() > 1 ? 'Choose your roles \u2014 {hacker} or {inside man}' : 'Midnight. The hack first, then the bank'), mark: () => null,
@@ -277,14 +282,14 @@ try {
   const belowZoo = () => { const p = AF.player, d = A.server; return AF.mode === 'walk' && !!d && p.y < (A.hatch ? A.hatch.y - 2.5 : -2) && dist(p, A.hatch) < 60; };
   const inShop = () => { const b = A.shopBox, p = AF.player; return AF.mode === 'walk' && !!b && p.x > b[0] && p.x < b[3] && p.z > b[2] && p.z < b[5] && p.y < b[4]; };
   const uniformLine = () => (H.got.uniform ? 'Slip back out of {Kovac\u2019s} \u2014 unseen'
-    : !H.got.grille ? (near(A.shopDoor, 30) ? 'Pick the padlock on the {night grille}' : 'Break into {Kovac\u2019s tailor shop} \u2014 it\u2019s shut for the night')
-      : 'Sneak past the {night watchman} \u2014 the {pilot uniforms} hang on the rail behind the counter');
+    : !H.got.grille ? (mgDone('grille') ? 'Your padlock is off \u2014 wait for your crew to pick theirs' + mgTag('grille') : near(A.shopDoor, 30) ? 'Pick ' + (crewN() > 1 ? 'your padlock' : 'the padlock') + ' on the {night grille}' + mgTag('grille') : 'Break into {Kovac\u2019s tailor shop} \u2014 it\u2019s shut for the night')
+      : mgDone('rail') ? 'Uniform on \u2014 wait for the rest of the crew' + mgTag('rail') : 'Sneak past the {night watchman} \u2014 the {pilot uniforms} hang on the rail behind the counter' + mgTag('rail'));
   let rolePick = null;
   const chooseRoles = () => {
     if (crewN() < 2) { if (host()) { H.roles = ['solo']; send({ op: 'roles', r: H.roles }); } return; }
     if (H.roles.length) return;
     rolePick = null;
-    AF.shop.open({ title: 'Midnight \u00b7 who does what?', sub: 'One of you hacks Kestrel\u2019s cameras from under the zoo, the other goes into the bank', items: () => [
+    AF.shop.open({ title: 'Midnight \u00b7 who does what?', sub: 'One of you hacks Kestrel\u2019s cameras from under the zoo' + (crewN() > 2 ? ', the rest go into the bank' : ', the other goes into the bank'), items: () => [
       { name: 'The hacker', desc: 'Keeper\u2019s uniform, the lion den, the bunker \u2014 then the cameras, lights and locks', tag: rolePick === 'hack' ? 'Picked' : 'Pick', act: () => pickRole('hack') },
       { name: 'The inside man', desc: 'The roof, the guards, the vault, the lasers, the drill, the cash', tag: rolePick === 'infil' ? 'Picked' : 'Pick', act: () => pickRole('infil') },
     ] });
@@ -358,8 +363,8 @@ try {
     if (HS.grille) HS.grille(on('shop') && !H.got.grille); HS.shopShut = on('shop'); if (HS.racks) HS.racks(on('shop'));
     HS.showNpc('ezra', on('ezra')); HS.showNpc('gate', on('gate') || on('ezra'));
     HS.showNpc('kit', on('kit'));
-    for (const k in HS.walkers) if (/^(tunnel|post)/.test(k)) HS.show(k, on('tunnel'));
-    for (const k of ['steward', 'waiter', 'dealer', 'detective']) HS.show(k, on('queen'));
+    for (const k in HS.walkers) if (/^(tunnel|post|wave)/.test(k)) HS.show(k, on('tunnel'));
+    for (const k of ['steward', 'waiter', 'dealer', 'detective', 'sec0', 'sec1', 'sec2', 'sec3', 'sec4', 'sec5']) HS.show(k, on('queen'));
     for (const k of ['door', 'prescott', 'celeste', 'pit']) HS.showNpc(k, on('queen'));
     HS.show('watchman', on('night'));
     for (const k of ['vera2', 'silas2', 'kit2', 'tony']) HS.showNpc(k, on('key') && H.i <= IDX.betray);
@@ -446,18 +451,20 @@ try {
     if (AF.den && AF.den.reset) AF.den.reset();
     if (AF.den && AF.den.setHatch) AF.den.setHatch(false);
     H.took = {}; H.tray = false; H.busy = false; H.drilling = false; H.dealing = false; H.drillR = false; AF.PL.still = false;
+    H.mg = {}; H.crack = 0; H.cracker = -1; H.crackOn = false; H.siege = null; H.detHold = 0; H.pitHold = 0; chaseClear();
+    if (S && S.carrying) S.carrying = null;
     if (LN() && LN().openStaff) LN().openStaff(i === IDX.silas || i === IDX.silascut);
     if (H.roadblock) { for (const c of H.roadblock.cars) c.temp = true; H.roadblock = null; }
     for (const k of ['celeste']) HS.showNpc(k, false);
   };
-  // the wardrobe + loadout a checkpoint implies
+  // the wardrobe + loadout a checkpoint implies (back at the Queen's checkpoint nobody wears a borrowed uniform yet: they're taken again)
   const outfit = () => {
     const i = H.i;
     if (i >= IDX.split && i <= IDX.night) dress(myRole() === 'hack' && H.got.keeper ? 'keeper' : 'night');
     else if (i > IDX.uniform && i <= IDX.kitcut) dress('pilot');
     else if (i >= IDX.escape) dress('night');
-    else if (i < IDX.uniforms || i > IDX.silascut) dress(null);
-    const C = CB(); if (C && C.lend) { if (H.got.cache && i < IDX.fight) C.lend('spistol', 60); }
+    else if (i <= IDX.uniforms || i > IDX.silascut) dress(null);
+    const C = CB(); if (C && C.lend) { if (H.got.cache && i < IDX.fight) { C.lend('spistol', 60); if (i >= IDX.uniforms && i <= IDX.silascut && C.selectId) C.selectId('fists'); } }
   };
   const restore = (cp, failed) => {
     const C = CPS[cp]; let i = IDX[C.step]; H.cp = cp;
@@ -477,13 +484,14 @@ try {
     AF.health.heal(AF.health.max);
     goTo(at, label);
     enter(i, true);
+    H.wear = undefined; H.wears = [];   // re-dress for real, whatever the avatar wore when it went wrong
     outfit();
     if (i === IDX.night) trackEnter(true);
     void failed;
   };
   const begin = () => {
     const J = AF.jobs; if (J && J.cur) J.cur.end('You clock off \u2014 there\u2019s a bigger job tonight.');
-    H.on = true; H.cp = 0; H.failing = false; H.got = {}; H.roles = []; H.tr = { h: 0, n: 0 }; H.nightCp = false; H.bags = [false, false, false, false]; H.wears = [];
+    H.on = true; H.cp = 0; H.failing = false; H.got = {}; H.roles = []; H.tr = { h: 0, n: 0 }; H.nightCp = false; H.bags = [false, false, false, false]; H.wears = []; H.mg = {};
     resetWorld(0); veraBlip(); sfx('jg_start'); enter(0, false);
   };
   const start = () => {
@@ -507,6 +515,7 @@ try {
     if (LN() && LN().openStaff) LN().openStaff(false);
     if (H.car) { H.car.temp = true; H.car = null; }
     if (H.roadblock) { for (const c of H.roadblock.cars) c.temp = true; H.roadblock = null; }
+    chaseClear(); H.siege = null; if (S && S.carrying) S.carrying = null;
     MI.unblip('heist-obj'); MI.unblip('heist-2'); MI.clearBars('heist'); if (AF.hud.job === H.hud) AF.hud.job = null;
     if (host()) AF.time.set({ paused: false });
     if (ok) {
@@ -523,12 +532,22 @@ try {
   H.start = start; H.retry = retry; H.quit = () => (host() ? finish(false) : send({ op: 'quit' }, 0));
   H.dbg = { IDX, ST, CPS, HACK, INF, begin, enter, restore, skip: () => advance(H.i), trDone, solo: (on = true) => { H.solo = on; } };
   H.dbg.jump = (cp) => { if (!host()) return; if (!H.on) begin(); restore(cp); send({ op: 'rs', cp }); };
+  // ---------------------------------------------------------------- everyone does their own part: a padlock each on the grille, a uniform each
+  // off the rail, a licence each from Ezra (the arms cache and the night's role jobs are the exceptions). The shared fact (got) lands once
+  // every member of the crew has done theirs; the host decides.
+  const crewSlots = () => (online() ? [0, ...N.peers.keys()] : [0]);
+  const MGF = { grille: 'grille', rail: 'uniform', papers: 'papers' };
+  const mgDone = (k, slot = mySlot()) => !!(H.mg && H.mg[k] && H.mg[k].has(slot));
+  const mgCount = (k) => crewSlots().filter((s) => mgDone(k, s)).length;
+  const mgTag = (k) => (crewN() > 1 ? ' (' + mgCount(k) + '/' + crewN() + ')' : '');
+  const mgCheck = () => { if (!host() || !H.on || !H.mg) return; for (const k in MGF) if (!H.got[MGF[k]] && H.mg[k] && crewSlots().every((s) => mgDone(k, s))) setGot(MGF[k]); };
+  const mgMark = (k, slot, remote) => { if (!H.mg) H.mg = {}; (H.mg[k] || (H.mg[k] = new Set())).add(slot); if (!remote) send({ op: 'mg', k }); hudT = 0; mgCheck(); };
   // ---------------------------------------------------------------- shared facts (got) + their side effects on every client
   const setGot = (k, remote) => {
     if (H.got[k]) return; H.got[k] = true;
     if (!remote) send({ op: 'got', k });
     if (k === 'grille') { sfx('latch'); if (HS.grille) HS.grille(false); radio('vera.shop1'); }
-    if (k === 'uniform') { dress('pilot'); note('Pilot uniform on. Very dashing.', 'ok'); }
+    if (k === 'uniform') dress('pilot');
     if (k === 'cache') { const C = CB(); if (C && C.lend) C.lend('spistol', 60); note('Silenced pistols and a diamond-core drill. Headshots are quiet and final.', 'ok'); }
     if (k === 'key') { H.lifting = false; note('Prescott\u2019s key is yours.', 'ok'); }
     if (k === 'hacked') { radio('kestrel.in'); if (crewN() < 2) note('Kestrel tablet unlocked \u2014 press T (or the TABLET button) for the bank\u2019s cameras.', 'ok'); }
@@ -541,19 +560,19 @@ try {
 
   // ---------------------------------------------------------------- act I: the tailor's after dark, Ezra, the crew gate
   const pickGrille = () => {
-    if (H.got.grille || H.busy) return;
+    if (H.got.grille || H.busy || mgDone('grille')) return;
     H.busy = true; sfx('click_metal');
-    play('lockpick', { title: 'Kovac\u2019s night grille', sub: 'A padlock on the shop door \u2014 pick it before the beat cop comes round', diff: 0.35, time: 45 })
-      .then((r) => { H.busy = false; if (r && r.ok && is('uniform')) setGot('grille'); });
+    play('lockpick', { title: crewN() > 1 ? 'Kovac\u2019s night grille \u00b7 your padlock' : 'Kovac\u2019s night grille', sub: crewN() > 1 ? 'A padlock for each of you \u2014 pick yours before the beat cop comes round' : 'A padlock on the shop door \u2014 pick it before the beat cop comes round', diff: 0.35, time: 45 })
+      .then((r) => { H.busy = false; if (r && r.ok && is('uniform')) { mgMark('grille', mySlot()); if (!H.got.grille) note('Your padlock is off \u2014 the crew picks the rest' + mgTag('grille') + '.', 'ok'); } });
   };
   const ezraPapers = () => {
-    const n = HS.npc.ezra; if (H.got.papers || H.busy) return;
+    const n = HS.npc.ezra; if (H.got.papers || H.busy || mgDone('papers')) return;
     H.busy = true; speak('ezra.e1', n);
     setTimeout(() => {
       speak('ezra.e2', n);
-      play('stamp', { title: 'Forging a pilot\u2019s licence', sub: 'Ezra Quill \u00b7 Harbour Stationers', diff: 0.4 }).then((r) => {
+      play('stamp', { title: 'Forging your pilot\u2019s licence', sub: 'Ezra Quill \u00b7 Harbour Stationers', diff: 0.4 }).then((r) => {
         H.busy = false;
-        if (r && r.ok) { speak('ezra.done', n); setGot('papers'); } else if (!(r && r.cancelled)) speak('ezra.fail', n);
+        if (r && r.ok) { speak('ezra.done', n); mgMark('papers', mySlot()); if (!H.got.papers) note('Your licence is done \u2014 Ezra still has the others to forge' + mgTag('papers') + '.', 'ok'); } else if (!(r && r.cancelled)) speak('ezra.fail', n);
       });
     }, AF.TEST ? 0 : 2600);
   };
@@ -564,11 +583,46 @@ try {
     setTimeout(() => { speak('gate.g2', n); setGot('cleared'); }, AF.TEST ? 0 : 2400);
   };
 
-  // ---------------------------------------------------------------- act II: the cache, the cove
-  const pickCache = () => {
+  // ---------------------------------------------------------------- act II: the stash maze, the siege at the cache, the cove, the chase
+  // The cache has three padlocks and a tripwire: the moment someone starts on it, Moretti's men pour in from both ends of the tube in
+  // waves (bigger for a bigger crew) while one cracker works the locks and the rest hold them off with the loud guns off the rack.
+  // Solo: put the picks down (Esc) to fight, then carry on from the lock you were on.
+  const CRACK_N = 3, WAVE_N = [0, 3, 4, 5, 6];
+  const crackCache = () => {
     if (H.got.cache || H.busy) return;
-    H.busy = true; sfx('click_metal');
-    play('lockpick', { title: 'The Moretti arms cache', sub: 'A padlocked crate \u2014 pick it quietly', diff: 0.5, time: 60 }).then((r) => { H.busy = false; if (r && r.ok) { sfx('latch'); setGot('cache'); radio('vera.cache'); } });
+    if (H.crackOn && H.cracker >= 0 && H.cracker !== mySlot()) { note('Someone is already on the locks \u2014 cover them!', 'warn'); return; }
+    H.busy = true; H.cracker = mySlot(); H.crackOn = true; send({ op: 'crack', on: 1 }); if (host()) siegeStart();
+    const k = Math.min(CRACK_N - 1, H.crack); sfx('click_metal');
+    play('lockpick', { title: 'The Moretti arms cache \u00b7 lock ' + (k + 1) + ' of ' + CRACK_N, sub: crewN() > 1 ? 'The crate was wired \u2014 your crew holds them off while you work' : 'They\u2019re coming \u2014 Esc puts the picks down so you can fight', diff: 0.45 + k * 0.08, time: 75 }).then((r) => {
+      H.busy = false; H.crackOn = false; send({ op: 'crack', on: 0 });
+      if (!is('cache') || H.got.cache || !(r && r.ok)) return;
+      const n = Math.max(H.crack, k + 1); H.crack = n; sfx('latch'); send({ op: 'crackp', n });
+      if (n >= CRACK_N) { if (host()) setGot('cache'); } else note('Lock ' + n + ' of ' + CRACK_N + ' open.', 'ok');
+    });
+  };
+  const siegeStart = () => {   // host
+    if (H.siege || H.got.cache || !is('cache')) return;
+    H.siege = { t: 0, wave: 0, next: 2 };
+    const z = S && S.zones.get('tunnel');
+    if (z) { z.lastSeen.x = A.cache.x; z.lastSeen.y = A.cache.y; z.lastSeen.z = A.cache.z; z.lastSeen.t = AF.clock.t; if (S.zone === z) S.requestAlarm('The cache was wired'); }
+    radio('vera.siege', true);
+  };
+  const siegeTick = (dt) => {   // host: the waves keep coming until the cache is open
+    const sg = H.siege; if (!sg || !is('cache') || !S || H.got.cache) return;
+    const z = S.zones.get('tunnel'); if (!z || S.zone !== z) return;
+    sg.t += dt;
+    let alive = 0; for (const g of z.guards) if (g.reserve && g.live && !g.down) alive++;
+    sg.next -= dt; if (alive === 0 && sg.wave > 0 && sg.next > 5) sg.next = 5;
+    if (sg.next > 0) return;
+    sg.next = 26; if (alive >= 8) return;
+    const n = Math.min(WAVE_N[Math.min(4, crewN())], 8 - alive);
+    for (let k = 0; k < n; k++) {
+      const i = S.freeReserve('tunnel', 22); if (i < 0) break;
+      const sp = A.waveSpawns[(sg.wave + k) % A.waveSpawns.length], o = ((k >> 1) % 3 - 1) * 0.8;
+      S.spawn('tunnel', i, sp.x + o, sp.y, sp.z - o);
+    }
+    sg.wave++; if (!z.alarm) S.requestAlarm('Reinforcements');
+    if (sg.wave > 1) radio('vera.siege2', false, () => is('cache') && !H.got.cache);
   };
   const nearestSki = () => {
     const J = AF.island && AF.island.jetski; let best = null, bd = 1e9; const p = me();
@@ -580,11 +634,12 @@ try {
     radio('vera.cove'); radio('tony.cove');
     const C = CB(), p = AF.player; H.goonsN = 0;
     if (restored || !C || !C.spawnGoon || dist(p, A.cove) > 160) return;
-    const n = Math.max(3, Math.ceil(7 / crewN()));
+    // each client spawns its share; the whole crew faces 4 + 2 per player
+    const n = Math.max(2, Math.ceil((4 + 2 * crewN()) / crewN()));
     for (let k = 0; k < n; k++) {
       const a = (k + mySlot() * 0.5) / n * PI * 2 + 0.4, r = 16 + (k % 2) * 8, x = A.cove.x + Math.sin(a) * r, z = A.cove.z + Math.cos(a) * r, y = AF.surfaceBelow(x, z, A.cove.y + 14, 30);
       if (!Number.isFinite(y) || y < -0.9 || AF.boxBlocked(x, y + 0.05, z, 0.3, 1.7)) continue;
-      if (C.spawnGoon(x, y, z, { kind: k % 3 === 2 ? 'brawl' : 'gun', weapon: k === 1 ? 'smg' : 'pistol' })) H.goonsN++;
+      if (C.spawnGoon(x, y, z, { kind: k % 3 === 2 ? 'brawl' : 'gun', weapon: k === 1 ? 'smg' : 'pistol', hp: 140 })) H.goonsN++;
     }
   };
   const ambushOver = () => {
@@ -592,22 +647,182 @@ try {
     if (!H.goonsN) return H.t > 6;
     const C = CB(); return !C || C.goons().every((w) => w.agg && w.agg.st === 'down');
   };
+  // ---- the chase: Moretti men on jet skis come after the crew; nobody heads for the Queen with them on their tail. The host steers them
+  // (8 Hz 'ch' to the crew), guests forward their hits ('chit'); riders are path walkers in the 'ride' pose (shared draws, hittable via
+  // actor.chase), hulls ride along in the island's jet-ski InstancedMesh (AF.island.jetski.extra).
+  const SEA = AF.PLAN.harbour.waterY, CH = { list: [], on: false, sendT: 0, t: 0 };
+  const deepAt = (x, z) => AF.W.groundY(x, z) < SEA - 1.5, rideAt = (x, z) => AF.W.groundY(x, z) < SEA - 0.6;
+  // the cove is a basin behind a dog-leg channel: a chaser on the other side of it threads the channel's points
+  const CVP = AF.PLAN.world.island.cove, inCove = (x, z) => !!CVP && Math.hypot(x - CVP.x, z - CVP.z) < CVP.r + 3;
+  const viaChannel = (e, tx, tz, out) => {
+    if (!CVP || !CVP.channel || inCove(e.x, e.z) === inCove(tx, tz)) return false;
+    const pts = CVP.channel, inward = !inCove(e.x, e.z); let k = 0, bd = 1e9;
+    for (let i = 0; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - e.x, pts[i][1] - e.z); if (d < bd) { bd = d; k = i; } }
+    if (bd < 9) k += inward ? -1 : 1;
+    if (k < 0) { out[0] = CVP.x; out[1] = CVP.z; } else if (k >= pts.length) { out[0] = tx; out[1] = tz; } else { out[0] = pts[k][0]; out[1] = pts[k][1]; }
+    return true;
+  };
+  const WP = [0, 0];
+  const chaseMake = (k) => {
+    const P = HS.walkers.chase, a = P && P.actors[k]; if (!a) return null;
+    const e = { k, x: 0, y: SEA - 0.1, z: 0, yaw: 0, v: 0, hp: 110, alive: true, side: k % 2 ? 1 : -1, fireT: 1.5 + k * 0.4, sink: 0, a, nx: 0, nz: 0, nyaw: 0, pitch: 0.08, roll: 0, on: true, fired: 0, w: 0 };
+    a.chase = e; if (a.rx) { a.rx.down = a.rx.fall = 0; } a.rxOn = false; a.tilt = a.lift = 0;
+    const J = AF.island && AF.island.jetski; if (J && J.extra) J.extra.push(e);
+    if (P) P.enabled = true;
+    return e;
+  };
+  const chaseClear = () => {
+    for (const e of CH.list) { e.on = false; if (e.a) { e.a.chase = null; e.a.ctl = { x: e.x, y: SEA - 60, z: e.z, yaw: 0, moving: false, ph: 0 }; } if (AF.audio) AF.audio.hold('heist-ch' + e.k, 'jetski_loop', 0, 1, e.x, e.y, e.z); }
+    CH.list.length = 0; CH.on = false;
+    const J = AF.island && AF.island.jetski; if (J && J.extra) J.extra.length = 0;
+    if (HS && HS.walkers && HS.walkers.chase) HS.walkers.chase.enabled = false;
+  };
+  const chaseStart = () => {   // host: they come round the headland, out beyond the cove's channel
+    chaseClear(); CH.on = true; CH.t = 0;
+    const CV = AF.PLAN.world.island.cove, ch = CV && CV.channel && CV.channel.length ? CV.channel[CV.channel.length - 1] : null;
+    const c = ch ? { x: ch[0], z: ch[1] } : A.cove, base = ch ? Math.atan2(ch[0] - CV.x, ch[1] - CV.z) : 0, n = Math.min(8, 2 + crewN()), p = me();
+    for (let k = 0; k < n; k++) {
+      const e = chaseMake(k); if (!e) break;
+      let x = c.x, z = c.z;
+      for (let tries = 0; tries < 30; tries++) {
+        const ang = base + ((n > 1 ? k / (n - 1) : 0.5) - 0.5) * 1.6 + (tries % 2 ? 1 : -1) * Math.ceil(tries / 2) * 0.22, r = 60 + (tries % 3) * 20;
+        x = c.x + Math.sin(ang) * r; z = c.z + Math.cos(ang) * r; if (deepAt(x, z) && dist({ x, z }, p) > 45) break;
+      }
+      e.x = e.nx = x; e.z = e.nz = z; e.yaw = e.nyaw = Math.atan2(p.x - x, p.z - z); e.v = 14;
+      CH.list.push(e);
+    }
+  };
+  const chaseIngest = (rows) => {   // guest
+    if (!is('chase')) return;
+    if (CH.list.length !== rows.length) { chaseClear(); CH.on = true; for (let k = 0; k < rows.length; k++) { const e = chaseMake(k); if (e) { e.x = +rows[k][0]; e.z = +rows[k][1]; CH.list.push(e); } } }
+    rows.forEach((r, k) => {
+      const e = CH.list[k]; if (!e || !Array.isArray(r) || ![r[0], r[1], r[2]].every(Number.isFinite)) return;
+      e.nx = r[0]; e.nz = r[1]; e.nyaw = r[2]; e.hp = +r[4] || 0;
+      if (e.alive && r[3] !== 1) chaseKill(e);
+      if (r[5] > 0) { const slot = (r[5] | 0) - 1, P = slot === mySlot() ? me() : AF.coop && AF.coop.players.get(slot); if (P) chaseTracer(e, P.x, (P.y || SEA) + 0.9, P.z, false); }
+    });
+  };
+  const chaseTracer = (e, tx, ty, tz, hit) => {
+    const C = CB(), mx = hit ? 0 : (Math.random() - 0.5) * 3, mz = hit ? 0 : (Math.random() - 0.5) * 3;
+    if (C && C.tracer) C.tracer(e.x, e.y + 1.35, e.z, tx + mx, ty, tz + mz, false);
+    if (AF.audio) AF.audio.play('gun_smg', { x: e.x, y: e.y + 1.3, z: e.z, vol: 0.85 });
+  };
+  const chaseKill = (e) => {
+    e.alive = false; e.sink = 0; e.v *= 0.5;
+    if (e.a) AF.walkers.knock(e.a, Math.sin(e.yaw), Math.cos(e.yaw), 2, 1e6);
+    sfx('splash', { x: e.x, y: SEA, z: e.z });
+    if (AF.fx && AF.fx.burst) AF.fx.burst('smoke', e.x, e.y + 0.6, e.z, 3, { size: 0.8, spread: 1.2 });
+    const left = CH.list.filter((q) => q.alive).length;
+    if (left) note('Chaser down \u2014 ' + left + ' to go.', 'ok'); else if (is('chase')) radio('vera.chase2', true);
+  };
+  const chaseHit = (e, dmg, head, remote) => {
+    if (!e || !e.alive) return;
+    if (!host()) { send({ op: 'chit', k: e.k, d: Math.round(dmg), h: head ? 1 : 0 }, 0); return; }
+    e.hp -= head ? dmg * 2.5 : dmg; void remote;
+    if (e.hp <= 0) chaseKill(e);
+  };
+  const chaseTargets = (out) => {
+    out.length = 0; const p = me();
+    if (AF.mode !== 'dead') out.push(mySlot(), p.x, p.y, p.z);
+    if (online() && AF.coop && AF.coop.players) for (const [slot, r] of AF.coop.players) if (r && r.seen && !r.dead) out.push(slot, r.x, r.y, r.z);
+    return out;
+  };
+  const TG = [], CHROW = [];
+  const chaseTick = (dt, t) => {
+    if (!CH.list.length) return;
+    if (!is('chase')) { if (!is('ambush')) chaseClear(); return; }
+    CH.t += dt;
+    const hostSide = host();
+    if (hostSide) chaseTargets(TG);
+    for (const e of CH.list) {
+      if (!e.alive) {
+        e.sink += dt; e.v *= Math.exp(-dt * 1.5); e.x += Math.sin(e.yaw) * e.v * dt; e.z += Math.cos(e.yaw) * e.v * dt;
+        e.y = SEA - 0.1 - Math.min(1.2, e.sink * 0.35); e.pitch = 0.08 + Math.min(0.5, e.sink * 0.2);
+        if (e.a) { const c = e.a.ctl || (e.a.ctl = { x: 0, y: 0, z: 0, yaw: 0, moving: false, ph: 0 }); c.x = e.x; c.y = e.sink > 2.5 ? SEA - 60 : e.y - 0.02; c.z = e.z; c.yaw = e.yaw; }
+        if (e.sink > 5) e.on = false;
+        if (AF.audio) AF.audio.hold('heist-ch' + e.k, 'jetski_loop', 0, 1, e.x, e.y, e.z);
+        continue;
+      }
+      if (hostSide) {
+        let bi = -1, bd = 1e9;
+        for (let i = 0; i < TG.length; i += 4) { const d = Math.hypot(TG[i + 1] - e.x, TG[i + 3] - e.z); if (d < bd) { bd = d; bi = i; } }
+        let want = e.yaw, vt = 12;
+        if (bi >= 0) {
+          const tx = TG[bi + 1], tz = TG[bi + 3], dx = tx - e.x, dz = tz - e.z, d = Math.max(0.1, bd);
+          // ride 14 m short of the target and 8 m off to one side: they flank and keep shooting rather than ram
+          const px = tx - dx / d * 14 - dz / d * e.side * 8, pz = tz - dz / d * 14 + dx / d * e.side * 8, dd = Math.hypot(px - e.x, pz - e.z);
+          want = Math.atan2(px - e.x, pz - e.z); vt = dd > 45 ? 25 : dd > 14 ? 19 : 11;
+          if (viaChannel(e, tx, tz, WP)) { want = Math.atan2(WP[0] - e.x, WP[1] - e.z); vt = 15; }
+          if ((e.fireT -= dt) <= 0 && d < 46) {
+            e.fireT = 0.9 + Math.random() * 0.9;
+            const hit = Math.random() < AF.clamp(0.36 - d / 130, 0.1, 0.32), slot = TG[bi];
+            chaseTracer(e, tx, TG[bi + 2] + 0.9, tz, hit); e.fired = slot + 1;
+            if (hit) { if (slot === mySlot()) { if (AF.health && !AF.health.dead) AF.health.hurt(5 + Math.round(Math.random() * 4), 'gun'); } else send({ op: 'chshot', d: 6 }, slot); }
+          }
+        }
+        // keep off the rocks: look ahead and swing to the side with water
+        const look = Math.max(6, Math.min(14, e.v * 0.7)), ax = e.x + Math.sin(e.yaw) * look, az = e.z + Math.cos(e.yaw) * look;
+        if (!rideAt(ax, az)) { const l = e.yaw + 0.9, r = e.yaw - 0.9; want = rideAt(e.x + Math.sin(l) * look, e.z + Math.cos(l) * look) ? l : r; vt = Math.min(vt, 9); }
+        const turn = AF.clamp(AF.angDiff(e.yaw, want), -1.9 * dt, 1.9 * dt); e.yaw += turn; e.w = turn / Math.max(dt, 1e-3);
+        e.v += (vt - e.v) * (1 - Math.exp(-dt * 1.3));
+        const nx = e.x + Math.sin(e.yaw) * e.v * dt, nz = e.z + Math.cos(e.yaw) * e.v * dt;
+        if (rideAt(nx, nz) || !rideAt(e.x, e.z)) { e.x = nx; e.z = nz; } else { e.v *= 0.5; e.yaw += 2.2 * dt * (e.side || 1); }
+        for (const o of CH.list) { if (o === e || !o.alive) continue; const sx = e.x - o.x, sz = e.z - o.z, s = Math.hypot(sx, sz); if (s > 0.01 && s < 4) { const k = (4 - s) / s * 0.5 * Math.min(1, dt * 4); if (rideAt(e.x + sx * k, e.z + sz * k)) { e.x += sx * k; e.z += sz * k; } } }
+      } else {
+        const k = 1 - Math.exp(-dt * 6), dx = e.nx - e.x, dz = e.nz - e.z;
+        if (dx * dx + dz * dz > 900) { e.x = e.nx; e.z = e.nz; } else { e.x += dx * k; e.z += dz * k; }
+        const turn = AF.angDiff(e.yaw, e.nyaw) * k; e.yaw += turn; e.w = turn / Math.max(dt, 1e-3);
+      }
+      e.y = SEA - 0.1 + Math.sin(t * 2.4 + e.k) * 0.06; e.roll = AF.clamp(-e.w * 0.35, -0.45, 0.45); e.pitch = 0.08;
+      if (e.a) { const c = e.a.ctl || (e.a.ctl = { x: 0, y: 0, z: 0, yaw: 0, moving: false, ph: 0 }); c.x = e.x; c.y = e.y - 0.02; c.z = e.z; c.yaw = e.yaw; }
+      if (AF.audio) AF.audio.hold('heist-ch' + e.k, 'jetski_loop', 0.75, 0.9 + Math.min(0.5, e.v / 50), e.x, e.y, e.z);
+    }
+    if (hostSide && online() && (CH.sendT -= dt) <= 0) {
+      CH.sendT = 1 / 8; CHROW.length = 0;
+      for (const e of CH.list) { CHROW.push([+e.x.toFixed(1), +e.z.toFixed(1), +e.yaw.toFixed(2), e.alive ? 1 : 0, Math.max(0, Math.round(e.hp)), e.fired]); e.fired = 0; }
+      send({ op: 'ch', s: CHROW });
+    }
+  };
+  const chaseLeft = () => CH.list.filter((e) => e.alive).length;
+  const chaseMark = () => { let b = null, bd = 1e9; const p = me(); for (const e of CH.list) if (e.alive) { const d = dist(p, e); if (d < bd) { bd = d; b = e; } } if (b) { SC.x = b.x; SC.y = b.y + 1; SC.z = b.z; return SC; } return null; };
+  const chaseOver = () => CH.on && CH.t > 3 && CH.list.length > 0 && !chaseLeft();
 
   // ---------------------------------------------------------------- act III: the Queen — uniforms, the salon, the sting
-  const myStingRole = () => (H.wear === 'dealer' ? 'dealer' : H.wear === 'waiter' ? 'waiter' : null);
+  const myStingRole = () => (H.wear === 'dealer' ? 'dealer' : H.wear === 'waiter' ? 'waiter' : H.wear === 'security' ? 'security' : null);
+  const STAFFW = new Set(['waiter', 'dealer', 'security']);
+  const secTaken = () => { let n = 0; for (const k in H.took) if (/^sec/.test(k)) n++; return n; };
+  // a crew of two: a waiter and a dealer; three or four: the rest borrow ship's-security uniforms. Every one of them needs a uniform.
+  const allUniformed = () => !!H.took.waiter && (crewN() < 2 || !!H.took.dealer) && crewSlots().every((s) => STAFFW.has(wears(s)));
+  const uniformsLine = () => {
+    if (myStingRole()) return crewN() > 1 ? 'Uniform on \u2014 wait for the rest of the crew to get theirs (' + crewSlots().filter((s) => STAFFW.has(wears(s))).length + '/' + crewN() + ')' : 'Uniform on';
+    if (!H.took.waiter) return 'Knock out the {waiter} in the pantry' + (crewN() > 1 ? ', the {dealer} in the crew lounge' : '') + (crewN() > 2 ? ' or a {ship\u2019s officer}' : '') + ' and take the uniform \u2014 then hide the body';
+    if (crewN() > 1 && !H.took.dealer) return 'Knock out the {dealer} in the crew lounge and take his vest \u2014 hide the body';
+    return 'Take a {ship\u2019s officer} down from behind \u2014 quietly, out of sight \u2014 and borrow his uniform';
+  };
+  const secMark = () => { const p = me(); let b = null, bd = 1e9; for (const g of HS.secG || []) { if (H.took['sec' + HS.secG.indexOf(g)]) continue; const d = dist(p, g.a); if (d < bd) { bd = d; b = g.a; } } if (b) { SC.x = b.x; SC.y = b.y; SC.z = b.z; return SC; } return null; };
+  // aboard the Queen: guns away (security shoots on sight)
+  const holster = () => { const C = CB(); if (C && C.selectId && C.heldId && C.heldId !== 'fists') { C.selectId('fists'); note('Weapons away \u2014 ship\u2019s security opens fire at the sight of a gun. Fists and stealth only.', 'warn'); } };
+  // the officers' jobs in the sting: keep the house detective talking, keep the pit boss looking elsewhere
+  const holdNpc = (k, remote) => {
+    if (k === 'det') { H.detHold = 30; const g = HS.detG; if (g && g.a && !g.down) AF.walkers.hold(g.a, (A.prescott.yaw || 0) + PI, 30); if (!remote) speak('det.chat', g && g.a); }
+    else { H.pitHold = 30; if (!remote) speak('pit.chat', HS.npc.pit); }
+    if (!remote) send({ op: 'hold', k });
+  };
   const stingLine = () => {
     const r = myStingRole();
     if (r === 'dealer') return H.dealing ? 'Deal Prescott a {rotten hand} the moment the drink arrives (3 sloppy deals and you\u2019re out)' : 'Take over {Prescott\u2019s table} from Celeste';
     if (r === 'waiter') return !H.tray ? 'Pick up a {drink tray} at the salon bar' : H.anger > 0 ? 'He\u2019s ranting \u2014 {serve his drink} and lift the key NOW' : 'Serve {Mr Prescott} his drink while he\u2019s ranting at the dealer';
+    if (r === 'security') return H.detHold > 0 ? (H.pitHold > 0 ? 'Stand by the door and look official' : 'Have a word with the {pit boss} \u2014 keep his eyes off the table') : 'Keep the {house detective} talking while the key is lifted';
     return 'Help your crew lift {Prescott\u2019s key}';
   };
-  const stingMark = () => { const r = myStingRole(); return r === 'dealer' && !H.dealing ? A.dealer : r === 'waiter' && !H.tray ? A.salonBar : A.prescott; };
+  const stingMark = () => { const r = myStingRole(); if (r === 'security') { const g = HS.detG; return H.detHold > 0 ? (H.pitHold > 0 ? null : HS.npc.pit) : g && g.a; } return r === 'dealer' && !H.dealing ? A.dealer : r === 'waiter' && !H.tray ? A.salonBar : A.prescott; };
   const ANGRY = ['prescott.angry1', 'prescott.angry2', 'prescott.angry3'];
   const anger = (secs, remote) => {
     H.anger = secs; if (!remote) send({ op: 'anger', s: secs });
     const n = HS.npc.prescott; if (n) { speak(ANGRY[H.angerN++ % 3], n); n.yaw = (A.prescott.yaw || 0) + 0.6; }
   };
   const strike = (remote) => {
+    if (H.pitHold > 0) return;   // an officer is keeping the pit boss busy
     H.strikes++; if (!remote) send({ op: 'strike' });
     const n = HS.npc.pit;
     if (H.strikes >= 3) { speak('pit.fire', n); if (!remote) fail('The pit boss pulled you off the table.'); }
@@ -739,7 +954,7 @@ try {
   };
   const spawnWave = () => {
     const C = CB(); if (!C || !C.spawnGoon) return;
-    const n = Math.max(2, Math.ceil(WAVES[H.waves] / crewN())), P = AF.player, spots = A.goonSpawns.filter((s) => dist(s, P) > 14);
+    const n = Math.max(2, Math.ceil(WAVES[H.waves] * (1 + 0.45 * (crewN() - 1)) / crewN())), P = AF.player, spots = A.goonSpawns.filter((s) => dist(s, P) > 14);
     for (let k = 0; k < n; k++) { const s = spots[(k * 3 + H.waves + mySlot()) % spots.length] || A.goonSpawns[k % A.goonSpawns.length]; C.spawnGoon(s.x + (k % 2) * 1.2, s.y, s.z, { kind: 'gun', weapon: H.waves === 2 && k === 0 ? 'lmg' : k % 2 ? 'smg' : 'pistol', hp: 120 }); }
     if (host() && H.waves === 1) {
       const sp = (s, name, wpn, hp) => { const w = C.spawnGoon(s.x, s.y, s.z, { kind: 'gun', weapon: wpn, hp, name }); if (w) H.bosses.push(w); };
@@ -779,16 +994,23 @@ try {
     // every story interaction waits while the police are after you (the job only goes on once you've lost them)
     const add = (o) => { const f = o.act; if (f) o.act = (...a) => { if (wantedHold()) { wantedNag(true); return; } f(...a); }; return AF.addInteract(Object.assign({ prio: 2 }, o)); };
     // act I
-    add({ x: A.grille.x, y: A.grille.y + 1, z: A.grille.z, r: 1.8, label: 'Pick the padlock on the night grille', prio: 2.4, can: () => walkOk() && is('uniform') && !H.got.grille && !H.busy, act: pickGrille });
-    add({ x: A.rail.x, y: A.rail.y + 1, z: A.rail.z, r: 1.7, label: 'Take two pilot uniforms off the rail', can: () => walkOk() && is('uniform') && H.got.grille && !H.got.uniform, act: () => { sfx('cloth'); setGot('uniform'); } });
-    add({ x: A.ezra.x, y: A.ezra.y + 1, z: A.ezra.z, r: 2.4, label: 'Get your pilot papers from Ezra', prio: 2.4, can: () => walkOk() && is('forger') && !H.got.papers && !H.busy, act: ezraPapers });
+    add({ x: A.grille.x, y: A.grille.y + 1, z: A.grille.z, r: 1.8, label: 'Pick the padlock on the night grille', prio: 2.4, can: () => walkOk() && is('uniform') && !H.got.grille && !H.busy && !mgDone('grille'), act: pickGrille });
+    add({ x: A.rail.x, y: A.rail.y + 1, z: A.rail.z, r: 1.7, label: 'Take a pilot uniform off the rail', can: () => walkOk() && is('uniform') && H.got.grille && !H.got.uniform && !mgDone('rail'), act: () => { sfx('cloth'); dress('pilot'); note('Pilot uniform on. Very dashing.', 'ok'); mgMark('rail', mySlot()); } });
+    add({ x: A.ezra.x, y: A.ezra.y + 1, z: A.ezra.z, r: 2.4, label: 'Get your pilot papers from Ezra', prio: 2.4, can: () => walkOk() && is('forger') && !H.got.papers && !H.busy && !mgDone('papers'), act: ezraPapers });
     add({ x: A.gate.x, y: A.gate.y + 1, z: A.gate.z, r: 2.6, label: 'Show your papers at the crew gate', prio: 2.4, can: () => walkOk() && is('gate') && !H.got.cleared, act: showPapers });
     // act II
-    add({ x: A.cache.x, y: A.cache.y + 1, z: A.cache.z, r: 2.0, label: 'Pick the cache\u2019s padlock', can: () => walkOk() && is('cache') && !H.got.cache && !H.busy, act: pickCache });
+    add({ x: A.cache.x, y: A.cache.y + 1, z: A.cache.z, r: 2.2, label: 'Crack the arms cache', can: () => walkOk() && is('cache') && !H.got.cache && !H.busy, act: crackCache });
+    (A.racks || []).forEach((rk, i) => add({ x: rk.x, y: rk.y + 1, z: rk.z, r: 1.7, label: i % 2 ? 'Take a pump shotgun off the rack' : 'Take a Tommy gun off the rack', prio: 2.5, can: () => walkOk() && (is('cache') || is('cave')),
+      act: () => { const C = CB(); if (C && C.lend) { C.lend(i % 2 ? 'shotgun' : 'tommy', i % 2 ? 48 : 250); sfx('gun_reload'); note(i % 2 ? 'Pump shotgun \u2014 loud and close.' : 'Tommy gun \u2014 250 rounds. Loud.', 'ok'); } } }));
     // act III
-    FOLLOW.push(follow(add({ x: 0, y: -999, z: 0, r: 1.8, label: 'Take the waiter\u2019s uniform', can: () => walkOk() && is('uniforms') && HS.waiterG && HS.waiterG.down && !H.took.waiter && !myStingRole(), act: () => { H.took.waiter = true; send({ op: 'took', k: 'waiter' }); dress('waiter'); sfx('cloth'); } }), () => HS.waiterG && HS.waiterG.a));
-    FOLLOW.push(follow(add({ x: 0, y: -999, z: 0, r: 1.8, label: 'Take the dealer\u2019s uniform', can: () => walkOk() && is('uniforms') && HS.dealerG && HS.dealerG.down && !H.took.dealer && !myStingRole(), act: () => { H.took.dealer = true; send({ op: 'took', k: 'dealer' }); dress('dealer'); sfx('cloth'); } }), () => HS.dealerG && HS.dealerG.a));
+    FOLLOW.push(follow(add({ x: 0, y: -999, z: 0, r: 1.8, label: 'Take the waiter\u2019s uniform', prio: 2.9, can: () => walkOk() && is('uniforms') && HS.waiterG && HS.waiterG.down && !H.took.waiter && !myStingRole(), act: () => { H.took.waiter = true; send({ op: 'took', k: 'waiter' }); dress('waiter'); sfx('cloth'); } }), () => HS.waiterG && HS.waiterG.a));
+    FOLLOW.push(follow(add({ x: 0, y: -999, z: 0, r: 1.8, label: 'Take the dealer\u2019s uniform', prio: 2.9, can: () => walkOk() && is('uniforms') && HS.dealerG && HS.dealerG.down && !H.took.dealer && !myStingRole(), act: () => { H.took.dealer = true; send({ op: 'took', k: 'dealer' }); dress('dealer'); sfx('cloth'); } }), () => HS.dealerG && HS.dealerG.a));
     add({ x: A.dealer.x, y: A.dealer.y + 1, z: A.dealer.z, r: 2.0, label: 'Take over Prescott\u2019s table', prio: 2.5, can: () => walkOk() && is('sting') && myStingRole() === 'dealer' && !H.dealing, act: takeTable });
+    // a crew of three or four: the others borrow ship's-security uniforms off officers they put down
+    (HS.secG || []).forEach((g, i) => FOLLOW.push(follow(add({ x: 0, y: -999, z: 0, r: 1.8, prio: 2.9, label: 'Take the officer\u2019s uniform', can: () => walkOk() && is('uniforms') && g.down && !H.took['sec' + i] && !myStingRole() && crewN() > 2 && secTaken() < crewN() - 2,
+      act: () => { H.took['sec' + i] = true; send({ op: 'took', k: 'sec' + i }); dress('security'); sfx('cloth'); note('Ship\u2019s security. Now hide him somewhere.', 'ok'); } }), () => g.a)));
+    if (HS.detG) FOLLOW.push(follow(add({ x: 0, y: -999, z: 0, r: 2.2, prio: 2.6, label: 'Talk shop with the house detective', can: () => walkOk() && is('sting') && myStingRole() === 'security' && !(H.detHold > 0) && !HS.detG.down, act: () => holdNpc('det') }), () => HS.detG.a));
+    if (HS.npc.pit) add({ x: HS.npc.pit.x, y: (HS.npc.pit.y || A.dealer.y) + 1, z: HS.npc.pit.z, r: 2.2, prio: 2.7, label: 'Have a word with the pit boss', can: () => walkOk() && is('sting') && myStingRole() === 'security' && !(H.pitHold > 0), act: () => holdNpc('pit') });
     add({ x: A.salonBar.x, y: A.salonBar.y + 1, z: A.salonBar.z, r: 2.0, label: 'Pick up a drink tray', can: () => walkOk() && is('sting') && myStingRole() === 'waiter' && !H.tray, act: () => { H.tray = true; sfx('glass'); } });
     if (HS.npc.prescott) { const pi = HS.npc.prescott.interact; pi.r = 2.2; pi.prio = 2.6; const t0 = pi.act; pi.act = () => { if (is('sting') && myStingRole() === 'waiter' && H.tray) serve(); else t0(); }; }
     if (HS.npc.silas) { const si = HS.npc.silas.interact; const t0 = si.act; si.act = () => { if (!is('silas')) t0(); }; }
@@ -806,7 +1028,7 @@ try {
     const z = (id) => S && S.zones.get(id);
     if (z('shop')) { z('shop').disguise = () => false; }
     if (z('queen')) { const q = z('queen'); const STAFF = new Set(['crew', 'pantry', 'crewLounge', 'stairs', 'salon', 'vestibule', 'office', 'vault', 'cage']);
-      q.disguise = (slot) => { if (slot === mySlot() && H.lifting) return false; if (wears(slot) === 'waiter' || wears(slot) === 'dealer') return true; const p = slot === mySlot() ? AF.player : AF.coop && AF.coop.players.get(slot); return !!p && !!LN() && !!LN().room && !STAFF.has(LN().room(p.x, p.y, p.z)); }; q.onAlarm = () => fail('Ship\u2019s security caught you.'); }
+      q.disguise = (slot) => { if (slot === mySlot() && H.lifting) return false; if (STAFFW.has(wears(slot))) return true; const p = slot === mySlot() ? AF.player : AF.coop && AF.coop.players.get(slot); return !!p && !!LN() && !!LN().room && !STAFF.has(LN().room(p.x, p.y, p.z)); }; q.onAlarm = () => fail('Ship\u2019s security caught you.'); }
     if (z('zoo')) { const q = z('zoo'); q.disguise = (slot) => wears(slot) === 'keeper'; q.onAlarm = () => fail('The night watchman raised the alarm.'); }
     if (z('tunnel')) z('tunnel').onAlarm = () => { radio('vera.spotted', true); };
     if (z('bank')) z('bank').onAlarm = (why) => { if (!H.bags.every(Boolean)) radio(/Gunfire|loud/i.test(why || '') ? 'vera.loud' : 'vera.spotted', true); };
@@ -915,7 +1137,7 @@ try {
     return out;
   });
   // ---------------------------------------------------------------- co-op
-  const OPS = new Set(['go', 'st', 'done', 'fail', 'end', 'quit', 'retry', 'rs', 'got', 'roles', 'role', 'tr', 'tdone', 'wear', 'took', 'anger', 'strike', 'table', 'lock', 'laser', 'grip', 'bag', 'drill']);
+  const OPS = new Set(['go', 'st', 'done', 'fail', 'end', 'quit', 'retry', 'rs', 'got', 'roles', 'role', 'tr', 'tdone', 'wear', 'took', 'anger', 'strike', 'table', 'lock', 'laser', 'grip', 'bag', 'drill', 'mg', 'crack', 'crackp', 'ch', 'chit', 'chshot', 'hold']);
   const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
   const GOT = new Set(['grille', 'uniform', 'papers', 'cleared', 'kitkey', 'cache', 'key', 'keeper', 'hacked', 'hatch', 'gate', 'cage']);
   const adoptGot = (g) => { if (!Array.isArray(g)) return; for (const k of g) if (GOT.has(k) && !H.got[k]) setGot(k, true); };
@@ -945,7 +1167,14 @@ try {
         case 'tr': if (fromHost && int(m.h, 0, 9) && int(m.n, 0, 9)) { H.tr.h = m.h; H.tr.n = m.n; adoptGot(m.g); if (H.got.hacked) H.nightCp = true; } break;
         case 'tdone': if (host() && (m.t === 'h' || m.t === 'n') && int(m.k, 0, 9)) trDone(m.t, m.k); break;
         case 'wear': if (typeof m.k === 'string' && m.k.length < 10) H.wears[from] = m.k || null; break;
-        case 'took': if (m.k === 'waiter' || m.k === 'dealer') H.took[m.k] = true; break;
+        case 'took': if (m.k === 'waiter' || m.k === 'dealer' || /^sec[0-9]$/.test(m.k)) H.took[m.k] = true; break;
+        case 'mg': if (H.on && typeof m.k === 'string' && MGF[m.k] && int(from, 0, 3)) mgMark(m.k, from, true); break;
+        case 'crack': if (H.on && is('cache') && int(from, 0, 3)) { if (m.on === 1) { H.cracker = from; H.crackOn = true; if (host()) siegeStart(); } else if (H.cracker === from) H.crackOn = false; } break;
+        case 'crackp': if (H.on && is('cache') && int(m.n, 0, 3) && m.n > H.crack) { H.crack = m.n; if (m.n >= CRACK_N && host()) setGot('cache'); } break;
+        case 'ch': if (fromHost && !host() && Array.isArray(m.s) && m.s.length <= 8) chaseIngest(m.s); break;
+        case 'chit': if (host() && int(m.k, 0, 7)) { const e = CH.list[m.k]; if (e) chaseHit(e, AF.clamp(+m.d || 20, 1, 400), m.h === 1, true); } break;
+        case 'chshot': if (fromHost && AF.health && !AF.health.dead) AF.health.hurt(AF.clamp(+m.d || 6, 1, 15), 'gun'); break;
+        case 'hold': if (H.on && is('sting') && (m.k === 'det' || m.k === 'pit')) holdNpc(m.k, true); break;
         case 'anger': if (is('sting')) anger(AF.clamp(+m.s || 5, 1, 9), true); break;
         case 'strike': if (is('sting')) strike(true); break;
         case 'table': HS.showNpc('celeste', false); break;
@@ -962,15 +1191,30 @@ try {
   }
   AF.on('died', () => { if (H.on && !H.failing) fail((AF.friends.current ? AF.friends.current.name : 'Someone') + ' was knocked out.'); });
   AF.respawnAt = () => { if (!H.on) return null; const at = spotFor(CPS[H.cp].at()); return at ? { label: CPS[H.cp].label, x: at.x, y: at.y, z: at.z, yaw: at.yaw || 0 } : null; };
-  if (AF.combat) AF.combat.onWalkerHit = (a, kind, fx, fz, info) => (S && H.on ? S.hit(a, kind, fx, fz, info) : false);
   if (AF.casino) AF.casino.can = () => !H.lifting && !H.dealing;
-  // stealth events -> Vera on the radio
+  // stealth events -> Vera on the radio. "Clean" only if it still is when she'd say it: no alarm, no reflex, nobody hunting the crew
+  const quietNow = () => { if (!H.on || !S || !S.zone) return false; const z = S.zone; return !z.alarm && !S.reflex && !z.guards.some((g) => !g.down && (g.st === 'alert' || g.st === 'combat')); };
+  let niceT = -99, bodyT = -99;
   AF.on('stealth', (e) => {
     if (!H.on || !e) return;
     if (e.type === 'reflex') { radio('vera.reflex', true); sfx('jg_spot'); }
-    else if (e.type === 'reflexOk' || (e.type === 'ko' && Math.random() < 0.35)) radio('vera.nice');
+    else if (e.type === 'alarm') { for (let i = RQ.length - 1; i >= 0; i--) if (RQ[i].id === 'vera.nice') RQ.splice(i, 1); }
+    else if ((e.type === 'reflexOk' || (e.type === 'ko' && Math.random() < 0.35)) && AF.clock.t - niceT > 20) {
+      niceT = AF.clock.t; const z = S && S.zone;
+      setTimeout(() => { if (S && S.zone === z && quietNow()) radio('vera.nice', false, quietNow); }, 1400);
+    }
+    if (e.type === 'ko' && e.zone === 'queen' && AF.clock.t - bodyT > 40) { bodyT = AF.clock.t; setTimeout(() => radio('vera.bodies', false, () => H.on && S.zone && S.zone.id === 'queen' && S.zone.guards.some((g) => g.down && !g.hid && g.carrier < 0)), 2600); }
   });
-  Object.assign(H.dbg, { grip, bag, setGot, lockOn, cutLasers, serve, takeTable, anger, openCams, myRole, scene, fail,
+  // the liner: a passenger hit where security can see it is violence on board (the alarm, the job fails)
+  const onWalker = (a, kind, fx, fz, info) => {
+    if (a && a.chase) { chaseHit(a.chase, (info && info.dmg) || 20, !!(info && info.head)); return true; }
+    if (!S || !H.on) return false;
+    if (S.hit(a, kind, fx, fz, info)) return true;
+    const z = S.zone; if (z && z.strict && !z.alarm && H.scene === 'queen') { const w = S.witness(z, a.x, a.y, a.z); if (w) S.raiseAlarm('Security saw you attack a passenger', w); }
+    return false;
+  };
+  if (AF.combat) AF.combat.onWalkerHit = onWalker;
+  Object.assign(H.dbg, { grip, bag, setGot, lockOn, cutLasers, serve, takeTable, anger, openCams, myRole, scene, fail, CH, crackCache, chaseHit,
     setRoles: (r) => { if (!host()) return; H.roles = r.slice(); send({ op: 'roles', r: H.roles }); rolesSet(); } });
 
   // ---------------------------------------------------------------- quiet city while the job is on (fewer ambient draws + ticks)
@@ -987,9 +1231,12 @@ try {
     MI.bar('heist-bags', H.on && H.i >= IDX.night && H.i <= IDX.stash && (n || H.tr.n >= 6) ? { label: 'Cash bags', value: n + ' / 4', ok: n === 4 } : null);
     MI.bar('heist-wave', is('fight') && H.waves ? { label: 'Moretti\u2019s men', value: 'wave ' + Math.min(H.waves, WAVES.length) + ' / ' + WAVES.length, hot: true } : null);
     MI.bar('heist-radar', RADAR.on ? { label: 'Radar lock', value: 'Fly ' + Math.round(RADAR.lo) + '\u2013' + Math.round(RADAR.hi) + ' m', pct: RADAR.k, hot: RADAR.off > 0, ok: !RADAR.off } : null);
+    MI.bar('heist-crack', is('cache') && (H.siege || H.crack > 0) && !H.got.cache ? { label: 'Cache locks', value: H.crack + ' / ' + CRACK_N, pct: H.crack / CRACK_N, ok: false, hot: !!H.siege } : null);
+    MI.bar('heist-chase', is('chase') && CH.list.length ? { label: 'Moretti skis', value: chaseLeft() + ' left', hot: chaseLeft() > 0 } : null);
+    MI.bar('heist-hold', is('sting') && (H.detHold > 0 || H.pitHold > 0) ? { label: H.detHold > 0 ? 'Detective distracted' : 'Pit boss distracted', value: Math.ceil(Math.max(H.detHold, H.pitHold)) + ' s', ok: true } : null);
   };
-  let natT = 0, laserT = 0, drillNT = 0, warnT = 0;
-  AF.onTick('heist', 425, (dt) => {
+  let natT = 0, laserT = 0, drillNT = 0, warnT = 0, mgT = 0;
+  AF.onTick('heist', 425, (dt, tw) => {
     voiceNow();
     if (H.after) { H.afterT -= dt; if (H.afterT <= 0 && !(UI.dialogueOpen && UI.dialogueOpen())) { const f = H.after; H.after = null; f(); } }
     const mn = H.on ? '' : 'none'; if (MN.style.display !== mn) MN.style.display = mn;
@@ -1007,6 +1254,11 @@ try {
     if ((is('salon') || is('sting')) && myStingRole() && !H.flag.doorSaid && near(A.salonDoor, 3.5, 3)) { H.flag.doorSaid = true; speak('door.in', HS.npc.door); }
     if (H.failing) return;
     // timers
+    if (H.detHold > 0) H.detHold -= dt;
+    if (H.pitHold > 0) H.pitHold -= dt;
+    if (host() && (mgT -= dt) <= 0) { mgT = 0.5; mgCheck(); }
+    if (host()) siegeTick(dt);
+    chaseTick(dt, tw);
     if (H.anger > 0 && (H.anger -= dt) <= 0) { H.anger = 0; const n = HS.npc.prescott; if (n) n.yaw = A.prescott.yaw || 0; }
     if (is('sting') && !H.dealing && !H.drillR && (crewN() < 2 || !H.took.dealer)) { if ((natT += dt) > 24) { natT = 0; speak('dealer.hand', HS.npc.celeste); setTimeout(() => { if (is('sting')) anger(4.8, true); }, 1200); } } else natT = 0;
     if (H.lockT > 0) H.lockT -= dt;

@@ -9,7 +9,8 @@ try {
 //            burst(kind, x, y, z, n, o) kinds flash|fire|spark|smoke|steam|dust|hit|glow, line(x0..z1) for tracers
 // AF.sfx     synthesised one-shots + a siren (WebAudio, no files)     AF.hud  panel under the minimap, job line, crosshair, meter
 // Forget policy: runtime cars (taken from the kerb, police, wrecks) are dropped G.forgetS s after the player is G.forgetD away;
-// engaged peds calm down past G.pedForgetD (77). Only AF.save survives a reload.
+// engaged peds calm down past G.pedForgetD (77). AF.forget sweeps whatever a player touched and left for G.staleS (cars, wrecks,
+// planes, jet skis, rowing boats) back home or away. Only AF.save survives a reload.
 {
   const PI = Math.PI, UI = AF.ui, root = document.getElementById('ui');
   const G = AF.G = {
@@ -21,6 +22,9 @@ try {
     deathFee: 0.1, deathFeeMax: 400, respawnS: 5,
     vehHp: 100, vehDmgMin: 3, vehDmgK: 3.2, vehSmoke: 45, vehBurnS: 7, boomR: 8, boomDmg: 95,
     forgetD: 220, forgetS: 40, wreckS: 60,
+    // stale sweep (AF.forget): anything a player touched and left returns home / is dropped staleS s after the last touch, checked
+    // every staleEvery s, never within staleNearD m of the camera (its spot or its home) so nothing pops in view
+    staleS: 300, staleEvery: 5, staleNearD: 60,
     pedHp: 30, copHp: 60, engagedMax: 12, pedForgetD: 85, panicR: 26,
     // gunplay (77): headshot multiplier, stance spread multipliers, recoil recovery; silenced shots only panic / report within these
     headK: 2.5, aimSpreadK: 0.45, crouchSpreadK: 0.65, moveSpreadK: 0.9, sprintSpreadK: 2.2, airSpreadK: 2.6, adsKickK: 0.6,
@@ -333,7 +337,7 @@ try {
   // the pools draw nothing while empty: compile their programs behind the boot veil so the first shot never hitches
   AF.on('preloaded', () => { if (!FX.glow || !AF.stream.compileAhead) return; for (const P of [FX.glow, FX.smoke]) { P.pts.visible = true; AF.stream.compileAhead(P.pts).then(() => { P.pts.visible = P.n > 0; }); } });
   let hudT = 0, reapT = 0;
-  const focus = () => AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.player;
+  const focus = () => (AF.mode !== 'aerial' && UI.map && UI.map.focus ? UI.map.focus() : AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.player);
   AF.onTick('game', 960, (dt) => {
     if (saveT > 0 && (saveT -= dt) <= 0) AF.saveNow();
     // fx + camera shake (after every camera owner)
@@ -374,12 +378,116 @@ try {
       reapT = 0;
       const VV = AF.vehicles, f = focus(), cars = VV.cars;
       for (let i = cars.length - 1; i >= 0; i--) {
-        const c = cars[i]; if (!c.temp || c.player || c.ai || c.keep) continue;
+        const c = cars[i]; if (!c.temp || c.player || c.ai || c.keep || c.net != null) continue;
         const far = (c.x - f.x) ** 2 + (c.z - f.z) ** 2 > G.forgetD * G.forgetD;
         c.away = far ? (c.away || 0) + 1 : 0;
         if (c.away >= G.forgetS || (c.dead && AF.clock.t - c.deadT > G.wreckS && far)) VV.forget(c);
       }
     }
+    if ((staleT += dt) >= G.staleEvery) { staleT = 0; FG.sweep(); }
+  });
+
+  // ---------------------------------------------------------------- AF.forget: the stale sweep (PERF.md §8.9)
+  // Everything a player touches carries touchT = AF.clock.t of the last interaction (driven, ridden, hit, pushed, moved off its
+  // spot). G.staleS after it, if nobody uses it and the camera is more than G.staleNearD from both where it is and where it belongs,
+  // it goes home or is dropped: a kerb car back to its kerb (VV.forget), a boot car to its spot, a plane to its stand
+  // (AF.planes.reset), a jet ski to its dock, a rowing boat to its jetty; wrecks, cars taken out of traffic and cars made for a
+  // remote driver are dropped. Only what this client owns: never anything with .net (a remote player has it), .keep or .mission;
+  // while a heist runs (AF.noTravel) only wrecks. Every G.staleEvery s, index loops over a few hundred entries, nothing allocated
+  // (a boot car's home pose is recorded once). AF.forget.touch(obj) stamps an interaction; register(name, kind) adds a system.
+  let staleT = 0, rideWas = null;
+  const FG = AF.forget = { kinds: [], swept: 0 };
+  FG.touch = (o) => { if (o) o.touchT = AF.clock.t; return o; };
+  // kind: { list() -> array | null, busy(o) -> in use right now, away(o) -> off its home spot / runtime, home(o) -> {x, z} | null,
+  //         reset(o) -> true once it is home or gone }
+  FG.register = (name, kind) => { kind.name = name; FG.kinds.push(kind); return kind; };
+  const ride = () => { const VV = AF.vehicles, C = AF.coop; return (VV && VV.player) || (AF.planes && AF.planes.cur) || (AF.island && AF.island.jetski && AF.island.jetski.cur) || (AF.east && AF.east.cur) || (C && C.ride && C.ride.veh) || null; };
+  // getting in or out of anything stamps it, to the second
+  AF.on('mode', () => { const now = AF.clock.t; if (rideWas) rideWas.touchT = now; rideWas = ride(); if (rideWas) rideWas.touchT = now; });
+  const near = (x, z, cx, cz) => (x - cx) * (x - cx) + (z - cz) * (z - cz) < G.staleNearD * G.staleNearD;
+  FG.sweep = (force, only) => {
+    const now = AF.clock.t, cam = AF.camera.position, cx = cam.x, cz = cam.z, cur = ride(), heist = !!(AF.noTravel && AF.noTravel());
+    let n = 0;
+    for (let k = 0; k < FG.kinds.length; k++) {
+      const K = FG.kinds[k], L = K.list(); if (!L) continue;
+      for (let i = L.length - 1; i >= 0; i--) {
+        const o = L[i]; if (!o || o.active === false || (only && o !== only)) continue;
+        if (o === cur || o.keep || o.mission || o.net != null || K.busy(o)) { o.touchT = now; continue; }
+        if (!K.away(o)) { o.touchT = 0; continue; }
+        if (!o.touchT) { o.touchT = now; continue; }
+        if (!force && now - o.touchT < G.staleS) continue;
+        if (heist && !o.dead) continue;
+        if (near(o.x, o.z, cx, cz)) continue;
+        const h = K.home(o); if (h && near(h.x, h.z, cx, cz)) continue;
+        if (K.reset(o)) { o.touchT = 0; n++; }
+      }
+    }
+    FG.swept += n; return n;
+  };
+  const CARS = FG.register('cars', {
+    list: () => AF.vehicles && AF.vehicles.cars,
+    busy: (c) => {
+      if (c.player || c.ai) return !!c.player;
+      const CB = AF.combat;
+      if (c.squad && CB && CB.stars > 0) return true;
+      if (c.pushLife > 0 || c.burnT > 0) return true;
+      if (c.hp !== c.hpSeen) { c.hpSeen = c.hp; return c.touchT > 0 || c.moved || c.temp; }   // shot / rammed: a touch
+      return false;
+    },
+    away: (c) => {
+      if (c.ai) return false;
+      if (!c.base && !c.temp && !c.moved && !c.dead) c.base = { x: c.x, y: c.y, z: c.z, yaw: c.yaw };   // a boot car's spot, once
+      return !!(c.temp || c.dead || c.moved);
+    },
+    home: (c) => (!c.dead && (c.temp ? c.home : c.base)) || null,
+    reset: (c) => {
+      const VV = AF.vehicles, b = c.base, spot = c.dead ? null : c.temp ? c.home : b;
+      // its spot taken (a car parked or passing there): try again next sweep rather than lose the kerb space
+      if (spot) for (let i = 0; i < VV.cars.length; i++) { const o = VV.cars[i]; if (o !== c && o.active !== false && Math.abs(o.x - spot.x) < 4 && Math.abs(o.z - spot.z) < 4) return false; }
+      // kerb cars go back to their kerb; wrecks, cars out of traffic, cars made for a remote driver are dropped
+      if (c.temp || c.dead || !b) { VV.forget(c); return true; }
+      c.x = b.x; c.y = b.y; c.z = b.z; c.yaw = b.yaw; c.v = c.vx = c.vz = 0; c.steer = c.pitch = c.roll = 0;
+      c.pushLife = c.pushX = c.pushZ = c.pushSpin = 0; c.moved = false; c.parked = true;
+      if (c.hp != null) { c.hp = c.hpSeen = G.vehHp; c.dmg = 0; c.smokeT = 0; }
+      VV.placeMesh(c); if (c.interact) c.sync();
+      return true;
+    },
+  });
+  FG.register('planes', {
+    list: () => AF.planes && AF.planes.list,
+    busy: (p) => p === AF.planes.cur || !!p.ghost,
+    away: (p) => !!p.home && (Math.abs(p.x - p.home.x) > 3 || Math.abs(p.z - p.home.z) > 3 || Math.abs(AF.angDiff(p.yaw, p.home.yaw)) > 0.2),
+    home: (p) => p.home,
+    reset: (p) => { AF.planes.reset(p); return true; },
+  });
+  FG.register('jetskis', {
+    list: () => AF.island && AF.island.jetski && AF.island.jetski.skis,
+    busy: (k) => Math.abs(k.v) > 0.05,
+    away: (k) => !!k.home && Math.hypot(k.x - k.home.x, k.z - k.home.z) > 4,
+    home: (k) => k.home,
+    reset: (k) => {
+      const d = k.home; k.x = d.x; k.z = d.z; k.yaw = d.yaw; k.v = k.w = 0; k.pitch = k.roll = 0; k.vy = k.air = k.land = 0;
+      if (k.wake) { k.wake.position.x = d.x; k.wake.position.z = d.z; k.wake.rotation.y = d.yaw; k.wake.updateMatrixWorld(); }
+      k.sync(); return true;
+    },
+  });
+  FG.register('rowboats', {
+    list: () => AF.east && AF.east.boats,
+    busy: (b) => Math.abs(b.v) > 0.05,
+    away: (b) => !!b.home && (Math.hypot(b.x - b.home.x, b.z - b.home.z) > 2 || Math.abs(AF.angDiff(b.yaw, b.home.yaw)) > 0.3),
+    home: (b) => b.home,
+    reset: (b) => { const h = b.home; b.x = h.x; b.z = h.z; b.yaw = h.yaw; b.v = b.w = 0; if (b.it) { b.it.x = h.x; b.it.z = h.z; } return true; },
+  });
+  // boot cars: their spots, recorded before anyone can move them
+  AF.on('ready', () => { const L = CARS.list(); if (L) for (let i = 0; i < L.length; i++) CARS.away(L[i]); });
+  AF.test('game: the stale sweep sends a touched, idle plane home (never in view of the camera)', () => {
+    const pl = AF.planes && AF.planes.list[0]; if (!pl) return { ok: true, info: 'no planes' };
+    const cam = AF.camera.position, cx = cam.x, cy = cam.y, cz = cam.z;
+    pl.x = pl.home.x + 60; pl.z = pl.home.z + 20; pl.touchT = 1e-3;
+    cam.set(pl.x + 5, cy, pl.z); FG.sweep(true, pl); const stayed = Math.abs(pl.x - pl.home.x) > 3;
+    cam.set(pl.home.x + 400, cy, pl.home.z + 400); FG.sweep(true, pl); const home = Math.abs(pl.x - pl.home.x) < 0.01 && Math.abs(pl.z - pl.home.z) < 0.01;
+    cam.set(cx, cy, cz); if (!home) AF.planes.reset(pl);
+    return { ok: stayed && home, info: `kept in view ${stayed}, home when out of view ${home}` };
   });
 
   AF.test('game: money, shop spend and the save round-trip', () => {

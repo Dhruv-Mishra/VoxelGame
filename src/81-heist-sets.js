@@ -45,6 +45,7 @@ try {
     else if (kind === 'dealer') { L.top = { style: 'vest', col: 0xf4f0e6, col2: 0x8a1424 }; L.bottom = { style: 'jeans', col: 0x141418 }; L.shoe = 0x111114; }
     else if (kind === 'keeper') { L.top = { style: 'shirt', col: 0x8a7a4a, col2: 0x5a4a2a }; L.bottom = { style: 'jeans', col: 0x5a5030 }; L.hat = 'cap'; L.hatCol = 0x5a4a2a; L.shoe = 0x3a2a1a; }
     else if (kind === 'night') { L.top = { style: 'shirt', col: 0x1a1a1e, col2: 0x1a1a1e }; L.bottom = { style: 'jeans', col: 0x16161a }; L.shoe = 0x0c0c0e; }
+    else if (kind === 'security') { L.top = { style: 'suit', col: 0x1f2a44, col2: 0xd8b04a }; L.bottom = { style: 'jeans', col: 0x1f2a44 }; L.hat = 'cap'; L.hatCol = 0x1f2a44; L.shoe = 0x111114; }
     if (kind) L.uniform = kind; else delete L.uniform;   // 47-airfield's crew gate reads look.uniform
     return L;
   };
@@ -139,14 +140,22 @@ try {
     A.caveExit = IH.caveExit || A.tunnelEntry; A.cove = IH.cove || A.caveExit;
     A.skis = IH.skis || [];
     const tl = IH.tunnel && IH.tunnel.length ? IH.tunnel : [P3(A.tunnelEntry), P3(A.cache), P3(A.caveExit)];
-    { let x0 = 1e9, y0 = 1e9, z0 = 1e9, x1 = -1e9, y1 = -1e9, z1 = -1e9; for (const p of tl.concat([P3(A.tunnelEntry), P3(A.cache), P3(A.caveExit)])) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); z0 = Math.min(z0, p[2]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); z1 = Math.max(z1, p[2]); }
+    A.racks = IH.racks || []; A.waveSpawns = IH.waveSpawns && IH.waveSpawns.length ? IH.waveSpawns.map((p) => ({ x: p[0], y: p[1], z: p[2] })) : [A.tunnelEntry, A.caveExit];
+    A.cacheStand = IH.cacheStand || A.cache;
+    { let x0 = 1e9, y0 = 1e9, z0 = 1e9, x1 = -1e9, y1 = -1e9, z1 = -1e9; for (const p of tl.concat([P3(A.tunnelEntry), P3(A.cache), P3(A.caveExit)], IH.nav ? IH.nav.pts : [])) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); z0 = Math.min(z0, p[2]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); z1 = Math.max(z1, p[2]); }
       A.tunnelBox = [x0 - 8, y0 - 6, z0 - 8, x1 + 8, y1 + 8, z1 + 8]; }
     const mob = () => crowdLook('worker', 'm', rng, 0x2c2c34, 0x26262c);
-    const tzn = HS.zones.tunnel = S.define('tunnel', { box: A.tunnelBox, mode: 'fight', voice: 'm1', reflexS: 1.8, radius: 80, nav: tl.length > 1 ? { pts: tl.map((p) => p.slice()), links: tl.slice(1).map((_, i) => [i, i + 1]) } : null });
+    const nav = IH.nav && IH.nav.pts.length > 1 ? { pts: IH.nav.pts.map((p) => p.slice()), links: IH.nav.links.map((l) => l.slice()) } : tl.length > 1 ? { pts: tl.map((p) => p.slice()), links: tl.slice(1).map((_, i) => [i, i + 1]) } : null;
+    const tzn = HS.zones.tunnel = S.define('tunnel', { box: A.tunnelBox, mode: 'fight', voice: 'm1', reflexS: 1.8, radius: 80, nav });
+    // every Moretti man walks a beat (the tube legs, three through the stash maze, the depot, the dock): none stands still
     const routes = IH.guardRoutes && IH.guardRoutes.length ? IH.guardRoutes : [[P3(A.cache, 0), [A.cache.x + 4, A.cache.y, A.cache.z]]];
-    routes.slice(0, 3).forEach((r, i) => { const p = walker('tunnel' + i, 'Moretti', r, r.length > 1 ? { speed: 0.9, mode: 'pingpong', dwell: [{ i: 0, t: 4 + i }, { i: r.length - 1, t: 5 }] } : { speed: 0, yaw: (IH.guardPosts && IH.guardPosts[i] && IH.guardPosts[i].yaw) || 0 }, mob(i)); if (p) S.guard('tunnel', { path: p, voice: i % 2 ? 'm2' : 'm1', name: 'Moretti', range: 14 }); });
-    for (const gp of (IH.guardPosts || []).slice(0, 2)) { const p = walker('post' + gp.x.toFixed(0), 'Moretti', [[gp.x, gp.y, gp.z]], { speed: 0, yaw: gp.yaw || 0 }, mob(9)); if (p) S.guard('tunnel', { path: p, voice: 'm2', name: 'Moretti', range: 13 }); }
-    void tzn;
+    routes.slice(0, 9).forEach((r, i) => { if (r.length < 2) r = [r[0], [r[0][0] + 3, r[0][1], r[0][2]]]; const p = walker('tunnel' + i, 'Moretti', r, { speed: 0.82 + (i % 3) * 0.09, mode: 'pingpong', dwell: [{ i: 0, t: 3 + (i % 3) * 1.5 }, { i: r.length - 1, t: 4 + (i % 2) }] }, mob(i)); if (p) S.guard('tunnel', { path: p, voice: i % 2 ? 'm2' : 'm1', name: 'Moretti', range: 14 }); });
+    // reinforcements for the siege at the cache (81-heist sends them in waves): off stage until S.spawn
+    HS.reserve = [];
+    for (let k = 0; k < 12; k++) { const p = walker('wave' + k, 'Moretti', [[A.cache.x, A.cache.y - 40, A.cache.z]], { speed: 0 }, mob()); if (p) { const g = S.guard('tunnel', { path: p, voice: k % 2 ? 'm2' : 'm1', name: 'Moretti', range: 20, reserve: true }); if (g) { g.down = true; g.hid = true; HS.reserve.push(g); } } }
+    tzn.hides = [];
+    if (IH.maze) tzn.hides.push({ x: IH.maze.far[0], y: IH.maze.far[1], z: IH.maze.far[2], r: 1.4, label: 'in the dead end' });
+    for (const gp of (IH.guardPosts || []).slice(0, 2)) tzn.hides.push({ x: gp.x, y: gp.y, z: gp.z, r: 1.4, label: 'behind the crates' });
     // ---------------------------------------------------------------- the Solace Queen: crew deck + salon (one zone: staff go anywhere, guests nowhere)
     const LS = (AF.liner && AF.liner.spots) || {};
     const L0 = AF.liner ? { x: AF.liner.x, y: 1.5, z: AF.liner.z } : { x: -225, y: 1.5, z: 1450 };
@@ -160,8 +169,30 @@ try {
     const pts = (k, fb) => (Array.isArray(LS[k]) && LS[k].length > 1 ? LS[k] : fb);
     const qb = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9];
     for (const p of [A.staffDoor, A.pantry, A.crewLounge, A.crewStairs, A.salonDoor, A.salon, A.prescott, A.serve, A.salonBar]) { qb[0] = Math.min(qb[0], p.x); qb[1] = Math.min(qb[1], p.y); qb[2] = Math.min(qb[2], p.z); qb[3] = Math.max(qb[3], p.x); qb[4] = Math.max(qb[4], p.y); qb[5] = Math.max(qb[5], p.z); }
-    A.queenBox = [qb[0] - 6, qb[1] - 2, qb[2] - 6, qb[3] + 6, qb[4] + 5, qb[5] + 6];
-    S.define('queen', { box: A.queenBox, mode: 'fail', voice: 'g3', reflexS: 2.2, radius: 70, sight: 0.9 });
+    A.queenBox = [L0.x - 97, -2, L0.z - 30, L0.x + 97, 26, L0.z + 28];
+    // the whole ship is a high-security zone: staff areas need a uniform, a weapon in hand or a body over the shoulder is an instant
+    // alarm, and so is any violence a guard sees (81-heist fails the job on the alarm). Bodies must be hidden.
+    const qz = S.define('queen', { box: A.queenBox, mode: 'fight', strict: true, voice: 'g3', reflexS: 2.2, radius: 70, sight: 0.9 });
+    {
+      const U = (u, y, v) => ({ x: L0.x + u, y, z: L0.z + v }), F1 = 1.5, F3 = 11.5;
+      qz.hides = [
+        Object.assign(U(55.6, F1, 4.6), { r: 1.5, label: 'in the laundry hamper' }), Object.assign(U(52, F1, -12), { r: 1.5, label: 'in a crew locker' }),
+        ...[-44, -12, 20, 48].flatMap((u) => [Object.assign(U(u, F3, -13.6), { r: 2.4, label: 'over the side' }), Object.assign(U(u, F3, 13.6), { r: 2.4, label: 'over the side' })]),
+      ];
+      // ship's security: six armed officers on their beats (crew corridor, casino floor, atrium + purser's cage, both promenades, sun deck)
+      const sec = (k, pts, mode, speed) => {
+        const L = crowdLook('worker', 'm', rng, 0x1f2a44, 0x1f2a44); L.hat = 'cap'; L.hatCol = 0x1f2a44;
+        const p = walker('sec' + k, 'Ship security', pts.map(([u, y, v]) => [L0.x + u, y, L0.z + v]), { speed, mode, dwell: [{ i: 0, t: 3 + k }] }, L);
+        if (p) { const g = S.guard('queen', { path: p, voice: k % 2 ? 'g1' : 'g3', name: 'Ship security', range: 16, role: 'security' }); if (g) HS.secG.push(g); }
+      };
+      HS.secG = [];
+      sec(0, [[-80, F1, 12.2], [56, F1, 12.2]], 'pingpong', 0.9);
+      sec(1, [[-20, F1, -6.2], [40, F1, -6.2], [40, F1, 6.2], [-20, F1, 6.2]], 'loop', 0.8);
+      sec(2, [[-52, F1, -6.5], [-30, F1, -6.5], [-30, F1, 6.5], [-52, F1, 6.5]], 'loop', 0.75);
+      sec(3, [[-56, F3, -12.8], [62, F3, -12.8]], 'pingpong', 0.95);
+      sec(4, [[62, F3, 12.8], [-56, F3, 12.8]], 'pingpong', 0.9);
+      sec(5, [[-40, 16.5, -7], [20, 16.5, -7]], 'pingpong', 0.85);
+    }
     const stew = walker('steward', 'Steward', pts('stewardPath', [P3(A.staffDoor), P3(A.pantry), P3(A.crewLounge)]), { speed: 0.9, mode: 'loop', dwell: [{ i: 0, t: 4 }] }, crowdLook('worker', 'm', rng, 0xf2efe4, 0x141418));
     if (stew) S.guard('queen', { path: stew, voice: 'g3', name: 'Steward', range: 13, armed: false });
     const waiter = walker('waiter', 'Waiter', [P3(A.pantry)], { speed: 0, yaw: A.pantry.yaw || 0 }, crowdLook('worker', 'm', rng, 0xf6f2ea, 0x141418));
@@ -206,6 +237,14 @@ try {
     const fm = free(A.stash.x, A.stash.z - 2.6, A.stash.y + 3, 6); A.finaleMeet = { x: fm.x, y: fm.y, z: fm.z, yaw: 0 };
     { const m = new AF.Model(12, 7, 7), wood = col(0x6a5a3a, { pat: 'plank' }), olive = col(0x4a5a2e), stencil = col(0xe8e0c0); m.box(0, 0, 0, 12, 6, 7, wood); m.box(0, 6, 0, 12, 7, 7, olive); m.box(4, 2, 7, 8, 4, 7, stencil);
       HS.props.crate = mesh(m, 1 / 8, [0.5, 0, 0.5], A.crate.x, A.crate.y, A.crate.z, A.crate.yaw || 0); HS.props.crate.visible = false; }
+    // the jet-ski chase after the cove (81-heist): eight Moretti riders, steered by the heist (actor.ctl), off stage until then
+    try {
+      const looks = []; for (let k = 0; k < 8; k++) { const L = mob(); L.pose = 'ride'; L.yaw = 0; looks.push(L); }
+      // two far-apart points: the path's bounds span the whole chase area (it stays active wherever the riders are steered)
+      const p = AF.walkers.addPath('heist chase riders', [[A.cove.x - 500, -60, A.cove.z - 500], [A.cove.x + 500, -60, A.cove.z + 500]], { count: 8, speed: 0, activeRadius: 600, looks });
+      p.enabled = false; WKR.chase = p;
+      for (const a of p.actors) a.ctl = { x: A.cove.x, y: -60, z: A.cove.z, yaw: 0, moving: false, ph: 0 };
+    } catch (e) { AF.warnOnce('heist chase riders', e); }
     HS.ready = true;
   });
   // the watchman + the guards only walk while their scene is on (81-heist toggles them)

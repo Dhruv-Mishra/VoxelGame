@@ -96,7 +96,9 @@ try {
   S.guard = (zid, o) => {
     const z = Z(zid); if (!z) return null;
     const g = Object.assign({ i: z.guards.length, z: zid, a: null, path: null, npc: null, voice: z.voice, name: 'Guard', range: 15, fov: 0.34, eye: 1.62, hp: 100, armed: true,
-      st: 'patrol', lv: 0, t: 0, tgt: { x: 0, y: 0, z: 0 }, route: null, ri: 0, ctl: null, leftW: 0, barkT: -9, fireT: 0, look0: 0, lookT: 0, heard: 0, down: false, spotT: 0, who: -1 }, o);
+      st: 'patrol', lv: 0, t: 0, tgt: { x: 0, y: 0, z: 0 }, route: null, ri: 0, ctl: null, leftW: 0, barkT: -9, fireT: 0, look0: 0, lookT: 0, heard: 0, down: false, spotT: 0, who: -1, hid: false, carrier: -1 }, o);
+    // armed guards soak a lot more (a takedown from behind is still one blow); everyone can be put down
+    g.hp0 = o.hp != null ? o.hp : g.armed ? 240 : 100; g.hp = g.hp0;
     if (g.path) g.a = g.path.actors[0];
     if (g.npc) g.a = g.npc;
     z.guards.push(g); return g;
@@ -130,6 +132,8 @@ try {
         const prev = new Int32Array(z.nav.pts.length).fill(-1), q = [a]; prev[a] = a;
         for (let qi = 0; qi < q.length; qi++) { const u = q[qi]; if (u === b) break; for (const v of z.nav.adj[u]) if (prev[v] < 0) { prev[v] = u; q.push(v); } }
         if (prev[b] >= 0) { const chain = []; for (let u = b; u !== a; u = prev[u]) chain.push(u); chain.push(a); chain.reverse(); for (const u of chain) { const p = z.nav.pts[u]; out.push({ x: p[0], y: p[1], z: p[2] }); } }
+        // already past the first node (between it and the next): don't walk back to it (a combat re-route every 1.5 s would oscillate)
+        while (out.length >= 2 && Math.hypot(out[1].x - x0, out[1].z - z0) <= Math.hypot(out[1].x - out[0].x, out[1].z - out[0].z) + 0.3) out.shift();
       } else if (a >= 0) { const p = z.nav.pts[a]; out.push({ x: p[0], y: p[1], z: p[2] }); }
     }
     out.push({ x: x1, y: y1, z: z1 });
@@ -142,7 +146,10 @@ try {
   S.isDark = (z, x, y, zz) => { for (const l of z.lights) if (l.off > 0 && x > l.box[0] && x < l.box[2] && zz > l.box[1] && zz < l.box[3]) return true; return false; };
 
   // ---------------------------------------------------------------- players in the zone (local + remote), scratch objects, no garbage
-  const PS = []; for (let k = 0; k < 4; k++) PS.push({ slot: k, x: 0, y: 0, z: 0, eye: 1.5, noise: 0, crouch: false, moving: false, on: false, px: 0, pz: 0, has: false });
+  const PS = []; for (let k = 0; k < 4; k++) PS.push({ slot: k, x: 0, y: 0, z: 0, eye: 1.5, noise: 0, crouch: false, moving: false, on: false, px: 0, pz: 0, has: false, armed: false, carry: false });
+  // what counts as a weapon in hand (80-coop's held ids): guns and melee weapons, not a guitar or a shopping bag
+  const ARMS = new Set(['bat', 'pan', 'cutlass', 'revolver', 'shotgun', 'tommy', 'rifle', 'spistol', 'ssmg', 'lmg']);
+  const carrying = (slot) => { const z = S.zone; if (!z) return false; for (const g of z.guards) if (g.carrier === slot) return true; return false; };
   const gather = (z) => {
     let n = 0; const me = mySlot(), p = AF.player;
     for (const q of PS) q.on = false;
@@ -150,12 +157,14 @@ try {
       const q = PS[me & 3]; q.on = true; q.x = p.x; q.y = p.y; q.z = p.z; q.eye = p.eyeH || (p.crouch ? 0.95 : 1.55); q.crouch = !!p.crouch;
       const sp = AF.PL && AF.PL.walk ? AF.PL.walk.speed || 0 : 0; q.moving = sp > 0.4;
       q.noise = p.noise != null ? p.noise : (sp > 4.5 ? 1 : sp > 0.4 ? 0.35 : 0); n++;
+      q.armed = !!AF.combat && ARMS.has(AF.combat.heldId); q.carry = !!S.carrying;
     }
     if (online() && AF.coop && AF.coop.players) for (const [slot, r] of AF.coop.players) {
       if (!r || !r.seen || r.dead || r.veh || slot === me || !inBox(z.box, r.x, r.y, r.z, 6)) continue;
       const q = PS[slot & 3], sp = q.has ? Math.hypot(r.x - q.px, r.z - q.pz) * 15 : 0;
       q.on = true; q.x = r.x; q.y = r.y; q.z = r.z; q.crouch = !!r.crouch; q.eye = q.crouch ? 0.95 : 1.55; q.moving = sp > 0.4;
       q.noise = r.noise != null ? r.noise : q.crouch ? (sp > 0.4 ? 0.12 : 0) : sp > 4.5 ? 1 : sp > 0.4 ? 0.35 : 0; n++;
+      q.armed = ARMS.has(r.heldId); q.carry = carrying(slot);
     }
     for (const q of PS) { if (q.on) { q.px = q.x; q.pz = q.z; q.has = true; } else q.has = false; }
     return n;
@@ -199,7 +208,7 @@ try {
     if (d < 0.35) { g.ri++; return g.ri >= g.route.length; }
     const st = Math.min(d, speed * dt), nx = c.x + dx / d * st, nz = c.z + dz / d * st;
     const y0 = AF.surfaceBelow(nx, nz, c.y + 0.7, 2.5), y = Number.isFinite(y0) && Math.abs(y0 - c.y) < 1.2 ? y0 : c.y;
-    if (AF.boxBlocked(nx, y + 0.3, nz, 0.22, 1.4)) { g.ri++; return g.ri >= g.route.length; }   // corner-cut: skip ahead
+    if (AF.boxBlocked(nx, Math.max(y, c.y) + 0.55, nz, 0.22, 1.2)) { g.ri++; return g.ri >= g.route.length; }   // corner-cut: skip ahead (0.5 m floor steps are walked, like the player's 0.55 step)
     c.x = nx; c.z = nz; c.y = y;
     c.moving = true; c.ph += st * 4.2;
     const want = Math.atan2(dx, dz); c.yaw += AF.angDiff(c.yaw, want) * (1 - Math.exp(-dt * 9));
@@ -241,6 +250,8 @@ try {
     if (z.mode === 'fight') for (const q of z.guards) if (!q.down && q.armed) toCombat(q);
     if (z.onAlarm) z.onAlarm(why, g);
   };
+  // a mission raising the alarm from any client: the zone's authority decides (and tells everyone)
+  S.requestAlarm = (why) => { const z = S.zone; if (!z || z.alarm) return; if (S.isAuth() || !online()) S.raiseAlarm(why); else send({ op: 'areq', z: z.id, why: String(why || '').slice(0, 80) }, S.auth); };
   S.calm = (remote) => {
     const z = S.zone; if (!z || !z.alarm) return;
     z.alarm = false; S.alarm = false; S.caution = 60; emit('calm');
@@ -261,31 +272,57 @@ try {
   S.knockOut = knockOut;
 
   // ---------------------------------------------------------------- hits from 77-combat (the heist routes CB.onWalkerHit here)
-  // melee from behind on an unaware guard = a silent takedown; a headshot or enough body shots = down; anything else = he fights
+  // melee from behind on an unaware guard = a silent takedown; a headshot on an unaware guard = down; otherwise every hit (fists,
+  // bats, bullets) wears his health down until he drops — nobody is unkillable, armed guards just take a lot more
   S.hit = (a, kind, fx, fz, info, from) => {
-    const z = S.zone; if (!z) return false;
-    const g = z.guards.find((q) => q.a === a); if (!g) return false;
+    let z = S.zone, g = z ? z.guards.find((q) => q.a === a) : null;
+    if (!g) {
+      for (const zz of S.zones.values()) { const q = zz.guards.find((r) => r.a === a); if (q) { g = q; z = zz; break; } }
+      if (!g) return false;
+      // a guard of a zone that isn't running (nobody simulates it): plain damage, applied where the shot landed
+      if (!g.down) { g.hp -= (info && info.dmg) || 20; if (g.hp <= 0 || kind === 'melee' && g.st !== 'combat') knockOut(g, fx, fz, kind); else AF.walkers.stagger(a, fx || 0, fz || 1); }
+      return true;
+    }
     if (g.down) return true;
     if (!S.isAuth() && online()) { send({ op: 'hit', z: z.id, i: g.i, k: kind === 'melee' ? 1 : 0, h: info && info.head ? 1 : 0, s: info && info.silenced ? 1 : 0, d: Math.round((info && info.dmg) || 30), fx: +(fx || 0).toFixed(2), fz: +(fz || 0).toFixed(2) }, S.auth); predictHit(g, kind, info); return true; }
     applyHit(g, kind, fx, fz, info, from == null ? mySlot() : from);
     return true;
   };
-  const predictHit = (g, kind, info) => { if ((kind === 'melee' && g.st !== 'combat' && g.st !== 'alert') || (info && info.head)) { g.down = true; if (g.path) AF.walkers.knock(g.a, 0, 1, 1.3, 1e6); } };
+  const predictHit = (g, kind, info) => { if (g.st !== 'combat' && ((info && info.head) || (kind === 'melee' && (g.lv < 0.85 || g.st === 'alert')))) { g.down = true; if (g.path) AF.walkers.knock(g.a, 0, 1, 1.3, 1e6); } };
+  // somebody else on duty sees (x, y, z)? (a takedown, a body being dragged, a brawl with a passenger) -> that guard, else null
+  const witness = S.witness = (z, x, y, zz, not) => {
+    if (!z) return null;
+    for (const o of z.guards) {
+      if (o === not || o.down || !o.a || (o.path && !o.path.active && !o.a.ctl)) continue;
+      const a = o.a, yaw = a.ctl ? a.ctl.yaw : a.yaw, dx = x - a.x, dz = zz - a.z, d = Math.hypot(dx, dz);
+      if (d > o.range * 0.85 || Math.abs(y - a.y) > 3 || (d > 1.5 && (dx * Math.sin(yaw) + dz * Math.cos(yaw)) / (d || 1) < o.fov)) continue;
+      if (S.isDark(z, x, y, zz) && d > 4) continue;
+      if (los(a.x, a.y + o.eye, a.z, x, y + 1.0, zz)) return o;
+    }
+    return null;
+  };
+  const seenViolence = (g, from) => {
+    const z = Z(g.z), a = g.a, w = witness(z, a.x, a.y, a.z, g); if (!w || z.alarm) return;
+    w.tgt.x = a.x; w.tgt.y = a.y; w.tgt.z = a.z; bark(w, 'body', true);
+    if (z.strict) S.raiseAlarm('A guard saw the attack', w); else toAlert(w, from);
+  };
   const applyHit = (g, kind, fx, fz, info, from) => {
     const a = g.a, P = from === mySlot() ? AF.player : AF.coop && AF.coop.players.get(from);
     const unaware = g.st !== 'combat' && g.st !== 'alert' && g.lv < 0.85;
     let behind = true;
     if (P) { const dx = P.x - a.x, dz = P.z - a.z, d = Math.hypot(dx, dz) || 1, yaw = a.ctl ? a.ctl.yaw : a.yaw; behind = (dx * Math.sin(yaw) + dz * Math.cos(yaw)) / d < 0.25; }
+    const head = !!(info && info.head), dmg = (info && info.dmg) || 30, fighting = g.st === 'combat';
     if (kind === 'melee') {
-      if (unaware || behind) { knockOut(g, fx, fz, 'melee'); broadcastKO(g, fx, fz); return; }
-      AF.walkers.stagger(a, fx || 0, fz || 1); toAlert(g, from); return;
+      if (unaware || g.st === 'alert' || (behind && !fighting)) { knockOut(g, fx, fz, 'melee'); broadcastKO(g, fx, fz); seenViolence(g, from); return; }
+      g.hp -= dmg * 1.5;
+      if (g.hp <= 0) { knockOut(g, fx, fz, 'melee'); broadcastKO(g, fx, fz); seenViolence(g, from); return; }
+      AF.walkers.stagger(a, fx || 0, fz || 1); toAlert(g, from); seenViolence(g, from); return;
     }
-    const head = !!(info && info.head), dmg = (info && info.dmg) || 30;
-    g.hp -= head ? 999 : dmg;
-    if (g.hp <= 0) { knockOut(g, fx, fz, head ? 'head' : 'shot'); broadcastKO(g, fx, fz); if (!(info && info.silenced)) S.noiseAt(a.x, a.y, a.z, 40, 'shot'); return; }
+    g.hp -= head ? (fighting ? dmg * 5 : 1e4) : dmg;
+    if (g.hp <= 0) { knockOut(g, fx, fz, head ? 'head' : 'shot'); broadcastKO(g, fx, fz); if (!(info && info.silenced)) S.noiseAt(a.x, a.y, a.z, 40, 'shot'); seenViolence(g, from); return; }
     AF.walkers.stagger(a, fx || 0, fz || 1);
     if (P) { const z = Z(g.z); z.lastSeen.x = P.x; z.lastSeen.y = P.y; z.lastSeen.z = P.z; z.lastSeen.t = AF.clock.t; }
-    toAlert(g, from);
+    toAlert(g, from); seenViolence(g, from);
   };
   const broadcastKO = (g, fx, fz) => { if (S.isAuth()) send({ op: 'ko', z: g.z, i: g.i, fx: +(fx || 0).toFixed(2), fz: +(fz || 0).toFixed(2) }); };
 
@@ -324,6 +361,86 @@ try {
   };
   const setLamps = (l, on) => { for (const L of l.lamps) { if (L.i0 == null) L.i0 = L.intensity ?? 1; L.intensity = on ? L.i0 : 0; } for (const m of l.meshes) m.visible = on; };
 
+  // ---------------------------------------------------------------- bodies: carry a downed guard over your shoulder (E), put him down (E)
+  // or stash him in one of the zone's hiding places (zone.hides [{x, y, z, r, label}]) where nobody will find him. A body seen by a guard
+  // raises the alarm; a guard who sees you carrying one in a strict zone (the liner) raises it at once. The zone's authority owns where
+  // bodies lie (a carrier on another client streams the body's spot to it at 6 Hz; 'gs' carries it to everyone).
+  S.carrying = null;
+  const CARRY = { sendT: 0, hide: null };
+  const hideNear = (z, x, y, zz) => { if (z && z.hides) for (const h of z.hides) if (Math.hypot(h.x - x, h.z - zz) < (h.r || 1.6) && Math.abs(h.y - y) < 2.4) return h; return null; };
+  const bodyAt = (g, x, y, zz, yaw) => {
+    const a = g.a; if (!a) return;
+    if (!a.ctl) a.ctl = { x, y, z: zz, yaw, moving: false, ph: 0 };
+    a.ctl.x = x; a.ctl.y = y; a.ctl.z = zz; a.ctl.yaw = yaw; a.ctl.moving = false;
+    if (a.rx) { a.rx.ox = a.rx.oz = a.rx.vx = a.rx.vz = 0; }
+  };
+  const putDown = (g, x, y, zz, yaw, hid) => {
+    g.carrier = -1; g.hid = !!hid; g.seenBy = null;
+    bodyAt(g, x, hid ? y - 40 : y, zz, yaw);
+  };
+  const pickUp = (g) => {
+    const z = S.zone; if (!z || !g || !g.down || g.hid || g.carrier >= 0 || S.carrying) return;
+    S.carrying = g; g.carrier = mySlot(); CARRY.sendT = 0;
+    if (AF.audio) AF.audio.play('cloth', { x: g.a.x, y: g.a.y, z: g.a.z });
+    if (!S.isAuth()) send({ op: 'carry', z: z.id, i: g.i, on: 1 }, S.auth);
+    const w = witness(z, g.a.x, g.a.y, g.a.z, g); if (w && !z.alarm) { bark(w, 'body', true); if (z.strict) S.raiseAlarm('A guard saw you carrying a body', w); else toAlert(w, mySlot()); }
+  };
+  const drop = () => {
+    const g = S.carrying, z = S.zone; S.carrying = null; if (!g || !z) return;
+    const p = AF.player, h = hideNear(z, p.x, p.y, p.z), fx = Math.sin(p.yaw), fz = Math.cos(p.yaw);
+    const x = h ? h.x : p.x + fx * 0.9, zz = h ? h.z : p.z + fz * 0.9, y0 = h ? h.y : AF.surfaceBelow(x, zz, p.y + 1, 3), y = Number.isFinite(y0) ? y0 : p.y;
+    putDown(g, x, y, zz, p.yaw, !!h);
+    if (AF.audio) AF.audio.play(h ? 'latch' : 'cloth', { x, y, z: zz });
+    if (h) AF.emit('toast', { text: 'Body hidden ' + (h.label || 'out of sight') + '.', kind: 'ok' });
+    if (!S.isAuth()) send({ op: 'carry', z: z.id, i: g.i, on: 0, x: +x.toFixed(2), y: +y.toFixed(2), zz: +zz.toFixed(2), yaw: +p.yaw.toFixed(2), hid: h ? 1 : 0 }, S.auth);
+    emit('body', g, { hid: !!h });
+  };
+  S.dropBody = () => { if (S.carrying) drop(); };
+  // reinforcements: a reserve guard (S.guard {reserve: true}, off stage) walks on at (x, y, z) and joins the fight (81-heist's waves;
+  // whoever decides sends it to everyone, the zone's authority then steers him)
+  S.spawn = (zid, i, x, y, zz, remote) => {
+    const z = Z(zid), g = z && z.guards[i]; if (!g || !g.reserve || !g.a || ![x, y, zz].every(Number.isFinite)) return null;
+    const a = g.a;
+    g.down = false; g.hid = false; g.live = true; g.carrier = -1; g.seenBy = null; g.hp = g.hp0; g.lv = 1; g.route = null; g.net = null;
+    if (a.rx) { const R = a.rx; R.down = R.fall = R.st = R.fear = R.hold = 0; R.ox = R.oz = R.vx = R.vz = 0; }
+    a.rxOn = false; a.tilt = a.lift = 0;
+    a.ctl = { x, y, z: zz, yaw: 0, moving: false, ph: 0 }; g.home = { x, y, z: zz }; g.leftW = AF.clock.w;
+    if (S.carrying === g) S.carrying = null;
+    if (g.path) g.path.enabled = true;
+    if (z.alarm) toCombat(g); else { set(g, 'search'); g.tgt.x = z.lastSeen.x; g.tgt.y = z.lastSeen.y; g.tgt.z = z.lastSeen.z; goTo(g, g.tgt.x, g.tgt.y, g.tgt.z); }
+    if (!remote) send({ op: 'spawn', z: zid, i, x: +x.toFixed(2), y: +y.toFixed(2), zz: +zz.toFixed(2) });
+    return g;
+  };
+  // the next free reserve of a zone: one never used, or a body nobody is near (reused off screen)
+  S.freeReserve = (zid, far) => {
+    const z = Z(zid); if (!z) return -1; const p = AF.player;
+    for (const g of z.guards) if (g.reserve && !g.live) return g.i;
+    for (const g of z.guards) if (g.reserve && g.down && g.carrier < 0 && Math.hypot(g.a.x - p.x, g.a.z - p.z) > (far || 25)) return g.i;
+    return -1;
+  };
+  const bodyIt = AF.addInteract({ x: 0, y: -999, z: 0, r: 1.7, prio: 2.7, label: 'Carry the body', can: () => AF.mode === 'walk' && (!!S.carrying || !!bodyIt.g), act: () => { if (S.carrying) drop(); else pickUp(bodyIt.g); } });
+  const carryTick = (z, dt) => {
+    const p = AF.player, g = S.carrying;
+    if (g) {
+      if (!z || !z.guards.includes(g) || !g.down || AF.mode !== 'walk') { if (z && z.guards.includes(g) && g.down) drop(); else S.carrying = null; return; }
+      // over the shoulder: the body lies across the carrier, its middle on the shoulder
+      const yaw = p.yaw + PI / 2, sx = Math.sin(yaw), sz = Math.cos(yaw);
+      bodyAt(g, p.x - sx * 0.8 - Math.sin(p.yaw) * 0.12, p.y + 1.18, p.z - sz * 0.8 - Math.cos(p.yaw) * 0.12, yaw);
+      const h = hideNear(z, p.x, p.y, p.z);
+      bodyIt.x = p.x; bodyIt.y = p.y + 1; bodyIt.z = p.z; bodyIt.label = h ? 'Hide the body ' + (h.label || 'here') : 'Put the body down';
+      if (!S.isAuth() && (CARRY.sendT -= dt) <= 0) { CARRY.sendT = 1 / 6; send({ op: 'cpos', z: z.id, i: g.i, x: +g.a.ctl.x.toFixed(2), y: +g.a.ctl.y.toFixed(2), zz: +g.a.ctl.z.toFixed(2), yaw: +yaw.toFixed(2) }, S.auth); }
+      return;
+    }
+    bodyIt.g = null; bodyIt.y = -999;
+    if (!z || AF.mode !== 'walk') return;
+    let bd = 2.2;
+    for (const o of z.guards) {
+      if (!o.down || o.hid || o.carrier >= 0 || !o.a) continue;
+      const d = Math.hypot(o.a.x - p.x, o.a.z - p.z); if (d < bd && Math.abs(o.a.y - p.y) < 1.6) { bd = d; bodyIt.g = o; }
+    }
+    if (bodyIt.g) { const a = bodyIt.g.a; bodyIt.x = a.x; bodyIt.y = a.y + 0.6; bodyIt.z = a.z; bodyIt.label = hideNear(z, a.x, a.y, a.z) ? 'Hide the body' : 'Carry the body'; }
+  };
+
   // ---------------------------------------------------------------- activation / reset
   S.activate = (zid) => {
     const z = zid ? Z(zid) : null;
@@ -334,6 +451,7 @@ try {
     hud(true);
   };
   const leave = (z) => {
+    if (S.carrying && z.guards.includes(S.carrying)) { S.carrying.carrier = -1; S.carrying = null; }
     for (const g of z.guards) AF.alertMark.clear('g' + z.id + g.i);
     for (const c of z.cams) AF.alertMark.clear('c' + z.id + c.i);
   };
@@ -341,9 +459,11 @@ try {
     const z = Z(zid); if (!z) return;
     z.alarm = false; if (S.zone === z) { S.alarm = false; S.reflex = null; S.rset.length = 0; S.caution = 0; }
     for (const g of z.guards) {
-      const a = g.a; g.down = false; g.lv = 0; g.hp = g.hp0 || 100; g.st = 'patrol'; g.t = 0; g.route = null; g.home = null;
+      const a = g.a; g.down = false; g.lv = 0; g.hp = g.hp0 || 100; g.st = 'patrol'; g.t = 0; g.route = null; g.home = null; g.hid = false; g.carrier = -1; g.seenBy = null; g.flagged = false;
+      if (g.path && S.carrying === g) S.carrying = null;
       if (g.path) { a.ctl = null; a.aim = 0; a.lag = 0; a.rx = null; a.rxOn = false; a.tilt = a.lift = 0; }
       if (g.npc && g.npc.root) { g.npc.root.rotation.x = 0; g.npc.down = false; }
+      if (g.reserve) { g.down = true; g.hid = true; g.live = false; }
       AF.alertMark.clear('g' + z.id + g.i);
     }
     for (const c of z.cams) { c.off = 0; c.lv = 0; c.alarmed = false; AF.alertMark.clear('c' + z.id + c.i); }
@@ -380,12 +500,15 @@ try {
         if (S.isDark(z, q.x, q.y, q.z)) k *= d < 3 ? 0.7 : 0.32;
         if (q.crouch) k *= d < 3.5 ? 0.8 : 0.5;
         k *= q.moving ? (q.noise > 0.8 ? 1.35 : 1) : 0.6;
-        if (z.disguise && z.disguise(q.slot)) k *= d < 2.2 && c > 0.8 ? 0.35 : 0.08;
-        if (k > best) { best = k; bq = q; }
+        // a weapon in hand or a body over the shoulder: no uniform covers that, and a strict zone (the liner) reacts at once
+        const flagged = z.strict && (q.armed || q.carry);
+        if (flagged) k = Math.max(k, 0.5) * 4;
+        else if (z.disguise && z.disguise(q.slot)) k *= d < 2.2 && c > 0.8 ? 0.35 : 0.08;
+        if (k > best) { best = k; bq = q; g.flagged = flagged; }
       }
-      // bodies: a guard who sees a downed colleague raises the alarm
+      // bodies: a guard who sees a downed colleague raises the alarm (hidden bodies and ones being carried don't count)
       if (!best && !z.alarm && g.st !== 'alert') for (const o of z.guards) {
-        if (!o.down || o === g || o.seenBy) continue;
+        if (!o.down || o === g || o.seenBy || o.hid || o.carrier >= 0) continue;
         const dx = o.a.x - ex, dz = o.a.z - ez, d = Math.hypot(dx, dz);
         if (d > 11 || Math.abs(o.a.y - a.y) > 3 || (dx * fx + dz * fz) / (d || 1) < g.fov || !los(ex, ey, ez, o.a.x, o.a.y + 0.3, o.a.z)) continue;
         o.seenBy = g; bark(g, 'body', true); g.tgt.x = o.a.x; g.tgt.y = o.a.y; g.tgt.z = o.a.z; toAlert(g, -1); break;
@@ -396,7 +519,7 @@ try {
         if (g.st === 'combat') { g.tgt.x = bq.x; g.tgt.y = bq.y; g.tgt.z = bq.z; g.see = true; continue; }
         g.lv = Math.min(1, g.lv + best * 1.55 * dt);
         g.tgt.x = bq.x; g.tgt.y = bq.y; g.tgt.z = bq.z;
-        if (g.lv >= 1) toAlert(g, bq.slot);
+        if (g.lv >= 1) { toAlert(g, bq.slot); if (g.flagged && !z.alarm) S.raiseAlarm(bq.carry ? 'A guard saw you carrying a body' : 'A guard saw your weapon', g); }
         else if (g.lv > 0.3 && (g.st === 'patrol' || g.st === 'return' || g.st === 'look')) toSus(g, bq.x, bq.y, bq.z, 'sight');
       } else {
         g.see = false;
@@ -493,9 +616,9 @@ try {
   const syncOut = (z) => {
     GS.length = 0;
     for (const g of z.guards) {
-      if (!g.a || (!g.a.ctl && g.lv < 0.02 && !g.down)) continue;
+      if (!g.a || (!g.a.ctl && g.lv < 0.02 && !g.down) || (g.reserve && !g.live)) continue;
       const a = g.a, c = a.ctl || a;
-      GS.push([g.i, ST.indexOf(g.st), +c.x.toFixed(2), +c.y.toFixed(2), +c.z.toFixed(2), +c.yaw.toFixed(2), c.moving ? 1 : 0, +(a.aim || 0).toFixed(2), +g.lv.toFixed(2), g.down ? 1 : 0]);
+      GS.push([g.i, ST.indexOf(g.st), +c.x.toFixed(2), +c.y.toFixed(2), +c.z.toFixed(2), +c.yaw.toFixed(2), c.moving ? 1 : 0, +(a.aim || 0).toFixed(2), +g.lv.toFixed(2), g.down ? 1 : 0, g.hid ? 1 : 0, g.carrier + 1]);
     }
     const cams = z.cams.map((c) => +c.lv.toFixed(2));
     send({ op: 'gs', z: z.id, g: GS, c: cams, al: z.alarm ? 1 : 0 });
@@ -515,6 +638,10 @@ try {
       const st = ST[r[1] | 0] || 'patrol';
       if (r[9] && !g.down) { g.down = true; if (g.path) { takeCtl(g); AF.walkers.knock(g.a, 0, 1, 1.3, 1e6); } }
       g.st = st; g.lv = +r[8] || 0;
+      if (g.down && r.length >= 12) {
+        const cr = (r[11] | 0) - 1; g.hid = !!r[10];
+        if (cr !== mySlot() || S.carrying !== g) { g.carrier = AF.clamp(cr, -1, 3); if (S.carrying === g) S.carrying = null; bodyAt(g, +r[2], +r[3], +r[4], +r[5]); }
+      }
       if (g.path && !g.down) { if (!g.a.ctl) takeCtl(g); g.net = g.net || {}; Object.assign(g.net, { x: +r[2], y: +r[3], z: +r[4], yaw: +r[5], mv: !!r[6], aim: +r[7] || 0 }); }
     }
     for (const g of z.guards) if (!seen.has(g) && !g.down && g.a && g.a.ctl && g.net) { dropCtl(g); g.net = null; g.st = 'patrol'; g.lv = 0; }
@@ -533,6 +660,14 @@ try {
       case 'actx': if (from === S.auth && ['loop', 'dark', 'dist', 'reset'].includes(m.k) && int(m.id, 0, 64)) applyAct(z, m.k, m.id, AF.clamp(+m.s || 20, 1, 90), true); break;
       case 'alarm': if (from === S.auth && !z.alarm) S.raiseAlarm(typeof m.why === 'string' ? m.why.slice(0, 80) : '', null, true); break;
       case 'calm': if (from === S.auth) S.calm(true); break;
+      case 'carry': if (S.isAuth() && int(m.i, 0, z.guards.length - 1)) {
+        const g = z.guards[m.i]; if (!g.down) break;
+        if (m.on === 1) { if (g.carrier < 0 && !g.hid) g.carrier = from; }
+        else if (g.carrier === from && [m.x, m.y, m.zz].every(Number.isFinite)) { putDown(g, m.x, m.y, m.zz, +m.yaw || 0, m.hid === 1 && !!hideNear(z, m.x, m.y, m.zz)); emit('body', g, { hid: g.hid }); }
+      } break;
+      case 'cpos': if (S.isAuth() && int(m.i, 0, z.guards.length - 1) && [m.x, m.y, m.zz].every(Number.isFinite)) { const g = z.guards[m.i]; if (g.down && g.carrier === from) bodyAt(g, m.x, m.y, m.zz, +m.yaw || 0); } break;
+      case 'spawn': if (int(m.i, 0, z.guards.length - 1) && [m.x, m.y, m.zz].every(Number.isFinite)) S.spawn(z.id, m.i, m.x, m.y, m.zz, true); break;
+      case 'areq': if (S.isAuth() && !z.alarm) S.raiseAlarm(typeof m.why === 'string' ? m.why.slice(0, 80) : 'Alarm'); break;
       case 'shot': if (AF.health && !AF.health.dead && AF.mode === 'walk') AF.health.hurt(AF.clamp(+m.d || 10, 1, 20), 'guard'); break;
       case 'fire': if (from === S.auth && int(m.i, 0, z.guards.length - 1) && [m.x, m.y, m.zz].every(Number.isFinite)) { const a = z.guards[m.i].a, CB = AF.combat; if (a && CB && CB.tracer) CB.tracer(a.x, a.y + 1.35, a.z, m.x, m.y, m.zz, false); if (AF.audio && a) AF.audio.play('rev', { x: a.x, y: a.y + 1.3, z: a.z, vol: 0.8 }); } break;
     }
@@ -569,11 +704,12 @@ try {
 
   AF.onTick('stealth', 430, (dt) => {
     const z = S.zone;
-    if (!z) { if (tagTxt || vigOn) hud(true); return; }
+    if (!z) { if (S.carrying) S.carrying = null; if (bodyIt.g || bodyIt.y > -900) { bodyIt.g = null; bodyIt.y = -999; } if (tagTxt || vigOn) hud(true); return; }
     // only near the zone: everything sleeps when nobody is within its radius
     const cp = AF.camera.position, b = z.box, near = cp.x > b[0] - z.radius && cp.x < b[3] + z.radius && cp.z > b[2] - z.radius && cp.z < b[5] + z.radius;
     camMeshes(z);
     if (!near) return;
+    carryTick(z, dt);
     S.auth = authority(z);
     if (S.isAuth()) { senseAcc += dt; if (senseAcc >= 1 / 15) { sense(z, Math.min(0.2, senseAcc)); senseAcc = 0; } }
     motion(z, dt);

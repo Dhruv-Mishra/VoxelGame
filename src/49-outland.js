@@ -43,14 +43,15 @@ function geometryFrom(pre) {
 function* build(entry) {
   const revision = entry.propRevision ?? 0, pre = entry.pre;
   entry.pre = null;
-  let geo;
-  if (pre) { R.workerBuilt++; entry.rim.set(pre.rim); geo = pre.n ? geometryFrom(pre) : null; }
-  else { const n = yield* O.meshTileG(entry, entry.rim); geo = n ? yield* terrainBuf.geometryG(true) : null; }
+  let geo, steep = 0;
+  if (pre) { R.workerBuilt++; entry.rim.set(pre.rim); geo = pre.n ? geometryFrom(pre) : null; steep = pre.steep || 0; }
+  else { const n = yield* O.meshTileG(entry, entry.rim); steep = terrainBuf.steep || 0; geo = n ? yield* terrainBuf.geometryG(true) : null; }
   yield;
+  let tall = false;
   if (O.props.length) {
     const props = [];
     if (geo) props.push({ geo, x: 0, y: 0, z: 0, rot: 0 });
-    for (const prop of O.props) if (prop.x >= entry.x && prop.x < entry.x + entry.size && prop.z >= entry.z && prop.z < entry.z + entry.size && !(entry.level >= 3 && prop.geo.userData.small)) props.push(prop);
+    for (const prop of O.props) if (prop.x >= entry.x && prop.x < entry.x + entry.size && prop.z >= entry.z && prop.z < entry.z + entry.size && !(entry.level >= 3 && prop.geo.userData.small)) { props.push(prop); if (!tall && entry.level <= 1 && prop.top > O.h(prop.x, prop.z) + 2.5) tall = true; }
     if (props.length > (geo ? 1 : 0)) {
       const pick = (prop) => entry.level >= 3 && prop.geo.userData.lod2 ? prop.geo.userData.lod2 : entry.level > 0 && prop.geo.userData.lod ? prop.geo.userData.lod : prop.geo;
       const merged = yield* AF.world.mergePropsG(props, pick, true);
@@ -63,7 +64,9 @@ function* build(entry) {
     let bytes = geo.index.array.byteLength;
     for (const attribute of Object.values(geo.attributes)) bytes += attribute.array.byteLength;
     const mesh = new THREE.Mesh(geo, AF.mat.voxel);
-    mesh.name = 'outland-L' + entry.level; mesh.userData.owner = mesh.name; mesh.receiveShadow = true; mesh.castShadow = entry.level <= 1;
+    mesh.name = 'outland-L' + entry.level; mesh.userData.owner = mesh.name; mesh.receiveShadow = true;     // Serena Isle's sloped tiles (07 meshSlopedG) shade with an up normal, so their own shadow would stripe the slopes facing away
+    // from the sun: they cast only where a building or another tall prop stands on gentle ground (trees are flora and cast anyway)
+    mesh.castShadow = entry.level <= 1 && (!O.slopedTile(entry) || tall && steep < 0.04);
     mesh.matrixAutoUpdate = false; mesh.updateMatrix(); mesh.visible = false;
     group.add(mesh); entry.meshes.push(mesh); entry.bytes = bytes; R.bytes += bytes;
     AF.releaseStaticGeometry(geo);
@@ -347,8 +350,10 @@ R.diagnose = () => {
 O.addProp = (geo, x, y, z, rot = 0, opts = {}) => {
   if (!geo || !geo.attributes.aPal || !geo.index || !geo.attributes.position.array) throw new Error('outland props need retained voxel geometry');
   const prop = { geo, x, y, z, rot: ((rot % 4) + 4) % 4 }; O.props.push(prop);
+  const box = geo.boundingBox || (geo.computeBoundingBox(), geo.boundingBox);
+  prop.top = y + box.max.y;
   if (opts.collide !== false) {
-    const box = geo.boundingBox || (geo.computeBoundingBox(), geo.boundingBox), transform = new THREE.Matrix4().makeRotationY(prop.rot * Math.PI / 2);
+    const transform = new THREE.Matrix4().makeRotationY(prop.rot * Math.PI / 2);
     const bounds = box.clone().applyMatrix4(transform);
     prop.col = AF.addCollider(x + bounds.min.x, y + bounds.min.y, z + bounds.min.z, x + bounds.max.x, y + bounds.max.y, z + bounds.max.z, opts.tag);
   }
@@ -437,8 +442,9 @@ AF.test('outland: terrain physics on range and island; sea gap and reserved pads
   let ok = true;
   const I = plan.island, ix = I.cx, iz = I.cz;
   for (const coords of [[220, -760], [ix, iz]]) {
-    const x = coords[0], z = coords[1], y = W.groundY(x, z);
-    if (y <= 0 || AF.surfaceBelow(x, z, y + 2, 6) !== y || !AF.boxBlocked(x, y - 0.5, z, 0.1, 1.7) || AF.boxBlocked(x, y + 2, z, 0.1, 1.7)) ok = false;
+    // the isle's columns sit under its smooth drawn surface, which carries bodies (07 isleTop): the stand is on or just above them
+    const x = coords[0], z = coords[1], y = W.groundY(x, z), stand = AF.surfaceBelow(x, z, y + 2, 6);
+    if (y <= 0 || stand < y || stand > y + (z > 300 ? 0.75 : 0) || !AF.boxBlocked(x, y - 0.5, z, 0.1, 1.7) || AF.boxBlocked(x, y + 2, z, 0.1, 1.7)) ok = false;
   }
   const island = W.groundY(ix, iz), gap = W.groundY(ix, (iz + 300) / 2), strip = W.groundY(-100, I.airstrip.z), resort = W.groundY(I.resort.x, I.resort.z);
   return { ok: ok && island > 0 && gap < -1.25 && strip === 2 && resort === 3, info: 'island ' + island + ', gap ' + gap + ', strip ' + strip + ', resort ' + resort };

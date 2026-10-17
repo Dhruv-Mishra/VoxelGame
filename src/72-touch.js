@@ -72,15 +72,18 @@ try {
     const pick = () => {
       const m = AF.mode, CB = AF.combat, HUD = AF.hud, J = AF.jobs;
       act.length = 0; use.length = 0;
+      // seated with a gun drawn (drive-by, 77-combat): FIRE + AIM join the vehicle's buttons
+      const vgun = CB && CB.vfire && CB.vfire.can && !!CB.gun();
       if (m === 'walk') {
         const gal = CB && CB.gallery, gun = CB && (gal || CB.gun());
         if (HUD && HUD.meterOn && HUD.meterOn()) act.push('stop');
         else { act.push(gun ? 'fire' : 'hit', 'jump'); if (gun && !gal) act.push('aim'); if (!gal) act.push('crouch'); }
-      } else if (m === 'drive') act.push('brake', 'exit');
+      } else if (m === 'drive') { if (vgun) act.push('fire', 'brake', 'exit', 'aim'); else act.push('brake', 'exit'); }
       else if (m === 'fly') { const pl = AF.planes && AF.planes.cur; act.push('thrU', 'thrD', 'fexit'); if (pl && pl.onGround) act.push('wbrake'); }
       else if (m === 'aerial') act.push('walk');
       else if (m === 'skydive') act.push('chute');
-      else if (RIDES.has(m)) act.push('exit');
+      else if (RIDES.has(m)) { if (vgun) act.push('fire', 'exit', 'aim'); else act.push('exit'); }
+      else if (vgun) act.push('fire', 'aim');
       if (CAM_MODES.has(m)) use.push('cam');
       if (J && (J.cur || m === 'walk' || (m === 'drive' && AF.vehicles.player && JOB_CAR(AF.vehicles.player.type)))) use.push('job');
       if (m === 'walk' && AF.inv) use.push('bag');

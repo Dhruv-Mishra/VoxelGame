@@ -133,7 +133,7 @@ try {
     add('office', [[36.5, 0.5, -109], [41.3, 0.5, -109]], { speed: 0.6, mode: 'pingpong', dwell: [{ i: 0, t: 9 }, { i: 1, t: 9 }] }, { name: 'Desk guard' });
     add('hall-w', [[14, 0.5, -115.5], [25, 0.5, -115.5], [25, 0.5, -123.5], [14, 0.5, -123.5]], { speed: 1.0, mode: 'loop' });
     add('hall-e', [[27.6, 0.5, -115.5], [37.5, 0.5, -115.5], [37.5, 0.5, -123.5], [27.6, 0.5, -123.5]], { speed: 0.95, mode: 'loop' });
-    add('vault', [[40.2, 0.5, -125]], { speed: 0, yaw: -PI / 2 }, { name: 'Vault guard' });
+    add('vault', [[40.2, 0.5, -125], [40.2, 0.5, -122.6]], { speed: 0.5, mode: 'pingpong', dwell: [{ i: 0, t: 8 }, { i: 1, t: 5 }] }, { name: 'Vault guard' });
     add('cages', [[16.5, 0.5, -135.6], [39.6, 0.5, -135.6]], { speed: 1.05, mode: 'pingpong', dwell: [{ i: 0, t: 3 }, { i: 1, t: 3 }] });
   });
   AF.onBuild('heist-bank', 890, () => { try { props(); zone(); HB.ready = true; } catch (e) { AF.warnOnce('heist bank', e); } });

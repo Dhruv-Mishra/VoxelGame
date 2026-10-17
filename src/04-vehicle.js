@@ -6,8 +6,10 @@ try {
 // - Vehicle.input(): keyboard + touch stick read once into a shared object (no per-frame allocation): thr -1..1, steer -1..1 (right +),
 //   brake, boost, exit (E/F pressed), modal (a menu is open: everything zero)
 // - Vehicle.Chase: the chase camera (rigid position, smoothed heading / height / boom, mouse orbit, pulled in front of walls); AF.view picks
-//   first person (eye = seat offset) / near / far for every camera owner (walk, chase, planes) — V cycles it (C is crouch on foot)
-// - Vehicle.seat(v, local, o): seats the player avatar at a local offset of a vehicle (AF.PL.seat, read by 70-player)
+//   first person (eye = seat offset) / near / far for every camera owner (walk, chase, planes) — V cycles it (C is crouch on foot);
+//   Vehicle.aim (drive-by, 77-combat) pulls the boom in over the rider's shoulder and holds the look where the mouse put it
+// - Vehicle.seat(v, local, o): seats the player avatar at a local offset of a vehicle (AF.PL.seat, read by 70-player); passenger seats are
+//   indexed in 80-coop (AF.coop.seats / seatOf: driver, front, rear left, rear right; a pillion on bikes and jet skis)
 // - Vehicle.landing(x, z, ...): nearest dry, unblocked spot to hop off onto
 // - Vehicle.all: every vehicle, for central queries
 {
@@ -39,6 +41,7 @@ try {
     }
   }
   Vehicle.all = [];
+  Vehicle.aim = false;   // set each frame by 77-combat while the seated player aims a gun (the chase camera pulls in and holds its look)
 
   const IN = Vehicle.IN = { thr: 0, steer: 0, brake: false, boost: false, exit: false, modal: false };
   Vehicle.input = () => {
@@ -69,9 +72,11 @@ try {
       return this;
     }
     update(dt, x, y, z, yaw, pitch = 0, roll = 0) {
-      const m = AF.input.mouse, fp = VIEW.fp(), cam = AF.camera;
-      this.dist = this.dist0 * (VIEW.dist[VIEW.i] || 1);
-      if ((document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { this.orbit = (this.orbit - m.dx * 0.006) % (Math.PI * 2); this.orbitP = AF.clamp(this.orbitP + m.dy * 0.004, fp ? -0.6 : -0.25, 0.9); this.dragT = 1.5; }
+      const m = AF.input.mouse, fp = VIEW.fp(), cam = AF.camera, aim = Vehicle.aim;
+      // aiming from the seat (77-combat drive-by): the boom pulls in and the look holds where it was put instead of easing back behind
+      this.dist = this.dist0 * (VIEW.dist[VIEW.i] || 1) * (aim ? 0.62 : 1);
+      if (!AF.PL.wheel && (document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { const k = aim ? 0.7 : 1; this.orbit = (this.orbit - m.dx * 0.006 * k) % (Math.PI * 2); this.orbitP = AF.clamp(this.orbitP + m.dy * 0.004 * k, fp ? -0.6 : aim ? -0.9 : -0.25, 0.9); this.dragT = 1.5; }
+      else if (aim || AF.PL.wheel) this.dragT = 1.5;
       else if ((this.dragT -= dt) < 0) { this.orbit *= Math.exp(-dt * 1.8); this.orbitP *= Math.exp(-dt * 1.8); }
       if (AF.player && AF.player.mesh) AF.player.mesh.visible = AF.player.visible && !fp;
       AF.shadowFocus.set(x, y, z); AF.shadowRadius = this.radius;
@@ -89,7 +94,10 @@ try {
       this.cyaw += AF.angDiff(this.cyaw, yaw) * (1 - Math.exp(-dt * 4.5));
       this.cy += (y - this.cy) * (1 - Math.exp(-dt * 6));
       const a = this.cyaw + this.orbit, camP = 0.2 + this.orbitP + this.dist * 0.004, cp = Math.cos(camP), sp = Math.sin(camP);
-      const tx = x + Math.sin(yaw) * this.ahead, ty = this.cy + this.height, tz = z + Math.cos(yaw) * this.ahead;
+      // aiming: pivot over the vehicle (not ahead of it) and a little right of the line of sight, so the rider doesn't hide the crosshair
+      this.ak = (this.ak || 0) + ((aim ? 1 : 0) - (this.ak || 0)) * (1 - Math.exp(-dt * 8));
+      const ah = this.ahead * (1 - this.ak), sh = 0.6 * this.ak;
+      const tx = x + Math.sin(yaw) * ah + Math.cos(a) * sh, ty = this.cy + this.height, tz = z + Math.cos(yaw) * ah - Math.sin(a) * sh;
       let d = this.dist;
       // keep the camera out of walls: pull in fast, ease back out
       for (let t = 0.25; t <= 1.0001; t += 0.125) {
@@ -101,7 +109,10 @@ try {
       cam.position.set(tx - Math.sin(a) * cp * this.cd, ty + sp * this.cd, tz - Math.cos(a) * cp * this.cd);
       const low = this.floor ? this.floor(cam.position.x, cam.position.z) : AF.W.groundY(cam.position.x, cam.position.z) + 0.4;
       if (cam.position.y < low) cam.position.y = low;
-      this.look.set(tx, ty, tz); cam.up.set(0, 1, 0); cam.lookAt(this.look);
+      this.look.set(tx, ty, tz);
+      // aiming: look along the boom's own pitch even when the floor lifted the camera, so the crosshair can still rise to the horizon and above
+      if (this.ak > 0.01) { const k = this.ak; this.look.set(AF.lerp(tx, cam.position.x + Math.sin(a) * cp * 20, k), AF.lerp(ty, cam.position.y - sp * 20, k), AF.lerp(tz, cam.position.z + Math.cos(a) * cp * 20, k)); }
+      cam.up.set(0, 1, 0); cam.lookAt(this.look);
       if (AF.camTarget) AF.camTarget.copy(this.look);
     }
   }

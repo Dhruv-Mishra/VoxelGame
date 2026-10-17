@@ -201,7 +201,7 @@ try {
     const b = M.primary, title = UI.state && (UI.state.title || UI.state.map), cut = AF.mode === 'cutscene';
     if (!b || !live(b) || title || cut) { if (edgeEl.style.display !== 'none') edgeEl.style.display = 'none'; if (distEl.style.display !== 'none') distEl.style.display = 'none'; return; }
     pos(b);
-    const f = AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes.cur ? AF.planes.cur : AF.player;
+    const f = AF.mode !== 'aerial' && UI.map && UI.map.focus ? UI.map.focus() : AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes.cur ? AF.planes.cur : AF.player;
     const d = f ? Math.hypot(b.x - f.x, b.z - f.z) : 0, dt = d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1) + ' km';
     // camera space first: its x / y give the on-screen direction even when the target is behind the camera (where a projected
     // point mirrors or blows up); in front, the projected point and the rim arrow then lie on one ray, so they meet at the rim

@@ -393,10 +393,10 @@ try {
     A.hold('canopy', 'canopy_loop', canopy ? 0.55 + AF.smooth(3, 10, LS.speed) * 0.45 : 0, 0.9 + AF.smooth(3, 10, LS.speed) * 0.2);
     if (VT.prevMode === 'skydive' && mode === 'walk' && AF.player && AF.player.z > 206 && AF.player.y < -0.5) A.play('splash');
     VT.prevMode = mode;
-    // footsteps (wading where the feet are under water)
+    // footsteps (wading where the feet are under water); swimming + climbing play their own strokes / steps (70-player)
     if (mode === 'walk' && AF.player && AF.PL.walk) {
       const sp = AF.PL.walk.speed || 0, body = AF.player.body;
-      if (sp > 1.2 && body && body.onGround) {
+      if (sp > 1.2 && body && body.onGround && !AF.player.swimming && !AF.player.climbing) {
         VT.stepT -= dt * sp;
         if (VT.stepT <= 0) { VT.stepT = sp > 7 ? 2.6 : 2.0; VT.stepSide ^= 1; A.play(wetFeet(AF.player) ? 'step_water' : surface(), { vol: sp > 7 ? 1.25 : 1, rate: 0.92 + Math.random() * 0.16 }); }
       } else VT.stepT = 0.4;

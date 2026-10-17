@@ -228,11 +228,11 @@ AF.input = { down: new Set(), pressed: new Set(), released: new Set(), mouse: { 
 {
   const I = AF.input;
   addEventListener('keydown', (e) => {
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') && e.code !== 'Escape') return;
     if (e.code === 'Escape') { if (!e.repeat) AF.emit('escape'); return; }
     if (!I.down.has(e.code)) I.pressed.add(e.code);
     I.down.add(e.code);
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'F1'].includes(e.code)) e.preventDefault();
   });
   addEventListener('keyup', (e) => { I.down.delete(e.code); I.released.add(e.code); });
   addEventListener('blur', () => { I.down.clear(); I.mouse.buttons = 0; });

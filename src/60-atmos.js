@@ -36,12 +36,17 @@ try {
     afSkyS: v4(0.9, 0.8, 0.6, 2),          // horizon haze toward the sun; w = azimuth sharpness
     afSunC: v4(1, 0.8, 0.5, 1),            // sun glow colour; w = glow strength
     afCity: v4(0, 0, 0, 40),               // night city-light glow in the low haze (rgb), w = glow height (m)
+    afMoon: v4(0, 1, 0, 0),                // moon direction, w = moon strength (the halo is part of the horizon colour)
+    afSkyE: v4(0, 0, 1000, 0),             // x belt-of-Venus strength (dusk), y world-edge melt width (m; 0 = off), z open-sea melt distance (m)
+    afEdge: v4(-1e5, -1e5, 1e5, 1e5),      // xz rect the ground / sea geometry covers (x0, z0, x1, z1); its rim melts into the sky
+    afSea: v4(0.004, 0.02, 0.05, 1e5),     // open sea beyond the world: lit body colour (rgb, 62-water), sea level (w; 1e5 = no sea)
   };
   SK.fog = { density: 0.0003, heightFalloff: 0.019, baseY: 0, start: 95, sunK: 0.38, indoor: 0, horizon: 1000, auto: true };
   SK.fogColor = new THREE.Color(0xbcd3e0);
   SK.version = 0;
   const AF_SKY_GLSL = `
     uniform vec4 afFogA; uniform vec4 afFogB; uniform vec4 afFogC; uniform vec4 afSkyZ; uniform vec4 afSkyH; uniform vec4 afSkyS; uniform vec4 afSunC; uniform vec4 afCity;
+    uniform vec4 afMoon; uniform vec4 afSkyE; uniform vec4 afEdge; uniform vec4 afSea;
     vec3 afHazeBase(vec3 d) {
       vec2 dh = normalize(d.xz + vec2(1e-5, 0.0)); vec2 sh = normalize(afFogB.xz + vec2(1e-5, 0.0));
       float az = clamp(dot(dh, sh) * 0.5 + 0.5, 0.0, 1.0);
@@ -52,6 +57,44 @@ try {
       return afSunC.rgb * (pow(mu, 5.0) * 0.28 + pow(mu, 40.0) * 0.55 + pow(mu, 400.0) * 1.2) * afSunC.w;
     }
     vec3 afHaze(vec3 d) { return afHazeBase(d) + afGlow(d); }
+    // elevation with a rounded foot (C1 at the horizon): the gradients above the horizon start with zero slope, so the flat
+    // colour at / below the horizon meets them without a crease
+    float afSoftY(float y) { y = max(y, 0.0); return y < 0.05 ? y * y * 10.0 : y - 0.025; }
+    // the sky's gradient in direction d (elevation y >= 0) without sun disc, clouds, moon disc or stars
+    vec3 afSkyUp(vec3 d, float y) {
+      float ys = afSoftY(y);
+      float mu = dot(d, afFogB.xyz);
+      float w = 1.0 - exp(-ys * 4.2);
+      vec3 col = mix(afHazeBase(d), afSkyZ.rgb, w);
+      col *= mix(1.0, 0.86 + 0.14 * (mu * 0.5 + 0.5), w);   // Rayleigh-ish: deeper away from the sun
+      float anti = pow(max(-dot(normalize(d.xz + 1e-5), normalize(afFogB.xz + 1e-5)), 0.0), 1.5);
+      float bvy = (ys - 0.07) / 0.07;
+      col += vec3(0.42, 0.18, 0.26) * afSkyE.x * anti * exp(-bvy * bvy) * 0.55;   // belt of Venus
+      col += afGlow(d);
+      col += afCity.rgb * exp(-ys * 14.0) * 0.8 * mix(1.0, 0.22, smoothstep(0.05, 0.75, d.z));   // city lights in the night haze (not over the open sea to the south)
+      float cm = max(dot(d, afMoon.xyz), 0.0);
+      col += vec3(0.25, 0.32, 0.52) * (pow(cm, 220.0) * 0.9 + pow(cm, 18.0) * 0.08) * afMoon.w;   // moon halo
+      return col;
+    }
+    // below the horizon: the open sea running on past the end of the world's geometry — a flat sea at afSea.w reflecting the sky
+    // (the water shader's Fresnel + sky lookup), hazed by the same height fog + horizon melt as real fragments, so it ends in
+    // exactly the horizon colour the sky starts from
+    vec3 afFarSea(vec3 d) {
+      vec3 hor = afSkyUp(d, 0.0);
+      float h = cameraPosition.y - afSea.w, s = -d.y;
+      if (h < 1.0 || s < 1e-4) return hor;
+      float L = h / s;
+      float y0 = max(cameraPosition.y - afFogA.z, -10.0), y1 = max(afSea.w - afFogA.z, -10.0);
+      float kd = afFogA.y * (y1 - y0), e0 = exp(-afFogA.y * y0);
+      float I = abs(kd) > 1e-4 ? (e0 - exp(-afFogA.y * y1)) / kd : e0;
+      float F = max(1.0 - exp(-afFogA.x * max(L - afFogC.x, 0.0) * I), smoothstep(afSkyE.z * 0.5, afSkyE.z * 1.6, L));
+      if (F > 0.998) return hor;
+      vec3 R = vec3(d.x, s, d.z);
+      vec3 sea = mix(afSea.rgb, mix(afHazeBase(R), afSkyZ.rgb, 1.0 - exp(-s * 4.2)) + afGlow(R) * 0.6, 0.02 + 0.98 * pow(1.0 - s, 5.0));
+      return mix(sea, hor, F);
+    }
+    // what the dome shows in direction d (y = d.y), and what the far fog and the rim of the world melt into
+    vec3 afSkyCol(vec3 d, float y) { return y >= 0.0 ? afSkyUp(d, y) : afFarSea(d); }
   `;
   SK.GLSL = AF_SKY_GLSL;
   {
@@ -82,13 +125,32 @@ try {
         // mean density along the ray, in a form that cannot overflow however high the camera is
         float afInt = abs( afKdy ) > 1e-4 ? ( afE0 - exp( - afK * afY1 ) ) / afKdy : afE0;
         float afOd = afFogA.x * max( afD - afFogC.x, 0.0 ) * afInt;
-        float afF = ( 1.0 - exp( - afOd ) );
-        afF = max( afF, smoothstep( afFogC.w, afFogC.w * 1.55, afD ) );
-        afF = min( afF, afFogC.y );
+        float afF = min( 1.0 - exp( - afOd ), afFogC.y );
+        // horizon melt: past the melt distance, and near the rim of the world's ground / sea, the fogged fragment becomes the sky
+        // (or, below the horizon, the open sea) behind it
+        float afM = smoothstep( afFogC.w, afFogC.w * 1.55, afD );
+        if ( afSkyE.y > 0.0 ) {
+          vec2 afWP = cameraPosition.xz + vAfFogOff.xz;
+          vec2 afEd = min( afWP - afEdge.xy, afEdge.zw - afWP );
+          afM = max( afM, 1.0 - smoothstep( 0.0, afSkyE.y, min( afEd.x, afEd.y ) ) );
+        }
+        afM = min( afM, afFogC.y );
         vec3 afC = afHaze( normalize( vec3( afDir.x, afDir.y * afFogC.z, afDir.z ) ) );
         afC += afSunC.rgb * pow( max( dot( afDir, afFogB.xyz ), 0.0 ), 3.0 ) * afFogB.w * 0.35 * afF;
         afC += afCity.rgb * exp( - max( cameraPosition.y + vAfFogOff.y, 0.0 ) / max( afCity.w, 1.0 ) ) * ( 1.0 - 0.8 * smoothstep( 260.0, 700.0, cameraPosition.z + vAfFogOff.z ) );
-        gl_FragColor.rgb = mix( gl_FragColor.rgb, afC, afF );
+        // fog mixes in after tonemapping / colorspace: bring its colour to the same space as the pixel (and the sky dome) when
+        // the material tone-maps itself (phones' direct path); a no-op into the desktop's linear scene target
+        #ifdef TONE_MAPPING
+          afC = toneMapping( afC );
+        #endif
+        gl_FragColor.rgb = mix( gl_FragColor.rgb, linearToOutputTexel( vec4( afC, 1.0 ) ).rgb, afF );
+        if ( afM > 0.0 ) {
+          vec3 afS = afSkyCol( afDir, afDir.y );
+          #ifdef TONE_MAPPING
+            afS = toneMapping( afS );
+          #endif
+          gl_FragColor.rgb = mix( gl_FragColor.rgb, linearToOutputTexel( vec4( afS, 1.0 ) ).rgb, afM );
+        }
       } else {
         #ifdef FOG_EXP2
           float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
@@ -109,7 +171,7 @@ try {
     let sx = B.x, sz = B.z; const sl = Math.hypot(sx, sz) || 1; sx /= sl; sz /= sl;
     const az = Math.pow((dx * sx + dz * sz) * 0.5 + 0.5, Math.max(S.w, 0.5));
     out.setRGB(H.x + (S.x - H.x) * az, H.y + (S.y - H.y) * az, H.z + (S.z - H.z) * az);
-    const y = Math.max(0, d.y), w = 1 - Math.exp(-y * 4.2);
+    const y = Math.max(0, d.y), ys = y < 0.05 ? y * y * 10 : y - 0.025, w = 1 - Math.exp(-ys * 4.2);
     out.r += (Z.x - out.r) * w; out.g += (Z.y - out.g) * w; out.b += (Z.z - out.b) * w;
     const mu = Math.max(0, d.x * B.x + d.y * B.y + d.z * B.z), gl = (Math.pow(mu, 5) * 0.28 + Math.pow(mu, 40) * 0.55) * G.w;
     out.r += G.x * gl; out.g += G.y * gl; out.b += G.z * gl;
@@ -212,6 +274,7 @@ try {
     SU.uSunDir.value.copy(sunVec); SU.uMoonDir.value.copy(moonVec);
     SU.uSunK.value = smooth(-0.06, 0.02, s); SU.uMoonK.value = smooth(-0.02, -0.14, s); SU.uNight.value = smooth(-0.02, -0.2, s);
     SU.uSunset.value = Math.max(0, 1 - Math.abs(s - 0.02) / 0.2);
+    { const M = FU.afMoon.value; M.x = moonVec.x; M.y = moonVec.y; M.z = moonVec.z; M.w = SU.uMoonK.value; FU.afSkyE.value.x = SU.uSunset.value; }
     // sun / moon light
     const sun = AF.sun, hemi = AF.hemi, amb = AF.amb;
     const sunI = sampleRamp(SUNC, s, tmpC);
@@ -268,6 +331,9 @@ try {
       // high aerial / flight views: the horizon melt moves out with altitude so the whole island stays in view; the far plane follows it
       const hz = SK.fog.horizon + Math.min(1800, Math.max(0, alt - 80) * 1.2) * (1 - ind);
       FU.afFogC.value.w = hz;
+      // the open sea past the world's rim (afFarSea) has no geometry to hide, so it hazes out much further: a soft horizon band
+      // ~1.5° tall from the ground, ~3–10° below the horizon from 400 m up (real fragments past hz melt into it)
+      { const cp = AF.camera && AF.camera.position, sw = FU.afSea.value.w; FU.afSkyE.value.z = hz + (cp && sw < 1e4 ? 8 * Math.max(0, cp.y - sw) : 0); }
       const cam = AF.camera, cf = Math.max(2500, Math.ceil((hz * 1.55 + 150) / 100) * 100);
       if (cam && cam.far !== cf) { cam.far = cf; cam.updateProjectionMatrix(); }
     }
@@ -302,19 +368,10 @@ try {
       float y = d.y;
       vec3 sd = afFogB.xyz;
       float mu = dot(d, sd);
-      // gradient: the horizon haze (exactly what the fog uses) rising into the zenith colour
-      vec3 base = afHazeBase(d);
       float yp = max(y, 0.0);
-      float w = 1.0 - exp(-yp * 4.2);
-      vec3 col = mix(base, afSkyZ.rgb, w);
-      // Rayleigh-ish: the sky deepens away from the sun, brightens around it
-      col *= mix(1.0, 0.86 + 0.14 * (mu * 0.5 + 0.5), w);
-      // belt of Venus: a pink band just above the anti-solar horizon at dusk
-      float anti = pow(max(-dot(normalize(d.xz + 1e-5), normalize(sd.xz + 1e-5)), 0.0), 1.5);
-      float bvy = (yp - 0.07) / 0.07;
-      col += vec3(0.42, 0.18, 0.26) * uSunset * anti * exp(-bvy * bvy) * 0.55;
-      col += afGlow(d);
-      col += afCity.rgb * exp(-yp * 14.0) * 0.8 * mix(1.0, 0.22, smoothstep(0.05, 0.75, d.z));   // the city's lights glowing in the night haze (R2b: not over the open sea to the south)
+      // gradient, belt of Venus, sun glow, city glow, moon halo, and below the horizon the open sea: exactly what the far fog
+      // and the rim of the world melt into (afSkyCol)
+      vec3 col = afSkyCol(d, y);
       float alpha = 0.0;
       // sun disc: big, warm, limb-darkened, HDR so bloom catches it
       float sunR = 0.99965;
@@ -352,7 +409,7 @@ try {
         float maria = smoothstep(0.35, 0.7, vn(mq * 0.9 + 3.0)) * 0.35 + smoothstep(0.5, 0.8, vn(mq * 2.3)) * 0.15;
         col += vec3(0.95, 0.96, 1.0) * mdisc * uMoonK * 3.4 * (1.0 - maria);
       }
-      col += vec3(0.25, 0.32, 0.52) * (pow(max(cm, 0.0), 220.0) * 0.9 + pow(max(cm, 0.0), 18.0) * 0.08) * uMoonK;
+      // (the moon halo is part of afSkyCol)
       // stars + milky way
       if (uNight > 0.01 && y > 0.0 && uStars > 0.5) {
         float clear = 1.0 - alpha;
@@ -530,6 +587,16 @@ try {
     const S = AF.scene;
     AF.timeTick(0);
 
+    // ---- the rim of the world's ground / sea (10-terrain's ocean + bed reach the same rect): the fog melts it into the sky
+    {
+      const sea = AF.land && AF.land.water && AF.land.water.sea, bb = sea && sea.boundingBox;
+      if (bb && Number.isFinite(bb.min.x + bb.max.x + bb.min.z + bb.max.z)) {
+        const E = FU.afEdge.value; E.x = bb.min.x; E.y = bb.min.z; E.z = bb.max.x; E.w = bb.max.z;
+        FU.afSkyE.value.y = 450;
+        FU.afSea.value.w = Number.isFinite(AF.land.SEA_Y) ? AF.land.SEA_Y : bb.max.y;
+      }
+    }
+
     // ---- sky dome
     {
       const geo = new THREE.SphereGeometry(1800, 48, 24);
@@ -539,7 +606,7 @@ try {
       S.add(sky);
       if (S.background && S.background.isColor) S.background = null;
       // env scene for R1's PMREM: the same sky (no stars) on a small sphere
-      const envU = Object.assign({}, SU, FU, { uStars: { value: 0 } });
+      const envU = Object.assign({}, SU, FU, { uStars: { value: 0 }, afSea: { value: { x: 0, y: 0, z: 0, w: 1e5 } } });   // env: haze below the horizon (no open sea)
       const envSky = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), new THREE.ShaderMaterial({ uniforms: envU, vertexShader: SKY_VS, fragmentShader: SKY_FS, side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false }));
       envSky.frustumCulled = false;
       SK.envScene = new THREE.Scene(); SK.envScene.add(envSky); SK.envMesh = envSky;

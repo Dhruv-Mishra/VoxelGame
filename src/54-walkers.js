@@ -60,7 +60,7 @@ try {
   // reactions to the player (77-combat): shoved (stagger), knocked flat (down s, then they get up), scared (run along the path, or cower
   // in place when the path has no speed). Offsets from the path ease back once they walk on. State lives on the actor (actor.rx), made once.
   const rx=(a)=>{if(!a.rx)a.rx={down:0,fall:0,st:0,fear:0,ox:0,oz:0,vx:0,vz:0,yaw:0};a.rxOn=true;return a.rx;};
-  const reacts=(a)=>a.look.pose!=='dance'&&a.look.pose!=='ride';
+  const reacts=(a)=>!!a.chase||a.look.pose!=='dance'&&a.look.pose!=='ride';
   WK.knock=(a,fx,fz,v,t)=>{const R=rx(a);R.down=Math.max(R.down,t);R.vx=fx*v;R.vz=fz*v;R.yaw=Math.atan2(-fx,-fz);R.st=0;R.fear=0;R.hold=0;};
   WK.stagger=(a,fx,fz)=>{const R=rx(a);if(R.down>0||R.fall>0)return;R.st=0.7;R.vx=fx*1.8;R.vz=fz*1.8;R.yaw=Math.atan2(-fx,-fz);R.fear=Math.max(R.fear,3);};
   WK.scare=(a,t)=>{const R=rx(a);if(!(R.down>0))R.fear=Math.max(R.fear,t);};
@@ -71,8 +71,9 @@ try {
   const NEAR=[];
   WK.near=(x,z,r)=>{
     NEAR.length=0;const r2=r*r;
-    for(const path of WK.paths){if(!path.active||x<path.minX-r||x>path.maxX+r||z<path.minZ-r||z>path.maxZ+r)continue;
-      for(const a of path.actors)if(!(a.gap>0)&&(a.x-x)**2+(a.z-z)**2<r2&&reacts(a))NEAR.push(a);}
+    for(const path of WK.paths){if(!path.active)continue;const out=x<path.minX-r||x>path.maxX+r||z<path.minZ-r||z>path.maxZ+r;
+      // an actor someone else steers (a guard off his beat, a chaser) can be anywhere: test it even outside its path's bounds
+      for(const a of path.actors)if((!out||a.ctl)&&!(a.gap>0)&&(a.x-x)**2+(a.z-z)**2<r2&&reacts(a))NEAR.push(a);}
     return NEAR;
   };
   function react(path,a,dt,W){

@@ -130,7 +130,10 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
   key boxes, cage, bags, 7 laser beams and 9 camera housings in the bank, drawn within 70 m at night); every guard is a path walker
   (shared draws), the mob reuses 55's pooled `goon` walkers. Stealth (`80-stealth`) senses at 15 Hz, only in the active zone,
   only within its radius, and only on the zone's authority client; alert markers are pooled DOM. While a heist is on `AF.quiet`
-  binds 60 % of the ambient crowd (55), so a busy story frame costs no more than free roam.
+  binds 60 % of the ambient crowd (55), so a busy story frame costs no more than free roam. The stash maze and its rock fill are two
+  outland props (merged into the tile meshes: no draws of their own) + merged colliders; siege reinforcements are 12 reserve path walkers
+  (off stage until spawned), the ship's 6 officers and the 8 chase riders are path walkers too, and the chasers' hulls ride in the
+  island's jet-ski InstancedMesh (20 instances) — the whole Act II / III expansion adds no draws.
 - Audio (`75`): one AudioContext; samples (`assets/sfx`, mono MP3: one-shots 32 kHz / 48 kbps, loops + beds 24 kHz / 40 kbps,
   voice 16 kHz / 24 kbps; ~2.3 MB for 167 files) decode on first use, the core set at unlock; ≤ 32 voices (20 on phones); loops
   fade by distance and are reaped after 120 s unused; the context suspends while the page is hidden. Ambience beds are weighted by
@@ -152,7 +155,7 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
 5. No new transparent materials except glass/water; a double-sided transparent material needs `forceSinglePass: true` (three r160
    otherwise draws it twice and re-derives its program every frame). 6. `castShadow` only for > 1 m objects near the player.
 7. No sphere/cylinder > 12 segments for things < 2 m. 8. Map images are baked (`tools/map-bake.mjs`); re-bake after world edits.
-9. Memory: iOS dies near 1.5 GB — check `AF.memStats()`. Runtime objects must have a forget path (76 forget policy, `AF.avatar.release`).
+9. Memory: iOS dies near 1.5 GB — check `AF.memStats()`. Runtime objects must have a forget path (76 forget policy + the `AF.forget` stale sweep, `AF.avatar.release`).
 
 ## 8b. Co-op network (locked) — `79-net`, `80-coop`
 - One binary snapshot per client on the unordered, no-retransmit `fast` channel, rate by activity: `N.rate` (20 Hz, 15 on phones)

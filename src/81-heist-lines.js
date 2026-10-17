@@ -5,25 +5,25 @@ try {
 // them through AF.audio.voice(id) and shows the text as subtitles. Guard barks exist once per guard voice (g1..g4, m1/m2, zw).
 {
   const V = { vera: 'af_heart', kit: 'am_liam', silas: 'bm_george', prescott: 'bm_lewis', ezra: 'bm_fable', mabel: 'af_sarah', gate: 'am_michael',
-    tower: 'am_echo', tony: 'am_onyx', pit: 'bm_daniel', door: 'am_adam', dealer: 'af_nova', kestrel: 'bf_alice' };
+    tower: 'am_echo', tony: 'am_onyx', pit: 'bm_daniel', door: 'am_adam', det: 'am_onyx', dealer: 'af_nova', kestrel: 'bf_alice' };
   const L = AF.VO = {};
   const add = (who, name, lines) => { for (const k in lines) L[who + '.' + k] = [V[who], name, lines[k]]; };
   add('vera', 'Vera', {
-    b1: 'Walk with me, both of you. You look like people who are tired of small change.',
+    b1: 'Walk with me, all of you. You look like people who are tired of small change.',
     b2: 'The Harbour Trust. Eighteen inches of steel and the fattest vault on the coast. By sunrise, it\u2019s ours.',
     b3: 'My inside man, Kit Morrow, is hiding out on Serena Isle. Three kilometres of open water. You\u2019ll have to fly.',
     b4: 'But Westgate won\u2019t let just anyone past the crew gate. You\u2019ll need pilot\u2019s uniforms, and papers to match.',
     b5: 'Kovac the tailor makes the airline\u2019s uniforms. His shop shut an hour ago. Ezra Quill does the papers, at Harbour Stationers. Off you go.',
-    offer: 'There\u2019s a job. The biggest this town has ever seen. But it needs a crew. Two of you, at least.',
-    shop: 'Kovac\u2019s tailor shop. Shut for the night, with a watchman inside. Pick the padlock on the front grille, and slip in behind him.',
-    shop1: 'You\u2019re in. The uniforms hang on the rail behind the counter. Stay low, and keep out of his torchlight.',
-    shop2: 'Two uniforms. Very dashing. Now find Ezra, at Harbour Stationers.',
+    offer: 'There\u2019s a job. The biggest this town has ever seen. But it needs a crew. Two of you at least, four at the most.',
+    shop: 'Kovac\u2019s tailor shop. Shut for the night, with a watchman inside. The night grille has a padlock for each of you. Pick yours, and slip in behind him.',
+    shop1: 'You\u2019re in. The uniforms hang on the rail behind the counter, one each. Stay low, and keep out of his torchlight.',
+    shop2: 'Very dashing, all of you. Now find Ezra, at Harbour Stationers. He forges one licence at a time, so every one of you sits for his camera.',
     ezra: 'Papers in hand? Good. Westgate Airfield, the crew gate on the apron side.',
     plane: 'Serena Isle is due south, three kilometres out. Keep her low over the water.',
     island: 'There\u2019s the island. Put her down on the airstrip.',
     kit: 'Kit\u2019s on the terrace of Hotel Serena. Go and say hello.',
     tunnel: 'The smugglers\u2019 tunnel. Stay low and stay quiet. Crouch, and take them from behind.',
-    cache: 'That\u2019s the cache. Pick the lock, quietly.',
+    cache: 'That\u2019s the cache. Three padlocks. One of you works the locks, the rest of you watch their back.',
     gear: 'Silenced pistols and a diamond core drill. Christmas came early.',
     cove: 'Company in the cove! Fight your way to the jet skis!',
     ski: 'The Solace Queen is anchored halfway back to the city. Open her up.',
@@ -35,11 +35,11 @@ try {
     q4: 'Dealer, take over his table. Waiter, grab a tray at the salon bar.',
     q5: 'Deal him a rotten hand just as the drink arrives. He\u2019ll be far too busy shouting to notice a thing.',
     got: 'The key is ours. Now see Silas, in his office behind the purser\u2019s cage.',
-    m1: 'Midnight. One of you goes into the bank. The other gets us eyes on the inside.',
+    m1: 'Midnight. One of you gets us eyes on the inside. Everyone else goes into the bank.',
     m2: 'Kestrel Systems runs the Harbour Trust\u2019s cameras. Their old fibre line runs through a war bunker under the zoo.',
     m3: 'The way in is through the lion house. Borrow a keeper\u2019s uniform, and for heaven\u2019s sake, don\u2019t wake the lions.',
     msolo: 'On your own? Then do the hack first, and take the bank after. Kestrel\u2019s tablet will give you the cameras.',
-    roof: 'Inside man, get onto the Harbour Trust\u2019s roof. Parachute in, or use the service ladder on Park Row.',
+    roof: 'Inside crew, get onto the Harbour Trust\u2019s roof. Parachute in, or use the service ladder on Park Row.',
     z1: 'The keepers\u2019 lockers are in the service yard. Grab a uniform.',
     z2: 'The lion house. Slow and quiet. If they wake up, run.',
     z3: 'There\u2019s the hatch. Down you go.',
@@ -71,7 +71,15 @@ try {
     fail2: 'Careful. We only get one shot at this.',
     spotted: 'They\u2019ve seen you!',
     reflex: 'Take him down, now, before he raises the alarm!',
-    nice: 'Clean. Nobody heard a thing.',
+    maze: 'They\u2019ve stacked the hall into a maze of crates. Every man in there walks a beat. Watch the corners, and keep your head down.',
+    siege: 'It was wired! Every Moretti on the island heard that. Grab the guns off the rack and hold them off until the cache is open!',
+    siege2: 'More of them coming down the tunnel! Keep them off the locks!',
+    chase: 'Moretti skis on your tail! Shoot from the saddle. Take every one of them down before you lead them to the Queen.',
+    chase2: 'That\u2019s the last of them. Now, to the Queen.',
+    q2b: 'And the rest of you, ship\u2019s security is everywhere tonight. Take an officer from behind, and borrow his uniform.',
+    qsec: 'Guns away on that ship. Security shoots on sight. Anyone you put to sleep, you hide, before somebody trips over them.',
+    q4b: 'Officers, keep the house detective talking, and give the pit boss something else to look at.',
+    bodies: 'Hide that body, before somebody finds it!',    nice: 'Clean. Nobody heard a thing.',
     loud: 'That was loud. Every guard in the building heard it!',
     dark: 'Lights are out. They can barely see a thing in there.',
     hold: 'Hold position. Let the guard walk past.',
@@ -138,6 +146,7 @@ try {
   });
   add('tony', 'Tony Moretti', {
     cove: 'Nobody steals from the Morettis! Light them up!',
+    chase: 'After them! Don\u2019t let them reach that ship!',
     k1: 'Nothing personal. The Morettis always collect. Boys!',
     k2: 'Kill them! Nobody walks off this island!',
     down: 'Tell my brother... I tried...',
@@ -146,10 +155,14 @@ try {
     relieve: 'Celeste, you\u2019re relieved. Take five.',
     warn: 'Steady, dealer. Mister Prescott is a valued guest.',
     fire: 'That\u2019s three. You\u2019re off the table. Security!',
+    chat: 'Officer? Something the matter? Of course, of course, let\u2019s step over here.',
   });
   add('door', 'Doorman', {
     in: 'Evening. The salon is members and staff only. Ah, you\u2019re the new hire. In you go.',
     no: 'Members and staff only, I\u2019m afraid.',
+  });
+  add('det', 'House detective', {
+    chat: 'Quiet night, officer. Too quiet, if you ask me. Walk with me a minute.',
   });
   add('dealer', 'Dealer', {
     hand: 'Player wins. Banker loses.',

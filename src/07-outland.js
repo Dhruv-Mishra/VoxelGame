@@ -14,11 +14,20 @@ const hex = [AF.PAL.hex[AF.col('grass')], 0x5d8a37, 0x6f797c, 0xf5f8f9, 0xcabe9f
   0xc8ac72, 0xd9bf87, 0xb29668, 0xc9a64c, 0xb18e3c, 0x67625b, 0x625d56, 0x6c675f, 0x726c63, 0x46423d, 0xcfa640, 0x3f6a2c, 0x4b6b2e, 0x8a8270, 0x5a5a48, 0x9a8462, 0x7d8f4a, 0x6a7a3a,
   0xe3c98f, 0xd6b97c, 0xecd9a8, 0xb59767, 0x38322f, 0x7a4632, 0xd9cfb6,
   // 54 damp sand, 55 dark lava, 56 lush jungle floor, 57 mossy basalt, 58 red scoria
-  0xc2a878, 0x2c2826, 0x3c6a2c, 0x56613f, 0x8e4a33];
+  0xc2a878, 0x2c2826, 0x3c6a2c, 0x56613f, 0x8e4a33,
+  // Serena Isle ramps (all without a surface pattern, so the sloped isle mesher can blend them per vertex - 49-outland): 59 sandy tufts,
+  // 60 dune grass, 61 scoria, 62 basalt, 63 volcanic soil, 64 light ash, 65 dark ash, 66 scrub soil, 67 light tropical grass, 68 mid
+  // grass, 69 dark scoria, 70 light scoria, 71 dark basalt, 72 grey rock, 73 olive moss, 74-81 the lowland-to-jungle greens
+  0xd0c088, 0xa9ad66, 0x8a4a34, 0x5a5049, 0x6d5a4b, 0x7d6a58, 0x5f514a, 0x6c6845, 0x9bb352, 0x6f9a3e,
+  0x76442f, 0x9a5a3c, 0x4a4440, 0x6e675e, 0x5d6542, 0x88a049, 0x7da646, 0x5d8a37, 0x557a34, 0x3f6a2c, 0x37612a, 0x4b6b2e, 0x6a7a3a];
 const GRASS = new Set([0, 1, 9, 15, 16, 23, 40, 41, 45, 46, 56]), ROCK = new Set([2, 8, 17, 18, 19, 20, 51, 52, 55, 57, 58]);
+const ISLE_SAND = [49, 47, 48], ISLE_SCORIA = [70, 61, 69], ISLE_LAVA = [62, 71, 72], ISLE_LOWROCK = [72, 62, 73], ISLE_ASH = [64, 63, 65];
+const ISLE_GREEN = [67, 74, 75, 68, 76, 77, 78, 79];
+// palette indices the sloped isle mesher may blend across a cell (same material, no pattern: only the albedo interpolates)
+const BLEND = new Uint8Array(hex.length); for (const index of [14, 47, 48, 49, 50, 54]) BLEND[index] = 1; for (let index = 59; index < hex.length; index++) BLEND[index] = 1;
 const pal = O.pal = hex.map((value, index) => index >= 34 && index <= 38 ? AF.col(value, { jitter: 0.2, edge: 0.02, pat: 'asphalt' }) : index === 39 ? AF.col(value, { jitter: 0.35, edge: 0.03 })
   : index === 53 ? AF.col(value, { jitter: 0.3, edge: 0.1, pat: 'none', patTop: 'slab' })
-  : AF.col(value, { jitter: 0.9, edge: 0, pat: ROCK.has(index) ? 'stone' : 'none', patTop: GRASS.has(index) ? 'grass' : ROCK.has(index) ? 'stone' : 'none' }));
+  : AF.col(value, { jitter: index >= 59 ? 0.55 : 0.9, edge: 0, pat: ROCK.has(index) ? 'stone' : 'none', patTop: GRASS.has(index) ? 'grass' : ROCK.has(index) ? 'stone' : 'none' }));
 const farmW = (x, z) => 1 - smooth(-700, -620, x + (noise(x * 0.004 + 3, z * 0.004 - 8) - 0.5) * 110);
 O.jungle = (x, z) => smooth(175, 95, Math.hypot(x - 715, (z + 375) * 1.3) + (noise(x * 0.02 + 61, z * 0.02) - 0.5) * 60);
 const waters = O.waters = [P.lake, { name: 'Mirror Lake', cx: 828, cz: -198, rx: 64, rz: 35, waterY: 13 }, { name: 'Westmoor Pond', cx: -1040, cz: -178, rx: 17, rz: 12, waterY: 8 }, { name: 'Mill Pond', cx: -912, cz: 92, rx: 23, rz: 14, waterY: 6 }];
@@ -43,12 +52,14 @@ function ridges(x, z) {
 O.coastX = (z, east = false) => east ? 1090 + Math.sin(z * 0.012) * 16 + (noise(z * 0.022 + 19, 6) - 0.5) * 38 : -1285 + Math.sin(z * 0.009) * 18 + (noise(z * 0.016, 3) - 0.5) * 28;
 O.dryWeight = (x, z) => smooth(610, 740, x + (noise(x * 0.015, z * 0.015 + 51) - 0.5) * 70) * smooth(-100, 5, z + (noise(x * 0.012 + 29, z * 0.012) - 0.5) * 60) * (1 - smooth(1060, 1140, x)) * (1 - smooth(240, 300, z));
 // ---------------------------------------------------------------- SERENA ISLE (05-plan world.island), authored in its own frame
-// (u = x - cx, v = z - cz): beaches south and west, basalt cliffs on the east, a ridged volcano with a crater-rim terrace, a lava
-// terrace the spring stream falls over, tors, a reef offshore, Moretti's cove and the smugglers' lava tube.
+// (u = x - cx, v = z - cz): beaches south and west with low dunes behind them, rolling lowland, basalt cliffs on the east, a smooth
+// volcano cone (soft gullies, a rounded rim lip, a bowl crater) with a crater-rim terrace, a lava terrace the spring stream falls over,
+// rounded lava knolls, a reef offshore, Moretti's cove and the smugglers' lava tube. Everything here is smooth (no creases, no
+// thresholded noise): 49-outland draws the isle as a sloped heightfield (meshSlopedG below), so the shape shows as it is.
 const ISLE = P.island;
 function islandE(x, z) {
   const u = x - ISLE.cx, v = z - ISLE.cz;
-  return Math.hypot(u / ISLE.rx, v / ISLE.rz) + (noise(x * 0.018 + 20, z * 0.018) - 0.5) * 0.13 + (noise(x * 0.07 - 7, z * 0.07 + 3) - 0.5) * 0.03
+  return Math.hypot(u / ISLE.rx, v / ISLE.rz) + (noise(x * 0.018 + 20, z * 0.018) - 0.5) * 0.13 + (noise(x * 0.07 - 7, z * 0.07 + 3) - 0.5) * 0.012
     + Math.exp(-(((u + 55) / 42) ** 2 + ((v - 118) / 25) ** 2)) * 0.14      // the party beach bay
     - Math.exp(-(((u - 180) / 55) ** 2 + ((v - 60) / 22) ** 2)) * 0.15      // the east peninsula (Moretti's cove)
     - Math.exp(-(((u + 196) / 24) ** 2 + ((v - 10) / 28) ** 2)) * 0.05;     // Serena Point
@@ -66,6 +77,9 @@ function reefH(x, z) {
   const q = ((x - r.x) / r.rx) ** 2 + ((z - r.z) / r.rz) ** 2;
   return q < 1.8 ? Math.min(-1.8, Math.max(-4, -1.85 - q * 1.3 + (noise(x * 0.18, z * 0.18) - 0.5) * 0.5)) : -4;
 }
+// the cone's soft radial relief, -1 (a gully) .. +1 (a spur): a warped cosine, shared by the shape and the colours
+const isleRib = (x, z, ang) => Math.cos(ang * 7 + (noise(x * 0.02 + 5, z * 0.02) - 0.5) * 3.2);
+let ribLast = 2;   // the last isleRib colorIndex computed (2 = none): the sloped mesher's relief term reuses it
 // the island before its cove, stream and tunnel (the stream levels and the tunnel floor are measured on this)
 function isleShape(x, z) {
   const u = x - ISLE.cx, v = z - ISLE.cz, e = islandE(x, z);
@@ -74,27 +88,36 @@ function isleShape(x, z) {
   // east coast: a raised rim with sheer basalt cliffs (the runway's approach line, th -0.48, stays a beach)
   const cliff = smooth(-0.3, -0.12, th) * (1 - smooth(0.85, 1.05, th));
   let height = -4 + smooth(1.18, 0.82, e) * 9;
-  if (cliff > 0) height = AF.lerp(height, -4 + smooth(1.05, 0.99, e) * (13 + (noise(x * 0.04, z * 0.04 + 9) - 0.5) * 6) - smooth(0.96, 0.78, e) * 4, cliff);
   const cone = ISLE.cone, cu = x - cone.x, cv = z - cone.z, distance = Math.hypot(cu, cv), t = Math.max(0, 1 - distance / cone.r), ang = Math.atan2(cv, cu);
+  // low dunes behind the beaches, gently rolling lowland inland (both fade out on the cone, and on the hotel's beach front, where the
+  // promenade boardwalk, cabanas and beach paths keep the old even slope)
+  const R0 = ISLE.resort, calm = smooth(R0.r + 40, R0.r + 75, Math.hypot(x - R0.x, z - R0.z));
+  const dune = smooth(0.85, 0.9, e) * (1 - smooth(0.93, 0.975, e)) * calm;
+  if (dune > 0) height += dune * (0.35 + 0.75 * noise(x * 0.045 - 11, z * 0.06 + 4));
+  const roll = smooth(0.86, 0.64, e) * smooth(cone.r * 0.5, cone.r * 1.05, distance) * calm;
+  if (roll > 0) height += roll * (noise(x * 0.011 + 13, z * 0.011 - 41) - 0.5) * 3.2;
+  if (cliff > 0) height = AF.lerp(height, -4 + smooth(1.05, 0.99, e) * (13 + (noise(x * 0.03, z * 0.03 + 9) - 0.5) * 5) - smooth(0.96, 0.78, e) * 4, cliff);
   if (t > 0) {
-    // ridged flanks: radial ribs and gullies, strongest half way up
-    const rib = Math.abs(Math.sin(ang * 7 + noise(x * 0.03 + 5, z * 0.03) * 2.6)), flank = smooth(0.06, 0.32, t) * (1 - smooth(0.7, 0.86, t));
-    height += t ** 1.3 * 50 * (1 + (rib - 0.6) * 0.24 * flank);
+    // the flanks: soft radial gullies and spurs (a warped cosine, no creases), strongest half way up
+    const flank = smooth(0.06, 0.32, t) * (1 - smooth(0.7, 0.86, t));
+    height += t ** 1.3 * 50 * (1 + isleRib(x, z, ang) * 0.055 * flank);
   }
-  height += Math.exp(-(((distance - cone.craterR - 1.5) / 2.6) ** 2)) * 2.2 - (1 - smooth(4, cone.craterR, distance)) * 14;
-  if (distance < 10) height = Math.min(height, 39 + distance * 0.2);
-  // the crater-rim trail: a level bench round the summit
-  const bench = Math.abs(distance - cone.craterR - 4);
-  if (bench < 2.6) height = AF.lerp(RIM_Y, height, smooth(1.5, 2.6, bench));
+  // the rim: a rounded lip, then a smooth bowl down to the crater floor (its lake: 44-island)
+  height += Math.exp(-(((distance - cone.craterR - 1.5) / 2.6) ** 2)) * 2.2;
+  if (distance < cone.craterR + 1.5) { const s = smooth(5, cone.craterR + 1.5, distance); height = 39 + (height - 39) * s * s; }
+  // the crater-rim trail: a level bench round the summit (steep toward the lip, a soft shoulder outward)
+  const bench = distance - cone.craterR - 4;
+  if (bench > -2.6 && bench < 6) height = AF.lerp(RIM_Y, height, bench < 0 ? smooth(1.5, 2.6, -bench) : smooth(1.4, 6, bench));
   // a basalt shelf on the south-west flank: the stream crosses it and falls over its lip
   const tm = Math.exp(-(((ang - 2.1) / 0.42) ** 2));
-  if (tm > 0.01) { const w = tm * smooth(37, 46, distance) * smooth(68.5, 65.5, distance + (noise(x * 0.08, z * 0.08) - 0.5) * 2.4); if (w > 0) height = AF.lerp(height, 18.5 + (66 - distance) * 0.06, w); }
-  // tors: lava outcrops on the eastern hills, Serena Point and the upper flanks
-  const tor = noise(x * 0.045 + 31, z * 0.045 - 17);
-  if (tor > 0.7) height += (tor - 0.7) * 24 * smooth(0.95, 0.85, e) * Math.max(smooth(60, 80, u), smooth(-160, -180, u), smooth(0.25, 0.4, t));
+  if (tm > 0.01) { const w = tm * smooth(37, 46, distance) * smooth(68.5, 65.5, distance + (noise(x * 0.05, z * 0.05) - 0.5) * 2.4); if (w > 0) height = AF.lerp(height, 18.5 + (66 - distance) * 0.06, w); }
+  // rounded lava knolls on the eastern hills, Serena Point and the upper flanks
+  const tor = smooth(0.64, 0.88, noise(x * 0.04 + 31, z * 0.04 - 17));
+  if (tor > 0) height += tor * tor * 6.5 * smooth(0.95, 0.85, e) * smooth(cone.craterR + 8, cone.craterR + 20, distance) * Math.max(smooth(60, 80, u), smooth(-160, -180, u), smooth(0.25, 0.4, t));
   height += Math.exp(-(((u + 196) / 18) ** 2 + ((v - 10) / 24) ** 2)) * 4;
+  // the strip's cut and fill: the embankment widens with its depth (no raw cut faces into the cone's foot)
   const strip = ISLE.airstrip, stripD = Math.hypot(Math.max(strip.x0 - x, 0, x - strip.x1), Math.max(Math.abs(z - strip.z) - strip.w / 2, 0));
-  height = AF.lerp(strip.y, height, smooth(0, 16, stripD));
+  height = AF.lerp(strip.y, height, smooth(0, 14 + Math.min(16, Math.abs(height - strip.y) * 2), stripD));
   const resort = ISLE.resort;
   height = AF.lerp(resort.y, height, smooth(resort.r, resort.r + 18, Math.hypot(x - resort.x, z - resort.z)));
   const landing = ISLE.landing;
@@ -165,7 +188,7 @@ const TN = TUN ? (() => {
   const yE = Math.round(isleShape(front[0], front[1]) * 2) / 2, yX = TUN.exitY;
   // the cleft ramps from the mouth down to the hillside 8 m out
   const cleftSlope = clamp((yE - isleShape(pts[0][0] + out[0] * 8.5, pts[0][1] + out[1] * 8.5)) / 8, 0, 0.45);
-  const chambers = TUN.chambers.map(([i, hw, h]) => ({ s: cs[i], hw, h }));
+  const chambers = TUN.chambers.map(([i, hw, h, len, flat]) => ({ s: cs[i], hw, h, len: len || 6, flat: !!flat }));
   return { pts, cs, L, yE, yX, out, cleftSlope, chambers, box: [x0 - 34, z0 - 34, x1 + 34, z1 + 34], MZ: 1.5, band: 1.25 };
 })() : null;
 const TN_ = { s: 0, d: 0, hw: 0, floor: 0, ceil: 0, end: false };
@@ -179,10 +202,11 @@ function tunnelAt(x, z) {
     if (d < best) { best = d; bs = T.cs[i - 1] + Math.sqrt(len2) * t; before = i === 1 && raw < 0 || i === T.pts.length - 1 && raw > 1; }
   }
   const d = Math.sqrt(best); if (d > 30) return 0;
-  let hw = TUN.hw, h = TUN.h;
-  for (const c of T.chambers) { const k = Math.exp(-(((bs - c.s) / 6) ** 2)); hw += (c.hw - TUN.hw) * k; h += (c.h - TUN.h) * k; }
+  let hw = TUN.hw, h = TUN.h, fs = bs;
+  // a chamber swells the tube over `len` metres either side; a flat one (the Moretti stash hall) levels its floor at its centre
+  for (const c of T.chambers) { const k = Math.exp(-(((bs - c.s) / c.len) ** 2)); hw += (c.hw - TUN.hw) * k; h += (c.h - TUN.h) * k; if (c.flat) fs = AF.lerp(fs, c.s, clamp(k * 1.7, 0, 1)); }
   hw += (noise(x * 0.45 + 3, z * 0.45 - 5) - 0.5) * 0.9 * smooth(0, 3, bs) * smooth(T.L, T.L - 3, bs);
-  const floor = Math.round(AF.lerp(T.yE, T.yX, bs / T.L) * 2) / 2;
+  const floor = Math.round(AF.lerp(T.yE, T.yX, fs / T.L) * 2) / 2;
   TN_.s = before ? (bs < 1 ? -d : T.L + d) : bs; TN_.d = before ? 0 : d; TN_.hw = hw; TN_.floor = floor;
   TN_.ceil = floor + Math.round((h + (noise(x * 0.5 + 9, z * 0.5) - 0.5) * 0.8) * 2) / 2; TN_.end = before;
   return !before && d < hw ? 2 : 1;
@@ -197,8 +221,13 @@ function isleH(x, z) {
   const k = tunnelAt(x, z); if (!k) return height;
   const T = TN, s = TN_.s;
   if (!TN_.end) {
-    const top = TN_.ceil + 2.6 + noise(x * 0.06, z * 0.06 + 2) * 1.5;
-    height = Math.max(height, top - Math.max(0, TN_.d - TN_.hw - 2.5) * 0.75);
+    // a smooth lava ridge keeps the tube buried (the floor's 0.5 m steps and the roof's noise stay inside the rock): the roof line
+    // without its rounding or noise, never less than 2 m of rock over the real roof
+    let hw = TUN.hw, h = TUN.h, fs = s;
+    for (const c of T.chambers) { const k = Math.exp(-(((s - c.s) / (c.len || 6)) ** 2)); hw += (c.hw - TUN.hw) * k; h += (c.h - TUN.h) * k; if (c.flat) fs = AF.lerp(fs, c.s, clamp(k * 1.7, 0, 1)); }
+    const top = Math.max(TN_.ceil + 2, AF.lerp(T.yE, T.yX, fs / T.L) + h + 3 + noise(x * 0.06, z * 0.06 + 2) * 1.2);
+    const ridge = top - Math.max(0, TN_.d - hw - 2.5) * 0.75, m = clamp(0.5 + 0.5 * (ridge - height) / 2, 0, 1);
+    height = AF.lerp(height, ridge, m) + 2 * m * (1 - m);   // a soft max: the ridge's foot rounds into the hillside
   } else if (s < 0 && s > -7.5) {
     // the cleft: a level floor between rock arms, open to the hillside below
     const across = Math.abs((x - T.pts[0][0]) * T.out[1] - (z - T.pts[0][1]) * T.out[0]), core = T.yE + s * T.cleftSlope;
@@ -369,8 +398,10 @@ O.h = (x, z) => {
 };
 // LRU of 16 m tiles (2 KB each): 128 tiles (~180 m square) thrashed as soon as the wild herds within 260 m, the vehicles and the
 // ambience all sampled the ground. A tile is only filled (1 024 heights, ~1 ms) once it has been asked for a few times; until then
-// a miss samples just its own cell (the same point the tile would hold, so the answer is identical).
+// a miss samples just its own cell (the same point the tile would hold, so the answer is identical). On Serena Isle the columns keep
+// that meaning (every caller's "ground + k" search windows stay valid); O.deckY lifts bodies onto the smooth surface drawn over them.
 const TILE_CAP = AF.MOBILE ? 1024 : 2048, TILE_MISSES = 6, misses = new Map();
+const cellB = (x, z) => Math.round(O.h(x, z) * 4);
 O.hB = (bx, bz) => {
   const x = W.xOf(bx), z = W.zOf(bz), tx = Math.floor(x / 16), tz = Math.floor(z / 16), key = tx * 100000 + tz;
   const ix = clamp(Math.floor((x - tx * 16) * 2), 0, 31), iz = clamp(Math.floor((z - tz * 16) * 2), 0, 31);
@@ -379,11 +410,11 @@ O.hB = (bx, bz) => {
     const n = (misses.get(key) || 0) + 1;
     if (n < TILE_MISSES || !O.edgeReady) {
       if (O.edgeReady) { misses.set(key, n); if (misses.size > 8192) misses.clear(); }
-      return Math.round(O.h(tx * 16 + ix * 0.5 + 0.25, tz * 16 + iz * 0.5 + 0.25) * 4);
+      return cellB(tx * 16 + ix * 0.5 + 0.25, tz * 16 + iz * 0.5 + 0.25);
     }
     misses.delete(key);
     tile = new Int16Array(1024);
-    for (let jx = 0; jx < 32; jx++) for (let jz = 0; jz < 32; jz++) tile[jx * 32 + jz] = Math.round(O.h(tx * 16 + jx * 0.5 + 0.25, tz * 16 + jz * 0.5 + 0.25) * 4);
+    for (let jx = 0; jx < 32; jx++) for (let jz = 0; jz < 32; jz++) tile[jx * 32 + jz] = cellB(tx * 16 + jx * 0.5 + 0.25, tz * 16 + jz * 0.5 + 0.25);
     tiles.set(key, tile); if (tiles.size > TILE_CAP) tiles.delete(tiles.keys().next().value);
   } else { tiles.delete(key); tiles.set(key, tile); }
   return tile[ix * 32 + iz];
@@ -416,25 +447,42 @@ function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
     // Serena Isle: asphalt strip, wet + damp sand at the waterline, warm beaches, lush lowland, jungle flanks, basalt cliffs and
     // tors, a scoria crater rim with its trail bench, the stream bed; the tube's open cells are drawn by its model (44-island)
     const isle = P.island, strip = isle.airstrip;
+    ribLast = 2;
     if (x >= strip.x0 && x <= strip.x1 && Math.abs(z - strip.z) < strip.w / 2) return 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3);
     const tk = tunnelAt(x, z);
     if (tk && !TN_.end && step <= 0.5) { const m = TN_.s < TN.MZ || TN_.s > TN.L - TN.MZ; if (tk === 2 ? m || height <= TN_.ceil + 1 : m && TN_.d < TN_.hw + TN.band) return -1; }
     if (tk && TN_.end && TN_.s < 0 && TN_.s > -8) return [55, 51, 57][tone];
     const C = COVE;
     if (C && x >= C.ledge.x0 && x < C.ledge.x1 && z >= C.ledge.z0 && z < C.ledge.z1) return 51;
-    if (C && height > 1.5 && slope > 0.9 && Math.hypot(x - C.x, z - C.z) < C.r + 7) return [55, 51, 57][tone];
+    if (C && height > 1.5 && slope > 0.9 && Math.hypot(x - C.x, z - C.z) < C.r + 7) return ISLE_LAVA[tone];
     if (ST) { streamAt(x, z); if (stD < ST.hw + 2.5 && height < stY + 1.2) return stD < ST.hw ? 43 : 42; }
     if (height < 0.25) return 50;
-    if (height < 1.2 && noise(x * 0.5 + 4, z * 0.5) < 0.45 + (1.2 - height) * 0.6) return 54;
-    if (islandE(x, z) > 0.8 && height < 4 || height < 2.1) return [47, 48, 49][tone];
-    const cone = isle.cone, d = Math.hypot(x - cone.x, z - cone.z);
+    // every band below steps into the next through a ramp of close tones (the sloped mesher blends them per vertex; a faint
+    // per-cell dither keeps the seams organic where the terraced mesher draws them)
+    const dz = (AF.hash2(Math.floor(x * 2 + 1e-3) + 7919, Math.floor(z * 2 + 1e-3) - 104729) - 0.5) * 0.4, fine = noise(x * 0.06 + 3, z * 0.06 - 7), lowN = noise(x * 0.012 + 70, z * 0.012 - 30);
+    if (height < 1.2 && fine * 0.6 + dz < 0.2 + (1.2 - height) * 0.7) return 54;
+    // sand: the beach band and anything near the waterline; dune grass and sandy tufts between it and the lawns
+    const sandK = height < 5.4 ? Math.max(smooth(3.1, 2.0, height), smooth(0.86, 0.935, islandE(x, z) + (fine - 0.5) * 0.05) * smooth(5.4, 3.8, height)) + dz * 0.3 : 0;
+    if (sandK > 0.62) return ISLE_SAND[clamp(Math.floor((lowN * 0.7 + fine * 0.3) * 3.2 - 0.6), 0, 2)];
+    if (sandK > 0.44) return 59;
+    if (sandK > 0.28) return 60;
+    const cone = isle.cone, cu = x - cone.x, cv = z - cone.z, d = Math.hypot(cu, cv);
     if (Math.abs(d - cone.craterR - 4) < 1.4 && Math.abs(height - RIM_Y) < 0.6) return 44;
-    if (height > 31) return d < cone.craterR + 8 ? (patch < 0.5 ? 52 : 58) : [51, 19, 57][tone];
-    if (slope > 0.9) return height > 6 ? [55, 51, 8][tone] : [20, 51, 8][tone];
-    if (height > 23) return [20, 51, 57][tone];
-    const lush = noise(x * 0.012 + 70, z * 0.012 - 30);
-    if (height > 9) return lush > 0.55 ? [56, 40, 1][tone] : [40, 1, 23][tone];
-    return lush > 0.6 ? [56, 16, 45][tone] : [16, 1, 15][tone];
+    // the summit: red scoria round the rim and down into the bowl
+    if (d < cone.craterR + 6.5 + fine * 3 + dz * 2) return ISLE_SCORIA[clamp(Math.floor(fine * 3.4 + dz - 0.2), 0, 2)];
+    // steep ground is bare rock (mossy grey low down, basalt higher); the strip's grassed embankments stay green
+    const stripD = Math.max(strip.x0 - x, 0, x - strip.x1, Math.abs(z - strip.z) - strip.w / 2);
+    const rockK = smooth(0.85, 1.3, slope) - smooth(36, 18, stripD) * 0.6 + dz * 0.3;
+    if (rockK > 0.55) return (height > 12 ? ISLE_LAVA : ISLE_LOWROCK)[clamp(Math.floor(lowN * 3), 0, 2)];
+    // up the cone: jungle -> scrub -> volcanic soil and ash; spurs dry out first, gullies stay green longer
+    const rib = d < cone.r ? (ribLast = isleRib(x, z, Math.atan2(cv, cu))) * smooth(cone.r, cone.r * 0.6, d) : 0;
+    const up = smooth(20, 36, height + rib * 3 + (fine - 0.5) * 6) + dz * 0.4;
+    if (up > 0.8) return ISLE_ASH[clamp(Math.floor((lowN * 0.6 + fine * 0.4) * 3.4 - 0.2), 0, 2)];
+    if (up > 0.6) return up > 0.7 ? 66 : 73;
+    if (up > 0.4) return up > 0.5 ? 81 : 80;
+    // the greens: light grass on the open lowland, deeper toward the hills, jungle-dark in the gullies and lush hollows
+    const lush = lowN * 0.6 + smooth(4, 20, height) * 0.32 - rib * 0.08 + (fine - 0.5) * 0.18 + dz * 0.25;
+    return ISLE_GREEN[clamp(Math.floor((lush - 0.12) * 9), 0, ISLE_GREEN.length - 1)];
   }
   const inland = Math.min(O.coastZ(x) - z, x - O.coastX(z), O.coastX(z, true) - x);
   if (inland < 19) return x < -660 ? [21, 4, 22][tone] : [17, 2, 18][tone];
@@ -480,7 +528,7 @@ O.roadDistance = (x, z) => { roadAt(x, z); return roadD === Infinity ? Infinity 
 // drivable top of the ribbons / bridge decks at (x,z) (-Infinity off them). With y: the highest top at or below y + 0.35 (a
 // viaduct over a lane, or the lane under it); y above a tunnel roof stands on the roof. Without y: the nearest ribbon.
 O.deckY = (x, z, y) => {
-  if (z > 300) return -Infinity;
+  if (z > 300) return isleTop(x, z, y);
   const list = roadGrid.get(key64(x, z)); if (!list) return -Infinity;
   let count = 0;
   for (const segment of list) {
@@ -931,16 +979,222 @@ function emit(buf, xa, za, xb, zb, lo, hi, color, normal, soft = false) {
   const reverse = normal === 0 || normal === 5;
   buf.quadS(quadP, quadUV, 0, reverse ? 3 : 1, 2, reverse ? 1 : 3, color, normal + (soft ? 32 : 0), 3, 3, 3, 3);
 }
+// ---- Serena Isle as a sloped heightfield: terraced columns stair-stepped its cone and beaches (0.75-6 m risers on the far tiles),
+// so tiles over the isle mesh one quad per cell from exact corner heights instead (flat runs - pads, the strip, the sea floor - still
+// merge), coloured per corner so the ramps blend across each cell (aPal per vertex: only patternless colours of one material, BLEND).
+// Same samples per tile (65 x 65 corners vs 66 x 66 centres), one quad per cell where the terraces needed a top and 1-2 risers, so
+// fewer triangles. Edge corners take the shared rim profile and the correction fades in over a few cells (a Coons blend), so tiles of
+// any level or style still meet crack-free. Round the smugglers' tube's openings (and its cleft) level-0 cells stay terraced, as
+// its shell (44-island) is fitted to them; walls close the seams between those cells and the slope.
+const cornerE = new Float32Array(65 * 65), cornerC = new Float32Array(65 * 65), cornerK = new Int16Array(65 * 65), cornerA = new Uint8Array(65 * 65), MIXED = 0xffff;
+// one sloped cell: corners 00 (xa,za), 01 (xa,zb), 11 (xb,zb), 10 (xb,za) with their heights, palette ids and AO; `turn` splits it
+// along 01-10 instead of 00-11 (same winding as quadS, which would pick the diagonal from the AO instead)
+function slopeQuad(buf, xa, za, xb, zb, a, turn, p00, p01, p11, p10) {
+  const base = buf.n; if (base + 4 > buf.pal.length) throw new Error('outland mesh scratch capacity');
+  const C = cornerC, A = cornerA, P = buf.p, U = buf.uv, L = buf.pal, N = buf.an, v = base * 3, t = base * 2;
+  P[v] = xa; P[v + 1] = C[a]; P[v + 2] = za; P[v + 3] = xa; P[v + 4] = C[a + 65]; P[v + 5] = zb;
+  P[v + 6] = xb; P[v + 7] = C[a + 66]; P[v + 8] = zb; P[v + 9] = xb; P[v + 10] = C[a + 1]; P[v + 11] = za;
+  U[t] = xa * 4; U[t + 1] = za * 4; U[t + 2] = xa * 4; U[t + 3] = zb * 4; U[t + 4] = xb * 4; U[t + 5] = zb * 4; U[t + 6] = xb * 4; U[t + 7] = za * 4;
+  L[base] = p00; L[base + 1] = p01; L[base + 2] = p11; L[base + 3] = p10;
+  N[base] = A[a] * 8 + 2; N[base + 1] = A[a + 65] * 8 + 2; N[base + 2] = A[a + 66] * 8 + 2; N[base + 3] = A[a + 1] * 8 + 2;
+  const I = buf.idx, o = base / 4 * 6, f = turn ? 1 : 0;
+  I[o] = base + f; I[o + 1] = base + f + 1; I[o + 2] = base + f + 2; I[o + 3] = base + f; I[o + 4] = base + f + 2; I[o + 5] = base + (f + 3) % 4;
+  buf.n += 4;
+}
+const tubeMask = new Uint8Array(64 * 64), tubeH = new Float32Array(64 * 64);
+// the rim correction fades over 3 cells on level-0 tiles (1.5 m: a cliff or the crater wall stays true right up to the seam), 4 on
+// level 1, 6 beyond (their rims are the same 8 m lattice, coarser cells need the room)
+const fadeCells = (step) => step <= 0.5 ? 3 : step <= 1 ? 4 : 6;
+const slopeFade = (k, n) => k >= n ? 0 : smooth(n, 0, k);
+function slopedTile(entry) {
+  return entry.x < ISLE_BOX.x1 && entry.x + entry.size > ISLE_BOX.x0 && entry.z < ISLE_BOX.z1 && entry.z + entry.size > ISLE_BOX.z0;
+}
+O.slopedTile = slopedTile;
+// level-0 cells drawn terraced: the tube's open cells (colorIndex -1) and its cleft, grown by two cells (interior cells only)
+function tubeCells(entry, step) {
+  const T = TN, M = tubeMask; M.fill(0);
+  if (!T || entry.size > 32 || entry.x >= T.box[2] || entry.x + entry.size <= T.box[0] || entry.z >= T.box[3] || entry.z + entry.size <= T.box[1]) return 0;
+  let n = 0;
+  // 4 x 4 cell blocks first: openings and the cleft lie within a chamber's half-width of the centre-line, so blocks whose centre is
+  // farther than that (+ a margin) skip
+  for (let br = 0; br < 64; br += 4) for (let bc = 0; bc < 64; bc += 4) {
+    if (!tunnelAt(entry.x + (bc + 2) * step, entry.z + (br + 2) * step) || TN_.d > TN_.hw + 9 || TN_.end && TN_.s < -16) continue;
+    for (let row = Math.max(1, br); row < Math.min(63, br + 4); row++) for (let col = Math.max(1, bc); col < Math.min(63, bc + 4); col++) {
+      const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step;
+      if (!tunnelAt(x, z)) continue;
+      const cleft = TN_.end && TN_.s < 0 && TN_.s > -9;
+      // only the hollow itself and the band round its mouths can open (colorIndex -1); the rest of the band stays buried
+      if (!cleft && !TN_.end && TN_.d >= TN_.hw && TN_.s >= T.MZ && TN_.s <= T.L - T.MZ) continue;
+      if (cleft || colorIndex(x, z, O.meshH(x, z, step), 0, step) < 0) { M[row * 64 + col] = 2; n++; }
+    }
+  }
+  if (!n) return 0;
+  for (let pass = 0; pass < 2; pass++) {
+    const mark = pass + 3;
+    for (let row = 1; row < 63; row++) for (let col = 1; col < 63; col++) {
+      const cell = row * 64 + col, w = M[cell - 1], e = M[cell + 1], s = M[cell - 64], q = M[cell + 64];
+      if (!M[cell] && (w && w < mark || e && e < mark || s && s < mark || q && q < mark)) M[cell] = mark;
+    }
+  }
+  for (let cell = 0; cell < 4096; cell++) if (M[cell]) { const x = entry.x + ((cell & 63) + 0.5) * step, z = entry.z + ((cell >> 6) + 0.5) * step; tubeH[cell] = O.meshH(x, z, step); }
+  return n;
+}
+function* meshSlopedG(entry, rim, step) {
+  const buf = terrainBuf, C = cornerC, E = cornerE, tube = tubeCells(entry, step), M = tubeMask, fade = fadeCells(step);
+  for (let iz = 0; iz <= 64; iz++) {
+    for (let ix = 0; ix <= 64; ix++) E[iz * 65 + ix] = O.hNat(entry.x + ix * step, entry.z + iz * step);
+    if ((iz & 3) === 3) yield;
+  }
+  const dTL = rim[0] - E[0], dBL = rim[64] - E[64 * 65], dTR = rim[65] - E[64], dBR = rim[129] - E[64 * 65 + 64];
+  for (let iz = 0; iz <= 64; iz++) {
+    const wt = slopeFade(iz, fade), wb = slopeFade(64 - iz, fade), dl = rim[iz] - E[iz * 65], dr = rim[65 + iz] - E[iz * 65 + 64];
+    for (let ix = 0; ix <= 64; ix++) {
+      const wl = slopeFade(ix, fade), wr = slopeFade(64 - ix, fade), at = iz * 65 + ix;
+      if (!(wl || wr || wt || wb)) { C[at] = E[at]; continue; }
+      const dt = rim[130 + ix] - E[ix], db = rim[195 + ix] - E[64 * 65 + ix];
+      C[at] = E[at] + wl * dl + wr * dr + wt * dt + wb * db - wl * wt * dTL - wl * wb * dBL - wr * wt * dTR - wr * wb * dBR;
+    }
+  }
+  yield;
+  // colours at the corners: a cell whose four corners are all blendable draws a gradient (aPal per vertex); any other cell (the strip,
+  // the stream bed, the trail bench, mixed with one of those) takes its centre's colour whole. The corners also carry a baked relief
+  // term in the AO bits (steep ground, hollows and the cone's gullies darker), stochastically rounded so it reads as a soft gradient.
+  const K = cornerK, AO = cornerA, cone = ISLE.cone;
+  let steep = 0;
+  for (let iz = 0; iz <= 64; iz++) {
+    for (let ix = 0; ix <= 64; ix++) {
+      const at = iz * 65 + ix, x = entry.x + ix * step, z = entry.z + iz * step;
+      const c = C[at], l = ix > 0 ? C[at - 1] : c, r = ix < 64 ? C[at + 1] : c, u = iz > 0 ? C[at - 65] : c, d = iz < 64 ? C[at + 65] : c;
+      const slope = Math.abs(r - l) / ((ix > 0 && ix < 64 ? 2 : 1) * step) + Math.abs(d - u) / ((iz > 0 && iz < 64 ? 2 : 1) * step);
+      const hollow = ((ix > 0 && ix < 64 ? (l + r) * 0.5 - c : 0) + (iz > 0 && iz < 64 ? (u + d) * 0.5 - c : 0)) / step;
+      ribLast = 2;
+      K[at] = inside(x, z) ? -1 : colorIndex(x, z, c, slope, step);
+      if (slope > 0.45) steep++;
+      let occl = smooth(0.55, 1.6, slope) * 0.9 + smooth(0.03, 0.3, hollow) * 0.9;
+      const cd = Math.hypot(x - cone.x, z - cone.z);
+      if (cd < cone.r && cd > cone.craterR + 6) occl += Math.max(0, -(ribLast < 2 ? ribLast : isleRib(x, z, Math.atan2(z - cone.z, x - cone.x)))) * 0.35 * smooth(cone.r, cone.r * 0.7, cd);
+      AO[at] = clamp(Math.floor(3 - occl * 1.2 + AF.hash2(Math.round(x * 2) + 311, Math.round(z * 2) - 977)), 1, 3);
+    }
+    if ((iz & 3) === 3) yield;
+  }
+  buf.steep = steep / (65 * 65);
+  for (let row = 0; row < 64; row++) {
+    for (let col = 0; col < 64; col++) {
+      const a = row * 65 + col, c00 = C[a], c10 = C[a + 1], c01 = C[a + 65], c11 = C[a + 66], cell = row * 64 + col;
+      if (M[cell]) {
+        used[cell] = 1;
+        const slope = (Math.abs(c10 - c00 + c11 - c01) + Math.abs(c01 - c00 + c11 - c10)) / (2 * step);
+        colors[cell] = O.colTop(entry.x + (col + 0.5) * step, entry.z + (row + 0.5) * step, tubeH[cell], slope, step);
+        continue;
+      }
+      if (Math.max(c00, c10, c01, c11) <= -1.6) continue;
+      const k00 = K[a], k10 = K[a + 1], k01 = K[a + 65], k11 = K[a + 66];
+      if (k00 === k10 && k00 === k01 && k00 === k11 && k00 >= 0) { colors[cell] = pal[k00]; continue; }
+      if (k00 >= 0 && k10 >= 0 && k01 >= 0 && k11 >= 0 && BLEND[k00] && BLEND[k10] && BLEND[k01] && BLEND[k11]) { colors[cell] = MIXED; continue; }
+      const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step;
+      if (inside(x, z)) continue;
+      const slope = (Math.abs(c10 - c00 + c11 - c01) + Math.abs(c01 - c00 + c11 - c10)) / (2 * step);
+      colors[cell] = O.colTop(x, z, (c00 + c10 + c01 + c11) * 0.25, slope, step);
+    }
+    if ((row & 7) === 7) yield;
+  }
+  const flat = (cell, h) => { const a = (cell >> 6) * 65 + (cell & 63); return C[a] === h && C[a + 1] === h && C[a + 65] === h && C[a + 66] === h; };
+  for (let row = 0; row < 64; row++) {
+    const za = entry.z + row * step, zb = za + step;
+    for (let col = 0; col < 64; col++) {
+      const cell = row * 64 + col, color = colors[cell];
+      if (!color || used[cell]) continue;
+      const a = row * 65 + col, c00 = C[a], c10 = C[a + 1], c01 = C[a + 65], c11 = C[a + 66], xa = entry.x + col * step, xb = xa + step;
+      if (color !== MIXED && flat(cell, c00)) {
+        let run = 1;
+        while (col + run < 64 && !used[cell + run] && colors[cell + run] === color && flat(cell + run, c00)) run++;
+        let depth = 1, match = true;
+        while (row + depth < 64 && match) {
+          for (let along = 0; along < run; along++) { const next = cell + depth * 64 + along; if (used[next] || colors[next] !== color || !flat(next, c00)) { match = false; break; } }
+          if (match) depth++;
+        }
+        for (let across = 0; across < depth; across++) used.fill(1, cell + across * 64, cell + across * 64 + run);
+        emit(buf, xa, za, xa + run * step, za + depth * step, c00, c00, color, 2);
+        continue;
+      }
+      // split along the diagonal with the smaller rise (ridges and gullies across a cell keep their line)
+      const turn = Math.abs(c00 - c11) > Math.abs(c01 - c10);
+      if (color === MIXED) slopeQuad(buf, xa, za, xb, zb, a, turn, pal[K[a]], pal[K[a + 65]], pal[K[a + 66]], pal[K[a + 1]]);
+      else slopeQuad(buf, xa, za, xb, zb, a, turn, color, color, color, color);
+    }
+    if ((row & 7) === 7) yield;
+  }
+  if (tube) {
+    // the terraced cells round the tube: flat tops at their quantised height, risers to lower neighbours, and walls closing the gap
+    // to the slope on both sides (each side covers the part of the gap above the other, so nothing overlaps)
+    for (let row = 1; row < 63; row++) {
+      for (let col = 1; col < 63; col++) {
+        const cell = row * 64 + col; if (!M[cell]) continue;
+        const h = tubeH[cell], color = colors[cell], xa = entry.x + col * step, za = entry.z + row * step, xb = xa + step, zb = za + step;
+        if (color) emit(buf, xa, za, xb, zb, h, h, color, 2);
+        for (const direction of directions) {
+          const dx = direction[0], dz = direction[1], normal = direction[2], next = cell + dx + dz * 64;
+          const ax = col + (dx > 0 ? 1 : 0), az = row + (dz > 0 ? 1 : 0), bx = col + (dx ? (dx > 0 ? 1 : 0) : 1), bz = row + (dz ? (dz > 0 ? 1 : 0) : 1);
+          const fxA = entry.x + ax * step, fzA = entry.z + az * step, fxB = entry.x + bx * step, fzB = entry.z + bz * step;
+          if (M[next]) {
+            const low = tubeH[next];
+            if (color && low < h) wall(buf, fxA, fzA, fxB, fzB, low, low, h, h, h - low <= step * 2 ? color : O.colSide(xa + step / 2, za + step / 2, h), normal, h - low <= step * 2);
+            continue;
+          }
+          const ea = C[az * 65 + ax], eb = C[bz * 65 + bx], other = colors[next];
+          if (color && h > Math.min(ea, eb)) wall(buf, fxA, fzA, fxB, fzB, ea, eb, h, h, color, normal, h - Math.min(ea, eb) <= step * 2);
+          if (other && Math.max(ea, eb) > h) {
+            const tone = other === MIXED ? pal[K[az * 65 + ax]] : other;
+            wall(buf, fxA, fzA, fxB, fzB, h, h, ea, eb, tone, normal ^ 1, Math.max(ea, eb) - h <= step * 2);
+          }
+        }
+      }
+    }
+  }
+  return buf.n;
+}
+// ---- physics on the sloped isle: what level-0 tiles draw at a 0.5 m corner (hNat + its tile's rim correction, as meshSlopedG),
+// cached; O.deckY (02 surfaceBelow) carries bodies on the drawn triangles where they rise above the cell's column. Round the tube
+// (its terraced cells, the cleft) only the columns count.
+const RX0 = -1484, RZ0 = -1708, isleCorners = new Map();
+let cornerPads = -1;
+const tubeNear = (x, z) => tunnelAt(x, z) && (TN_.end ? TN_.s > -11 : TN_.d < TN_.hw + 3 || TN_.s < TN.MZ + 2 || TN_.s > TN.L - TN.MZ - 2);
+function isleCorner(ix, iz) {
+  if (O.pads.length !== cornerPads) { cornerPads = padsSeen = O.pads.length; rimCache.clear(); isleCorners.clear(); }
+  const key = ix * 16384 + iz;
+  let c = isleCorners.get(key); if (c !== undefined) return c;
+  const x = RX0 + ix * 0.5, z = RZ0 + iz * 0.5, cx = ix & 63, cz = iz & 63, X0 = x - cx * 0.5, Z0 = z - cz * 0.5;
+  const wl = slopeFade(cx, 3), wr = slopeFade(64 - cx, 3), wt = slopeFade(cz, 3), wb = slopeFade(64 - cz, 3), d = (px, pz) => boundaryH(px, pz) - O.hNat(px, pz);
+  c = O.hNat(x, z);
+  if (wl) c += wl * d(X0, z); if (wr) c += wr * d(X0 + 32, z); if (wt) c += wt * d(x, Z0); if (wb) c += wb * d(x, Z0 + 32);
+  if (wl && wt) c -= wl * wt * d(X0, Z0); if (wl && wb) c -= wl * wb * d(X0, Z0 + 32); if (wr && wt) c -= wr * wt * d(X0 + 32, Z0); if (wr && wb) c -= wr * wb * d(X0 + 32, Z0 + 32);
+  if (isleCorners.size > 40000) isleCorners.clear();
+  isleCorners.set(key, c); return c;
+}
+// the drawn surface at (x,z) (the cell's two triangles, split as meshSlopedG splits them); -Infinity off the isle, round the tube,
+// under the sea, or above y + 0.35
+function isleTop(x, z, y) {
+  if (x <= ISLE_BOX.x0 || x >= ISLE_BOX.x1 || z <= ISLE_BOX.z0 || z >= ISLE_BOX.z1 || W.col(x, z) >= 0 || tubeNear(x, z)) return -Infinity;
+  const fx = (x - RX0) * 2, fz = (z - RZ0) * 2, ix = Math.floor(fx), iz = Math.floor(fz), u = fx - ix, v = fz - iz;
+  const c00 = isleCorner(ix, iz), c10 = isleCorner(ix + 1, iz), c01 = isleCorner(ix, iz + 1), c11 = isleCorner(ix + 1, iz + 1);
+  if (Math.max(c00, c10, c01, c11) <= -1.6) return -Infinity;
+  let h;
+  if (Math.abs(c00 - c11) <= Math.abs(c01 - c10)) h = u >= v ? c00 + u * (c10 - c00) + v * (c11 - c10) : c00 + v * (c01 - c00) + u * (c11 - c01);
+  else h = u + v <= 1 ? c00 + u * (c10 - c00) + v * (c01 - c00) : c11 + (1 - u) * (c01 - c11) + (1 - v) * (c10 - c11);
+  return y !== undefined && h > y + 0.35 ? -Infinity : h;
+}
+O.isleTop = isleTop;
 // one tile { x, z, size } (64 x 64 cells) into O.terrainBuf; rim = Float32Array(260) edge profile. Returns the vertex count.
 O.meshTileG = function* (entry, rim) {
-  if (O.pads.length !== padsSeen) { padsSeen = O.pads.length; rimCache.clear(); }
+  if (O.pads.length !== padsSeen) { padsSeen = O.pads.length; rimCache.clear(); isleCorners.clear(); }
   const step = entry.size / 64, quantum = step <= 1 ? step * 0.5 : step * 0.75, buf = terrainBuf;
-  buf.n = 0; colors.fill(0); used.fill(0);
+  buf.n = 0; buf.steep = 0; colors.fill(0); used.fill(0);
   for (let index = 0; index <= 64; index++) {
     rim[index] = boundaryH(entry.x, entry.z + index * step); rim[65 + index] = boundaryH(entry.x + entry.size, entry.z + index * step);
     rim[130 + index] = boundaryH(entry.x + index * step, entry.z); rim[195 + index] = boundaryH(entry.x + index * step, entry.z + entry.size);
     if ((index & 7) === 7) yield;
   }
+  if (slopedTile(entry)) return yield* meshSlopedG(entry, rim, step);
   for (let row = -1; row <= 64; row++) {
     for (let col = -1; col <= 64; col++) {
       const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step, offset = (row + 1) * 66 + col + 1;
@@ -1010,7 +1264,7 @@ O.meshTileArrays = (x, z, size) => {
   for (let i = 0; i < p.length; i += 3) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); z0 = Math.min(z0, p[i + 2]); z1 = Math.max(z1, p[i + 2]); }
   const cx = (x0 + x1) * 0.5, cy = (y0 + y1) * 0.5, cz = (z0 + z1) * 0.5;
   for (let i = 0; i < p.length; i += 3) r2 = Math.max(r2, (p[i] - cx) ** 2 + (p[i + 1] - cy) ** 2 + (p[i + 2] - cz) ** 2);
-  return { n, p, uv, pal: buf.pal.slice(0, n), an: buf.an.slice(0, n), idx: n > 65535 ? new Uint32Array(ix) : new Uint16Array(ix), box: [x0, y0, z0, x1, y1, z1], sphere: [cx, cy, cz, Math.sqrt(r2)], rim };
+  return { n, p, uv, pal: buf.pal.slice(0, n), an: buf.an.slice(0, n), idx: n > 65535 ? new Uint32Array(ix) : new Uint16Array(ix), box: [x0, y0, z0, x1, y1, z1], sphere: [cx, cy, cz, Math.sqrt(r2)], rim, steep: buf.steep };
 };
 // the generated network + every city-edge height for the workers (structured-clone safe: roads reduced to what the samplers read)
 O.padsExport = () => O.pads.map((pad) => ({ x: pad.x, z: pad.z, rx: pad.rx, rz: pad.rz, y: pad.y, bank: pad.bank, kind: pad.kind, face: pad.face, pave: pad.pave }));

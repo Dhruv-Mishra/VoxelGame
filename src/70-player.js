@@ -1,7 +1,12 @@
 // ================================================================ 70-player.js
 try {
 // ===== 70-player: AF.avatar (parametric voxel people — the player + the friends), 'aerial' orbit camera + 'walk' modes  (OWNER: player) =====
-// AF.player = {x,y,z,yaw, body, mesh, visible, setVisible(b), teleport(x,y,z,yaw), setLook(look), crouch, setCrouch(on), noise, eyeH}
+// AF.player = {x,y,z,yaw, body, mesh, visible, setVisible(b), teleport(x,y,z,yaw), setLook(look), crouch, setCrouch(on), noise, eyeH,
+//              swimming, climbing}
+//   swim: walk mode in water deeper than 1.25 m floats (feet 1.3 m under the surface) and swims (breaststroke, front crawl when
+//   sprinting, treading water when still); weapons are holstered. AF.PL.waterAt(x, z) = water surface y there (-Infinity = none).
+//   climb: Space (or swimming into an edge <= 0.8 m out of the water) next to a ledge up to 1.9 m above the water / 1.6 m above the feet plays
+//   a climb and stands you on top (the ledge must be >= ~0.5 m deep with room to stand). Poses ride the replicated joints + root.
 //   walk: C toggles a crouch (45 % speed, 1.1 m collider so you fit under 1.1 m+ gaps, bent-leg pose); sprinting / jumping stands you
 //   up when there is headroom. noise (per frame) 0 still · 0.12 crouch-walk · ~0.35 walk · 1 sprint / hard landing; eyeH 1.55 / 0.95 m.
 // AF.flyTo(pos, target, dur)  AF.interactTarget  AF.emit('interact', target)
@@ -266,6 +271,8 @@ try {
     // stance (KeyC on foot): crouch = toggled state; noise = how loud the player is this frame (0 still, ~0.12 crouch-walk, ~0.35 walk,
     // 1 sprint or a hard landing); eyeH = head height above the feet (the stealth line-of-sight target)
     crouch: false, noise: 0, eyeH: EYE_STAND,
+    // walk mode in deep water floats + swims (PL.swim); climbing = a ledge climb / mantle is playing (PL.climb, ~0.6-0.85 s)
+    swimming: false, climbing: false,
     // false (and stays crouched) when there is no headroom to stand up
     setCrouch(on) {
       on = !!on; if (on === player.crouch) return true;
@@ -567,6 +574,8 @@ try {
       WK.boom = AF.lerp(WK.boom, tgt, 1 - Math.exp(-dt * (tgt < WK.boom ? 10 : 2.5)));
       WK.boom = Math.min(WK.boom, hard + 0.15);
       let cx = px + dx * WK.boom, cy = py + WK.lift + dy * WK.boom, cz = pz + dz * WK.boom;
+      // swimming: the camera stays above the surface (looking up from low no longer dives the lens under the water)
+      if (SW.on && cy < SW.wy + 0.3) cy = SW.wy + 0.3;
       if (solid(cx, cy, cz)) { cx = hx; cy = hy; cz = hz; }
       TMP.set(cx, cy, cz);
       LOOK.set(px - dx * 8, py - dy * 8 + 0.55, pz - dz * 8);
@@ -586,6 +595,229 @@ try {
     AF.camTarget.set(hx, hy, hz);
     AF.shadowFocus.set(body.x, 0, body.z); AF.shadowRadius = 70;
   };
+
+  // ------------------------------------------------------------------ WATER: surfaces, swimming, ledge climbs
+  // Surfaces: every water mesh but the sea, rasterised into 1 m cells as it is added (02 releases the arrays after upload; 16 m tiles of
+  // Float32 heights, NaN = dry, ~0.5 MB), the harbour south of the quay, and the outland's lakes / rivers / sea (07 O.waterY).
+  const HBR = AF.PLAN.harbour, WTILE = new Map();
+  let wCells = 0;
+  const tKey = (ix, iz) => ((ix >> 4) + 1024) * 2048 + ((iz >> 4) + 1024);
+  const wGet = (ix, iz) => { const T = WTILE.get(tKey(ix, iz)); return T ? T[((ix & 15) << 4) | (iz & 15)] : NaN; };
+  const wSet = (ix, iz, y) => {
+    const k = tKey(ix, iz); let T = WTILE.get(k); if (!T) { T = new Float32Array(256).fill(NaN); WTILE.set(k, T); }
+    const i = ((ix & 15) << 4) | (iz & 15), o = T[i]; if (o !== o) { wCells++; T[i] = y; } else if (y > o) T[i] = y;
+  };
+  const waterCells = (geo) => {
+    const ud = geo && geo.userData, pa = geo && geo.attributes && geo.attributes.position;
+    if (!ud || ud.sea || !pa || !pa.array || pa.isInterleavedBufferAttribute || pa.itemSize !== 3) return;
+    const A = pa.array, ix = geo.index ? geo.index.array : null, n = ix ? ix.length : pa.count;
+    for (let t = 0; t + 2 < n; t += 3) {
+      const a = (ix ? ix[t] : t) * 3, b = (ix ? ix[t + 1] : t + 1) * 3, c = (ix ? ix[t + 2] : t + 2) * 3;
+      const ax = A[a], az = A[a + 2], bx = A[b], bz = A[b + 2], cx = A[c], cz = A[c + 2], y = (A[a + 1] + A[b + 1] + A[c + 1]) / 3;
+      const d = (bx - ax) * (cz - az) - (bz - az) * (cx - ax); if (Math.abs(d) < 1e-9) continue;
+      const x0 = Math.floor(Math.min(ax, bx, cx)), x1 = Math.floor(Math.max(ax, bx, cx)), z0 = Math.floor(Math.min(az, bz, cz)), z1 = Math.floor(Math.max(az, bz, cz));
+      if ((x1 - x0 + 1) * (z1 - z0 + 1) > 250000) continue;
+      for (let i = x0; i <= x1; i++) for (let k = z0; k <= z1; k++) {
+        const px = i + 0.5, pz = k + 0.5;
+        const w0 = ((bx - px) * (cz - pz) - (bz - pz) * (cx - px)) / d, w1 = ((cx - px) * (az - pz) - (cz - pz) * (ax - px)) / d;
+        if (w0 < -1e-6 || w1 < -1e-6 || 1 - w0 - w1 < -1e-6) continue;
+        wSet(i, k, y);
+      }
+    }
+  };
+  { const add0 = AF.addWater; AF.addWater = (geo, mat) => { try { waterCells(geo); } catch (e) { AF.warnOnce('player: water cells', e); } return add0(geo, mat); }; }
+  try { for (const w of (AF.world && AF.world.water) || []) waterCells(w.geo); } catch (e) { /* arrays already released */ }
+  // water surface y at (x, z), -Infinity where there is none
+  const waterAt = PL.waterAt = (x, z) => {
+    let y = -Infinity;
+    const v = wGet(Math.floor(x), Math.floor(z)); if (v === v) y = v;
+    if (AF.W.col(x, z) < 0) { const O = AF.outland, o = O && O.waterY ? O.waterY(x, z) : null; if (o != null && o > y) y = o; }
+    else if (z >= HBR.coastZ && HBR.waterY > y) y = HBR.waterY;
+    return y;
+  };
+  PL.waterCells = () => wCells;
+
+  // swim: feet SINK under the surface; starts where the bottom is SWIM_IN below the surface, ends (stand up) above SWIM_OUT
+  const SINK = 1.3, SWIM_IN = 1.25, SWIM_OUT = 1.05, SWIM = 2.3, SWIM_RUN = 3.7, CLIMB_WATER = 1.9;   // quays: 1.5 m + a 0.25 m coping
+  const SW = PL.swim = { on: false, wy: -Infinity, floor: 0, vy: 0, w: 0, crawl: 0, pb: 0, pc: 0, t: 0, bob: 0, push: 0, wall: false, busy: false, hid: null, posed: false, sT: 0 };
+  const CL = PL.climb = { on: false, t: 0, dur: 0.7, x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0, water: false };
+  const MB_WALK = { step: 0.55 }, MB_SWIM = { step: 0.55, fly: true }, SND = { vol: 1, rate: 1 };
+  const sfx = (id, vol, rate) => { if (!AF.audio || !AF.audio.play) return; SND.vol = vol; SND.rate = rate; AF.audio.play(id, SND); };
+  // deep enough to swim at (x, z) with the feet at y? Leaves the surface in SW.wy, the bottom under it in SW.floor
+  const deepAt = (x, z, y, need) => {
+    const wy = SW.wy = waterAt(x, z);
+    if (wy === -Infinity) return false;
+    SW.floor = AF.surfaceBelow(x, z, wy + 0.05, 40);
+    if (y > wy - 0.3 || SW.floor > wy - need) return false;
+    return !(AF.liner && AF.liner.where && AF.liner.where(x, y + 1, z));
+  };
+  const splash = (x, z, k) => {
+    const P = AF.fx && AF.fx.smoke; if (!P) return;
+    const n = Math.round((6 + k * 6) * (AF.MOBILE ? 0.5 : 1)), L = 0.94 - 0.66 * ((AF.time && AF.time.night) || 0);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * PI * 2, r = Math.random(), out = 0.8 + k * 0.5 + r;
+      P.spawn(x + Math.sin(a) * 0.4, SW.wy + 0.05, z + Math.cos(a) * 0.4, Math.sin(a) * out, 1.4 + k * 0.6 + r * 1.6, Math.cos(a) * out, 0.5 + r * 0.4, 0.25, 0.9, -9.8, 0.86 * L, 0.91 * L, 0.95 * L);
+    }
+  };
+  const startSwim = (vy0, quiet) => {
+    SW.on = true; player.swimming = true; SW.vy = AF.clamp(vy0 || 0, -7, 0) * 0.45; SW.w = 0; SW.crawl = 0; SW.push = 0; SW.sT = 0.8;
+    if (player.crouch) { player.crouch = false; body.h = STAND_H; AF.emit('crouch', false); }
+    AN.crouch = 0; if (player.parts) bentLegs(player.parts, false);
+    body.vy = 0; body.onGround = true; vel.x *= 0.5; vel.z *= 0.5;
+    if (!quiet) { const imp = -(vy0 || 0); splash(body.x, body.z, Math.min(4, imp * 0.35)); sfx(imp > 4 ? 'splash' : 'step_water', Math.min(1, 0.4 + imp * 0.08), 0.9 + Math.random() * 0.2); }
+    AF.emit('swim', true);
+  };
+  const stopSwim = () => { if (!SW.on) return; SW.on = false; player.swimming = false; body.vy = 0; body.onGround = true; AF.emit('swim', false); };
+
+  // ledge in direction (dx, dz): the first column within 0.4-0.8 m whose top is in [minTop, maxTop], with a stand spot >= 0.25 m past
+  // it at the same height (so not a fence or a railing), room to stand there, and headroom straight up + halfway across
+  const LG = { x: 0, y: 0, z: 0 };
+  const ledgeDir = (dx, dz, minTop, maxTop) => {
+    const r = body.r;
+    for (let d = 0.4; d < 0.9; d += 0.2) {
+      const cx = body.x + dx * d, cz = body.z + dz * d;
+      const top = AF.surfaceBelow(cx, cz, maxTop + 0.01, maxTop - minTop + 0.5);
+      if (!(top >= minTop && top <= maxTop + 0.01) || AF.solidAt(cx, top + 0.12, cz)) continue;
+      for (let e = d + 0.45; e > d + 0.2; e -= 0.2) {
+        const sx = body.x + dx * e, sz = body.z + dz * e, s2 = AF.surfaceBelow(sx, sz, top + 0.3, 0.6);
+        if (!(Math.abs(s2 - top) <= 0.3) || AF.boxBlocked(sx, s2 + 0.02, sz, r, STAND_H)) continue;
+        if (AF.boxBlocked(body.x, s2 + 0.02, body.z, r, STAND_H) || AF.boxBlocked((body.x + sx) * 0.5, s2 + 0.02, (body.z + sz) * 0.5, r, STAND_H)) continue;
+        LG.x = sx; LG.y = s2; LG.z = sz; return true;
+      }
+      return false;
+    }
+    return false;
+  };
+  const startClimb = (yaw, water) => {
+    CL.on = true; player.climbing = true; CL.t = 0; CL.water = water;
+    CL.x0 = body.x; CL.y0 = body.y; CL.z0 = body.z; CL.x1 = LG.x; CL.y1 = LG.y; CL.z1 = LG.z;
+    CL.dur = AF.clamp(0.42 + (CL.y1 - CL.y0) * 0.16, 0.55, 0.85);
+    player.yaw = yaw; vel.x = vel.z = 0; body.vy = 0; body.onGround = true;
+    if (player.crouch) { player.crouch = false; body.h = STAND_H; AF.emit('crouch', false); }
+    if (SW.on) { stopSwim(); sfx('step_water', 0.7, 0.8); }
+    AF.emit('climb', water ? 'water' : 'ledge');
+  };
+  // the ledge straight ahead, else 25 degrees either side
+  const tryClimb = (dx, dz, minTop, maxTop, water) => {
+    if (!(maxTop > minTop)) return false;
+    const a0 = Math.atan2(dx, dz);
+    for (let k = 0; k < 3; k++) {
+      const a = a0 + (k === 1 ? 0.45 : k === 2 ? -0.45 : 0);
+      if (ledgeDir(Math.sin(a), Math.cos(a), minTop, maxTop)) { startClimb(a, water); return true; }
+    }
+    return false;
+  };
+  // pull up first (hands on the edge), then over it: kinematic, the path was checked clear when the climb started
+  const climbStep = (dt) => {
+    CL.t += dt; const u = Math.min(1, CL.t / CL.dur), uy = AF.smooth(0, 0.55, u), uh = AF.smooth(0.45, 1, u);
+    body.x = AF.lerp(CL.x0, CL.x1, uh); body.z = AF.lerp(CL.z0, CL.z1, uh); body.y = AF.lerp(CL.y0, CL.y1, uy);
+    body.vy = 0; body.onGround = true; vel.x = vel.z = 0;
+    if (u >= 1) { CL.on = false; player.climbing = false; AN.land = 0.35; sfx(CL.water ? 'step_water' : 'step_concrete', 0.6, 0.9); }
+  };
+  const swimMove = (dt, moving, dx, dz) => {
+    AF.moveBody(body, vel.x * dt, vel.z * dt, dt, MB_SWIM);
+    if (!deepAt(body.x, body.z, body.y, SWIM_OUT)) {
+      // found your feet (a beach, a ramp, a shelf): stand on the bottom; off the water entirely: walking takes over
+      stopSwim();
+      if (SW.wy > -Infinity && SW.floor > body.y && SW.floor < body.y + 0.6 && !AF.boxBlocked(body.x, SW.floor, body.z, body.r, body.h)) body.y = SW.floor;
+      return;
+    }
+    // float: a spring to SINK under the surface (a dip after jumping in), never through the bottom or into a ceiling
+    const target = SW.wy - SINK;
+    SW.vy += ((target - body.y) * 28 - SW.vy * 7) * dt;
+    let y = body.y + SW.vy * dt;
+    if (y > body.y && AF.boxBlocked(body.x, y, body.z, body.r, body.h)) { y = body.y; SW.vy = 0; }
+    if (y < SW.floor) { y = SW.floor; SW.vy = Math.max(0, SW.vy); }
+    body.y = y; body.vy = 0; body.onGround = true;
+    // a wall ahead turns you upright; swimming on into an edge <= 0.8 m out of the water (pontoons, ramps, low decks) climbs out
+    SW.wall = AF.solidAt(body.x + dx * 0.75, SW.wy - 0.15, body.z + dz * 0.75) || AF.solidAt(body.x + dx * 1.1, SW.wy - 0.15, body.z + dz * 1.1);
+    if (moving && (body.hitWall || SW.wall)) { if ((SW.push += dt) > 0.18) { SW.push = 0; tryClimb(dx, dz, SW.wy - 0.4, SW.wy + 0.8, true); } }
+    else SW.push = 0;
+  };
+
+  // ---- poses (after combat's arm overlay; everything rides the replicated root pose + joints, so co-op peers see it as is)
+  const angLerp = (a, b, t) => a + AF.angDiff(a, b) * t;
+  const bump = (u, a, b) => (u <= a || u >= b ? 0 : Math.sin((u - a) / (b - a) * PI));
+  // breaststroke keys: u, arm x, arm abduction, legs x (reach / out-sweep / in-sweep + knees drawn / shoot forward + kick / glide)
+  const BK = [0, -2.95, 0.1, 0.1, 0.4, -1.5, 1.15, 0.1, 0.55, -1.85, 0.3, -0.75, 0.72, -2.95, 0.08, 0.3, 1, -2.95, 0.1, 0.1];
+  const BS = { ax: 0, az: 0, lx: 0 };
+  const breast = (u) => {
+    let i = 0; while (i < 12 && BK[i + 4] < u) i += 4;
+    const e0 = AF.clamp((u - BK[i]) / (BK[i + 4] - BK[i]), 0, 1), e = e0 * e0 * (3 - 2 * e0);
+    BS.ax = AF.lerp(BK[i + 1], BK[i + 5], e); BS.az = AF.lerp(BK[i + 2], BK[i + 6], e); BS.lx = AF.lerp(BK[i + 3], BK[i + 7], e);
+  };
+  const poseSwim = (P, dt) => {
+    const S = SW, hs = WK.speed || 0, moving = hs > 0.35 && !S.wall;
+    S.t += dt;
+    S.w += ((moving ? 1 : 0) - S.w) * (1 - Math.exp(-dt * 3.5));
+    S.crawl += ((moving && WK.running ? 1 : 0) - S.crawl) * (1 - Math.exp(-dt * 3));
+    const pb0 = S.pb, pc0 = S.pc;
+    S.pb = (S.pb + dt * (0.45 + hs * 0.17)) % 1;
+    S.pc = (S.pc + dt * (0.35 + hs * 0.13)) % 1;
+    const w = S.w, cw = S.crawl, t = S.t;
+    // treading water: upright, hands sculling out to the sides, a slow eggbeater kick, looking around
+    let aLx = -0.45 + Math.sin(t * 3.4) * 0.28, aRx = -0.45 + Math.sin(t * 3.4 + 0.4) * 0.28, azL = 1.0 + Math.sin(t * 3.4 + 1.2) * 0.18, azR = 1.0 + Math.sin(t * 3.4 + 1.6) * 0.18;
+    let lL = Math.sin(t * 2.6) * 0.38, lR = -lL, pitch = 0.1, roll = 0, hx = -0.05, hy = Math.sin(t * 0.45) * 0.5, cx = 0.05 + Math.sin(t * 1.7) * 0.03;
+    if (w > 0.01) {
+      breast(S.pb);
+      let sLx = BS.ax, sRx = BS.ax, sLz = BS.az, sRz = BS.az, sLl = BS.lx, sRl = BS.lx, sp = 1.18 - 0.28 * bump(S.pb, 0.3, 0.68), sroll = 0, shy = 0;
+      if (cw > 0.01) {
+        // front crawl: each arm a full circle (pull under the body, recover over the back, elbow out), flutter kick, the body rolls,
+        // a breath to the side every cycle
+        const L = S.pc, R = (S.pc + 0.5) % 1;
+        const cLx = AF.angDiff(0, -PI + L * 2 * PI), cRx = AF.angDiff(0, -PI + R * 2 * PI);
+        const cLz = 0.14 + (L > 0.5 ? Math.sin((L - 0.5) * 2 * PI) * 0.5 : 0), cRz = 0.14 + (R > 0.5 ? Math.sin((R - 0.5) * 2 * PI) * 0.5 : 0);
+        const fl = Math.sin(S.pc * 2 * PI * 3) * 0.32;
+        sLx = angLerp(sLx, cLx, cw); sRx = angLerp(sRx, cRx, cw); sLz = AF.lerp(sLz, cLz, cw); sRz = AF.lerp(sRz, cRz, cw);
+        sLl = AF.lerp(sLl, 0.06 + fl, cw); sRl = AF.lerp(sRl, 0.06 - fl, cw);
+        sp = AF.lerp(sp, 1.3, cw); sroll = Math.sin(S.pc * 2 * PI) * 0.38 * cw; shy = bump(R, 0.55, 0.95) * 0.9 * cw;
+      }
+      aLx = angLerp(aLx, sLx, w); aRx = angLerp(aRx, sRx, w); azL = AF.lerp(azL, sLz, w); azR = AF.lerp(azR, sRz, w);
+      lL = AF.lerp(lL, sLl, w); lR = AF.lerp(lR, sRl, w); pitch = AF.lerp(pitch, sp, w); roll = sroll * w;
+      hx = AF.lerp(hx, -sp * 0.85, w); hy = AF.lerp(hy, shy, w); cx = AF.lerp(cx, 0, w);
+    }
+    P.armL.rotation.set(aLx, 0, -azL); P.armR.rotation.set(aRx, 0, azR);
+    P.legL.rotation.set(lL, 0, 0); P.legR.rotation.set(lR, 0, 0);
+    P.chest.rotation.set(cx, 0, 0); P.head.rotation.set(hx, hy, 0); P.hips.position.y = 0.75;
+    // the root pivots at the feet: shift it back so the body lies over the collider, shoulders just under the (bobbing) surface
+    const s = player.look.height || 1, yaw = player.yaw, back = 0.8 * s * Math.sin(pitch);
+    S.bob = Math.sin(t * 1.7) * 0.035 + Math.sin(t * 0.63 + 1) * 0.02;
+    P.root.position.set(body.x - Math.sin(yaw) * back, body.y + SINK + S.bob - 1.23 * s * Math.cos(pitch) + 0.03, body.z - Math.cos(yaw) * back);
+    P.root.rotation.set(pitch, yaw, roll, 'YXZ');
+    // strokes: a hand entering (crawl), the kick (breaststroke), the odd slosh treading water
+    if (w > 0.5) {
+      if (cw > 0.5) { if ((pc0 < 0.5 && S.pc >= 0.5) || S.pc < pc0) sfx('step_water', 0.35, 1.05 + Math.random() * 0.15); }
+      else if (pb0 < 0.6 && S.pb >= 0.6) sfx('step_water', 0.45, 0.8 + Math.random() * 0.1);
+    } else if ((S.sT -= dt) <= 0) { S.sT = 1.8 + Math.random(); sfx('step_water', 0.18, 0.7); }
+  };
+  // climb: reach up onto the edge, press down as the body comes up, a knee onto the edge, stand
+  const poseClimb = (P) => {
+    const u = Math.min(1, CL.t / CL.dur), e1 = AF.smooth(0, 0.28, u), e2 = AF.smooth(0.28, 0.62, u), e3 = AF.smooth(0.62, 1, u);
+    const ax = AF.lerp(AF.lerp(AF.lerp(-0.4, -2.75, e1), -0.25, e2), 0, e3), az = AF.lerp(AF.lerp(0.12, 0.28, e1), 0.08, e3);
+    const pitch = AF.lerp(AF.lerp(AF.lerp(0.05, 0.38, e1), 0.62, e2), 0, e3);
+    P.armL.rotation.set(ax, 0, -az); P.armR.rotation.set(ax, 0, az);
+    P.legL.rotation.set(AF.lerp(AF.lerp(0, -1.45, e2), 0, e3), 0, 0); P.legR.rotation.set(AF.lerp(AF.lerp(0.1, 0.35, e2), 0, e3), 0, 0);
+    P.chest.rotation.set(AF.lerp(0.2 * e1, 0.35, e2) * (1 - e3), 0, 0); P.head.rotation.set(AF.lerp(-0.45 * e1, -0.1, e2) * (1 - e3), 0, 0);
+    P.hips.position.y = 0.75 - 0.08 * bump(u, 0.3, 0.9);
+    // leaning in pivots on the feet: until the body is over the edge, hold the shoulders back at the wall
+    const back = 0.95 * Math.sin(pitch) * (1 - AF.smooth(0.25, 0.5, u));
+    P.root.position.set(body.x - Math.sin(player.yaw) * back, body.y, body.z - Math.cos(player.yaw) * back); P.root.rotation.set(pitch, player.yaw, 0, 'YXZ');
+  };
+  // weapons are holstered in the water and while climbing: combat (151) sees PL.busy, the held item hides
+  AF.onTick('player-water-busy', 150.5, () => { if (AF.mode === 'walk' && (SW.on || CL.on) && !PL.busy) { PL.busy = true; SW.busy = true; } });
+  AF.onTick('player-water-pose', 151.5, (dt) => {
+    if (SW.busy) { SW.busy = false; PL.busy = false; }
+    const P = player.parts;
+    if (!P || AF.mode !== 'walk' || !(SW.on || CL.on)) {
+      if (SW.hid) { SW.hid.visible = true; SW.hid = null; }
+      if (SW.posed && P) { SW.posed = false; P.root.rotation.set(0, player.yaw, 0); if (!P.sitting) P.hips.position.y = 0.75; }
+      return;
+    }
+    const CB = AF.combat; if (CB && CB.held && CB.held.visible) { CB.held.visible = false; SW.hid = CB.held; }
+    SW.posed = true;
+    if (CL.on) poseClimb(P); else poseSwim(P, dt);
+  });
+
   AF.modes.walk = {
     enter(opts = {}, from) {
       const s = AF.PLAN.spawn;
@@ -598,11 +830,14 @@ try {
       const c = cam(); WK.from.copy(c.position); WK.fromQ.copy(c.quaternion); WK.blend = (opts.snap || from == null) ? 1 : 0;
       vel.x = vel.z = 0;
       player.crouch = false; body.h = STAND_H; AN.crouch = 0; player.eyeH = EYE_STAND; player.noise = 0; NZ.land = 0;
+      // started in deep water (off a jet ski, a boat, a checkpoint at sea): float straight away, never sink to the bottom
+      CL.on = false; player.climbing = false; SW.on = false; player.swimming = false; SW.vy = 0;
+      if (deepAt(body.x, body.z, body.y, SWIM_IN)) { startSwim(0, true); body.y = Math.max(SW.floor, SW.wy - SINK); }
       if (player.parts) AV.sit(player.parts, false);
       player.setVisible(true);
       AF.emit('hint', '');
     },
-    exit() { AF.interactTarget = null; PL.hideMesh = false; player.noise = 0; if (player.crouch) { player.crouch = false; body.h = STAND_H; AF.emit('crouch', false); } AN.crouch = 0; if (player.parts) bentLegs(player.parts, false); player.eyeH = EYE_STAND; if (player.mesh) player.mesh.visible = player.visible; const c = cam(); WK.fov = 50; if (c.fov !== 50) { c.fov = 50; c.updateProjectionMatrix(); } },
+    exit() { stopSwim(); CL.on = false; player.climbing = false; AF.interactTarget = null; PL.hideMesh = false; player.noise = 0; if (player.crouch) { player.crouch = false; body.h = STAND_H; AF.emit('crouch', false); } AN.crouch = 0; if (player.parts) bentLegs(player.parts, false); player.eyeH = EYE_STAND; if (player.mesh) player.mesh.visible = player.visible; const c = cam(); WK.fov = 50; if (c.fov !== 50) { c.fov = 50; c.updateProjectionMatrix(); } },
     update(dt) {
       const I = AF.input, m = I.mouse, modal = inModal() || !!PL.busy;
       const locked = !!document.pointerLockElement;
@@ -628,41 +863,56 @@ try {
       const mag = Math.min(1, Math.hypot(ix, iz)), analog = !!(I.stick && (I.stick.x || I.stick.y));
       let run = I.key('ShiftLeft') || I.key('ShiftRight') || !!(I.stick && I.stick.run);
       // KeyC toggles the crouch; sprinting or jumping stands you up (when there is headroom: else you stay low and can't sprint)
-      if (!modal && I.hit('KeyC')) { if (!player.setCrouch(!player.crouch)) AF.emit('toast', 'No room to stand up here.'); }
+      if (!modal && I.hit('KeyC') && !SW.on && !CL.on) { if (!player.setCrouch(!player.crouch)) AF.emit('toast', 'No room to stand up here.'); }
       if (player.crouch && run && (ix || iz) && !player.setCrouch(false)) run = false;
       if (player.crouch && !modal && I.hit('Space') && !player.setCrouch(false)) I.pressed.delete('Space');
       const fx = -Math.sin(WK.camYaw), fz = -Math.cos(WK.camYaw), rx = -fz, rz = fx;
       let wx = fx * iz + rx * ix, wz = fz * iz + rz * ix;
-      const wl = Math.hypot(wx, wz);
-      const sp = (player.crouch ? WALK * CROUCH_K : run ? RUN : WALK) * (analog ? mag : 1);
-      WK.running = run && wl > 0;
+      const wl = Math.hypot(wx, wz), swim = SW.on && !CL.on;
+      const sp = (CL.on ? 0 : swim ? (run ? SWIM_RUN : SWIM) : player.crouch ? WALK * CROUCH_K : run ? RUN : WALK) * (analog ? mag : 1);
+      WK.running = run && wl > 0 && !CL.on;
+      const dirX = wl > 0 ? wx / wl : Math.sin(player.yaw), dirZ = wl > 0 ? wz / wl : Math.cos(player.yaw);
       if (wl > 0) { wx = wx / wl * sp; wz = wz / wl * sp; }
-      const acc = 1 - Math.exp(-dt * (body.onGround ? 18 : 3));
+      const acc = 1 - Math.exp(-dt * (swim ? 4 : body.onGround ? 18 : 3));
       vel.x = AF.lerp(vel.x, wx, acc); vel.z = AF.lerp(vel.z, wz, acc);
-      if (!modal && I.hit('Space') && body.onGround) { body.vy = 7.2; body.onGround = false; }
+      // Space: climb onto a ledge in front (<= 1.9 m above the water, 1.6 m above the feet), else jump (on land)
+      const space = !modal && !CL.on && I.hit('Space');
+      if (space && swim) tryClimb(dirX, dirZ, Math.max(body.y + 0.6, SW.wy - 0.4), SW.wy + CLIMB_WATER, true);
+      else if (space && body.onGround && !tryClimb(dirX, dirZ, body.y + 0.6, Math.max(body.y, waterAt(body.x, body.z)) + 1.6, false)) { body.vy = 7.2; body.onGround = false; }
       const wasAir = !body.onGround, vy0 = body.vy;
       const ox = body.x, oz = body.z;
-      AF.moveBody(body, vel.x * dt, vel.z * dt, dt, { step: 0.55 });
+      let landed = false;
+      if (CL.on) climbStep(dt);
+      else if (swim) swimMove(dt, wl > 0, dirX, dirZ);
+      else {
+        AF.moveBody(body, vel.x * dt, vel.z * dt, dt, MB_WALK);
+        landed = wasAir && body.onGround;
+        // out of your depth (walked off a pier, fell or jumped in, waded too far): swim; the water breaks the fall
+        if (deepAt(body.x, body.z, body.y, SWIM_IN)) { startSwim(wasAir ? vy0 : 0, false); landed = false; }
+      }
       const bounds = AF.PLAN.world.play, margin = AF.PLAN.world.margin;
       body.x = AF.clamp(body.x, bounds.x0 - margin, bounds.x1 + margin);
       body.z = AF.clamp(body.z, bounds.z0 - margin, AF.PLAN.world.bounds.z1 - margin);
-      if (wasAir && body.onGround) { AN.land = 0.6; AF.emit('land', -vy0); if (-vy0 > 8.5) { NZ.land = 0.3; NZ.landK = 1; } else if (-vy0 > 5) { NZ.land = 0.2; NZ.landK = 0.5; } }
+      if (landed) { AN.land = 0.6; AF.emit('land', -vy0); if (-vy0 > 8.5) { NZ.land = 0.3; NZ.landK = 1; } else if (-vy0 > 5) { NZ.land = 0.2; NZ.landK = 0.5; } }
       const hs = Math.hypot(body.x - ox, body.z - oz) / Math.max(dt, 1e-4);
       WK.speed = hs;
       AN.crouch += ((player.crouch ? 1 : 0) - AN.crouch) * (1 - Math.exp(-dt * 12));
       player.eyeH = EYE_STAND - (EYE_STAND - EYE_CROUCH) * AN.crouch;
       NZ.land = Math.max(0, NZ.land - dt);
       player.noise = Math.max(NZ.land > 0 ? NZ.landK : 0, !body.onGround || hs < 0.4 ? 0 : player.crouch ? 0.12 : hs > 7 ? 1 : 0.35 * Math.min(1, hs / 4));
+      if (SW.on) player.noise = hs > 0.4 ? (WK.running ? 0.35 : 0.22) : 0.05; else if (CL.on) player.noise = 0.3;
       if (body.hitWall) { vel.x *= 0.6; vel.z *= 0.6; }
-      if (WK.fp || PL.aim) player.yaw = WK.camYaw + PI;
-      else if (wl > 0) player.yaw += AF.angDiff(player.yaw, Math.atan2(wx, wz)) * (1 - Math.exp(-dt * 12));
+      if (CL.on) { /* facing the ledge */ }
+      else if (WK.fp || PL.aim) player.yaw = WK.camYaw + PI;
+      else if (wl > 0) player.yaw += AF.angDiff(player.yaw, Math.atan2(wx, wz)) * (1 - Math.exp(-dt * (SW.on ? 5 : 12)));
       if (!WK.fp && !locked && wl > 0 && iz > 0 && AF.clock.t - WK.lastMouse > 4) WK.camYaw += AF.angDiff(WK.camYaw, player.yaw + PI) * (1 - Math.exp(-dt * 0.9));
       if (body.y < -14 || !isFinite(body.y)) { const s = AF.PLAN.spawn; player.teleport(s.x, s.y, s.z, s.yaw); AF.emit('toast', 'Whoops \u2014 back to safe ground.'); }
       player.x = body.x; player.y = body.y; player.z = body.z;
       if (player.mesh) { player.mesh.position.set(body.x, body.y, body.z); player.mesh.rotation.y = player.yaw; }
-      if (player.parts) AV.animate(player.parts, AN, dt, hs, body.onGround);
+      // swimming / climbing poses are set after combat's overlay (player-water-pose)
+      if (player.parts && !SW.on && !CL.on) AV.animate(player.parts, AN, dt, hs, body.onGround);
       // interactions
-      const it = modal ? null : findInteract();
+      const it = modal || CL.on ? null : findInteract();
       AF.interactTarget = it;
       if (it && (I.hit('KeyE') || I.hit('KeyF')) && !talking) {
         try { it.act && it.act(); } catch (e) { console.error('[af] interact', e); }
@@ -734,6 +984,24 @@ try {
       I.down.add('ShiftLeft'); step(20); const sprint = player.noise === 1;
       return { ok: low && sneak && walk && sprint, info: `crouch ${low}, sneak ${sneak} (${player.noise}), walk ${walk}, sprint ${sprint}` };
     } finally { I.down.delete('KeyW'); I.down.delete('ShiftLeft'); I.pressed.clear(); player.setCrouch(false); if (S) S.title = title; if (was && was !== AF.mode) AF.setMode(was); }
+  });
+  AF.test('player: deep water swims, Space at the quay climbs out, running off the quay swims again unhurt', () => {
+    const was = AF.mode, I = AF.input, S = AF.ui && AF.ui.state, title = S && S.title; if (S) S.title = false;
+    const step = (n) => { for (let i = 0; i < n; i++) AF.modes.walk.update(1 / 30); };
+    const sea = HBR.waterY, H = AF.health, hp = H ? H.v : 0, x0 = body.x, y0 = body.y, z0 = body.z, yaw0 = player.yaw;
+    try {
+      // the harbour 3 m off the quay wall (z 210: top 0.25 + a 0.25 m coping; water -1.25, bed -4)
+      AF.setMode('walk', { x: -100, y: sea, z: 213, yaw: PI, snap: true });
+      const float = SW.on && Math.abs(body.y - (sea - SINK)) < 0.05;
+      I.down.add('KeyW'); step(45); I.down.delete('KeyW');
+      const swam = SW.on && body.z < 211 && Math.abs(body.y - (sea - SINK)) < 0.2;
+      I.pressed.add('Space'); step(1); I.pressed.clear(); const climb = CL.on;
+      step(40); const out = !CL.on && !SW.on && body.y > 0.2 && body.z < 210;
+      AF.setMode('walk', { x: -40, y: 0.25, z: 205.5, yaw: 0, snap: true });
+      I.down.add('KeyW'); I.down.add('ShiftLeft'); step(60);
+      const back = SW.on && (!H || H.v >= hp);
+      return { ok: float && swam && climb && out && back, info: `float ${float}, swam ${swam}, climb ${climb}, out ${out} (${body.y.toFixed(2)}), back in ${back}, ${wCells} water cells in ${WTILE.size} tiles` };
+    } finally { I.down.delete('KeyW'); I.down.delete('ShiftLeft'); I.pressed.clear(); stopSwim(); CL.on = false; player.climbing = false; player.teleport(x0, y0, z0, yaw0); if (S) S.title = title; if (was && was !== AF.mode) AF.setMode(was); }
   });
 }
 

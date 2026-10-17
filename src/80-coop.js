@@ -89,6 +89,7 @@ try {
   // player: x y z yaw pitch roll | 11 joints | hips mode flags weapon vehLo vehHi seat anchorKind anchorIdx stat speed
   const P_HIPS = 17, P_MODE = 18, P_FLAGS = 19, P_WPN = 20, P_VLO = 21, P_VHI = 22, P_SEAT = 23, P_AK = 24, P_AI = 25, P_STAT = 26, P_SPD = 27;
   const PT = [1, 1, 1, 3, 2, 2].concat(new Array(NJ).fill(0), [0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 0]);
+  PT[6 + 2] = PT[6 + 4] = 2;   // armL.x / armR.x interpolate as angles: a front-crawl stroke wraps past +-pi without a one-frame flick
   const VT = [1, 1, 1, 3, 2, 2, 0, 0, 4, 4];   // x y z yaw pitch roll v steer dmg flags
   const NT = [1, 1, 1, 3, 4, 4];               // x y z yaw look frame
   const HT = [1, 1, 1, 3, 4];                  // x y z yaw falling
@@ -121,7 +122,7 @@ try {
   };
   const removeRemote = (slot) => {
     const r = RP.get(slot); if (!r) return;
-    RP.delete(slot);
+    RP.delete(slot); CLAIMS.delete(slot);
     for (const e of [...RV.values()]) if (e.owner === slot) releaseVeh(e, null);
     for (const e of [...RN.values()]) if (e.owner === slot) freeNpc(e);
     if (r.P) { AF.scene.remove(r.P.root); AF.avatar.release(r.P); }
@@ -145,17 +146,41 @@ try {
     const m = AF.modelMesh(geo); m.position.set(0, -0.52, 0.03); m.castShadow = false; m.name = 'held'; r.P.armR.add(m); r.held = m;
   };
 
-  // ---------------------------------------------------------------- seats: the driver's seat (VV.seatLocal), the passenger mirrored / a pillion
+  // ---------------------------------------------------------------- seats: indexed, 0 = the driver (VV.seatLocal). Cars, vans, trucks and the bus
+  // seat 4: 1 front passenger, 2 rear left, 3 rear right; a motorbike / jet ski seats a pillion (1) behind the rider, a sidecar its chair.
+  // Local [right, up, forward] of the avatar root.
   const SL = [0, 0, 0], POSE = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0 };
   const isBike = (v) => v.type && v.type.kind === 'bike' && !!v.type.solo;
+  // planes carry their crew unseen: 4 aboard any of them (the heist's "one flies, the others ride along" takes whichever is free)
+  const seatsOf = (v, k = kindOf(v)) => k === VK_CAR ? (v.type.kind === 'bike' ? 2 : v.type.horse ? 1 : 4) : k === VK_SKI ? 2 : k === VK_PLANE ? 4 : 1;
   const seatOf = (v, k, seat) => {
+    if (seat >= seatsOf(v, k)) seat = 0;
     if (k === VK_CAR) {
-      const L = VV.seatLocal(v), bike = isBike(v); SL[0] = L[0]; SL[1] = L[1] - (bike ? 0 : 0.57); SL[2] = L[2];
-      if (seat) { if (bike) { SL[1] += 0.06; SL[2] -= 0.55; } else SL[0] = -SL[0]; }
+      const T = v.type, L = VV.seatLocal(v), bike = isBike(v); SL[0] = L[0]; SL[1] = L[1] - (bike ? 0 : 0.57); SL[2] = L[2];
+      if (seat) {
+        if (bike) { SL[1] += 0.06; SL[2] -= 0.55; }
+        else if (T.kind === 'bike') { SL[0] = -v.halfW * 0.5; SL[2] += 0.15; }   // the sidecar's chair
+        else { SL[0] = seat === 3 ? L[0] : -L[0]; if (seat >= 2) SL[2] -= T.big ? 1.6 : T.kind === 'van' ? 1.3 : 0.95; }
+      }
     } else if (k === VK_SKI) { SL[0] = 0; SL[1] = -0.05; SL[2] = seat ? -0.75 : -0.15; }
     else { SL[0] = 0; SL[1] = 1; SL[2] = 0; }
     return SL;
   };
+  // who sits where: remote players' snapshots (veh hash + seat) plus fresh 'seat' claims (a claim answers before the snapshots catch up)
+  const CLAIMS = new Map();   // slot -> { h, s, t }
+  const seatHolder = (h, s, except) => {
+    for (const r of RP.values()) if (r !== except && r.veh === h && r.seat === s) return r;
+    const now = performance.now();
+    for (const [slot, c] of CLAIMS) if (c.h === h && c.s === s && now - c.t < 3000 && (!except || slot !== except.slot) && RP.has(slot)) return RP.get(slot);
+    return null;
+  };
+  // the lowest free passenger seat of v (this client's own seat counts as taken unless it is `except`'s), -1 when full
+  const freeSeat = (v, except) => {
+    const h = hashOf(v), n = seatsOf(v);
+    for (let s = 1; s < n; s++) if (!seatHolder(h, s, except) && !(PR.veh === v && PR.seat === s && except !== ME)) return s;
+    return -1;
+  };
+  const ME = { slot: -1 };
   const seatPose = (v, k, l, out) => {
     const s = Math.sin(v.yaw), c = Math.cos(v.yaw);
     out.x = v.x + c * l[0] + s * l[2]; out.y = v.y + (k === VK_CAR ? v.bob || 0 : 0) + l[1]; out.z = v.z - s * l[0] + c * l[2];
@@ -485,22 +510,35 @@ try {
     }
   };
 
-  // ---------------------------------------------------------------- riding along (passenger seat of another player's car, bike, plane or jet ski)
-  const PR = C.ride = { veh: null, kind: 0, seat: 1, chase: new AF.Vehicle.Chase(), carO: { seatH: 0.45, lean: 0.1 }, bikeO: { seatH: 0.7, lean: 0.35 }, skiO: { seatH: 0.55, lean: 0.35 } };
-  const seatTaken = (h) => { for (const r of RP.values()) if (r.veh === h && r.seat === 1) return true; return false; };
+  // ---------------------------------------------------------------- riding along (a passenger seat of another player's car, bike, plane or jet ski)
+  // Seats are indexed (seatOf): the rider asks for the lowest free one with a reliable 'seat' { h, s } (s = 0: I got out); the driver's
+  // client is the authority and answers a taken or invalid seat with 'seatno' { h, s, alt } (alt = another free seat, -1 = full).
+  const PR = C.ride = { veh: null, kind: 0, seat: 1, eye: [0, 0, 0], chase: new AF.Vehicle.Chase(), carO: { seatH: 0.45, lean: 0.1 }, bikeO: { seatH: 0.7, lean: 0.35 }, skiO: { seatH: 0.55, lean: 0.35 } };
+  const SEAT_NAMES = ['driver\u2019s seat', 'front seat', 'back left', 'back right'];
+  const seatName = (v, s) => { const k = kindOf(v); return k === VK_SKI || isBike(v) ? 'pillion' : k === VK_PLANE ? 'cabin' : v.type && v.type.kind === 'bike' ? 'sidecar' : SEAT_NAMES[s] || 'seat ' + s; };
+  // the chase camera + first-person eye of the current seat
+  const rideCam = (v) => {
+    const k = PR.kind, plane = k === VK_PLANE, big = v.type && v.type.big, e = PR.eye;
+    if (plane) { e[0] = 0; e[1] = v.G ? v.G.h * 0.62 : 2; e[2] = 0; }
+    else { const l = seatOf(v, k, PR.seat); e[0] = l[0]; e[1] = l[1] + (k === VK_SKI ? 1.55 : k === VK_CAR && !isBike(v) ? 1.57 : 1.42); e[2] = l[2] + 0.1; }
+    PR.chase.set({ dist: plane ? 9 + (v.G ? v.G.halfL * 1.3 : 6) : big ? 13 : k === VK_SKI ? 6.4 : 8.5, height: plane ? 2.5 : 1.3 + (big ? 1.2 : 0), shadow: plane ? 90 : 60, eye: e });
+  };
   AF.modes.passenger = {
     enter(o = {}) {
       const v = o.veh; if (!v) { AF.setMode('walk'); return; }
-      PR.veh = v; PR.kind = kindOf(v); PR.seat = 1;
-      const plane = PR.kind === VK_PLANE, big = v.type && v.type.big, L = PR.kind === VK_CAR ? VV.seatLocal(v) : null;
-      const eye = PR.kind === VK_CAR ? (isBike(v) ? [0, L[1] + 1.45, L[2] - 0.55] : [-L[0], L[1] + 1.0, L[2] + 0.1]) : PR.kind === VK_SKI ? [0, 1.5, -0.7] : [0, v.G ? v.G.h * 0.62 : 2, 0];
-      PR.chase.set({ dist: plane ? 9 + (v.G ? v.G.halfL * 1.3 : 6) : big ? 13 : PR.kind === VK_SKI ? 6.4 : 8.5, height: plane ? 2.5 : 1.3 + (big ? 1.2 : 0), shadow: plane ? 90 : 60, eye });
-      AF.player.setVisible(!plane);
-      const d = RP.get(v.net); N.send('seat', { h: hashOf(v), s: 1 });
-      toast('You hop in' + (d ? ' with ' + d.peer.name : '') + '. ' + (AF.touch ? 'EXIT to get out.' : 'E to get out.'));
-      AF.emit('hint', AF.touch ? '' : 'Mouse look \u00b7 V camera \u00b7 E get out');
+      const k = kindOf(v), want = o.seat;
+      const s = Number.isInteger(want) && want > 0 && want < seatsOf(v, k) && !seatHolder(hashOf(v), want, ME) ? want : freeSeat(v, ME);
+      if (s < 0) { PR.veh = null; toast('No room \u2014 every seat is taken.'); AF.setMode('walk'); return; }
+      PR.veh = v; PR.kind = k; PR.seat = s; rideCam(v);
+      AF.player.setVisible(k !== VK_PLANE);
+      const d = RP.get(v.net); N.send('seat', { h: hashOf(v), s });
+      toast('You hop in' + (d ? ' with ' + d.peer.name : '') + ' (' + seatName(v, s) + '). ' + (AF.touch ? 'EXIT to get out.' : 'E to get out.'));
+      AF.emit('hint', AF.touch ? '' : 'Mouse look \u00b7 V camera \u00b7 right mouse / Z aim \u00b7 click / Q shoot \u00b7 E get out');
     },
-    exit() { PR.veh = null; AF.PL.seat = null; AF.player.setVisible(true); AF.emit('hud', { speed: null }); AF.emit('hint', ''); },
+    exit() {
+      if (PR.veh && N.live()) N.send('seat', { h: hashOf(PR.veh), s: 0 });
+      PR.veh = null; AF.PL.seat = null; AF.player.setVisible(true); AF.emit('hud', { speed: null }); AF.emit('hint', '');
+    },
     update() {
       const v = PR.veh, I = AF.input; if (!v || (AF.ui.modalOpen && AF.ui.modalOpen())) return;
       if (I.hit('KeyF') && v.net == null) { takeWheel(); return; }
@@ -512,14 +550,16 @@ try {
     if (v.active === false) { getOut(true); return; }
     const P = AF.player;
     if (PR.kind !== VK_PLANE) {
-      const S = AF.Vehicle.seat(v, seatOf(v, PR.kind, 1), PR.kind === VK_SKI ? PR.skiO : isBike(v) ? PR.bikeO : PR.carO);
+      const S = AF.Vehicle.seat(v, seatOf(v, PR.kind, PR.seat), PR.kind === VK_SKI ? PR.skiO : isBike(v) ? PR.bikeO : PR.carO);
       if (PR.kind === VK_SKI) S.pitch = -(v.pitch || 0);
       P.x = P.body.x = S.x; P.y = P.body.y = S.y; P.z = P.body.z = S.z;
     } else { AF.PL.seat = null; P.x = P.body.x = v.x; P.y = P.body.y = v.y; P.z = P.body.z = v.z; }
     P.body.vy = 0;
     PR.chase.update(dt, v.x, v.y, v.z, v.yaw, PR.kind === VK_PLANE ? 0 : v.pitch || 0, v.roll || 0);
-    AF.Vehicle.hud(v.v || 0, v.name, ' \u00b7 passenger');
+    AF.Vehicle.hud(v.v || 0, v.name, ' \u00b7 ' + seatName(v, PR.seat));
   };
+  // out beside your own seat (its side of the car, its row; the other side if that one is blocked); off a jet ski anywhere: a beach
+  // or jetty within 10 m, else into the water beside it
   const getOut = (force) => {
     const v = PR.veh; if (!v) { AF.setMode('walk'); return; }
     const sp = Math.abs(v.v || 0), s = Math.sin(v.yaw), c = Math.cos(v.yaw);
@@ -528,13 +568,18 @@ try {
       if (h > 35) { AF.setMode('skydive', { x: v.x - c * d, y: v.y - 1, z: v.z + s * d, yaw: v.yaw, vx: s * sp * 0.6, vz: c * sp * 0.6, vy: 0 }); return; }
       if (!force) { toast('Too low to jump \u2014 climb above 35 m or wait for the landing.'); return; }
     }
-    if (sp > 4 && !force) { toast('Wait until you slow down!'); return; }
+    if (sp > 4 && !force && PR.kind !== VK_SKI) { toast('Wait until you slow down!'); return; }
     let spot = null;
     if (PR.kind === VK_CAR) {
-      const lx = -(v.halfW + 0.7), x = v.x + lx * c + 0.4 * s, z = v.z - lx * s + 0.4 * c, y = AF.surfaceBelow(x, z, v.y + 1.5, 4);
-      if (Number.isFinite(y) && !AF.boxBlocked(x, y + 0.05, z, 0.3, 1.7)) spot = { x, y, z };
+      const l = seatOf(v, VK_CAR, PR.seat), side = l[0] > 0.05 ? 1 : -1, lz = l[2];
+      for (let i = 0; i < 2 && !spot; i++) {
+        const lx = (i ? -side : side) * (v.halfW + 0.7), x = v.x + lx * c + lz * s, z = v.z - lx * s + lz * c, y = AF.surfaceBelow(x, z, v.y + 1.5, 4);
+        if (Number.isFinite(y) && !AF.boxBlocked(x, y + 0.05, z, 0.3, 1.7)) spot = { x, y, z };
+      }
     } else if (PR.kind === VK_PLANE) { const d = Math.min(v.G ? v.G.halfW : 3, 3) + 1.2; spot = { x: v.x - c * d, y: undefined, z: v.z + s * d }; }
-    if (!spot) spot = AF.Vehicle.landing(v.x, v.z, PR.kind === VK_SKI ? AF.PLAN.harbour.waterY + 0.35 : -60, v.y + 4, 10);
+    const SEA = AF.PLAN.harbour.waterY;
+    if (!spot) spot = AF.Vehicle.landing(v.x, v.z, PR.kind === VK_SKI ? SEA + 0.35 : -60, v.y + 4, 10);
+    if (!spot && PR.kind === VK_SKI) spot = { x: v.x - c * 1.4, y: SEA, z: v.z + s * 1.4 };
     if (!spot) { if (!force) { toast('Pull up beside dry land to get out.'); return; } spot = { x: v.x + 2, y: v.y + 1, z: v.z }; }
     AF.setMode('walk', { x: spot.x, y: spot.y, z: spot.z, yaw: v.yaw });
   };
@@ -543,21 +588,27 @@ try {
     if (k === VK_CAR) AF.setMode('drive', { car: v }); else if (k === VK_PLANE) AF.setMode('fly', { plane: v }); else if (k === VK_SKI) AF.setMode('jetski', { ski: v });
   };
   C.getOut = getOut;
+  // seats API: AF.coop.seats(v) = capacity (driver included), freeSeat(v) = the seat a ride-along would take (-1 full), seatOf(v, i) =
+  // local [right, up, forward] of seat i, riders(v) = [{ slot, seat }] of the remote players aboard
+  C.seats = (v) => seatsOf(v);
+  C.freeSeat = (v) => freeSeat(v, ME);
+  C.seatOf = (v, i) => seatOf(v, kindOf(v), i).slice();
+  C.riders = (v) => { const h = hashOf(v), out = []; for (const r of RP.values()) if (r.veh === h) out.push({ slot: r.slot, seat: r.seat }); return out; };
   // 'Ride with ...' follows the nearest vehicle another player is driving (slow, with a free seat)
   const rideIt = AF.addInteract({ x: 0, y: -999, z: 0, r: 2.4, prio: 0.05, label: 'Ride along', target: null,
     dist: (px, pz) => { const v = rideIt.target; if (!v) return 99; return kindOf(v) === VK_CAR ? VV.bodyDist(v, px, pz) : Math.max(0, Math.hypot(v.x - px, v.z - pz) - (v.G ? Math.min(3, v.G.halfW) : 1.5)); },
     can: () => AF.mode === 'walk' && !!rideIt.target && rideIt.target.net != null,
-    act: () => { const v = rideIt.target; if (v) AF.setMode('passenger', { veh: v }); } });
+    act: () => { const v = rideIt.target; if (!v) return; if (freeSeat(v, ME) < 0) { toast('No room \u2014 every seat is taken.'); return; } AF.setMode('passenger', { veh: v }); } });
   let rideT = 0;
   const rideScan = (dt) => {
     if ((rideT -= dt) > 0) return; rideT = 0.2;
     let best = null, bd = 100; const p = AF.player;
     if (AF.mode === 'walk') for (const e of RV.values()) {
-      const v = e.obj; if (e.squad || Math.abs(v.v || 0) > 3 || seatTaken(e.h)) continue;
+      const v = e.obj; if (e.squad || Math.abs(v.v || 0) > 3 || freeSeat(v, ME) < 0) continue;
       const d = (v.x - p.x) ** 2 + (v.z - p.z) ** 2; if (d < bd) { bd = d; best = e; }
     }
     rideIt.target = best ? best.obj : null;
-    if (best) { const r = RP.get(best.owner); rideIt.x = best.obj.x; rideIt.z = best.obj.z; rideIt.y = best.obj.y + 1; rideIt.label = 'Ride with ' + (r ? r.peer.name : 'your friend'); }
+    if (best) { const r = RP.get(best.owner); rideIt.x = best.obj.x; rideIt.z = best.obj.z; rideIt.y = best.obj.y + 1; rideIt.r = best.kind === VK_SKI ? 4 : 2.4; rideIt.label = 'Ride with ' + (r ? r.peer.name : 'your friend'); }
     else rideIt.y = -999;
   };
 
@@ -579,8 +630,9 @@ try {
       else if (C.pvp) N.send('hurt', { dmg: Math.round(dmg), src: 'pvp', px: fx * 2, pz: fz * 2 }, obj.slot);
     };
     CB.rayPeers = (ox, oy, oz, dx, dy, dz, t0, HIT, rayCapsule, raySphere) => {
+      const mv = myVeh() || (AF.mode === 'passenger' && PR.veh), mh = mv ? hashOf(mv) : 0;
       for (const r of RP.values()) {
-        if (C.pvp && r.P && r.P.root.visible && !r.dead) { const t = rayCapsule(ox, oy, oz, dx, dy, dz, r.x, r.y, r.z, 1.75, 0.35); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'peer'; HIT.obj = r.hit; } }
+        if (C.pvp && r.P && r.P.root.visible && !r.dead && !(mh && r.veh === mh)) { const t = rayCapsule(ox, oy, oz, dx, dy, dz, r.x, r.y, r.z, 1.75, 0.35); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'peer'; HIT.obj = r.hit; } }
         const H = r.heli; if (H && H.grp && H.grp.visible) { const t = raySphere(ox, oy, oz, dx, dy, dz, H.x, H.y + 1, H.z, 3); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'peer'; HIT.obj = r.heliHit; } }
       }
     };
@@ -646,12 +698,28 @@ try {
     const ok = num(m.x, -6000, 6000) && num(m.y, -500, 3000) && num(m.z, -6000, 6000) && num(m.yaw, -10, 10);
     releaseVeh(e, ok ? m : null);
   });
+  // seats: every client books the claim (so a third rider picks another seat at once); the driver's client accepts or bumps it
   N.on('seat', (m, from) => {
-    const r = RP.get(from), mine = myVeh(); if (!r || !mine || hashOf(mine) !== m.h >>> 0 || m.s !== 1) return;
-    for (const q of RP.values()) if (q !== r && q.veh === m.h >>> 0 && q.seat === 1) { N.send('seatno', { h: m.h }, from); return; }
-    toast(r.peer.name + ' hopped in.');
+    const r = RP.get(from); if (!r || !num(m.h, 0, 4294967295) || !Number.isInteger(m.s) || m.s < 0 || m.s > 7) return;
+    const h = m.h >>> 0;
+    if (m.s === 0) { const c = CLAIMS.get(from); if (c && c.h === h) CLAIMS.delete(from); return; }
+    const mine = myVeh();
+    if (!mine || hashOf(mine) !== h) { CLAIMS.set(from, { h, s: m.s, t: performance.now() }); return; }
+    if (m.s >= seatsOf(mine) || seatHolder(h, m.s, r)) {
+      const alt = freeSeat(mine, r);
+      if (alt > 0) CLAIMS.set(from, { h, s: alt, t: performance.now() }); else CLAIMS.delete(from);
+      N.send('seatno', { h, s: m.s, alt }, from);
+      return;
+    }
+    CLAIMS.set(from, { h, s: m.s, t: performance.now() });
+    toast(r.peer.name + ' hopped in (' + seatName(mine, m.s) + ').');
   });
-  N.on('seatno', (m) => { if (AF.mode === 'passenger' && PR.veh && hashOf(PR.veh) === m.h >>> 0) { getOut(true); toast('Someone beat you to that seat.'); } });
+  // only the vehicle's driver can bump me: into the free seat it offers, or out when it is full
+  N.on('seatno', (m, from) => {
+    const v = PR.veh; if (AF.mode !== 'passenger' || !v || v.net !== from || hashOf(v) !== m.h >>> 0 || m.s !== PR.seat) return;
+    if (Number.isInteger(m.alt) && m.alt > 0 && m.alt < seatsOf(v)) { PR.seat = m.alt; rideCam(v); N.send('seat', { h: hashOf(v), s: m.alt }); toast('That seat was taken \u2014 you slide into the ' + seatName(v, m.alt) + '.'); }
+    else { getOut(true); toast('No room \u2014 every seat is taken.'); }
+  });
   N.on('look', (m, from) => {
     const r = RP.get(from); if (!r) return;
     const B = AF.friends.byId;
@@ -892,6 +960,32 @@ try {
       releaseVeh(e, null); getOut(true);
       return { ok: inside && AF.mode === 'walk' && car.net == null, info: `seated ${inside}, out ${AF.mode}` };
     } finally { removeRemote(2); N.peers.delete(2); if (AF.mode !== was && was && AF.modes[was]) AF.setMode(was); }
+  });
+  AF.test('coop: seats are indexed \u2014 riders get distinct seats inside the car, a full car refuses; a jet ski takes one pillion', () => {
+    const car = VV.cars.find((c) => !c.static && !c.player && !c.ai && c.active !== false && c.type.kind === 'car' && c.net == null && !c.dead), ski = AF.island && AF.island.jetski && AF.island.jetski.skis[0];
+    if (!car || !ski) return { ok: false, info: 'no car / ski' };
+    const was = AF.mode, h = hashOf(car), F = AF.friends.cast, rs = [];
+    try {
+      for (let slot = 1; slot <= 3; slot++) { const p = { slot, name: 'R' + slot, friend: F[slot].id, look: F[slot].look, rtt: 0, x: car.x, z: car.z }; N.peers.set(slot, p); rs.push(addRemote(p)); }
+      // four seats, all inside the body and apart; the exit of each is on its own side
+      const pts = []; for (let s = 0; s < 4; s++) { const l = seatOf(car, VK_CAR, s); seatPose(car, VK_CAR, l, POSE); pts.push([POSE.x, POSE.z, l[0]]); }
+      let apart = true; for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) if (Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) < 0.5) apart = false;
+      const inside = pts.every((q) => VV.bodyDist(car, q[0], q[1]) === 0), sides = pts[1][2] < 0 && pts[2][2] < 0 && pts[3][2] > 0;
+      const order = [];
+      for (const r of rs) { const s = freeSeat(car, ME); order.push(s); r.veh = h; r.seat = s; }
+      const full = freeSeat(car, ME) === -1 && C.seats(car) === 4;
+      AF.setMode('passenger', { veh: car }); const refused = AF.mode !== 'passenger';
+      for (const r of rs) r.veh = 0;
+      AF.setMode('passenger', { veh: car, seat: 3 }); const back = AF.mode === 'passenger' && PR.seat === 3; ridePlace(1 / 30);
+      const S = AF.PL.seat, seat3 = !!S && Math.hypot(S.x - pts[3][0], S.z - pts[3][1]) < 0.05;
+      getOut(true); const P = AF.player, l3 = seatOf(car, VK_CAR, 3), s = Math.sin(car.yaw), c = Math.cos(car.yaw), lx = (P.x - car.x) * c - (P.z - car.z) * s;
+      const outRight = AF.mode === 'walk' && lx > car.halfW && l3[0] > 0;
+      // a jet ski: driver + one pillion
+      const kh = hashOf(ski); rs[0].veh = kh; rs[0].seat = 1;
+      const skiFull = C.seats(ski) === 2 && freeSeat(ski, ME) === -1;
+      return { ok: apart && inside && sides && order.join() === '1,2,3' && full && refused && back && seat3 && outRight && skiFull,
+        info: `apart ${apart}, inside ${inside}, sides ${sides}, order ${order}, full ${full}, refused ${refused}, back-right ${back && seat3}, out right ${outRight}, ski ${skiFull}` };
+    } finally { for (const r of rs) { removeRemote(r.slot); N.peers.delete(r.slot); } CLAIMS.clear(); if (AF.mode !== was && was && AF.modes[was]) AF.setMode(was); }
   });
 }
 } catch (e) { AF.partError('80-coop.js', e); }

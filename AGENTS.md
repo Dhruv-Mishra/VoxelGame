@@ -65,7 +65,8 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Actors: 50 vehicles · 51 traffic · 52 planes · 53 air traffic · 54 path walkers · 55 pedestrians · 56 animals ·
   56-wild outland fauna · 57 friends (cast, dialogue) · 58 pets (`AF.pets`: Paws & Claws store on Friends Lane, a following pet per
   friend in `AF.save.pets`; Hunar starts with Coco the toy poodle).
-- Player/UI: 70 avatar + walk/aerial · 71 UI (title, minimal HUD, stacked toasts, menu, dialogue) · 72 touch ·
+- Player/UI: 70 avatar + walk/aerial (walk swims in water > 1.25 m deep — `AF.player.swimming`, surface `AF.PL.waterAt(x, z)`;
+  Space climbs / mantles a ledge ≤ 1.6 m (≤ 1.9 m out of the water) — `AF.player.climbing`) · 71 UI (title, minimal HUD, stacked toasts, menu, dialogue) · 72 touch ·
   73 mission kit (`AF.mission`: `blip/unblip` map + minimap blips with world markers (one instanced draw), `objective`, `bar`,
   `shard` big-message cards, `cut` cutscene player) · 74 map (`map.overlays`, `map.miniOverlays`) ·
   75 extras (photo mode `P`, Solace Stars collectibles) · 75-audio (`AF.audio`: samples, loops, zone ambience beds, footsteps,
@@ -86,7 +87,10 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 ## Gameplay layer (76–78)
 - Balance only in `AF.G` (prices, pay, damage, heat, star thresholds, forget distances). `AF.save` (money, guns, ammo, mags,
   outfits, a look per friend) is the only persisted game state; everything else is forgotten (runtime cars `car.temp` →
-  `VV.forget` back to their kerb, engaged peds calm down past `G.pedForgetD`, wrecks after `G.wreckS`).
+  `VV.forget` back to their kerb, engaged peds calm down past `G.pedForgetD`, wrecks after `G.wreckS`). The stale sweep
+  `AF.forget` (76) returns / drops whatever a player touched and left for `G.staleS` (300 s; cars, wrecks, cars out of traffic, boot
+  cars, planes, jet skis, rowing boats), never within `G.staleNearD` of the camera, never `.net` / `.keep` / `.mission`, only wrecks
+  mid-heist; `AF.forget.touch(obj)` stamps a use, `AF.forget.register(name, { list, busy, away, home, reset })` adds a system.
 - Peds stay bare crowd instances until touched: `w.agg` (77 `engage`) makes 55's crowd tick call `AF.combat.stepPed`;
   `CB.release` returns them. Cops = 8 pooled walkers in the `cop` look; the mob = 8 pooled `goon` walkers (`CB.spawnGoon/goons/
   clearGoons`: hostile without a wanted level, no heat). Kids / wheelchair users only ever flee. The player starts with bare fists
@@ -97,7 +101,13 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Jobs extend `class Job` (78): implement `plan()` → next stop `{x,z,r,wait,t,pay,label,done}` (null ends the shift).
   Counters: `counter(x,y,z,label,open)` + `AF.shop.open({title,sub,tabs,items(tab)})`; drive-in zones via `zone()`.
 - Keys: Q / click attack, Z / right mouse aim, wheel / 1–5 / X weapon (hold X = weapon wheel; the weapon HUD's ▸ = next), R reload,
-  C crouch (`AF.player.crouch/noise/eyeH`), V camera, J job. Touch (72):
+  C crouch (`AF.player.crouch/noise/eyeH`), V camera, J job, H horn (driving), F1 / ? controls sheet, P photo, M map, I bag.
+  Drive-by: seated (drive, jetski, passenger, tender) the same aim / fire / switch / reload keys shoot from the seat (77 `fireSeat`,
+  same gunfire path; passengers aim all round, a driver front + sides; own vehicle + crewmates aboard never hit); state
+  `AF.combat.vfire` {on, aim, firing, arc, veh, driver, seat, t, shots, dir}, local 'gunshot' events carry `veh`; touch adds FIRE / AIM.
+  Escape does ONE thing per press (71 `escape`): close the topmost open thing (minigame, casino, shop, bag, map, controls, menu,
+  dialogue, weapon wheel, photo mode, an unlocked CCTV feed, or a `UI.onEscape(fn → true)` hook), else open the pause menu; a
+  keydown + pointer unlock from the same press count once. Never bind a new key that an existing mode already uses. Touch (72):
   stick to the rim runs; one context cluster bottom-right (big primary + ≤ 3 secondaries chosen per mode / weapon, `AF.touchUI`) +
   CAM / JOB / BAG utilities; CROUCH in the cluster; weapons from the HUD chip (tap ▸ = next, hold = the wheel, `AF.combat.wheelOpen/wheelAim/wheelClose`).
 - Path walkers (54: airport, outland, island, liner, heist guards) react via `AF.walkers.near/knock/stagger/scare/isDown` (77 bumps,
@@ -107,6 +117,17 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   step has a solo way through if a partner drops. No teleports mid-heist: `AF.noTravel()` makes map travel, go-to-friend and skip-crossing
   refuse; only cutscenes and checkpoint retries move the crew. `AF.quiet` (heist on) binds 60 % of the crowd. `node tools/coop-heist.js` (server running, playwright resolvable, optional
   `CHROME=`) plays it end to end with two real clients: lockstep, the two-key step, fail → shared checkpoint, retry, payout.
+  Crew of 2–4: per-player tasks (`H.mg`: a padlock each on Kovac's grille, a uniform each off the rail, a licence each from Ezra; the
+  shared fact lands when every crew slot is done, `mg` op) — the arms cache (one cracker, `crack`/`crackp`) and the night's roles are the
+  exceptions. Act II: the stash maze (44-island fills chamber B with a 3 m-grid maze + rock; `AF.island.heist.nav/maze/racks/waveSpawns`),
+  cracking starts a siege (waves of reserve guards, `S.spawn`, sized by crew), then a jet-ski chase (`chase` step, host-steered riders =
+  'heist chase riders' path walkers with `actor.chase`, hulls in `AF.island.jetski.extra`; `ch`/`chit`/`chshot` ops). Act III: crews of
+  3–4 take ship's-security uniforms (`sec0..5`) and distract the detective / pit boss (`hold`). Conditional radio lines:
+  `radio(id, urgent, when)` re-checks `when()` at play time.
+  Stealth (80-stealth): every guard is killable (armed 240 hp; a takedown from behind / headshot on an unaware guard is still one hit);
+  guards steered off their path stay hittable (54 `WK.near` tests `ctl` actors outside the path bounds); `zone.strict` (the liner): a
+  weapon in hand or a carried body seen = instant alarm, any witnessed violence = alarm (`S.witness`); bodies are carried / hidden with
+  E (`zone.hides`, `carry`/`cpos` ops); `S.requestAlarm` routes a mission's alarm through the zone authority.
   Modal overlays (`AF.shop`, the casino panel `UI.state.casino`) count in `UI.modalOpen()`; Escape closes them.
 
 ## Co-op (79–80)
@@ -119,7 +140,11 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Remote things: `car.net = slot` (drive `can()` refuses them), 16 pooled `w.net` walkers in 55, `AF.avatar.build` per remote player.
   Hits on something another player owns are forwarded to its owner (`CB.onNetPed/onNetCar/hurtPeer`); `CB.pvp` = friendly fire.
 - Vehicles are matched by `v.netKey` (name + spawn cell, 04). Seated players and ride riders are placed from the receiver's own copy
-  of the vehicle / ride (`anchorOf`), never their world pose. `passenger` mode = riding in another player's vehicle (F gets out).
+  of the vehicle / ride (`anchorOf`), never their world pose. `passenger` mode = riding in another player's vehicle (E/F gets out,
+  beside your own seat; off a jet ski anywhere, into the water if no beach is near). Seats are indexed (`AF.coop.seats/freeSeat/seatOf/
+  riders`): cars / vans / trucks / the bus 4 (driver, front, rear left, rear right), motorbikes / sidecar / jet skis 2, planes 4
+  (unseen); the snapshot carries the seat, a reliable `seat {h, s}` claims it (s 0 = left) and the driver's client answers a taken
+  one with `seatno {h, s, alt}` (another free seat, or -1 = full → out).
 
 ## Rules of thumb
 - Settings live in `localStorage['portSolace.*']` (gfx, fps, resH, lod, shadows, bright2, stars, view, sound; game state in `save`).

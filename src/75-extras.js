@@ -23,7 +23,7 @@ try {
   const bar = document.createElement('div'); bar.id = 'h-photo'; bar.className = 'panel pe';
   bar.innerHTML = AF.touch
     ? '<b>Photo mode</b><button class="btn" data-p="shot">Save photo</button><button class="btn" data-p="freeze">Freeze</button><button class="btn" data-p="exit">Done</button>'
-    : '<b>Photo mode</b><span>WASD + mouse fly \u00b7 Space/C up/down \u00b7 Wheel zoom \u00b7 [ ] time \u00b7 F freeze \u00b7 K save \u00b7 P exit</span>';
+    : '<b>Photo mode</b><span>WASD + mouse fly \u00b7 Space/C up/down \u00b7 Wheel zoom \u00b7 [ ] time \u00b7 F freeze \u00b7 K save \u00b7 P / Esc exit</span>';
   root.appendChild(bar);
   const ground = (x, z) => { try { return AF.W.groundY(x, z) || 0; } catch (e) { return 0; } };
   PH.enter = () => {

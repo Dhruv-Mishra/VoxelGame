@@ -225,9 +225,10 @@ AF.PLAN = (() => {
       landing: { x: -20, z: 478 + IZ, r: 20, y: 2, pier: { x0: -24, x1: -16, z0: 420 + IZ, z1: 478 + IZ } },
       // the Moretti smugglers' lava tube (07-outland cuts it out of the ground, 44-island lines it): from a cleft on the cone's
       // north-east flank (pts[0], the mouth faces away from pts[1]) to a sea cave on the cove's ledge (last point, floor exitY).
-      // chambers: [point index, half-width, height]; hw / h = the plain tube
+      // chambers: [point index, half-width, height, swell length (m, default 6), flat floor]; hw / h = the plain tube. The second is the
+      // Moretti stash hall: a wide flat cavern that 44-island fills with a maze of crate stacks and rock walls around the arms cache.
       tunnel: { pts: [[26, 3086], [18, 3092], [12, 3102], [16, 3114], [30, 3118], [44, 3112], [58, 3114], [68, 3124], [66, 3138], [74, 3150], [86, 3148], [90, 3138], [94, 3146], [103, 3150]],
-        hw: 1.8, h: 3.5, exitY: 1, chambers: [[3, 4.6, 5.5], [6, 4.4, 5], [11, 5.2, 5.5]] },
+        hw: 1.8, h: 3.5, exitY: 1, chambers: [[3, 4.6, 5.5], [6, 11.5, 7, 11, 1], [11, 5.2, 5.5]] },
       // Moretti's cove: a cliff-ringed basin on the east coast, a dog-leg channel out to sea, the cave ledge + a wooden dock
       cove: { x: 120, z: 3150, r: 16, rim: 11, channel: [[136, 3150], [146, 3142], [168, 3136]], channelHW: 6,
         ledge: { x0: 102, x1: 106, z0: 3145, z1: 3155, y: 1 }, dock: { x0: 105.5, x1: 116, z: 3150, w: 2.5, y: 1.5 } },

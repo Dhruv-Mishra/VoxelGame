@@ -360,7 +360,7 @@ try {
   // ---------------------------------------------------------------- tick
   AF.onTick('jobs', 420, (dt, t) => {
     if (!AF.ready) return;
-    if (I.hit('KeyJ') && !(AF.ui.modalOpen() || AF.health.dead)) J.toggle();
+    if (I.hit('KeyJ') && AF.mode !== 'photo' && AF.mode !== 'cctv' && !(AF.ui.modalOpen() || AF.health.dead)) J.toggle();
     if (J.cur) J.cur.update(dt);
     galleryTick(dt); airport(dt);
     // drive-in zones

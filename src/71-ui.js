@@ -233,8 +233,8 @@ try {
     <div><h3>Doing things</h3><div class="k"><span>Talk / get in / use</span><span>tap the prompt</span></div><div class="k"><span>Main action</span><span>big button (HIT, FIRE, BRAKE, THR\u2026)</span></div><div class="k"><span>More</span><span>buttons around it change with what you do</span></div><div class="k"><span>Crouch</span><span>CROUCH button</span></div><div class="k"><span>Next weapon</span><span>tap \u25b8 by its name (top right)</span></div><div class="k"><span>Weapon wheel</span><span>hold the weapon name, slide, lift</span></div><div class="k"><span>Get out</span><span>EXIT button</span></div><div class="k"><span>Map & menu</span><span>beside the minimap</span></div></div></div>`
     : `<div class="cols"><div><h3>On foot</h3>${K('W+A+S+D', 'Walk')}${K('Shift', 'Run')}${K('Space', 'Jump')}${K('Mouse', 'Look (click to capture)')}${K('E', 'Talk / get in / use')}${K('I', 'Bag: snacks, pet treats, job items')}${K('C', 'Crouch (toggle) \u00b7 sneak')}${K('V', 'Camera: first person / near / far')}${K('Tab', 'Aerial view')}</div>
     <div><h3>Fighting</h3>${K('Click+Q', 'Attack / shoot')}${K('Right-drag+Z', 'Aim (hold / toggle)')}${K('Wheel+1-5+X', 'Switch weapon (or the \u25b8 by its name)')}${K('Hold X', 'Weapon wheel')}${K('R', 'Reload')}<h3>Work</h3>${K('J', 'Start / quit a job (taxi, bus, van, fire engine, on foot: courier)')}</div>
-    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('E', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('F', 'Get out (on the ground) \u00b7 bail out (high)')}</div>
-    <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}<h3>Anywhere</h3>${K('M', 'Map')}${K('Esc', 'Menu')}${K('Space', 'Skip a cutscene')}</div></div>`}
+    <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('H', 'Horn / bell')}${K('E+F', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('F', 'Get out (on the ground) \u00b7 bail out (high)')}</div>
+    <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}<h3>Anywhere</h3>${K('M', 'Map')}${K('P', 'Photo mode')}${K('F1+?', 'Controls (this list)')}${K('Esc', 'Close what is open \u00b7 else the menu')}${K('Space', 'Skip a cutscene')}</div></div>`}
     <div class="stack"><button class="btn primary" data-k="closehelp">Got it</button></div></div>`;
 
   // ------------------------------------------------------------------ state + public api
@@ -471,7 +471,7 @@ try {
     AF.friends.play(S.pick);
     const c = AF.friends.current;
     UI.notify({ title: 'Port Solace', text: `Welcome home, ${c.name}! Your friends live along Friends Lane \u2014 go say hi.`, kind: 'ok', ms: 6000 });
-    setTimeout(() => UI.help(TOUCH ? 'Tap a prompt to talk, or to get into a car, a bike or a plane.' : 'Walk up to anyone \u2014 or any car \u2014 and press [E]. [M] map \u00b7 [I] bag \u00b7 [Esc] menu', 9000), 1200);
+    setTimeout(() => UI.help(TOUCH ? 'Tap a prompt to talk, or to get into a car, a bike or a plane.' : 'Walk up to anyone \u2014 or any car \u2014 and press [E]. [M] map \u00b7 [I] bag \u00b7 [F1] controls \u00b7 [Esc] menu', 9000), 1200);
   };
   tDots.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) select(b.dataset.id); });
   title.querySelector('.arr.l').addEventListener('click', () => step(-1));
@@ -542,16 +542,47 @@ try {
   const toggleMenu = (on, resume = true) => { S.menu = on ?? !S.menu; if (S.menu) { syncMenu(); S.help = false; if (S.map) UI.toggleMap(false, false); help.classList.remove('open'); exitLock(); } menu.classList.toggle('open', S.menu); root.classList.toggle('paused', S.menu || S.help); if (!S.menu && resume) AF.input.requestLock(); };
   const toggleHelp = (on) => { S.help = on ?? !S.help; help.classList.toggle('open', S.help); if (S.help) { if (S.map) UI.toggleMap(false, false); S.menu = false; menu.classList.remove('open'); exitLock(); } else AF.input.requestLock(); root.classList.toggle('paused', S.menu || S.help); };
   UI.resume = () => { if (S.menu) toggleMenu(false); };
-  AF.on('pointerunlock', (intentional) => { if (!intentional && !S.title && !UI.modalOpen() && !S.dlg) toggleMenu(true); });
-  AF.on('escape', () => {
+  // ---- Escape: ONE action per press. With something open it only closes the topmost thing (minigame, casino, shop, bag, map,
+  // controls, pause menu, dialogue, weapon wheel, photo mode, a CCTV feed, or anything registered with UI.onEscape(fn -> true
+  // if it closed something)); with nothing open it opens the pause menu (pointer lock released). A press while the pointer is
+  // locked reaches us as a keydown, an unrequested pointer unlock, or both (browser-dependent), so the second within 400 ms is
+  // the same press and is dropped.
+  const ESC = { at: -1e9, hooks: [] };
+  UI.onEscape = (fn) => { ESC.hooks.push(fn); };
+  const escape = () => {
+    const now = performance.now(); if (now - ESC.at < 400) return; ESC.at = now;
     if (AF.minigame && AF.minigame.open) { AF.minigame.cancel(); return; }
     if (S.title) return;
+    const CB = AF.combat, PH = AF.photo, CC = AF.cctv;
     if (S.casino) AF.casino.close();
     else if (S.shop) AF.shop.close();
     else if (S.inv && AF.inv) AF.inv.close();
-    else if (S.map || S.help) { toggleMap(false); toggleHelp(false); }
+    else if (S.map) toggleMap(false);
+    else if (S.help) toggleHelp(false);
+    else if (S.menu) toggleMenu(false);
     else if (S.dlg) closeDlg();
-    else toggleMenu(true);
+    else if (CB && CB.wheel && CB.wheel.open) CB.wheelClose(false);
+    else if (PH && PH.on) PH.exit();
+    else if (CC && AF.mode === 'cctv' && !(CC.o && CC.o.locked)) CC.close();
+    else { for (const fn of ESC.hooks) if (fn()) return; toggleMenu(true); }
+  };
+  AF.on('pointerunlock', (intentional) => {
+    if (intentional || S.title) return;
+    // focus lost (alt-tab, another window): pause, never close anything
+    if (!document.hasFocus()) { if (!UI.modalOpen() && !S.dlg) toggleMenu(true); return; }
+    escape();
+  });
+  AF.on('escape', escape);
+  AF.test('ui: Escape closes only what is open, then opens / closes the menu; F1 (not H) is the controls sheet', () => {
+    const title = S.title, I = AF.input, hook = AF.hooks.tick.find((x) => x.name === 'ui'); S.title = false;
+    const press = () => { ESC.at = -1e9; AF.emit('escape'); };
+    closeDlg(); if (AF.photo && AF.photo.on) AF.photo.exit(); if (S.menu) toggleMenu(false, false);
+    UI.toggleMap(true, false); press(); const mapOnly = !S.map && !S.menu;
+    press(); const menuOn = S.menu; press(); const menuOff = !S.menu;
+    I.tap('KeyH'); hook.fn(0); I.pressed.delete('KeyH'); const hFree = !S.help;
+    I.tap('F1'); hook.fn(0); I.pressed.delete('F1'); const f1 = S.help; press(); const helpOnly = !S.help && !S.menu;
+    ESC.at = -1e9; S.title = title;
+    return { ok: mapOnly && menuOn && menuOff && hFree && f1 && helpOnly, info: `map ${mapOnly}, menu ${menuOn}/${menuOff}, H free ${hFree}, F1 ${f1}, help ${helpOnly}, mode ${AF.mode}` };
   });
   menu.addEventListener('click', (e) => {
     if (e.target === menu) { toggleMenu(false); return; }
@@ -582,7 +613,7 @@ try {
   mm.addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) { if (b.dataset.k === 'menu') toggleMenu(); else if (b.dataset.k === 'map') toggleMap(); else if (b.dataset.k === 'full') goFull(!isFull()); return; } if (e.target.closest('#h-mini')) toggleMap(true); });
   prompt.addEventListener('click', () => AF.input.tap(AF.mode==='ferry-ride'||AF.mode==='tender'?'Space':'KeyE'));
 
-  const focus = () => AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes && AF.planes.cur ? AF.planes.cur : AF.player;
+  const focus = () => UI.map && UI.map.focus ? UI.map.focus() : AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes && AF.planes.cur ? AF.planes.cur : AF.player;
   const toggleMap = (...args) => UI.toggleMap && UI.toggleMap(...args);
   UI.toggleHelp = toggleHelp; UI.toggleMenu = toggleMenu;
 
@@ -612,7 +643,7 @@ try {
       if (I.hit('ArrowLeft') || I.hit('KeyA')) step(-1);
     } else {
       if (I.hit('KeyM')) toggleMap();
-      if (I.hit('KeyH') || I.hit('Slash')) toggleHelp();
+      if (I.hit('F1') || I.hit('Slash')) toggleHelp();
       if (I.hit('Escape')) AF.emit('escape');
     }
     const D = S.dlg;

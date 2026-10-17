@@ -6,6 +6,8 @@ try {
 //   never saved). Click or Q attack, right mouse (hold) or Z aim (tighter FOV, steadier), R reload. Switching: mouse wheel, 1-5, X taps
 //   to the next one, holding X opens the weapon wheel; the weapon HUD (top right) has a ▸ that takes the next weapon (tap / click) and
 //   opens the wheel when held. Touch: HIT / FIRE / AIM / CROUCH (72-touch); weapons from the HUD chip.
+// Drive-by: seated (driving, a jet ski, riding along, the liner's launch) a drawn gun aims (right mouse / Z) and fires (click / Q) from
+//   the seat through the same gunfire path; passengers all round, a driver to the front and sides. State: AF.combat.vfire (below volley).
 // Gunplay: per-weapon spread that blooms with each shot and with moving / sprinting / jumping and tightens crouched or aiming
 //   (the crosshair shows it), camera recoil that recovers, pooled tracers (one additive ribbon draw, also NPC shots: CB.tracer),
 //   muzzle flashes + impact sparks / dust from AF.fx, hit markers (hit / kill / headshot). Hits above the neck deal G.headK.
@@ -100,6 +102,9 @@ try {
   const CB = AF.combat = { slot: 0, aimToggle: false, cd: 0, swing: 0, swingDur: 0.3, side: 0, hitAt: -1, reloadT: 0, mag: S.mag || (S.mag = {}), heat: 0, stars: 0, seenT: 0, engaged: 0, recoil: 0, flinch: 0, held: null, heldId: null, gallery: null,
     bloom: 0, kick: 0, raise: 0, lastShot: -9 };
   const OWNED = [null], MELEE_ID = '@melee', LEND = {};
+  // drive-by (shooting from a vehicle seat): AF.combat.vfire, see the block after volley(); SELF = the shooter's own vehicle (never hit)
+  const VF = CB.vfire = { can: false, on: false, aim: false, firing: false, want: false, edge: false, arc: true, veh: null, driver: false, seat: 0, t: -9, shots: 0, dir: new THREE.Vector3(0, 0, 1), posed: false };
+  let SELF = null;
   const sig = () => { const f = AF.friends && AF.friends.current; return f && MELEE[f.id]; };
   // slot 0 = bare fists (every spawn starts there), then the friend's signature melee, then the guns bought or lent
   const owned = () => { OWNED.length = 1; if (sig()) OWNED.push(MELEE_ID); for (const id of GUN_IDS) if (S.guns[id] || LEND[id]) OWNED.push(id); return OWNED; };
@@ -209,7 +214,7 @@ try {
     const f = slotInfo(o[WH.pick]); ctr.firstChild.textContent = f.name; ctr.lastChild.textContent = ammoTxt(f);
   };
   CB.wheelOpen = () => {
-    if (WH.open || CB.gallery || AF.mode !== 'walk' || owned().length < 2) return false;
+    if (WH.open || CB.gallery || (AF.mode !== 'walk' && !VF.can) || owned().length < 2) return false;
     wheelBuild(); WH.open = true; WH.pick = CB.slot; WH.vx = WH.vy = 0; AF.PL.wheel = true; wheelEl.classList.add('open'); wheelPaint(); return true;
   };
   // a pointer (mouse look deltas, or a finger's slide) steers the pick: the direction of the last few dozen pixels, not the total
@@ -230,7 +235,7 @@ try {
     let pid = null, holdT = 0, px = 0, py = 0;
     const clear = () => { if (holdT) { clearTimeout(holdT); holdT = 0; } };
     chip.addEventListener('pointerdown', (e) => {
-      e.preventDefault(); e.stopPropagation(); if (pid != null || AF.mode !== 'walk') return;
+      e.preventDefault(); e.stopPropagation(); if (pid != null || (AF.mode !== 'walk' && !VF.can)) return;
       pid = e.pointerId; px = e.clientX; py = e.clientY; try { chip.setPointerCapture(pid); } catch (err) { /* old browsers */ }
       holdT = setTimeout(() => { holdT = 0; CB.wheelOpen(); }, 300);
     });
@@ -243,10 +248,10 @@ try {
     };
     chip.addEventListener('pointerup', end); chip.addEventListener('pointercancel', end);
   }
-  CB.next = () => { if (AF.mode === 'walk' && !CB.gallery && owned().length > 1) select(CB.slot + 1); };
+  CB.next = () => { if ((AF.mode === 'walk' || VF.can) && !CB.gallery && owned().length > 1) select(CB.slot + 1); };
   const hudPaint = (dt) => {
     firedT += dt; hudPop = Math.max(0, hudPop - dt);
-    const on = AF.mode === 'walk' && !H.dead && (owned().length > 1 || !!CB.gallery || !!cur());
+    const on = (AF.mode === 'walk' || VF.can) && !H.dead && (owned().length > 1 || !!CB.gallery || !!cur());
     chip.classList.toggle('on', on); chip.classList.toggle('pop', hudPop > 0);
     if (!on) return;
     // repaint only on a change (nothing is built per frame)
@@ -574,7 +579,7 @@ try {
       const t = rayPerson(ox, oy, oz, dx, dy, dz, a.x, a.y, a.z, 1.75); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'walker'; HIT.obj = a; HIT.head = RPH; }
     }
     if (!CB.gallery) for (const c of VV.cars) {
-      if (c.active === false || c.player || (c.x - ox) ** 2 + (c.z - oz) ** 2 > R2) continue;
+      if (c.active === false || c.player || c === SELF || (c.x - ox) ** 2 + (c.z - oz) ** 2 > R2) continue;
       const t = raySphere(ox, oy, oz, dx, dy, dz, c.x, c.y + 0.8, c.z, Math.min(c.halfL, 2.2)); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'car'; HIT.obj = c; HIT.head = false; }
     }
     if (HELI.on && !CB.gallery) { const t = raySphere(ox, oy, oz, dx, dy, dz, HELI.x, HELI.y + 1, HELI.z, 3); if (t < HIT.t) { HIT.t = t; HIT.kind = 'heli'; HIT.head = false; } }
@@ -584,20 +589,20 @@ try {
     return HIT;
   };
   CB.ray = ray;
-  // hip fire picks the nearest ped / walker inside a 25 degree cone (aim assist, the only aiming on a phone without AIM)
-  const autoTarget = (ox, oz, fx, fz, range) => {
+  // hip fire picks the nearest ped / walker inside a 25 degree cone (aim assist, the only aiming on a phone without AIM); oy = eye height
+  const autoTarget = (ox, oz, fx, fz, range, oy = AF.player.y + 1.4) => {
     const C = CR(); let best = null, bd = range;
     if (C) for (const w of C.walkers) {
       if (!w.act || flat(w) || exempt(w)) continue;
       const dx = w.x - ox, dz = w.z - oz, d = Math.hypot(dx, dz); if (d > bd || d < 0.5) continue;
-      if ((dx * fx + dz * fz) / d < 0.9 || !los(ox, AF.player.y + 1.4, oz, w.x, w.y + 1.3, w.z)) continue;
+      if ((dx * fx + dz * fz) / d < 0.9 || !los(ox, oy, oz, w.x, w.y + 1.3, w.z)) continue;
       bd = d; best = w;
     }
     const WK = AF.walkers;
     if (WK && WK.near) for (const a of WK.near(ox, oz, bd)) {
       if (WK.isDown(a)) continue;
       const dx = a.x - ox, dz = a.z - oz, d = Math.hypot(dx, dz); if (d > bd || d < 0.5) continue;
-      if ((dx * fx + dz * fz) / d < 0.9 || !los(ox, AF.player.y + 1.4, oz, a.x, a.y + 1.3, a.z)) continue;
+      if ((dx * fx + dz * fz) / d < 0.9 || !los(ox, oy, oz, a.x, a.y + 1.3, a.z)) continue;
       bd = d; best = a;
     }
     return best;
@@ -625,8 +630,9 @@ try {
     else FX.burst('spark', x, y, z, 3 + n, { spread: 4 });
   };
   let emptyT = 0;
-  const GS = { x: 0, y: 0, z: 0, loud: 0, silenced: false, weapon: '', remote: false };
-  const emitShot = (x, y, z, loud, silenced, weapon, remote) => { GS.x = x; GS.y = y; GS.z = z; GS.loud = loud; GS.silenced = silenced; GS.weapon = weapon; GS.remote = remote; AF.emit('gunshot', GS); };
+  const GS = { x: 0, y: 0, z: 0, loud: 0, silenced: false, weapon: '', remote: false, veh: null };
+  // veh = the vehicle the local shooter sat in (drive-by), else null
+  const emitShot = (x, y, z, loud, silenced, weapon, remote, veh) => { GS.x = x; GS.y = y; GS.z = z; GS.loud = loud; GS.silenced = silenced; GS.weapon = weapon; GS.remote = remote; GS.veh = veh || null; AF.emit('gunshot', GS); };
   // the muzzle of the held gun in world space (the hand when the model has no tip)
   const muzzle = (out) => {
     const p = AF.player, h = CB.held, tip = h && h.geometry.userData.tip;
@@ -689,6 +695,71 @@ try {
     return res;
   };
   CB.volley = (g, ox, oy, oz, dx, dy, dz) => { DIR.set(dx, dy, dz).normalize(); MZ.set(ox, oy, oz); return volley(g, GUNS[g], ox, oy, oz, 0, 0); };
+  // ---------------------------------------------------------------- drive-by: shooting from a vehicle seat (driver or passenger)
+  // Seated in a car / bike / bus (drive), on a jet ski (jetski), riding along in another player's vehicle (passenger, not a plane) or on
+  // the liner's launch (tender), a drawn gun fires like on foot: right mouse / Z aims through the crosshair (the chase camera pulls in,
+  // 04-vehicle Vehicle.aim), click / Q fires (hip fire = the camera's heading with the 25 degree aim assist). Passengers aim all round,
+  // a driver only to the front and the sides (VF.arc) and keeps steering. Same rounds, spread, tracers, hits, ammo, R reload, 'gunshot'
+  // events (GS.veh = the vehicle) and co-op forwarding as on foot; the shooter's own vehicle and crewmates aboard are never hit.
+  // AF.combat.vfire: can (seated where shooting is allowed), on (can + a gun drawn), aim, firing (a shot in the last 0.6 s), arc,
+  // veh (null on the launch), driver, seat (80-coop seat index, 0 = driver), t (AF.clock.t of the last shot), shots (count), dir (aim).
+  const seatInfo = () => {
+    const m = AF.mode; VF.veh = null; VF.driver = false; VF.seat = 0;
+    if (!AF.PL.seat || H.dead) return false;
+    if (m === 'drive') { VF.veh = VV.player; VF.driver = true; }
+    else if (m === 'jetski') { const J = AF.island && AF.island.jetski; VF.veh = J ? J.cur : null; VF.driver = true; }
+    else if (m === 'passenger') { const R = AF.coop && AF.coop.ride; if (!R || !R.veh) return false; VF.veh = R.veh; VF.seat = R.seat; }
+    else if (m !== 'tender') return false;
+    return true;
+  };
+  const seatSpread = (W) => {
+    const v = VF.veh, sp = v ? Math.abs(v.v || 0) : 0;
+    let k = VF.aim ? G.aimSpreadK : 1.3;
+    k *= 1 + 0.5 * Math.min(1, sp / 20); if (v && v.air > 0) k *= G.airSpreadK;
+    return W.spread * k + CB.bloom;
+  };
+  // the seated avatar turns its chest half way to the aim and points the gun arm along it (after 70-player's seat pose, tick 160)
+  const seatAimPose = () => {
+    const P = AF.player.parts, S = AF.PL.seat; if (!P || !S) return;
+    const d = VF.dir, cY = Math.cos(S.yaw), sY = Math.sin(S.yaw), lx = d.x * cY - d.z * sY, lz = d.x * sY + d.z * cY, ly = AF.clamp(d.y, -1, 1);
+    const ang = Math.atan2(lx, lz), cy = AF.clamp(ang * 0.5, -0.9, 0.9), cc = Math.cos(cy), cs = Math.sin(cy), ax = lx * cc - lz * cs, az = lx * cs + lz * cc;
+    P.chest.rotation.y = cy; P.chest.rotation.x = 0.05;
+    P.armR.rotation.set(Math.atan2(-az, -ly) - CB.recoil * 0.12, 0, Math.asin(AF.clamp(ax, -1, 1)));
+    P.head.rotation.y = AF.clamp(ang - cy, -1.1, 1.1); P.head.rotation.x = -Math.asin(ly) * 0.6;
+    if (CB.held) CB.held.rotation.x = 0;
+    VF.posed = true;
+  };
+  const seatUnpose = () => { const P = AF.player.parts; if (P) { P.chest.rotation.y = 0; P.armR.rotation.y = 0; } if (CB.held) CB.held.rotation.x = 0; VF.posed = false; };
+  const fireSeat = (g) => {
+    const W = GUNS[g], S = AF.PL.seat, p = AF.player, cam = AF.camera, v = VF.veh;
+    if (!(magOf(g) > 0)) { if (resOf(g) > 0) reload(); else { if (!AU('dry')) SFX.play('click'); CB.cd = 0.3; if (AF.clock.t - emptyT > 4) { emptyT = AF.clock.t; AF.emit('toast', LEND[g] ? 'Out of ammo.' : 'Out of ammo \u2014 a gun counter sells more.'); } } return; }
+    setMag(g, magOf(g) - 1);
+    CB.cd = W.rate; CB.recoil = 1; CB.lastShot = VF.t = AF.clock.t; VF.shots++;
+    p.x = S.x; p.y = S.y; p.z = S.z;   // hits, witnesses and panic read the shooter's position
+    cam.getWorldDirection(DIR);
+    let ox, oy, oz, t0 = 0;
+    if (!VF.aim) {   // hip fire: level along the camera's heading, onto the nearest person in the cone
+      const h = Math.hypot(DIR.x, DIR.z) || 1, fx = DIR.x / h, fz = DIR.z / h, w = autoTarget(S.x, S.z, fx, fz, W.range, S.y + 1.3);
+      if (w) DIR.set(w.x - S.x, w.y + 1.25 * (w.s || 1) - S.y - 1.3, w.z - S.z).normalize(); else DIR.set(fx, 0, fz);
+    }
+    VF.dir.copy(DIR);
+    p.mesh.position.set(S.x, S.y, S.z); p.mesh.rotation.set(S.pitch || 0, S.yaw, S.roll || 0, 'YXZ'); seatAimPose();
+    p.mesh.updateMatrixWorld(true);
+    muzzle(MZ);
+    if (VF.aim) { ox = cam.position.x; oy = cam.position.y; oz = cam.position.z; t0 = Math.max(0, (S.x - ox) * DIR.x + (S.y + 1.2 - oy) * DIR.y + (S.z - oz) * DIR.z); }
+    else { ox = MZ.x; oy = MZ.y; oz = MZ.z; }
+    SELF = v;
+    try { volley(g, W, ox, oy, oz, t0, seatSpread(W)); } finally { SELF = null; }
+    CB.bloom = Math.min(W.bloomMax, CB.bloom + W.bloom);
+    if (AF.camfx && AF.camfx.shake) AF.camfx.shake(W.heavy ? 0.014 : W.cls === 'shotgun' || W.cls === 'rifle' ? 0.016 : 0.006, 0.12);
+    const camD = cam.position.distanceTo(MZ), fl = (W.flash || 0.6) * 0.3 * Math.min(1, camD / 3);
+    FX.burst('flash', MZ.x + DIR.x * 0.08, MZ.y + DIR.y * 0.08, MZ.z + DIR.z * 0.08, 1, { size: fl });
+    if (!W.silenced) for (let i = 1; i <= 2; i++) FX.glow.spawn(MZ.x + DIR.x * 0.14 * i, MZ.y + DIR.y * 0.14 * i, MZ.z + DIR.z * 0.14 * i, DIR.x * 4, DIR.y * 4, DIR.z * 4, 0.05, 0.6 * fl / i, 0, 0, 4, 2.6, 1.1);
+    SFX.play(W.snd, S.x, S.z);
+    emitShot(MZ.x, MZ.y, MZ.z, W.loud, !!W.silenced, g, false, v);
+    if (!W.silenced) { CB.crime(G.heat.shots * (W.auto ? 0.25 : 1)); panic(S.x, S.z, G.panicR); } else panic(S.x, S.z, G.silencedPanicR);
+  };
+  CB.fireSeat = fireSeat;
   // melee: a wind-up, the strike (the hit lands ~55 % in), a follow-through
   const swing = () => {
     const W = melee(); CB.cd = W[3]; CB.swing = CB.swingDur = W[4] ? 0.46 : 0.3; CB.side ^= 1; CB.hitAt = CB.swingDur * (W[4] ? 0.55 : 0.45);
@@ -1146,7 +1217,8 @@ try {
     if (!AF.ready || !CR()) return;
     CB.cd -= dt; hitCd -= dt;
     const walk = AF.mode === 'walk' && !H.dead, m = I.mouse, locked = !!document.pointerLockElement;
-    const busy = !walk || AF.PL.busy || UI.modalOpen() || (UI.dialogueOpen && UI.dialogueOpen());
+    const seated = VF.can = !walk && seatInfo();
+    const busy = !(walk || seated) || AF.PL.busy || UI.modalOpen() || (UI.dialogueOpen && UI.dialogueOpen());
     if (CB.reloadT > 0) {
       const RW = GUNS[CB.reloadG];
       if (!CB.magDropped && RW && CB.reloadT < RW.reload * 0.78 && walk) { CB.magDropped = true; if (RW.cls !== 'shotgun' && CB.reloadG !== 'revolver') magDrop(); }
@@ -1170,21 +1242,29 @@ try {
       }
       if (I.hit('KeyZ')) CB.aimToggle = !CB.aimToggle;
       const gunUp = !!(g || CB.gallery);
-      AF.PL.aim = gunUp && (CB.aimToggle || (locked && !!(m.buttons & 2)) || !!CB.gallery);
-      AF.PL.aimFov = CB.gallery ? 34 : g ? GUNS[g].zoom || 40 : 40;
-      const down = !WH.open && ((locked && !!(m.buttons & 1)) || I.key('KeyQ')), edge = down && !prevFire; prevFire = down;
-      if (down && CB.cd <= 0 && CB.reloadT <= 0 && !AF.hud.meterOn()) {
-        if (CB.gallery) { if (edge) fire('revolver'); }
-        else if (g) { if (GUNS[g].auto || edge) { fire(g); firedT = 0; } }
-        else if (edge) swing();
+      if (seated) {   // drive-by: the shot itself goes in the 'combat-seat' tick, once the vehicle and the seat have moved this frame
+        AF.PL.aim = VF.aim = !!g && (CB.aimToggle || (locked && !!(m.buttons & 2)));
+        AF.PL.aimFov = g ? GUNS[g].zoom || 40 : 40;
+        const down = !!g && !WH.open && ((locked && !!(m.buttons & 1)) || I.key('KeyQ'));
+        VF.edge = VF.edge || (down && !prevFire); VF.want = down; prevFire = down;
+      } else {
+        AF.PL.aim = gunUp && (CB.aimToggle || (locked && !!(m.buttons & 2)) || !!CB.gallery);
+        AF.PL.aimFov = CB.gallery ? 34 : g ? GUNS[g].zoom || 40 : 40;
+        const down = !WH.open && ((locked && !!(m.buttons & 1)) || I.key('KeyQ')), edge = down && !prevFire; prevFire = down;
+        if (down && CB.cd <= 0 && CB.reloadT <= 0 && !AF.hud.meterOn()) {
+          if (CB.gallery) { if (edge) fire('revolver'); }
+          else if (g) { if (GUNS[g].auto || edge) { fire(g); firedT = 0; } }
+          else if (edge) swing();
+        }
       }
-    } else { AF.PL.aim = false; prevFire = false; xT = -1; CB.wheelClose(false); }
+    } else { AF.PL.aim = false; prevFire = false; xT = -1; CB.wheelClose(false); VF.want = VF.edge = VF.aim = false; }
+    AF.Vehicle.aim = seated && !!AF.PL.aim;
     // recoil recovers once the trigger rests a moment; bloom shrinks back
     const W = g ? GUNS[g] : null, since = AF.clock.t - CB.lastShot;
     if (CB.kick > 0 && since > 0.06) { const r = CB.kick * (1 - Math.exp(-dt * (W ? W.rec : 6))); CB.kick -= r; if (CB.kick < 1e-4) CB.kick = 0; if (walk) { const WK = AF.PL.walk; WK.camPitch = AF.clamp(WK.camPitch + r, -0.75, 1.25); } }
     if (CB.bloom > 0 && since > 0.08) CB.bloom = Math.max(0, CB.bloom - dt * (W ? W.bloomMax * 2.5 : 0.2));
     hudPaint(dt);
-    crossPaint(walk && !!AF.PL.aim && !WH.open && !CB.gallery, W ? spreadNow(W) : 0.006);
+    crossPaint(((walk && !CB.gallery) || (seated && VF.arc)) && !!AF.PL.aim && !WH.open, W ? (seated ? seatSpread(W) : spreadNow(W)) : 0.006);
     if (hmT > 0 && (hmT -= dt) <= 0) hm.className = '';
     if (CB.swing > 0) { CB.swing -= dt; if (CB.hitAt > 0 && CB.swingDur - CB.swing >= CB.hitAt) { CB.hitAt = -1; resolveMelee(); } }
     if (walk) { overlay(dt, g); bodyPush(dt); }
@@ -1200,7 +1280,51 @@ try {
     magUpdate(dt);
   });
   AF.on('hurt', () => { CB.flinch = 0.25; });
-  AF.on('mode', (m) => { if (m !== 'walk') { AF.PL.aim = false; CB.swing = 0; crossPaint(false, 0); } });
+  // drive-by: after the vehicle, the seat (80-coop places a passenger at 155) and 70-player's seated pose (160) for this frame
+  AF.onTick('combat-seat', 161, () => {
+    const g = VF.can && AF.PL.seat ? cur() : null, on = VF.on = !!g && !UI.modalOpen();
+    if (!on) { VF.aim = VF.firing = VF.want = VF.edge = false; if (VF.posed) seatUnpose(); return; }
+    const S = AF.PL.seat, v = VF.veh, c = AF.camera.getWorldDirection(TMP);
+    if (VF.aim) VF.dir.copy(c);
+    else if (AF.clock.t - VF.t > 0.6) { const h = Math.hypot(c.x, c.z) || 1; VF.dir.set(c.x / h, 0, c.z / h); }
+    // a driver shoots to the front and the sides only (about 110 degrees either way of the heading)
+    const hy = v ? v.yaw : S.yaw;
+    VF.arc = !VF.driver || Math.abs(AF.angDiff(hy, Math.atan2(c.x, c.z))) < 1.95;
+    if (VF.want && VF.arc && CB.cd <= 0 && CB.reloadT <= 0 && (GUNS[g].auto || VF.edge)) { fireSeat(g); firedT = 0; }
+    VF.edge = false;
+    VF.firing = AF.clock.t - VF.t < 0.6;
+    if ((VF.aim && VF.arc) || VF.firing) seatAimPose(); else if (VF.posed) seatUnpose();
+  });
+  AF.test('combat: drive-by \u2014 a seated driver aims and fires from the car; it hits a goon, never the car', () => {
+    const car = VV.cars.find((c) => !c.static && !c.player && !c.ai && !c.dead && c.active !== false && c.type.kind === 'car' && c.net == null);
+    if (!car) return { ok: false, info: 'no car' };
+    const hk = (n) => AF.hooks.tick.find((h) => h.name === n), tk = hk('combat'), idle = hk('player-idle'), st = hk('combat-seat');
+    const was = AF.mode, slot = CB.slot, heat = CB.heat, stars = CB.stars, tog = CB.aimToggle, onShot = CB.onShot, keep = { x: car.x, z: car.z, yaw: car.yaw, hp: car.hp };
+    const US = UI.state, title = US && US.title; if (US) US.title = false;
+    let w = null, shots = 0, body = 0, selfHit = false;
+    try {
+      AF.setMode('drive', { car }); for (let i = 0; i < 3; i++) AF.modes.drive.update(1 / 30);
+      CB.lend('revolver', 30);
+      const s = Math.sin(car.yaw), c = Math.cos(car.yaw), gx = car.x + c * 7, gz = car.z - s * 7, gy = AF.surfaceBelow(gx, gz, car.y + 3, 6);
+      w = Number.isFinite(gy) ? CB.spawnGoon(gx, gy, gz, { weapon: 'smg', hp: 500 }) : null; if (!w) return { ok: false, info: 'no goon' };
+      CB.onShot = (wid, mx, my, mz, ex, ey, ez, hit) => { shots++; if (hit === 2) body++; if (VV.bodyDist(car, ex, ez) < 0.05 && ey < car.y + 2) selfHit = true; };
+      CB.aimToggle = true; CB.cd = 0; CB.reloadT = 0; CB.bloom = 0; I.down.add('KeyQ');
+      tk.fn(1 / 30); idle.fn(1 / 30);
+      const S = AF.PL.seat, cam = AF.camera; cam.position.set(S.x, S.y + 1.3, S.z); cam.up.set(0, 1, 0); cam.lookAt(w.x, w.y + 1.1, w.z);
+      st.fn(1 / 30);
+      const fired = shots >= 1 && VF.shots > 0 && VF.on && VF.aim && VF.arc && VF.driver && VF.veh === car && AF.mode === 'drive' && AF.Vehicle.aim, posed = VF.posed && Math.abs(AF.player.parts.armR.rotation.z) > 0.5;
+      // the driver can't shoot straight back over the boot
+      I.down.delete('KeyQ'); tk.fn(1 / 30); CB.cd = 0; I.down.add('KeyQ'); tk.fn(1 / 30); idle.fn(1 / 30); cam.lookAt(S.x - s * 20, S.y + 1.3, S.z - c * 20);
+      const n0 = shots; st.fn(1 / 30); const behind = shots === n0 && !VF.arc;
+      return { ok: fired && body >= 1 && !selfHit && posed && behind, info: `fired ${fired}, body hits ${body}/${shots}, self ${selfHit}, posed ${posed}, rear refused ${behind}` };
+    } finally {
+      I.down.delete('KeyQ'); CB.onShot = onShot; if (w && w.agg) CB.release(w); CB.unlend('revolver'); CB.slot = slot; CB.aimToggle = tog; CB.heat = heat; CB.stars = stars; CB.kick = 0; CB.bloom = 0;
+      if (US) US.title = title;
+      if (AF.mode !== was && was && AF.modes[was]) AF.setMode(was);
+      car.x = keep.x; car.z = keep.z; car.yaw = keep.yaw; car.hp = keep.hp; car.v = 0; VV.placeMesh(car); if (car.interact) car.sync();
+    }
+  });
+  AF.on('mode', (m) => { if (m !== 'walk') { AF.PL.aim = false; CB.swing = 0; crossPaint(false, 0); } if (VF.posed) seatUnpose(); AF.Vehicle.aim = false; });
   AF.onBuild('combat', 875, () => { heliBuild(); trBuild(); magBuild(); });
   if (AF.preloaded) setTimeout(warm, 0); else AF.on('preloaded', warm);
 
