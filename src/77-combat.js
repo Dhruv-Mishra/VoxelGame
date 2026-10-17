@@ -648,9 +648,12 @@ try {
     p.mesh.updateMatrixWorld(true);
     muzzle(MZ);
     let ox, oy, oz, t0 = 0;
-    if (AF.PL.aim) {   // through the crosshair: from the camera, starting level with the player
+    const fp = AF.view.fp();
+    if (AF.PL.aim || fp) {   // through the crosshair: from the camera, starting level with the player
       cam.getWorldDirection(DIR); ox = cam.position.x; oy = cam.position.y; oz = cam.position.z;
       t0 = Math.max(0, (p.x - ox) * DIR.x + (p.y + 1.4 - oy) * DIR.y + (p.z - oz) * DIR.z);
+      // first person: the (hidden) gun hand is behind the lens; tracers and the flash leave from just below-right of the view
+      if (fp) { const h = Math.hypot(DIR.x, DIR.z) || 1; MZ.set(ox + DIR.x * 0.55 - DIR.z / h * 0.14, oy + DIR.y * 0.55 - 0.12, oz + DIR.z * 0.55 + DIR.x / h * 0.14); }
     } else {
       const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw), w = autoTarget(p.x, p.z, fx, fz, W.range);
       ox = MZ.x; oy = MZ.y; oz = MZ.z;
@@ -698,7 +701,7 @@ try {
   // ---------------------------------------------------------------- drive-by: shooting from a vehicle seat (driver or passenger)
   // Seated in a car / bike / bus (drive), on a jet ski (jetski), riding along in another player's vehicle (passenger, not a plane) or on
   // the liner's launch (tender), a drawn gun fires like on foot: right mouse / Z aims through the crosshair (the chase camera pulls in,
-  // 04-vehicle Vehicle.aim), click / Q fires (hip fire = the camera's heading with the 25 degree aim assist). Passengers aim all round,
+  // 04-vehicle Vehicle.aim), click / Q fires (hip fire = the camera's heading with the 25 degree aim assist).   Passengers and jet-ski riders aim all round,
   // a driver only to the front and the sides (VF.arc) and keeps steering. Same rounds, spread, tracers, hits, ammo, R reload, 'gunshot'
   // events (GS.veh = the vehicle) and co-op forwarding as on foot; the shooter's own vehicle and crewmates aboard are never hit.
   // AF.combat.vfire: can (seated where shooting is allowed), on (can + a gun drawn), aim, firing (a shot in the last 0.6 s), arc,
@@ -715,7 +718,7 @@ try {
   const seatSpread = (W) => {
     const v = VF.veh, sp = v ? Math.abs(v.v || 0) : 0;
     let k = VF.aim ? G.aimSpreadK : 1.3;
-    k *= 1 + 0.5 * Math.min(1, sp / 20); if (v && v.air > 0) k *= G.airSpreadK;
+    k *= 1 + 0.25 * Math.min(1, sp / 20); if (v && v.air > 0) k *= G.airSpreadK;
     return W.spread * k + CB.bloom;
   };
   // the seated avatar turns its chest half way to the aim and points the gun arm along it (after 70-player's seat pose, tick 160)
@@ -1264,7 +1267,7 @@ try {
     if (CB.kick > 0 && since > 0.06) { const r = CB.kick * (1 - Math.exp(-dt * (W ? W.rec : 6))); CB.kick -= r; if (CB.kick < 1e-4) CB.kick = 0; if (walk) { const WK = AF.PL.walk; WK.camPitch = AF.clamp(WK.camPitch + r, -0.75, 1.25); } }
     if (CB.bloom > 0 && since > 0.08) CB.bloom = Math.max(0, CB.bloom - dt * (W ? W.bloomMax * 2.5 : 0.2));
     hudPaint(dt);
-    crossPaint(((walk && !CB.gallery) || (seated && VF.arc)) && !!AF.PL.aim && !WH.open, W ? (seated ? seatSpread(W) : spreadNow(W)) : 0.006);
+    crossPaint(((walk && !CB.gallery) || (seated && VF.arc)) && (!!AF.PL.aim || (walk && !!g && AF.view.fp())) && !WH.open, W ? (seated ? seatSpread(W) : spreadNow(W)) : 0.006);
     if (hmT > 0 && (hmT -= dt) <= 0) hm.className = '';
     if (CB.swing > 0) { CB.swing -= dt; if (CB.hitAt > 0 && CB.swingDur - CB.swing >= CB.hitAt) { CB.hitAt = -1; resolveMelee(); } }
     if (walk) { overlay(dt, g); bodyPush(dt); }
@@ -1287,9 +1290,9 @@ try {
     const S = AF.PL.seat, v = VF.veh, c = AF.camera.getWorldDirection(TMP);
     if (VF.aim) VF.dir.copy(c);
     else if (AF.clock.t - VF.t > 0.6) { const h = Math.hypot(c.x, c.z) || 1; VF.dir.set(c.x / h, 0, c.z / h); }
-    // a driver shoots to the front and the sides only (about 110 degrees either way of the heading)
+    // a driver shoots to the front and the sides only (about 110 degrees either way of the heading); a jet-ski rider all round
     const hy = v ? v.yaw : S.yaw;
-    VF.arc = !VF.driver || Math.abs(AF.angDiff(hy, Math.atan2(c.x, c.z))) < 1.95;
+    VF.arc = !VF.driver || AF.mode === 'jetski' || Math.abs(AF.angDiff(hy, Math.atan2(c.x, c.z))) < 1.95;
     if (VF.want && VF.arc && CB.cd <= 0 && CB.reloadT <= 0 && (GUNS[g].auto || VF.edge)) { fireSeat(g); firedT = 0; }
     VF.edge = false;
     VF.firing = AF.clock.t - VF.t < 0.6;

@@ -90,10 +90,13 @@ try {
   // further out is swung back toward the middle of the map
   const WB = AF.PLAN.world.bounds, SKY = 1500, WC = { x: (WB.x0 + WB.x1) / 2, z: (WB.z0 + WB.z1) / 2 };
   const outside = (pl) => pl.x < WB.x0 - SKY || pl.x > WB.x1 + SKY || pl.z < WB.z0 - SKY || pl.z > WB.z1 + SKY;
+  // a crash kills the pilot where it happened (a heist fails on the death); the ground crew tows the wreck back to its stand
   const crash = (pl, why) => {
-    AF.emit('toast', why + ' The ground crew tows the ' + pl.name + ' back to the apron.');
+    const x = pl.x, z = pl.z, yaw = pl.yaw, y = Math.max(AF.W.groundY(x, z), -0.6);
+    AF.emit('toast', why + ' The ' + pl.name + ' is towed back to the apron.');
     PL.reset(pl);
-    AF.setMode('walk', { x: pl.x + Math.cos(pl.yaw) * 4, z: pl.z - Math.sin(pl.yaw) * 4, yaw: pl.yaw + PI / 2 });
+    AF.setMode('walk', { x, y, z, yaw: yaw + PI / 2, snap: true });
+    if (AF.health && AF.health.kill) AF.health.kill('crash');
   };
   PL.reset = (pl) => { pl.x = pl.home.x; pl.z = pl.home.z; pl.yaw = pl.home.yaw; pl.pitch = pl.roll = pl.gam = pl.pr = pl.rr = pl.v = pl.throttle = 0; pl.engine = false; pl.onGround = true; pl.y = AF.W.groundY(pl.x, pl.z); place(pl); };
   AF.modes.fly = {

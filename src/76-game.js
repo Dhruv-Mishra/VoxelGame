@@ -3,7 +3,7 @@ try {
 // ===== 76-game: the gameplay core shared by 77-combat + 78-jobs  (OWNER: game) =====
 // AF.G       every tuning number of the gameplay layer (economy, health, damage, wanted, forget policy) — balance here only
 // AF.save    the ONLY hard-persisted gameplay state: money, guns + ammo, outfits owned, a look per friend (localStorage)
-// AF.money   add(n) / spend(n, what) -> bool          AF.health  hurt(n, src) / heal(n); 0 hp -> 'dead' mode -> wake at home
+// AF.money   add(n) / spend(n, what) -> bool          AF.health  hurt(n, src) / heal(n) / kill(src); 0 hp -> 'dead' mode -> wake at home
 // AF.shop    open({ title, sub, tabs?, items(tab) -> [{ name, desc, price, tag, sw, off, act() }] }) — every counter + wardrobe
 // AF.fx      pooled particles, 2 draws (additive glow + dithered opaque smoke), nothing per frame while empty:
 //            burst(kind, x, y, z, n, o) kinds flash|fire|spark|smoke|steam|dust|hit|glow, line(x0..z1) for tracers
@@ -143,6 +143,8 @@ try {
     if (H.v <= 0) die(src);
   };
   H.heal = (n) => { H.v = Math.min(H.max, H.v + n); };
+  // certain death (a plane flown into the ground or the sea), whatever the mode
+  H.kill = (src) => { if (H.dead || !AF.ready) return; H.v = 0; H.last = AF.clock.t; HUD.hurt(H.max); AF.emit('hurt', H.max, src); die(src); };
   AF.on('land', (v) => { if (v > G.fallSafe) H.hurt((v - G.fallSafe) * G.fallK, 'fall'); });
   const DEAD = { t: 0, cam: new THREE.Vector3(), look: new THREE.Vector3() };
   const die = (src) => {

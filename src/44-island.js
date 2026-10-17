@@ -94,7 +94,7 @@ AF.onBuild('island-tunnel',496.42,()=>{
  const cellOf=(x,z)=>{const i=Math.floor((x-x0)*2),k=Math.floor((z-z0)*2);return i<0||k<0||i>=NI||k>=NK?-1:i*NK+k;};
  // lanterns: every 12 m, alternate walls, an emissive block 2 m up the first wall cell, each with a pooled light
  const lights=[],sMaze=T.chambers[1]?T.chambers[1].s:-1e9;
- for(let s=5,side=1;s<T.L-2;s+=12,side=-side){if(Math.abs(s-sMaze)<15)continue;const c=along(s);for(let d=c.hw-0.75;d<c.hw+2;d+=0.25){const x=c.x-c.dz*side*d,z=c.z+c.dx*side*d,n=cellOf(x,z);if(n>=0&&kind[n]===1){lamp.set(n,fl[n]+2);lights.push([c.x-c.dz*side*(c.hw-0.6),c.y+2.3,c.z+c.dx*side*(c.hw-0.6)]);break;}}}
+ for(let s=5,side=1;s<T.L-2;s+=12,side=-side){if(Math.abs(s-sMaze)<18)continue;const c=along(s);for(let d=c.hw-0.75;d<c.hw+2;d+=0.25){const x=c.x-c.dz*side*d,z=c.z+c.dx*side*d,n=cellOf(x,z);if(n>=0&&kind[n]===1){lamp.set(n,fl[n]+2);lights.push([c.x-c.dz*side*(c.hw-0.6),c.y+2.3,c.z+c.dx*side*(c.hw-0.6)]);break;}}}
  for(const l of lights){AF.addLight({x:l[0],y:l[1],z:l[2],color:0xffb060,intensity:1.6,range:12,kind:'street',night:false});TUN.lights++;}
  // the shell, one model per 32 m outland tile (the quadtree's level-0 grid)
  const RX=-1484,RZ=-1708;
@@ -139,7 +139,7 @@ AF.onBuild('island-tunnel',496.42,()=>{
  const netG=geometry('t-net',14,10,1,m=>{for(let x=0;x<14;x++)for(let y=0;y<10;y++)if((x+y)%2===0||y===9)m.set(x,y,0,rope);},0.25);
  const pole=geometry('t-lamp-pole',3,18,3,m=>{m.box(1,0,1,2,15,2,dark);m.box(0,15,0,3,17,3,iron);m.box(1,15,1,2,17,2,lampC);},1/8);
  const cart=geometry('t-mine-track',32,8,14,m=>{for(let x=0;x<32;x+=6)m.box(x,0,0,x+2,1,14,wood);for(const z of [3,10])m.box(0,1,z,32,2,z+1,iron);m.box(8,2,1,24,3,13,iron);m.box(8,3,1,24,8,2,rust);m.box(8,3,12,24,8,13,rust);m.box(8,3,1,9,8,13,rust);m.box(23,3,1,24,8,13,rust);for(let x=10;x<22;x++)for(let z=2;z<12;z++)if(AF.hash2(x,z)<0.6)m.set(x,4+((x*z)%3),z,wallC[1]);},1/8);
- const table=geometry('t-cache-table',14,4,8,m=>{m.box(0,3,0,14,4,8,wood);for(const x of [0,13])for(const z of [0,7])m.box(x,0,z,x+1,3,z+1,wood);},0.25);
+ const table=geometry('t-cache-table',12,4,6,m=>{m.box(0,3,0,12,4,6,wood);for(const x of [0,11])for(const z of [0,5])m.box(x,0,z,x+1,3,z+1,wood);},0.25);
  const cacheBox=geometry('t-cache-crate',20,10,12,m=>{m.box(0,0,0,20,10,12,olive);for(const x of [0,19])m.box(x,0,0,x+1,10,12,dark);m.box(0,9,0,20,10,12,dark);for(let x=3;x<17;x+=4)m.box(x,6,0,x+2,7,1,white);m.box(8,3,0,12,6,1,dark);m.box(9,3,0,11,5,0,gold);m.set(9,4,0,gold);m.set(10,4,0,gold);m.box(9,1,0,11,3,1,gold);},1/8);
  const place=(geo,x,z,rot=0,collide=true)=>{O.tunnelAt(x,z);return O.addProp(geo,x,ti.floor,z,rot,{tag:'island:tunnel',collide});};
  const chamber=j=>{const c=T.chambers[j],p=along(c.s),nx=-p.dz,nz=p.dx;return{...p,nx,nz,s:c.s,r:c.hw};};
@@ -157,14 +157,14 @@ AF.onBuild('island-tunnel',496.42,()=>{
  const trackRot=Math.abs(C.dx)>Math.abs(C.dz)?0:1,tp=put(C,cart,2.05,0.95,trackRot,false);
  if(tp)AF.addCollider(tp[0]-(trackRot?0.95:2.05),C.y,tp[1]-(trackRot?2.05:0.95),tp[0]+(trackRot?0.95:2.05),C.y+1,tp[1]+(trackRot?2.05:0.95),'island:tunnel');
  if(!put(C,netG,1.75,0.2,0,false))put(C,netG,1.75,0.2,1,false);put(C,crate,1,0.75);put(C,barrel,0.5,0.5);put(C,crateS,0.65,0.65);put(C,pole,0.25,0.25,0,false);
- // ---- the Moretti stash hall (chamber B, a wide flat cavern): a maze of crate stacks and rock walls on a 3 m grid round the arms cache.
+ // ---- the Moretti stash hall (chamber B, a wide flat cavern): a maze of crate stacks and rock walls on a 4 m grid round the arms cache.
  // The rest of the cavern is filled with rock, so the only way through is the maze (in from the mouth side, out towards the sea cave).
  // Walls stand 2.75 m: nobody sees or jumps over them. Two outland props (walls at 1/4 m, the rock fill at 1/2 m: merged into the tile
  // meshes, no draws of their own), colliders merged per run. 81-heist-sets walks the guards through it on the maze graph (S.heist.nav).
  const MZ=(()=>{
-  const CS=3,NG=8,half=CS*NG/2,sIn=B.s-14,sOut=B.s+14,gx0=Math.round((B.x-half)*2)/2,gz0=Math.round((B.z-half)*2)/2,rng=AF.rng(7311);
+  const CS=4,NG=7,half=CS*NG/2,sIn=B.s-17,sOut=B.s+17,gx0=Math.round((B.x-half)*2)/2,gz0=Math.round((B.z-half)*2)/2,rng=AF.rng(7311),m=CS/2-0.1;
   const id=(i,k)=>i*NG+k,cc=n=>[gx0+(((n/NG)|0)+0.5)*CS,gz0+(n%NG+0.5)*CS];
-  const okCell=n=>{const [x,z]=cc(n);for(const [ox,oz] of [[0,0],[-1.4,-1.4],[1.4,-1.4],[-1.4,1.4],[1.4,1.4],[0,-1.4],[0,1.4],[-1.4,0],[1.4,0]])if(O.tunnelAt(x+ox,z+oz)!==2||ti.end||ti.d>ti.hw-0.5||ti.s<sIn+1.5||ti.s>sOut-1.5)return false;return true;};
+  const okCell=n=>{const [x,z]=cc(n);for(const [ox,oz] of [[0,0],[-m,-m],[m,-m],[-m,m],[m,m],[0,-m],[0,m],[-m,0],[m,0]])if(O.tunnelAt(x+ox,z+oz)!==2||ti.end||ti.d>ti.hw-0.5||ti.s<sIn+1.5||ti.s>sOut-1.5)return false;return true;};
   const on=new Uint8Array(NG*NG);for(let n=0;n<NG*NG;n++)on[n]=okCell(n)?1:0;
   const nb=n=>{const i=(n/NG)|0,k=n%NG,o=[];if(i>0&&on[id(i-1,k)])o.push(id(i-1,k));if(i<NG-1&&on[id(i+1,k)])o.push(id(i+1,k));if(k>0&&on[id(i,k-1)])o.push(id(i,k-1));if(k<NG-1&&on[id(i,k+1)])o.push(id(i,k+1));return o;};
   // keep the largest 4-connected group of cells
@@ -219,9 +219,11 @@ AF.onBuild('island-tunnel',496.42,()=>{
    if((i===0||!on[id(i-1,k)])&&!(n===MZ.entry&&dIn==='W'||n===MZ.exit&&dOut==='W'))walls.push([gx0+i*CS,gz0+k*CS,0,n]);
    if((k===0||!on[id(i,k-1)])&&!(n===MZ.entry&&dIn==='N'||n===MZ.exit&&dOut==='N'))walls.push([gx0+i*CS,gz0+k*CS,1,n]);}
   let lo=Infinity,hi=-Infinity;for(const n of MZ.cells){const [x,z]=MZ.cc(n);for(const [ox,oz] of [[-1.5,-1.5],[1.5,1.5],[1.5,-1.5],[-1.5,1.5]]){const f=mzFloor(x+ox,z+oz);lo=Math.min(lo,f);hi=Math.max(hi,f);}}
-  const NX=NG*CS*WV+4,NZ=NX,model=new AF.Model(NX,Math.round((hi-lo)*WV)+WH+2,NZ),ox0=gx0-0.5/WV*2,oz0=gz0-0.5/WV*2;
+  // the model starts two voxels west / north of the grid (the corner posts reach 0.5 m out); every voxel is floor()ed from its centre,
+  // so a wall spans exactly its collider (edge ± 0.25 m) and never shares a face with the rock fill behind the rim
+  const NX=NG*CS*WV+4,NZ=NX,model=new AF.Model(NX,Math.round((hi-lo)*WV)+WH+2,NZ),ox0=gx0-2/WV,oz0=gz0-2/WV;
   const wood2=AF.col(0x8a6a44,{pat:'plank',jitter:0.35,edge:0.2}),band=dark,ammo=olive,stencilC=AF.col(0xe8e0c0,{jitter:0.1,edge:0});
-  const put1=(x,z,h,style,u)=>{const mi=Math.round((x-ox0)*WV),mk=Math.round((z-oz0)*WV),f=Math.round((mzFloor(x,z)-lo)*WV);if(mi<0||mk<0||mi>=NX||mk>=NZ)return;
+  const put1=(x,z,h,style,u)=>{const mi=Math.floor((x-ox0)*WV),mk=Math.floor((z-oz0)*WV),f=Math.round((mzFloor(x,z)-lo)*WV);if(mi<0||mk<0||mi>=NX||mk>=NZ)return;
    for(let y=0;y<h;y++){let c;if(style===0)c=y===0&&AF.hash2(mi,mk)<0.4?mossC:wallC[(AF.hash2(mi*3+y,mk*5-y)*4)|0];
     else{const b=y%4===3||u%4===0;c=b?band:style===1?wood2:ammo;if(style===2&&!b&&y%4===1&&u%4===2)c=stencilC;}
     model.set(mi,f+y,mk,c);}};
@@ -239,16 +241,16 @@ AF.onBuild('island-tunnel',496.42,()=>{
  // the arms cache: a big padlocked crate on a table in the maze's farthest dead end, facing its way in; the armoury racks one cell back
  const [cacheX,cacheZ]=MZ.cc(MZ.cache),cacheY=mzFloor(cacheX,cacheZ),cachePath=MZ.path(MZ.entry,MZ.cache),cprev=cachePath.length>1?cachePath[cachePath.length-2]:MZ.entry;
  const [px0,pz0]=MZ.cc(cprev),cfx=Math.sign(Math.round(px0-cacheX)),cfz=Math.sign(Math.round(pz0-cacheZ)),cf={fx:cfx,fz:cfz,rot:Math.abs(cfz)>=Math.abs(cfx)?(cfz<0?0:2):(cfx<0?1:3)};
- const cacheYaw=Math.atan2(cf.fx,cf.fz);
- O.addProp(table,cacheX-cf.fx*0.5,cacheY,cacheZ-cf.fz*0.5,cf.rot,{tag:'island:tunnel'});O.addProp(cacheBox,cacheX-cf.fx*0.5,cacheY+1,cacheZ-cf.fz*0.5,cf.rot,{tag:'island:tunnel-cache'});
+ const cacheYaw=Math.atan2(cf.fx,cf.fz),cb=-0.9;   // table + crate pushed to the back of the dead end (0.1 m off its wall)
+ O.addProp(table,cacheX+cf.fx*cb,cacheY,cacheZ+cf.fz*cb,cf.rot,{tag:'island:tunnel'});O.addProp(cacheBox,cacheX+cf.fx*cb,cacheY+1,cacheZ+cf.fz*cb,cf.rot,{tag:'island:tunnel-cache'});
  const rack=geometry('t-gun-rack',12,15,4,m=>{m.box(0,0,0,12,1,4,wood);m.box(0,0,0,1,15,4,wood);m.box(11,0,0,12,15,4,wood);m.box(0,14,0,12,15,4,wood);m.box(0,7,0,12,8,4,dark);for(let x=2;x<11;x+=3){m.box(x,1,1,x+1,13,2,dark);m.box(x,9,1,x+2,11,2,iron);m.box(x,3,2,x+1,5,3,wood);}},1/8);
  const racks=[];{const [rx,rz]=MZ.cc(cprev),i=Math.floor((rx-MZ.gx0)/MZ.CS),k=Math.floor((rz-MZ.gz0)/MZ.CS);
   for(const [dx,dz,rot] of [[1,0,3],[-1,0,1],[0,1,2],[0,-1,0]]){if(racks.length>=2)break;
    // against a closed side of the armoury cell (no open neighbour that way)
    const ni=i+dx,nk=k+dz,nn=ni>=0&&nk>=0&&ni<MZ.NG&&nk<MZ.NG&&MZ.on[MZ.id(ni,nk)]?MZ.id(ni,nk):-1;
-   if(nn>=0&&MZ.isOpen(cprev,nn))continue;const x=rx+dx*0.95,z=rz+dz*0.95;O.addProp(rack,x,mzFloor(x,z),z,rot,{tag:'island:gun-rack'});racks.push({x:+x.toFixed(2),y:mzFloor(x,z),z:+z.toFixed(2),yaw:Math.atan2(-dx,-dz)});}}
- for(const n of [MZ.entry,MZ.cache,MZ.far]){const [x,z]=MZ.cc(n);AF.addLight({x,y:mzFloor(x,z)+3.2,z,color:0xffb060,intensity:1.5,range:10,kind:'street',night:false});TUN.lights++;}
- place(pole,cacheX+(cf.fx+cf.fz)*0.8,cacheZ+(cf.fz+cf.fx)*0.8,0,false);
+   if(nn>=0&&MZ.isOpen(cprev,nn))continue;const x=rx+dx*(MZ.CS/2-0.55),z=rz+dz*(MZ.CS/2-0.55);O.addProp(rack,x,mzFloor(x,z),z,rot,{tag:'island:gun-rack'});racks.push({x:+x.toFixed(2),y:mzFloor(x,z),z:+z.toFixed(2),yaw:Math.atan2(-dx,-dz)});}}
+ for(const n of [MZ.entry,MZ.cache,MZ.far,MZ.exit]){const [x,z]=MZ.cc(n);AF.addLight({x,y:mzFloor(x,z)+3.2,z,color:0xffb060,intensity:1.5,range:11,kind:'street',night:false});TUN.lights++;}
+ place(pole,cacheX+cf.fx*1.3-cf.fz*1.45,cacheZ+cf.fz*1.3+cf.fx*1.45,0,false);
  for(const ch of [A,C]){AF.addLight({x:ch.x,y:ch.y+3,z:ch.z,color:0xffb868,intensity:1.4,range:11,kind:'street',night:false});TUN.lights++;}
  // the cleft: two boulders screen the mouth from the hillside (the way in weaves between them)
  const boulder=geometry('t-boulder',9,6,8,m=>{m.sphere(4.5,1.5,4,4.4,wallC[0],(x,y,z)=>y<6?wallC[(AF.hash2(x*3+y,z)*4)|0]:0);});
@@ -275,8 +277,10 @@ AF.onBuild('island-tunnel',496.42,()=>{
  const H=S.heist={
   tunnelEntry:{x:+(mx0+out[0]*2.5).toFixed(2),y:AF.W.groundY(mx0+out[0]*2.5,mz0+out[1]*2.5),z:+(mz0+out[1]*2.5).toFixed(2),yaw:Math.atan2(-out[0],-out[1])},
   tunnel:walk,length:T.L,nav,
-  cache:{x:+(cacheX-cf.fx*0.5).toFixed(2),y:cacheY+1,z:+(cacheZ-cf.fz*0.5).toFixed(2),yaw:cacheYaw},
+  cache:{x:+(cacheX+cf.fx*cb).toFixed(2),y:cacheY+1,z:+(cacheZ+cf.fz*cb).toFixed(2),yaw:cacheYaw},
   cacheStand:{x:+(cacheX+cf.fx*0.8).toFixed(2),y:cacheY,z:+(cacheZ+cf.fz*0.8).toFixed(2),yaw:Math.atan2(-cf.fx,-cf.fz)},
+  // where the Moretti men hold once the alarm is up (80-stealth zone.holds): the tube past the way out first, then the way in
+  holds:[2,4,6,-2,-4].flatMap(ds=>[-0.9,0.9].map(o=>{const p=along(ds>0?MZ.sOut+ds:MZ.sIn+ds),x=p.x-p.dz*o,z=p.z+p.dx*o;O.tunnelAt(x,z);return[+x.toFixed(2),ti.floor,+z.toFixed(2)];})),
   racks,maze:{cells:MZ.cells.length,walls:MZ.walls,entry:cellP(MZ.entry),exit:cellP(MZ.exit),cache:cellP(MZ.cache),far:cellP(MZ.far)},
   // the Moretti reinforcements pour in from both ends of the tube
   waveSpawns:[line(MZ.sIn-9,MZ.sIn-9)[0],line(MZ.sIn-5,MZ.sIn-5)[0],post[Math.min(post.length-1,3)],post[Math.min(post.length-1,5)]],

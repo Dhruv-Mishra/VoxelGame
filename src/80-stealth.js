@@ -206,9 +206,12 @@ try {
     const a = g.a, c = a.ctl; if (!c || !g.route || g.ri >= g.route.length) { if (c) c.moving = false; return true; }
     const p = g.route[g.ri], dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz);
     if (d < 0.35) { g.ri++; return g.ri >= g.route.length; }
-    const st = Math.min(d, speed * dt), nx = c.x + dx / d * st, nz = c.z + dz / d * st;
-    const y0 = AF.surfaceBelow(nx, nz, c.y + 0.7, 2.5), y = Number.isFinite(y0) && Math.abs(y0 - c.y) < 1.2 ? y0 : c.y;
-    if (AF.boxBlocked(nx, Math.max(y, c.y) + 0.55, nz, 0.22, 1.2)) { g.ri++; return g.ri >= g.route.length; }   // corner-cut: skip ahead (0.5 m floor steps are walked, like the player's 0.55 step)
+    const st = Math.min(d, speed * dt); let nx = c.x + dx / d * st, nz = c.z + dz / d * st;
+    const y0 = AF.surfaceBelow(nx, nz, c.y + 0.7, 2.5), y = Number.isFinite(y0) && Math.abs(y0 - c.y) < 1.2 ? y0 : c.y, by = Math.max(y, c.y) + 0.55;
+    // blocked: slide along whichever axis is free (0.5 m floor steps are walked, like the player's 0.55 step), else skip ahead
+    if (AF.boxBlocked(nx, by, nz, 0.22, 1.2)) {
+      if (!AF.boxBlocked(nx, by, c.z, 0.22, 1.2)) nz = c.z; else if (!AF.boxBlocked(c.x, by, nz, 0.22, 1.2)) nx = c.x; else { g.ri++; return g.ri >= g.route.length; }
+    }
     c.x = nx; c.z = nz; c.y = y;
     c.moving = true; c.ph += st * 4.2;
     const want = Math.atan2(dx, dz); c.yaw += AF.angDiff(c.yaw, want) * (1 - Math.exp(-dt * 9));
@@ -274,13 +277,16 @@ try {
   // ---------------------------------------------------------------- hits from 77-combat (the heist routes CB.onWalkerHit here)
   // melee from behind on an unaware guard = a silent takedown; a headshot on an unaware guard = down; otherwise every hit (fists,
   // bats, bullets) wears his health down until he drops — nobody is unkillable, armed guards just take a lot more
+  // a one-hit takedown only ever comes from behind (a melee blow or a headshot on a guard who isn't fighting yet); from the front
+  // every guard soaks hits until his health runs out
+  const behindOf = (a, P) => { if (!P) return false; const dx = P.x - a.x, dz = P.z - a.z, d = Math.hypot(dx, dz) || 1, yaw = a.ctl ? a.ctl.yaw : a.yaw; return (dx * Math.sin(yaw) + dz * Math.cos(yaw)) / d < 0; };
   S.hit = (a, kind, fx, fz, info, from) => {
     let z = S.zone, g = z ? z.guards.find((q) => q.a === a) : null;
     if (!g) {
       for (const zz of S.zones.values()) { const q = zz.guards.find((r) => r.a === a); if (q) { g = q; z = zz; break; } }
       if (!g) return false;
       // a guard of a zone that isn't running (nobody simulates it): plain damage, applied where the shot landed
-      if (!g.down) { g.hp -= (info && info.dmg) || 20; if (g.hp <= 0 || kind === 'melee' && g.st !== 'combat') knockOut(g, fx, fz, kind); else AF.walkers.stagger(a, fx || 0, fz || 1); }
+      if (!g.down) { g.hp -= (info && info.dmg) || 20; if (g.hp <= 0 || kind === 'melee' && g.st !== 'combat' && behindOf(a, AF.player)) knockOut(g, fx, fz, kind); else AF.walkers.stagger(a, fx || 0, fz || 1); }
       return true;
     }
     if (g.down) return true;
@@ -288,7 +294,7 @@ try {
     applyHit(g, kind, fx, fz, info, from == null ? mySlot() : from);
     return true;
   };
-  const predictHit = (g, kind, info) => { if (g.st !== 'combat' && ((info && info.head) || (kind === 'melee' && (g.lv < 0.85 || g.st === 'alert')))) { g.down = true; if (g.path) AF.walkers.knock(g.a, 0, 1, 1.3, 1e6); } };
+  const predictHit = (g, kind, info) => { if (g.st !== 'combat' && (kind === 'melee' || (info && info.head)) && behindOf(g.a, AF.player)) { g.down = true; if (g.path) AF.walkers.knock(g.a, 0, 1, 1.3, 1e6); } };
   // somebody else on duty sees (x, y, z)? (a takedown, a body being dragged, a brawl with a passenger) -> that guard, else null
   const witness = S.witness = (z, x, y, zz, not) => {
     if (!z) return null;
@@ -308,17 +314,14 @@ try {
   };
   const applyHit = (g, kind, fx, fz, info, from) => {
     const a = g.a, P = from === mySlot() ? AF.player : AF.coop && AF.coop.players.get(from);
-    const unaware = g.st !== 'combat' && g.st !== 'alert' && g.lv < 0.85;
-    let behind = true;
-    if (P) { const dx = P.x - a.x, dz = P.z - a.z, d = Math.hypot(dx, dz) || 1, yaw = a.ctl ? a.ctl.yaw : a.yaw; behind = (dx * Math.sin(yaw) + dz * Math.cos(yaw)) / d < 0.25; }
-    const head = !!(info && info.head), dmg = (info && info.dmg) || 30, fighting = g.st === 'combat';
+    const behind = behindOf(a, P), head = !!(info && info.head), dmg = (info && info.dmg) || 30, fighting = g.st === 'combat';
     if (kind === 'melee') {
-      if (unaware || g.st === 'alert' || (behind && !fighting)) { knockOut(g, fx, fz, 'melee'); broadcastKO(g, fx, fz); seenViolence(g, from); return; }
+      if (behind && !fighting) { knockOut(g, fx, fz, 'melee'); broadcastKO(g, fx, fz); seenViolence(g, from); return; }
       g.hp -= dmg * 1.5;
       if (g.hp <= 0) { knockOut(g, fx, fz, 'melee'); broadcastKO(g, fx, fz); seenViolence(g, from); return; }
       AF.walkers.stagger(a, fx || 0, fz || 1); toAlert(g, from); seenViolence(g, from); return;
     }
-    g.hp -= head ? (fighting ? dmg * 5 : 1e4) : dmg;
+    g.hp -= head ? (behind && !fighting ? 1e4 : dmg * 2.5) : dmg;
     if (g.hp <= 0) { knockOut(g, fx, fz, head ? 'head' : 'shot'); broadcastKO(g, fx, fz); if (!(info && info.silenced)) S.noiseAt(a.x, a.y, a.z, 40, 'shot'); seenViolence(g, from); return; }
     AF.walkers.stagger(a, fx || 0, fz || 1);
     if (P) { const z = Z(g.z); z.lastSeen.x = P.x; z.lastSeen.y = P.y; z.lastSeen.z = P.z; z.lastSeen.t = AF.clock.t; }
@@ -584,13 +587,36 @@ try {
     for (const l of z.lights) if (l.off > 0 && (l.off -= dt) <= 0) { l.off = 0; setLamps(l, true); }
     for (const p of z.points) if (p.cd > 0) p.cd -= dt;
   };
+  // zones with holds (the stash maze): only the `hunters` nearest the crew's last sighting close in; the rest each take the nearest free
+  // hold point (re-dealt once a second) and wait there, firing at whoever comes into view
+  const FIGHT = [];
+  const dealRoles = (z) => {
+    const now = AF.clock.t; if (now - (z.roleT || -9) < 1) return; z.roleT = now;
+    const L = z.lastSeen, P = z.holds; FIGHT.length = 0;
+    for (const g of z.guards) { if (!g.down && g.st === 'combat' && g.a && g.a.ctl) { g.rd = Math.hypot(g.a.ctl.x - L.x, g.a.ctl.z - L.z); FIGHT.push(g); } else g.hold = -1; }
+    FIGHT.sort((a, b) => a.rd - b.rd);
+    const used = new Set();
+    FIGHT.forEach((g, k) => {
+      if (k < (z.hunters || 2)) { g.hold = -1; return; }
+      let best = g.hold >= 0 && !used.has(g.hold) ? g.hold : -1;
+      if (best < 0) { let bd = 1e9; const c = g.a.ctl; for (let i = 0; i < P.length; i++) { if (used.has(i)) continue; const d = Math.hypot(P[i][0] - c.x, P[i][2] - c.z); if (d < bd) { bd = d; best = i; } } }
+      if (best < 0) best = k % P.length;
+      if (best !== g.hold) g.route = null;
+      g.hold = best; used.add(best);
+    });
+  };
   const combat = (z, g, dt) => {
     const a = g.a, c = a.ctl; if (!c) return;
+    if (z.holds && z.holds.length) dealRoles(z);
     const q = PS[g.lastQ & 3], tx = g.see && q && q.on ? q.x : g.tgt.x, tz = g.see && q && q.on ? q.z : g.tgt.z, d = Math.hypot(tx - c.x, tz - c.z);
     if (g.see && d < 24) {
       c.moving = false; faceTo(g, tx, tz, dt, 7); a.aim = Math.min(1, (a.aim || 0) + dt * 4);
       if ((g.fireT -= dt) <= 0 && a.aim > 0.8 && g.armed) { g.fireT = 0.85 + AF.whash(g.i, AF.clock.frame) * 0.6; shoot(g, q, d); }
       g.route = null;
+    } else if (g.hold >= 0) {
+      const h = z.holds[g.hold];
+      if (Math.hypot(h[0] - c.x, h[2] - c.z) > 0.6) { if (!g.route || g.ri >= g.route.length) goTo(g, h[0], h[1], h[2]); walk(g, dt, 3.1); a.aim = Math.max(0.3, (a.aim || 0) - dt); }
+      else { c.moving = false; g.route = null; faceTo(g, tx, tz, dt, 3); a.aim = Math.min(1, (a.aim || 0) + dt * 2); }
     } else {
       a.aim = Math.max(0.3, (a.aim || 0) - dt);
       if (!g.route || g.ri >= g.route.length || (g.t > 1.5 && (g.t = 0, true))) goTo(g, tx, g.tgt.y, tz);

@@ -80,7 +80,10 @@ try {
       else if ((this.dragT -= dt) < 0) { this.orbit *= Math.exp(-dt * 1.8); this.orbitP *= Math.exp(-dt * 1.8); }
       if (AF.player && AF.player.mesh) AF.player.mesh.visible = AF.player.visible && !fp;
       AF.shadowFocus.set(x, y, z); AF.shadowRadius = this.radius;
+      // aiming: the look stays put in the world while the vehicle turns under it (a target behind stays behind)
       if (fp) {
+        if (aim && this.yaw0 != null) this.orbit = AF.angDiff(0, this.orbit - AF.angDiff(this.yaw0, yaw));
+        this.yaw0 = yaw;
         const s = Math.sin(yaw), c = Math.cos(yaw), e = this.eye;
         cam.position.set(x + c * e[0] + s * e[2], y + e[1] + Math.sin(pitch) * e[2], z - s * e[0] + c * e[2]);
         const a = yaw + this.orbit, p = -this.orbitP * 0.8 - pitch;
@@ -91,7 +94,10 @@ try {
       }
       const first = !this.init;
       if (first) { this.cyaw = yaw; this.cy = y; this.cd = this.dist; }
+      const cy0 = this.cyaw;
       this.cyaw += AF.angDiff(this.cyaw, yaw) * (1 - Math.exp(-dt * 4.5));
+      if (aim) this.orbit = AF.angDiff(0, this.orbit - (this.cyaw - cy0));
+      this.yaw0 = null;
       this.cy += (y - this.cy) * (1 - Math.exp(-dt * 6));
       const a = this.cyaw + this.orbit, camP = 0.2 + this.orbitP + this.dist * 0.004, cp = Math.cos(camP), sp = Math.sin(camP);
       // aiming: pivot over the vehicle (not ahead of it) and a little right of the line of sight, so the rider doesn't hide the crosshair

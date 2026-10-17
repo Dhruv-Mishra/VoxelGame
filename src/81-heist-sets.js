@@ -146,7 +146,8 @@ try {
       A.tunnelBox = [x0 - 8, y0 - 6, z0 - 8, x1 + 8, y1 + 8, z1 + 8]; }
     const mob = () => crowdLook('worker', 'm', rng, 0x2c2c34, 0x26262c);
     const nav = IH.nav && IH.nav.pts.length > 1 ? { pts: IH.nav.pts.map((p) => p.slice()), links: IH.nav.links.map((l) => l.slice()) } : tl.length > 1 ? { pts: tl.map((p) => p.slice()), links: tl.slice(1).map((_, i) => [i, i + 1]) } : null;
-    const tzn = HS.zones.tunnel = S.define('tunnel', { box: A.tunnelBox, mode: 'fight', voice: 'm1', reflexS: 1.8, radius: 80, nav });
+    // alarm up: two hunt the crew through the maze, the rest hold the tube past its way out (then its way in) and wait
+    const tzn = HS.zones.tunnel = S.define('tunnel', { box: A.tunnelBox, mode: 'fight', voice: 'm1', reflexS: 1.8, radius: 80, nav, holds: IH.holds, hunters: 2 });
     // every Moretti man walks a beat (the tube legs, three through the stash maze, the depot, the dock): none stands still
     const routes = IH.guardRoutes && IH.guardRoutes.length ? IH.guardRoutes : [[P3(A.cache, 0), [A.cache.x + 4, A.cache.y, A.cache.z]]];
     routes.slice(0, 9).forEach((r, i) => { if (r.length < 2) r = [r[0], [r[0][0] + 3, r[0][1], r[0][2]]]; const p = walker('tunnel' + i, 'Moretti', r, { speed: 0.82 + (i % 3) * 0.09, mode: 'pingpong', dwell: [{ i: 0, t: 3 + (i % 3) * 1.5 }, { i: r.length - 1, t: 4 + (i % 2) }] }, mob(i)); if (p) S.guard('tunnel', { path: p, voice: i % 2 ? 'm2' : 'm1', name: 'Moretti', range: 14 }); });

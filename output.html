@@ -4259,7 +4259,10 @@ try {
       else if ((this.dragT -= dt) < 0) { this.orbit *= Math.exp(-dt * 1.8); this.orbitP *= Math.exp(-dt * 1.8); }
       if (AF.player && AF.player.mesh) AF.player.mesh.visible = AF.player.visible && !fp;
       AF.shadowFocus.set(x, y, z); AF.shadowRadius = this.radius;
+      // aiming: the look stays put in the world while the vehicle turns under it (a target behind stays behind)
       if (fp) {
+        if (aim && this.yaw0 != null) this.orbit = AF.angDiff(0, this.orbit - AF.angDiff(this.yaw0, yaw));
+        this.yaw0 = yaw;
         const s = Math.sin(yaw), c = Math.cos(yaw), e = this.eye;
         cam.position.set(x + c * e[0] + s * e[2], y + e[1] + Math.sin(pitch) * e[2], z - s * e[0] + c * e[2]);
         const a = yaw + this.orbit, p = -this.orbitP * 0.8 - pitch;
@@ -4270,7 +4273,10 @@ try {
       }
       const first = !this.init;
       if (first) { this.cyaw = yaw; this.cy = y; this.cd = this.dist; }
+      const cy0 = this.cyaw;
       this.cyaw += AF.angDiff(this.cyaw, yaw) * (1 - Math.exp(-dt * 4.5));
+      if (aim) this.orbit = AF.angDiff(0, this.orbit - (this.cyaw - cy0));
+      this.yaw0 = null;
       this.cy += (y - this.cy) * (1 - Math.exp(-dt * 6));
       const a = this.cyaw + this.orbit, camP = 0.2 + this.orbitP + this.dist * 0.004, cp = Math.cos(camP), sp = Math.sin(camP);
       // aiming: pivot over the vehicle (not ahead of it) and a little right of the line of sight, so the rider doesn't hide the crosshair
@@ -4556,7 +4562,7 @@ AF.PLAN = (() => {
       // chambers: [point index, half-width, height, swell length (m, default 6), flat floor]; hw / h = the plain tube. The second is the
       // Moretti stash hall: a wide flat cavern that 44-island fills with a maze of crate stacks and rock walls around the arms cache.
       tunnel: { pts: [[26, 3086], [18, 3092], [12, 3102], [16, 3114], [30, 3118], [44, 3112], [58, 3114], [68, 3124], [66, 3138], [74, 3150], [86, 3148], [90, 3138], [94, 3146], [103, 3150]],
-        hw: 1.8, h: 3.5, exitY: 1, chambers: [[3, 4.6, 5.5], [6, 11.5, 7, 11, 1], [11, 5.2, 5.5]] },
+        hw: 1.8, h: 3.5, exitY: 1, chambers: [[3, 4.6, 5.5], [6, 13, 7, 14, 1], [11, 5.2, 5.5]] },
       // Moretti's cove: a cliff-ringed basin on the east coast, a dog-leg channel out to sea, the cave ledge + a wooden dock
       cove: { x: 120, z: 3150, r: 16, rim: 11, channel: [[136, 3150], [146, 3142], [168, 3136]], channelHW: 6,
         ledge: { x0: 102, x1: 106, z0: 3145, z1: 3155, y: 1 }, dock: { x0: 105.5, x1: 116, z: 3150, w: 2.5, y: 1.5 } },
@@ -21607,7 +21613,7 @@ AF.onBuild('island-tunnel',496.42,()=>{
  const cellOf=(x,z)=>{const i=Math.floor((x-x0)*2),k=Math.floor((z-z0)*2);return i<0||k<0||i>=NI||k>=NK?-1:i*NK+k;};
  // lanterns: every 12 m, alternate walls, an emissive block 2 m up the first wall cell, each with a pooled light
  const lights=[],sMaze=T.chambers[1]?T.chambers[1].s:-1e9;
- for(let s=5,side=1;s<T.L-2;s+=12,side=-side){if(Math.abs(s-sMaze)<15)continue;const c=along(s);for(let d=c.hw-0.75;d<c.hw+2;d+=0.25){const x=c.x-c.dz*side*d,z=c.z+c.dx*side*d,n=cellOf(x,z);if(n>=0&&kind[n]===1){lamp.set(n,fl[n]+2);lights.push([c.x-c.dz*side*(c.hw-0.6),c.y+2.3,c.z+c.dx*side*(c.hw-0.6)]);break;}}}
+ for(let s=5,side=1;s<T.L-2;s+=12,side=-side){if(Math.abs(s-sMaze)<18)continue;const c=along(s);for(let d=c.hw-0.75;d<c.hw+2;d+=0.25){const x=c.x-c.dz*side*d,z=c.z+c.dx*side*d,n=cellOf(x,z);if(n>=0&&kind[n]===1){lamp.set(n,fl[n]+2);lights.push([c.x-c.dz*side*(c.hw-0.6),c.y+2.3,c.z+c.dx*side*(c.hw-0.6)]);break;}}}
  for(const l of lights){AF.addLight({x:l[0],y:l[1],z:l[2],color:0xffb060,intensity:1.6,range:12,kind:'street',night:false});TUN.lights++;}
  // the shell, one model per 32 m outland tile (the quadtree's level-0 grid)
  const RX=-1484,RZ=-1708;
@@ -21652,7 +21658,7 @@ AF.onBuild('island-tunnel',496.42,()=>{
  const netG=geometry('t-net',14,10,1,m=>{for(let x=0;x<14;x++)for(let y=0;y<10;y++)if((x+y)%2===0||y===9)m.set(x,y,0,rope);},0.25);
  const pole=geometry('t-lamp-pole',3,18,3,m=>{m.box(1,0,1,2,15,2,dark);m.box(0,15,0,3,17,3,iron);m.box(1,15,1,2,17,2,lampC);},1/8);
  const cart=geometry('t-mine-track',32,8,14,m=>{for(let x=0;x<32;x+=6)m.box(x,0,0,x+2,1,14,wood);for(const z of [3,10])m.box(0,1,z,32,2,z+1,iron);m.box(8,2,1,24,3,13,iron);m.box(8,3,1,24,8,2,rust);m.box(8,3,12,24,8,13,rust);m.box(8,3,1,9,8,13,rust);m.box(23,3,1,24,8,13,rust);for(let x=10;x<22;x++)for(let z=2;z<12;z++)if(AF.hash2(x,z)<0.6)m.set(x,4+((x*z)%3),z,wallC[1]);},1/8);
- const table=geometry('t-cache-table',14,4,8,m=>{m.box(0,3,0,14,4,8,wood);for(const x of [0,13])for(const z of [0,7])m.box(x,0,z,x+1,3,z+1,wood);},0.25);
+ const table=geometry('t-cache-table',12,4,6,m=>{m.box(0,3,0,12,4,6,wood);for(const x of [0,11])for(const z of [0,5])m.box(x,0,z,x+1,3,z+1,wood);},0.25);
  const cacheBox=geometry('t-cache-crate',20,10,12,m=>{m.box(0,0,0,20,10,12,olive);for(const x of [0,19])m.box(x,0,0,x+1,10,12,dark);m.box(0,9,0,20,10,12,dark);for(let x=3;x<17;x+=4)m.box(x,6,0,x+2,7,1,white);m.box(8,3,0,12,6,1,dark);m.box(9,3,0,11,5,0,gold);m.set(9,4,0,gold);m.set(10,4,0,gold);m.box(9,1,0,11,3,1,gold);},1/8);
  const place=(geo,x,z,rot=0,collide=true)=>{O.tunnelAt(x,z);return O.addProp(geo,x,ti.floor,z,rot,{tag:'island:tunnel',collide});};
  const chamber=j=>{const c=T.chambers[j],p=along(c.s),nx=-p.dz,nz=p.dx;return{...p,nx,nz,s:c.s,r:c.hw};};
@@ -21670,14 +21676,14 @@ AF.onBuild('island-tunnel',496.42,()=>{
  const trackRot=Math.abs(C.dx)>Math.abs(C.dz)?0:1,tp=put(C,cart,2.05,0.95,trackRot,false);
  if(tp)AF.addCollider(tp[0]-(trackRot?0.95:2.05),C.y,tp[1]-(trackRot?2.05:0.95),tp[0]+(trackRot?0.95:2.05),C.y+1,tp[1]+(trackRot?2.05:0.95),'island:tunnel');
  if(!put(C,netG,1.75,0.2,0,false))put(C,netG,1.75,0.2,1,false);put(C,crate,1,0.75);put(C,barrel,0.5,0.5);put(C,crateS,0.65,0.65);put(C,pole,0.25,0.25,0,false);
- // ---- the Moretti stash hall (chamber B, a wide flat cavern): a maze of crate stacks and rock walls on a 3 m grid round the arms cache.
+ // ---- the Moretti stash hall (chamber B, a wide flat cavern): a maze of crate stacks and rock walls on a 4 m grid round the arms cache.
  // The rest of the cavern is filled with rock, so the only way through is the maze (in from the mouth side, out towards the sea cave).
  // Walls stand 2.75 m: nobody sees or jumps over them. Two outland props (walls at 1/4 m, the rock fill at 1/2 m: merged into the tile
  // meshes, no draws of their own), colliders merged per run. 81-heist-sets walks the guards through it on the maze graph (S.heist.nav).
  const MZ=(()=>{
-  const CS=3,NG=8,half=CS*NG/2,sIn=B.s-14,sOut=B.s+14,gx0=Math.round((B.x-half)*2)/2,gz0=Math.round((B.z-half)*2)/2,rng=AF.rng(7311);
+  const CS=4,NG=7,half=CS*NG/2,sIn=B.s-17,sOut=B.s+17,gx0=Math.round((B.x-half)*2)/2,gz0=Math.round((B.z-half)*2)/2,rng=AF.rng(7311),m=CS/2-0.1;
   const id=(i,k)=>i*NG+k,cc=n=>[gx0+(((n/NG)|0)+0.5)*CS,gz0+(n%NG+0.5)*CS];
-  const okCell=n=>{const [x,z]=cc(n);for(const [ox,oz] of [[0,0],[-1.4,-1.4],[1.4,-1.4],[-1.4,1.4],[1.4,1.4],[0,-1.4],[0,1.4],[-1.4,0],[1.4,0]])if(O.tunnelAt(x+ox,z+oz)!==2||ti.end||ti.d>ti.hw-0.5||ti.s<sIn+1.5||ti.s>sOut-1.5)return false;return true;};
+  const okCell=n=>{const [x,z]=cc(n);for(const [ox,oz] of [[0,0],[-m,-m],[m,-m],[-m,m],[m,m],[0,-m],[0,m],[-m,0],[m,0]])if(O.tunnelAt(x+ox,z+oz)!==2||ti.end||ti.d>ti.hw-0.5||ti.s<sIn+1.5||ti.s>sOut-1.5)return false;return true;};
   const on=new Uint8Array(NG*NG);for(let n=0;n<NG*NG;n++)on[n]=okCell(n)?1:0;
   const nb=n=>{const i=(n/NG)|0,k=n%NG,o=[];if(i>0&&on[id(i-1,k)])o.push(id(i-1,k));if(i<NG-1&&on[id(i+1,k)])o.push(id(i+1,k));if(k>0&&on[id(i,k-1)])o.push(id(i,k-1));if(k<NG-1&&on[id(i,k+1)])o.push(id(i,k+1));return o;};
   // keep the largest 4-connected group of cells
@@ -21732,9 +21738,11 @@ AF.onBuild('island-tunnel',496.42,()=>{
    if((i===0||!on[id(i-1,k)])&&!(n===MZ.entry&&dIn==='W'||n===MZ.exit&&dOut==='W'))walls.push([gx0+i*CS,gz0+k*CS,0,n]);
    if((k===0||!on[id(i,k-1)])&&!(n===MZ.entry&&dIn==='N'||n===MZ.exit&&dOut==='N'))walls.push([gx0+i*CS,gz0+k*CS,1,n]);}
   let lo=Infinity,hi=-Infinity;for(const n of MZ.cells){const [x,z]=MZ.cc(n);for(const [ox,oz] of [[-1.5,-1.5],[1.5,1.5],[1.5,-1.5],[-1.5,1.5]]){const f=mzFloor(x+ox,z+oz);lo=Math.min(lo,f);hi=Math.max(hi,f);}}
-  const NX=NG*CS*WV+4,NZ=NX,model=new AF.Model(NX,Math.round((hi-lo)*WV)+WH+2,NZ),ox0=gx0-0.5/WV*2,oz0=gz0-0.5/WV*2;
+  // the model starts two voxels west / north of the grid (the corner posts reach 0.5 m out); every voxel is floor()ed from its centre,
+  // so a wall spans exactly its collider (edge ± 0.25 m) and never shares a face with the rock fill behind the rim
+  const NX=NG*CS*WV+4,NZ=NX,model=new AF.Model(NX,Math.round((hi-lo)*WV)+WH+2,NZ),ox0=gx0-2/WV,oz0=gz0-2/WV;
   const wood2=AF.col(0x8a6a44,{pat:'plank',jitter:0.35,edge:0.2}),band=dark,ammo=olive,stencilC=AF.col(0xe8e0c0,{jitter:0.1,edge:0});
-  const put1=(x,z,h,style,u)=>{const mi=Math.round((x-ox0)*WV),mk=Math.round((z-oz0)*WV),f=Math.round((mzFloor(x,z)-lo)*WV);if(mi<0||mk<0||mi>=NX||mk>=NZ)return;
+  const put1=(x,z,h,style,u)=>{const mi=Math.floor((x-ox0)*WV),mk=Math.floor((z-oz0)*WV),f=Math.round((mzFloor(x,z)-lo)*WV);if(mi<0||mk<0||mi>=NX||mk>=NZ)return;
    for(let y=0;y<h;y++){let c;if(style===0)c=y===0&&AF.hash2(mi,mk)<0.4?mossC:wallC[(AF.hash2(mi*3+y,mk*5-y)*4)|0];
     else{const b=y%4===3||u%4===0;c=b?band:style===1?wood2:ammo;if(style===2&&!b&&y%4===1&&u%4===2)c=stencilC;}
     model.set(mi,f+y,mk,c);}};
@@ -21752,16 +21760,16 @@ AF.onBuild('island-tunnel',496.42,()=>{
  // the arms cache: a big padlocked crate on a table in the maze's farthest dead end, facing its way in; the armoury racks one cell back
  const [cacheX,cacheZ]=MZ.cc(MZ.cache),cacheY=mzFloor(cacheX,cacheZ),cachePath=MZ.path(MZ.entry,MZ.cache),cprev=cachePath.length>1?cachePath[cachePath.length-2]:MZ.entry;
  const [px0,pz0]=MZ.cc(cprev),cfx=Math.sign(Math.round(px0-cacheX)),cfz=Math.sign(Math.round(pz0-cacheZ)),cf={fx:cfx,fz:cfz,rot:Math.abs(cfz)>=Math.abs(cfx)?(cfz<0?0:2):(cfx<0?1:3)};
- const cacheYaw=Math.atan2(cf.fx,cf.fz);
- O.addProp(table,cacheX-cf.fx*0.5,cacheY,cacheZ-cf.fz*0.5,cf.rot,{tag:'island:tunnel'});O.addProp(cacheBox,cacheX-cf.fx*0.5,cacheY+1,cacheZ-cf.fz*0.5,cf.rot,{tag:'island:tunnel-cache'});
+ const cacheYaw=Math.atan2(cf.fx,cf.fz),cb=-0.9;   // table + crate pushed to the back of the dead end (0.1 m off its wall)
+ O.addProp(table,cacheX+cf.fx*cb,cacheY,cacheZ+cf.fz*cb,cf.rot,{tag:'island:tunnel'});O.addProp(cacheBox,cacheX+cf.fx*cb,cacheY+1,cacheZ+cf.fz*cb,cf.rot,{tag:'island:tunnel-cache'});
  const rack=geometry('t-gun-rack',12,15,4,m=>{m.box(0,0,0,12,1,4,wood);m.box(0,0,0,1,15,4,wood);m.box(11,0,0,12,15,4,wood);m.box(0,14,0,12,15,4,wood);m.box(0,7,0,12,8,4,dark);for(let x=2;x<11;x+=3){m.box(x,1,1,x+1,13,2,dark);m.box(x,9,1,x+2,11,2,iron);m.box(x,3,2,x+1,5,3,wood);}},1/8);
  const racks=[];{const [rx,rz]=MZ.cc(cprev),i=Math.floor((rx-MZ.gx0)/MZ.CS),k=Math.floor((rz-MZ.gz0)/MZ.CS);
   for(const [dx,dz,rot] of [[1,0,3],[-1,0,1],[0,1,2],[0,-1,0]]){if(racks.length>=2)break;
    // against a closed side of the armoury cell (no open neighbour that way)
    const ni=i+dx,nk=k+dz,nn=ni>=0&&nk>=0&&ni<MZ.NG&&nk<MZ.NG&&MZ.on[MZ.id(ni,nk)]?MZ.id(ni,nk):-1;
-   if(nn>=0&&MZ.isOpen(cprev,nn))continue;const x=rx+dx*0.95,z=rz+dz*0.95;O.addProp(rack,x,mzFloor(x,z),z,rot,{tag:'island:gun-rack'});racks.push({x:+x.toFixed(2),y:mzFloor(x,z),z:+z.toFixed(2),yaw:Math.atan2(-dx,-dz)});}}
- for(const n of [MZ.entry,MZ.cache,MZ.far]){const [x,z]=MZ.cc(n);AF.addLight({x,y:mzFloor(x,z)+3.2,z,color:0xffb060,intensity:1.5,range:10,kind:'street',night:false});TUN.lights++;}
- place(pole,cacheX+(cf.fx+cf.fz)*0.8,cacheZ+(cf.fz+cf.fx)*0.8,0,false);
+   if(nn>=0&&MZ.isOpen(cprev,nn))continue;const x=rx+dx*(MZ.CS/2-0.55),z=rz+dz*(MZ.CS/2-0.55);O.addProp(rack,x,mzFloor(x,z),z,rot,{tag:'island:gun-rack'});racks.push({x:+x.toFixed(2),y:mzFloor(x,z),z:+z.toFixed(2),yaw:Math.atan2(-dx,-dz)});}}
+ for(const n of [MZ.entry,MZ.cache,MZ.far,MZ.exit]){const [x,z]=MZ.cc(n);AF.addLight({x,y:mzFloor(x,z)+3.2,z,color:0xffb060,intensity:1.5,range:11,kind:'street',night:false});TUN.lights++;}
+ place(pole,cacheX+cf.fx*1.3-cf.fz*1.45,cacheZ+cf.fz*1.3+cf.fx*1.45,0,false);
  for(const ch of [A,C]){AF.addLight({x:ch.x,y:ch.y+3,z:ch.z,color:0xffb868,intensity:1.4,range:11,kind:'street',night:false});TUN.lights++;}
  // the cleft: two boulders screen the mouth from the hillside (the way in weaves between them)
  const boulder=geometry('t-boulder',9,6,8,m=>{m.sphere(4.5,1.5,4,4.4,wallC[0],(x,y,z)=>y<6?wallC[(AF.hash2(x*3+y,z)*4)|0]:0);});
@@ -21788,8 +21796,10 @@ AF.onBuild('island-tunnel',496.42,()=>{
  const H=S.heist={
   tunnelEntry:{x:+(mx0+out[0]*2.5).toFixed(2),y:AF.W.groundY(mx0+out[0]*2.5,mz0+out[1]*2.5),z:+(mz0+out[1]*2.5).toFixed(2),yaw:Math.atan2(-out[0],-out[1])},
   tunnel:walk,length:T.L,nav,
-  cache:{x:+(cacheX-cf.fx*0.5).toFixed(2),y:cacheY+1,z:+(cacheZ-cf.fz*0.5).toFixed(2),yaw:cacheYaw},
+  cache:{x:+(cacheX+cf.fx*cb).toFixed(2),y:cacheY+1,z:+(cacheZ+cf.fz*cb).toFixed(2),yaw:cacheYaw},
   cacheStand:{x:+(cacheX+cf.fx*0.8).toFixed(2),y:cacheY,z:+(cacheZ+cf.fz*0.8).toFixed(2),yaw:Math.atan2(-cf.fx,-cf.fz)},
+  // where the Moretti men hold once the alarm is up (80-stealth zone.holds): the tube past the way out first, then the way in
+  holds:[2,4,6,-2,-4].flatMap(ds=>[-0.9,0.9].map(o=>{const p=along(ds>0?MZ.sOut+ds:MZ.sIn+ds),x=p.x-p.dz*o,z=p.z+p.dx*o;O.tunnelAt(x,z);return[+x.toFixed(2),ti.floor,+z.toFixed(2)];})),
   racks,maze:{cells:MZ.cells.length,walls:MZ.walls,entry:cellP(MZ.entry),exit:cellP(MZ.exit),cache:cellP(MZ.cache),far:cellP(MZ.far)},
   // the Moretti reinforcements pour in from both ends of the tube
   waveSpawns:[line(MZ.sIn-9,MZ.sIn-9)[0],line(MZ.sIn-5,MZ.sIn-5)[0],post[Math.min(post.length-1,3)],post[Math.min(post.length-1,5)]],
@@ -29800,10 +29810,13 @@ try {
   // further out is swung back toward the middle of the map
   const WB = AF.PLAN.world.bounds, SKY = 1500, WC = { x: (WB.x0 + WB.x1) / 2, z: (WB.z0 + WB.z1) / 2 };
   const outside = (pl) => pl.x < WB.x0 - SKY || pl.x > WB.x1 + SKY || pl.z < WB.z0 - SKY || pl.z > WB.z1 + SKY;
+  // a crash kills the pilot where it happened (a heist fails on the death); the ground crew tows the wreck back to its stand
   const crash = (pl, why) => {
-    AF.emit('toast', why + ' The ground crew tows the ' + pl.name + ' back to the apron.');
+    const x = pl.x, z = pl.z, yaw = pl.yaw, y = Math.max(AF.W.groundY(x, z), -0.6);
+    AF.emit('toast', why + ' The ' + pl.name + ' is towed back to the apron.');
     PL.reset(pl);
-    AF.setMode('walk', { x: pl.x + Math.cos(pl.yaw) * 4, z: pl.z - Math.sin(pl.yaw) * 4, yaw: pl.yaw + PI / 2 });
+    AF.setMode('walk', { x, y, z, yaw: yaw + PI / 2, snap: true });
+    if (AF.health && AF.health.kill) AF.health.kill('crash');
   };
   PL.reset = (pl) => { pl.x = pl.home.x; pl.z = pl.home.z; pl.yaw = pl.home.yaw; pl.pitch = pl.roll = pl.gam = pl.pr = pl.rr = pl.v = pl.throttle = 0; pl.engine = false; pl.onGround = true; pl.y = AF.W.groundY(pl.x, pl.z); place(pl); };
   AF.modes.fly = {
@@ -39981,7 +39994,7 @@ try {
 // ===== 76-game: the gameplay core shared by 77-combat + 78-jobs  (OWNER: game) =====
 // AF.G       every tuning number of the gameplay layer (economy, health, damage, wanted, forget policy) — balance here only
 // AF.save    the ONLY hard-persisted gameplay state: money, guns + ammo, outfits owned, a look per friend (localStorage)
-// AF.money   add(n) / spend(n, what) -> bool          AF.health  hurt(n, src) / heal(n); 0 hp -> 'dead' mode -> wake at home
+// AF.money   add(n) / spend(n, what) -> bool          AF.health  hurt(n, src) / heal(n) / kill(src); 0 hp -> 'dead' mode -> wake at home
 // AF.shop    open({ title, sub, tabs?, items(tab) -> [{ name, desc, price, tag, sw, off, act() }] }) — every counter + wardrobe
 // AF.fx      pooled particles, 2 draws (additive glow + dithered opaque smoke), nothing per frame while empty:
 //            burst(kind, x, y, z, n, o) kinds flash|fire|spark|smoke|steam|dust|hit|glow, line(x0..z1) for tracers
@@ -40121,6 +40134,8 @@ try {
     if (H.v <= 0) die(src);
   };
   H.heal = (n) => { H.v = Math.min(H.max, H.v + n); };
+  // certain death (a plane flown into the ground or the sea), whatever the mode
+  H.kill = (src) => { if (H.dead || !AF.ready) return; H.v = 0; H.last = AF.clock.t; HUD.hurt(H.max); AF.emit('hurt', H.max, src); die(src); };
   AF.on('land', (v) => { if (v > G.fallSafe) H.hurt((v - G.fallSafe) * G.fallK, 'fall'); });
   const DEAD = { t: 0, cam: new THREE.Vector3(), look: new THREE.Vector3() };
   const die = (src) => {
@@ -42531,9 +42546,12 @@ try {
     p.mesh.updateMatrixWorld(true);
     muzzle(MZ);
     let ox, oy, oz, t0 = 0;
-    if (AF.PL.aim) {   // through the crosshair: from the camera, starting level with the player
+    const fp = AF.view.fp();
+    if (AF.PL.aim || fp) {   // through the crosshair: from the camera, starting level with the player
       cam.getWorldDirection(DIR); ox = cam.position.x; oy = cam.position.y; oz = cam.position.z;
       t0 = Math.max(0, (p.x - ox) * DIR.x + (p.y + 1.4 - oy) * DIR.y + (p.z - oz) * DIR.z);
+      // first person: the (hidden) gun hand is behind the lens; tracers and the flash leave from just below-right of the view
+      if (fp) { const h = Math.hypot(DIR.x, DIR.z) || 1; MZ.set(ox + DIR.x * 0.55 - DIR.z / h * 0.14, oy + DIR.y * 0.55 - 0.12, oz + DIR.z * 0.55 + DIR.x / h * 0.14); }
     } else {
       const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw), w = autoTarget(p.x, p.z, fx, fz, W.range);
       ox = MZ.x; oy = MZ.y; oz = MZ.z;
@@ -42581,7 +42599,7 @@ try {
   // ---------------------------------------------------------------- drive-by: shooting from a vehicle seat (driver or passenger)
   // Seated in a car / bike / bus (drive), on a jet ski (jetski), riding along in another player's vehicle (passenger, not a plane) or on
   // the liner's launch (tender), a drawn gun fires like on foot: right mouse / Z aims through the crosshair (the chase camera pulls in,
-  // 04-vehicle Vehicle.aim), click / Q fires (hip fire = the camera's heading with the 25 degree aim assist). Passengers aim all round,
+  // 04-vehicle Vehicle.aim), click / Q fires (hip fire = the camera's heading with the 25 degree aim assist).   Passengers and jet-ski riders aim all round,
   // a driver only to the front and the sides (VF.arc) and keeps steering. Same rounds, spread, tracers, hits, ammo, R reload, 'gunshot'
   // events (GS.veh = the vehicle) and co-op forwarding as on foot; the shooter's own vehicle and crewmates aboard are never hit.
   // AF.combat.vfire: can (seated where shooting is allowed), on (can + a gun drawn), aim, firing (a shot in the last 0.6 s), arc,
@@ -42598,7 +42616,7 @@ try {
   const seatSpread = (W) => {
     const v = VF.veh, sp = v ? Math.abs(v.v || 0) : 0;
     let k = VF.aim ? G.aimSpreadK : 1.3;
-    k *= 1 + 0.5 * Math.min(1, sp / 20); if (v && v.air > 0) k *= G.airSpreadK;
+    k *= 1 + 0.25 * Math.min(1, sp / 20); if (v && v.air > 0) k *= G.airSpreadK;
     return W.spread * k + CB.bloom;
   };
   // the seated avatar turns its chest half way to the aim and points the gun arm along it (after 70-player's seat pose, tick 160)
@@ -43147,7 +43165,7 @@ try {
     if (CB.kick > 0 && since > 0.06) { const r = CB.kick * (1 - Math.exp(-dt * (W ? W.rec : 6))); CB.kick -= r; if (CB.kick < 1e-4) CB.kick = 0; if (walk) { const WK = AF.PL.walk; WK.camPitch = AF.clamp(WK.camPitch + r, -0.75, 1.25); } }
     if (CB.bloom > 0 && since > 0.08) CB.bloom = Math.max(0, CB.bloom - dt * (W ? W.bloomMax * 2.5 : 0.2));
     hudPaint(dt);
-    crossPaint(((walk && !CB.gallery) || (seated && VF.arc)) && !!AF.PL.aim && !WH.open, W ? (seated ? seatSpread(W) : spreadNow(W)) : 0.006);
+    crossPaint(((walk && !CB.gallery) || (seated && VF.arc)) && (!!AF.PL.aim || (walk && !!g && AF.view.fp())) && !WH.open, W ? (seated ? seatSpread(W) : spreadNow(W)) : 0.006);
     if (hmT > 0 && (hmT -= dt) <= 0) hm.className = '';
     if (CB.swing > 0) { CB.swing -= dt; if (CB.hitAt > 0 && CB.swingDur - CB.swing >= CB.hitAt) { CB.hitAt = -1; resolveMelee(); } }
     if (walk) { overlay(dt, g); bodyPush(dt); }
@@ -43170,9 +43188,9 @@ try {
     const S = AF.PL.seat, v = VF.veh, c = AF.camera.getWorldDirection(TMP);
     if (VF.aim) VF.dir.copy(c);
     else if (AF.clock.t - VF.t > 0.6) { const h = Math.hypot(c.x, c.z) || 1; VF.dir.set(c.x / h, 0, c.z / h); }
-    // a driver shoots to the front and the sides only (about 110 degrees either way of the heading)
+    // a driver shoots to the front and the sides only (about 110 degrees either way of the heading); a jet-ski rider all round
     const hy = v ? v.yaw : S.yaw;
-    VF.arc = !VF.driver || Math.abs(AF.angDiff(hy, Math.atan2(c.x, c.z))) < 1.95;
+    VF.arc = !VF.driver || AF.mode === 'jetski' || Math.abs(AF.angDiff(hy, Math.atan2(c.x, c.z))) < 1.95;
     if (VF.want && VF.arc && CB.cd <= 0 && CB.reloadT <= 0 && (GUNS[g].auto || VF.edge)) { fireSeat(g); firedT = 0; }
     VF.edge = false;
     VF.firing = AF.clock.t - VF.t < 0.6;
@@ -44164,7 +44182,7 @@ try {
 //         me (host 0, guests 1..3), role 'off' | 'host' | 'guest', peers: slot -> { slot, name, friend, look, rtt, x, z }, live()
 // Rate tiers: snapshots between players more than 250 m apart go at 1/2 rate, beyond 500 m at 1/4 (only the map dot needs them).
 {
-  const N = AF.net = { role: 'off', me: 0, code: '', status: '', peers: new Map(), build: "b0fb5c263911", rate: AF.MOBILE ? 15 : 20, ice: null,
+  const N = AF.net = { role: 'off', me: 0, code: '', status: '', peers: new Map(), build: "5e966094b805", rate: AF.MOBILE ? 15 : 20, ice: null,
     stats: { up: 0, down: 0, upK: 0, downK: 0 }, hello: null, welcomeExtra: null, mine: { x: 0, z: 0 } };
   const ALPH = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
   // the deployed signaling Worker; ?signal=wss://... or localStorage 'portSolace.signal' override it, localhost uses tools/serve.mjs
@@ -45765,9 +45783,12 @@ try {
     const a = g.a, c = a.ctl; if (!c || !g.route || g.ri >= g.route.length) { if (c) c.moving = false; return true; }
     const p = g.route[g.ri], dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz);
     if (d < 0.35) { g.ri++; return g.ri >= g.route.length; }
-    const st = Math.min(d, speed * dt), nx = c.x + dx / d * st, nz = c.z + dz / d * st;
-    const y0 = AF.surfaceBelow(nx, nz, c.y + 0.7, 2.5), y = Number.isFinite(y0) && Math.abs(y0 - c.y) < 1.2 ? y0 : c.y;
-    if (AF.boxBlocked(nx, Math.max(y, c.y) + 0.55, nz, 0.22, 1.2)) { g.ri++; return g.ri >= g.route.length; }   // corner-cut: skip ahead (0.5 m floor steps are walked, like the player's 0.55 step)
+    const st = Math.min(d, speed * dt); let nx = c.x + dx / d * st, nz = c.z + dz / d * st;
+    const y0 = AF.surfaceBelow(nx, nz, c.y + 0.7, 2.5), y = Number.isFinite(y0) && Math.abs(y0 - c.y) < 1.2 ? y0 : c.y, by = Math.max(y, c.y) + 0.55;
+    // blocked: slide along whichever axis is free (0.5 m floor steps are walked, like the player's 0.55 step), else skip ahead
+    if (AF.boxBlocked(nx, by, nz, 0.22, 1.2)) {
+      if (!AF.boxBlocked(nx, by, c.z, 0.22, 1.2)) nz = c.z; else if (!AF.boxBlocked(c.x, by, nz, 0.22, 1.2)) nx = c.x; else { g.ri++; return g.ri >= g.route.length; }
+    }
     c.x = nx; c.z = nz; c.y = y;
     c.moving = true; c.ph += st * 4.2;
     const want = Math.atan2(dx, dz); c.yaw += AF.angDiff(c.yaw, want) * (1 - Math.exp(-dt * 9));
@@ -45833,13 +45854,16 @@ try {
   // ---------------------------------------------------------------- hits from 77-combat (the heist routes CB.onWalkerHit here)
   // melee from behind on an unaware guard = a silent takedown; a headshot on an unaware guard = down; otherwise every hit (fists,
   // bats, bullets) wears his health down until he drops — nobody is unkillable, armed guards just take a lot more
+  // a one-hit takedown only ever comes from behind (a melee blow or a headshot on a guard who isn't fighting yet); from the front
+  // every guard soaks hits until his health runs out
+  const behindOf = (a, P) => { if (!P) return false; const dx = P.x - a.x, dz = P.z - a.z, d = Math.hypot(dx, dz) || 1, yaw = a.ctl ? a.ctl.yaw : a.yaw; return (dx * Math.sin(yaw) + dz * Math.cos(yaw)) / d < 0; };
   S.hit = (a, kind, fx, fz, info, from) => {
     let z = S.zone, g = z ? z.guards.find((q) => q.a === a) : null;
     if (!g) {
       for (const zz of S.zones.values()) { const q = zz.guards.find((r) => r.a === a); if (q) { g = q; z = zz; break; } }
       if (!g) return false;
       // a guard of a zone that isn't running (nobody simulates it): plain damage, applied where the shot landed
-      if (!g.down) { g.hp -= (info && info.dmg) || 20; if (g.hp <= 0 || kind === 'melee' && g.st !== 'combat') knockOut(g, fx, fz, kind); else AF.walkers.stagger(a, fx || 0, fz || 1); }
+      if (!g.down) { g.hp -= (info && info.dmg) || 20; if (g.hp <= 0 || kind === 'melee' && g.st !== 'combat' && behindOf(a, AF.player)) knockOut(g, fx, fz, kind); else AF.walkers.stagger(a, fx || 0, fz || 1); }
       return true;
     }
     if (g.down) return true;
@@ -45847,7 +45871,7 @@ try {
     applyHit(g, kind, fx, fz, info, from == null ? mySlot() : from);
     return true;
   };
-  const predictHit = (g, kind, info) => { if (g.st !== 'combat' && ((info && info.head) || (kind === 'melee' && (g.lv < 0.85 || g.st === 'alert')))) { g.down = true; if (g.path) AF.walkers.knock(g.a, 0, 1, 1.3, 1e6); } };
+  const predictHit = (g, kind, info) => { if (g.st !== 'combat' && (kind === 'melee' || (info && info.head)) && behindOf(g.a, AF.player)) { g.down = true; if (g.path) AF.walkers.knock(g.a, 0, 1, 1.3, 1e6); } };
   // somebody else on duty sees (x, y, z)? (a takedown, a body being dragged, a brawl with a passenger) -> that guard, else null
   const witness = S.witness = (z, x, y, zz, not) => {
     if (!z) return null;
@@ -45867,17 +45891,14 @@ try {
   };
   const applyHit = (g, kind, fx, fz, info, from) => {
     const a = g.a, P = from === mySlot() ? AF.player : AF.coop && AF.coop.players.get(from);
-    const unaware = g.st !== 'combat' && g.st !== 'alert' && g.lv < 0.85;
-    let behind = true;
-    if (P) { const dx = P.x - a.x, dz = P.z - a.z, d = Math.hypot(dx, dz) || 1, yaw = a.ctl ? a.ctl.yaw : a.yaw; behind = (dx * Math.sin(yaw) + dz * Math.cos(yaw)) / d < 0.25; }
-    const head = !!(info && info.head), dmg = (info && info.dmg) || 30, fighting = g.st === 'combat';
+    const behind = behindOf(a, P), head = !!(info && info.head), dmg = (info && info.dmg) || 30, fighting = g.st === 'combat';
     if (kind === 'melee') {
-      if (unaware || g.st === 'alert' || (behind && !fighting)) { knockOut(g, fx, fz, 'melee'); broadcastKO(g, fx, fz); seenViolence(g, from); return; }
+      if (behind && !fighting) { knockOut(g, fx, fz, 'melee'); broadcastKO(g, fx, fz); seenViolence(g, from); return; }
       g.hp -= dmg * 1.5;
       if (g.hp <= 0) { knockOut(g, fx, fz, 'melee'); broadcastKO(g, fx, fz); seenViolence(g, from); return; }
       AF.walkers.stagger(a, fx || 0, fz || 1); toAlert(g, from); seenViolence(g, from); return;
     }
-    g.hp -= head ? (fighting ? dmg * 5 : 1e4) : dmg;
+    g.hp -= head ? (behind && !fighting ? 1e4 : dmg * 2.5) : dmg;
     if (g.hp <= 0) { knockOut(g, fx, fz, head ? 'head' : 'shot'); broadcastKO(g, fx, fz); if (!(info && info.silenced)) S.noiseAt(a.x, a.y, a.z, 40, 'shot'); seenViolence(g, from); return; }
     AF.walkers.stagger(a, fx || 0, fz || 1);
     if (P) { const z = Z(g.z); z.lastSeen.x = P.x; z.lastSeen.y = P.y; z.lastSeen.z = P.z; z.lastSeen.t = AF.clock.t; }
@@ -46143,13 +46164,36 @@ try {
     for (const l of z.lights) if (l.off > 0 && (l.off -= dt) <= 0) { l.off = 0; setLamps(l, true); }
     for (const p of z.points) if (p.cd > 0) p.cd -= dt;
   };
+  // zones with holds (the stash maze): only the `hunters` nearest the crew's last sighting close in; the rest each take the nearest free
+  // hold point (re-dealt once a second) and wait there, firing at whoever comes into view
+  const FIGHT = [];
+  const dealRoles = (z) => {
+    const now = AF.clock.t; if (now - (z.roleT || -9) < 1) return; z.roleT = now;
+    const L = z.lastSeen, P = z.holds; FIGHT.length = 0;
+    for (const g of z.guards) { if (!g.down && g.st === 'combat' && g.a && g.a.ctl) { g.rd = Math.hypot(g.a.ctl.x - L.x, g.a.ctl.z - L.z); FIGHT.push(g); } else g.hold = -1; }
+    FIGHT.sort((a, b) => a.rd - b.rd);
+    const used = new Set();
+    FIGHT.forEach((g, k) => {
+      if (k < (z.hunters || 2)) { g.hold = -1; return; }
+      let best = g.hold >= 0 && !used.has(g.hold) ? g.hold : -1;
+      if (best < 0) { let bd = 1e9; const c = g.a.ctl; for (let i = 0; i < P.length; i++) { if (used.has(i)) continue; const d = Math.hypot(P[i][0] - c.x, P[i][2] - c.z); if (d < bd) { bd = d; best = i; } } }
+      if (best < 0) best = k % P.length;
+      if (best !== g.hold) g.route = null;
+      g.hold = best; used.add(best);
+    });
+  };
   const combat = (z, g, dt) => {
     const a = g.a, c = a.ctl; if (!c) return;
+    if (z.holds && z.holds.length) dealRoles(z);
     const q = PS[g.lastQ & 3], tx = g.see && q && q.on ? q.x : g.tgt.x, tz = g.see && q && q.on ? q.z : g.tgt.z, d = Math.hypot(tx - c.x, tz - c.z);
     if (g.see && d < 24) {
       c.moving = false; faceTo(g, tx, tz, dt, 7); a.aim = Math.min(1, (a.aim || 0) + dt * 4);
       if ((g.fireT -= dt) <= 0 && a.aim > 0.8 && g.armed) { g.fireT = 0.85 + AF.whash(g.i, AF.clock.frame) * 0.6; shoot(g, q, d); }
       g.route = null;
+    } else if (g.hold >= 0) {
+      const h = z.holds[g.hold];
+      if (Math.hypot(h[0] - c.x, h[2] - c.z) > 0.6) { if (!g.route || g.ri >= g.route.length) goTo(g, h[0], h[1], h[2]); walk(g, dt, 3.1); a.aim = Math.max(0.3, (a.aim || 0) - dt); }
+      else { c.moving = false; g.route = null; faceTo(g, tx, tz, dt, 3); a.aim = Math.min(1, (a.aim || 0) + dt * 2); }
     } else {
       a.aim = Math.max(0.3, (a.aim || 0) - dt);
       if (!g.route || g.ri >= g.route.length || (g.t > 1.5 && (g.t = 0, true))) goTo(g, tx, g.tgt.y, tz);
@@ -46813,6 +46857,7 @@ try {
     spotted: 'They\u2019ve seen you!',
     reflex: 'Take him down, now, before he raises the alarm!',
     maze: 'They\u2019ve stacked the hall into a maze of crates. Every man in there walks a beat. Watch the corners, and keep your head down.',
+    tough: 'And careful. These Moretti boys are built like doors. Face to face, they\u2019ll soak up a whole clip. But sneak up behind one, and a single blow puts him down.',
     siege: 'It was wired! Every Moretti on the island heard that. Grab the guns off the rack and hold them off until the cache is open!',
     siege2: 'More of them coming down the tunnel! Keep them off the locks!',
     chase: 'Moretti skis on your tail! Shoot from the saddle. Take every one of them down before you lead them to the Queen.',
@@ -47096,7 +47141,8 @@ try {
       A.tunnelBox = [x0 - 8, y0 - 6, z0 - 8, x1 + 8, y1 + 8, z1 + 8]; }
     const mob = () => crowdLook('worker', 'm', rng, 0x2c2c34, 0x26262c);
     const nav = IH.nav && IH.nav.pts.length > 1 ? { pts: IH.nav.pts.map((p) => p.slice()), links: IH.nav.links.map((l) => l.slice()) } : tl.length > 1 ? { pts: tl.map((p) => p.slice()), links: tl.slice(1).map((_, i) => [i, i + 1]) } : null;
-    const tzn = HS.zones.tunnel = S.define('tunnel', { box: A.tunnelBox, mode: 'fight', voice: 'm1', reflexS: 1.8, radius: 80, nav });
+    // alarm up: two hunt the crew through the maze, the rest hold the tube past its way out (then its way in) and wait
+    const tzn = HS.zones.tunnel = S.define('tunnel', { box: A.tunnelBox, mode: 'fight', voice: 'm1', reflexS: 1.8, radius: 80, nav, holds: IH.holds, hunters: 2 });
     // every Moretti man walks a beat (the tube legs, three through the stash maze, the depot, the dock): none stands still
     const routes = IH.guardRoutes && IH.guardRoutes.length ? IH.guardRoutes : [[P3(A.cache, 0), [A.cache.x + 4, A.cache.y, A.cache.z]]];
     routes.slice(0, 9).forEach((r, i) => { if (r.length < 2) r = [r[0], [r[0][0] + 3, r[0][1], r[0][2]]]; const p = walker('tunnel' + i, 'Moretti', r, { speed: 0.82 + (i % 3) * 0.09, mode: 'pingpong', dwell: [{ i: 0, t: 3 + (i % 3) * 1.5 }, { i: r.length - 1, t: 4 + (i % 2) }] }, mob(i)); if (p) S.guard('tunnel', { path: p, voice: i % 2 ? 'm2' : 'm1', name: 'Moretti', range: 14 }); });
@@ -47292,7 +47338,7 @@ try {
   H.radio = radio; H.speak = speak;
 
   // ---------------------------------------------------------------- places + checks
-  const SC = { x: 0, y: 0, z: 0 };
+  const SC = { x: 0, y: 0, z: 0 }, V3 = new THREE.Vector3();
   const isPlane = (v) => !!v && !!AF.planes && AF.planes.list.includes(v);
   const rideVeh = () => (AF.mode === 'passenger' && AF.coop && AF.coop.ride ? AF.coop.ride.veh : null);
   const flying = () => AF.mode === 'fly' || isPlane(rideVeh());
@@ -47414,11 +47460,11 @@ try {
     { id: 'gate', tag: 'Crew gate', line: 'Show your papers at the {Westgate crew gate}', mark: () => A.gate, enter: (r) => { scene('gate'); if (!r) radio('vera.ezra'); }, done: () => !!H.got.cleared, mu: 'mu_plan' },
     { id: 'plane', tag: 'Plane', line: 'Take a {plane} from the apron \u2014 one flies, the others ride along', mark: () => planeAt(), enter: () => { resetPlanes(); }, done: () => flying(), mu: 'mu_plan' },
     { id: 'fly', tag: 'Serena Isle', line: () => (RADAR.on ? 'Fly under the coast radar \u2014 hold the {green band} \u2014 to {Serena Isle}' : 'Fly 3 km south to {Serena Isle} and land on the airstrip'), mark: () => A.strip, enter: (r) => { if (!r) { radio('tower.t1'); radio('vera.plane'); } }, done: () => onIsland() && (AF.mode === 'walk' || landed()), mu: 'mu_island' },
-    { id: 'kit', cp: 2, act: 'Act II \u00b7 Serena Isle', tag: 'Kit', line: 'Meet {Kit Morrow} on the terrace of Hotel Serena', mark: () => A.kit, enter: (r) => { scene('kit'); if (!r) radio('vera.kit'); }, done: () => near(A.kit, 5, 4), mu: 'mu_island', time: 11 },
+    { id: 'kit', cp: 2, act: 'Act II \u00b7 Serena Isle', tag: 'Kit', line: 'Meet {Kit Morrow} on the terrace of Hotel Serena', mark: () => A.kit, enter: (r) => { scene('kit'); if (!r) radio('vera.kit'); }, done: () => near(A.kit, 5, 4), mu: 'mu_island', time: 23.4 },
     { id: 'kitcut', line: 'Kit Morrow', cut: () => cutKit(), enter: () => scene('kit'), mu: 'mu_island' },
     { id: 'tunnel', tag: 'Tunnel', line: 'Find the {smugglers\u2019 tunnel} on the volcano\u2019s flank', mark: () => A.tunnelEntry, enter: () => { scene('tunnel'); H.got.kitkey = true; }, done: () => near(A.tunnelEntry, 6, 6), mu: 'mu_tension' },
     { id: 'cache', cp: 3, tag: 'Cache', line: () => (H.got.cache ? 'The cache is open' : H.siege ? (H.crackOn && H.cracker !== mySlot() ? 'Hold them off while your crew cracks the {arms cache} \u2014 grab a loud gun off the {rack}' : 'Crack the {arms cache} \u2014 lock ' + Math.min(CRACK_N, H.crack + 1) + ' of ' + CRACK_N + (crewN() > 1 ? ', your crew covers you' : '')) : 'Sneak through the {stash maze} to the arms cache \u2014 crouch (C), stay out of sight'),
-      mark: () => A.cache, enter: (r) => { scene('tunnel'); if (!r) { radio('vera.tunnel'); radio('vera.maze'); } }, done: () => !!H.got.cache, mu: 'mu_tension' },
+      mark: () => A.cache, enter: (r) => { scene('tunnel'); if (!r) { radio('vera.tunnel'); radio('vera.maze'); radio('vera.tough'); } }, done: () => !!H.got.cache, mu: 'mu_tension' },
     { id: 'cave', tag: 'Sea cave', line: 'Slip out through the {sea cave}', mark: () => A.caveExit, enter: (r) => { scene('tunnel'); if (!r) radio('vera.gear'); }, done: () => near(A.caveExit, 7, 6) || near(A.cove, 10, 6), mu: 'mu_tension' },
     { id: 'ambush', tag: 'Jet skis', line: 'Moretti\u2019s men! Fight your way to {the jet skis}', mark: () => nearestSki(), enter: (r) => ambush(r), done: () => ambushOver(), mu: 'mu_action' },
     { id: 'chase', tag: 'Chasers', line: () => 'Moretti\u2019s men are after you on jet skis \u2014 ride and shoot (aim + fire from the saddle), take them all down' + (CH.list.length ? ' (' + chaseLeft() + ' left)' : ''), mark: () => chaseMark(),
@@ -47427,7 +47473,7 @@ try {
       enter: (r) => { const C = CB(); if (C) C.clearGoons(); if (!r) { radio('vera.ski'); radio('vera.ski2'); } }, done: () => onQueen() || near(A.pontoon, 8), mu: 'mu_island' },
     { id: 'uniforms', cp: 4, act: 'Act III \u00b7 The Queen', tag: 'Staff', line: () => uniformsLine(),
       mark: () => (myStingRole() ? null : !H.took.waiter ? A.pantry : crewN() > 1 && !H.took.dealer ? A.crewLounge : secMark()), enter: (r) => { scene('queen'); holster(); if (!r) { radio('vera.q1'); radio(crewN() > 1 ? 'vera.q2' : 'vera.qsolo'); if (crewN() > 2) radio('vera.q2b'); radio('vera.qsec'); } },
-      done: () => allUniformed(), mu: 'mu_casino', time: 19.6 },
+      done: () => allUniformed(), mu: 'mu_casino', time: 23.6 },
     { id: 'salon', tag: 'Salon', line: 'Take the {crew stairs} up to the high-roller salon', mark: () => A.salonDoor, enter: (r) => { scene('queen'); if (!r) radio('vera.q3'); }, done: () => near(A.salon, 7, 3), mu: 'mu_casino' },
     { id: 'sting', tag: 'Prescott', line: () => stingLine(), mark: () => stingMark(), enter: (r) => { scene('queen'); if (!r) { radio('vera.q4'); radio('vera.q5'); if (crewN() > 2) radio('vera.q4b'); } H.anger = 0; H.strikes = 0; H.tray = false; }, done: () => !!H.got.key, mu: 'mu_casino' },
     { id: 'silas', tag: 'Silas', line: 'See {Silas Crane} in his office behind the purser\u2019s cage', mark: () => A.silas, enter: (r) => { scene('queen'); if (!r) radio('vera.got'); if (LN() && LN().openStaff) LN().openStaff(true); }, done: () => near(A.silas, 3.6, 3), mu: 'mu_casino' },
@@ -47888,7 +47934,7 @@ try {
   const chaseStart = () => {   // host: they come round the headland, out beyond the cove's channel
     chaseClear(); CH.on = true; CH.t = 0;
     const CV = AF.PLAN.world.island.cove, ch = CV && CV.channel && CV.channel.length ? CV.channel[CV.channel.length - 1] : null;
-    const c = ch ? { x: ch[0], z: ch[1] } : A.cove, base = ch ? Math.atan2(ch[0] - CV.x, ch[1] - CV.z) : 0, n = Math.min(8, 2 + crewN()), p = me();
+    const c = ch ? { x: ch[0], z: ch[1] } : A.cove, base = ch ? Math.atan2(ch[0] - CV.x, ch[1] - CV.z) : 0, n = Math.min(8, 1 + 2 * crewN()), p = me();
     for (let k = 0; k < n; k++) {
       const e = chaseMake(k); if (!e) break;
       let x = c.x, z = c.z;
@@ -47963,9 +48009,17 @@ try {
           if (viaChannel(e, tx, tz, WP)) { want = Math.atan2(WP[0] - e.x, WP[1] - e.z); vt = 15; }
           if ((e.fireT -= dt) <= 0 && d < 46) {
             e.fireT = 0.9 + Math.random() * 0.9;
-            const hit = Math.random() < AF.clamp(0.36 - d / 130, 0.1, 0.32), slot = TG[bi];
-            chaseTracer(e, tx, TG[bi + 2] + 0.9, tz, hit); e.fired = slot + 1;
-            if (hit) { if (slot === mySlot()) { if (AF.health && !AF.health.dead) AF.health.hurt(5 + Math.round(Math.random() * 4), 'gun'); } else send({ op: 'chshot', d: 6 }, slot); }
+            // they fire forward-ish, need a clear line, and miss a lot more at a fast or unseen (off-screen) target
+            const slot = TG[bi], ty = TG[bi + 2] + 0.9, fwd = (dx * Math.sin(e.yaw) + dz * Math.cos(e.yaw)) / d;
+            if (fwd > -0.2 && AF.segClear(e.x, e.y + 1.35, e.z, tx, ty, tz)) {
+              const sp = Math.hypot(tx - (e.lx ?? tx), tz - (e.lz ?? tz)) / Math.max(1e-3, CH.t - (e.lt ?? CH.t - 1));
+              let pHit = AF.clamp(0.32 - d / 130 - sp / 70, 0.04, 0.3);
+              if (slot === mySlot()) { V3.set(e.x, e.y + 1, e.z).project(AF.camera); if (V3.z > 1 || Math.abs(V3.x) > 1 || Math.abs(V3.y) > 1) pHit *= 0.3; }
+              const hit = Math.random() < pHit;
+              chaseTracer(e, tx, ty, tz, hit); e.fired = slot + 1;
+              if (hit) { if (slot === mySlot()) { if (AF.health && !AF.health.dead) AF.health.hurt(5 + Math.round(Math.random() * 4), 'gun'); } else send({ op: 'chshot', d: 6 }, slot); }
+            }
+            e.lx = tx; e.lz = tz; e.lt = CH.t;
           }
         }
         // keep off the rocks: look ahead and swing to the side with water
@@ -48206,9 +48260,10 @@ try {
     add({ x: A.rail.x, y: A.rail.y + 1, z: A.rail.z, r: 1.7, label: 'Take a pilot uniform off the rail', can: () => walkOk() && is('uniform') && H.got.grille && !H.got.uniform && !mgDone('rail'), act: () => { sfx('cloth'); dress('pilot'); note('Pilot uniform on. Very dashing.', 'ok'); mgMark('rail', mySlot()); } });
     add({ x: A.ezra.x, y: A.ezra.y + 1, z: A.ezra.z, r: 2.4, label: 'Get your pilot papers from Ezra', prio: 2.4, can: () => walkOk() && is('forger') && !H.got.papers && !H.busy && !mgDone('papers'), act: ezraPapers });
     add({ x: A.gate.x, y: A.gate.y + 1, z: A.gate.z, r: 2.6, label: 'Show your papers at the crew gate', prio: 2.4, can: () => walkOk() && is('gate') && !H.got.cleared, act: showPapers });
-    // act II
-    add({ x: A.cache.x, y: A.cache.y + 1, z: A.cache.z, r: 2.2, label: 'Crack the arms cache', can: () => walkOk() && is('cache') && !H.got.cache && !H.busy, act: crackCache });
-    (A.racks || []).forEach((rk, i) => add({ x: rk.x, y: rk.y + 1, z: rk.z, r: 1.7, label: i % 2 ? 'Take a pump shotgun off the rack' : 'Take a Tommy gun off the rack', prio: 2.5, can: () => walkOk() && (is('cache') || is('cave')),
+    // act II (the cache and the racks only answer from their own side of the maze wall)
+    const sees = (x, y, z) => { const p = AF.player; return AF.segClear(p.x, p.y + 1.1, p.z, x, y, z); };
+    add({ x: A.cache.x, y: A.cache.y + 1, z: A.cache.z, r: 2.2, label: 'Crack the arms cache', can: () => walkOk() && is('cache') && !H.got.cache && !H.busy && sees(A.cacheStand.x, A.cacheStand.y + 1.1, A.cacheStand.z), act: crackCache });
+    (A.racks || []).forEach((rk, i) => add({ x: rk.x, y: rk.y + 1, z: rk.z, r: 1.7, label: i % 2 ? 'Take a pump shotgun off the rack' : 'Take a Tommy gun off the rack', prio: 2.5, can: () => walkOk() && (is('cache') || is('cave')) && sees(rk.x + Math.sin(rk.yaw) * 0.5, rk.y + 1.1, rk.z + Math.cos(rk.yaw) * 0.5),
       act: () => { const C = CB(); if (C && C.lend) { C.lend(i % 2 ? 'shotgun' : 'tommy', i % 2 ? 48 : 250); sfx('gun_reload'); note(i % 2 ? 'Pump shotgun \u2014 loud and close.' : 'Tommy gun \u2014 250 rounds. Loud.', 'ok'); } } }));
     // act III
     FOLLOW.push(follow(add({ x: 0, y: -999, z: 0, r: 1.8, label: 'Take the waiter\u2019s uniform', prio: 2.9, can: () => walkOk() && is('uniforms') && HS.waiterG && HS.waiterG.down && !H.took.waiter && !myStingRole(), act: () => { H.took.waiter = true; send({ op: 'took', k: 'waiter' }); dress('waiter'); sfx('cloth'); } }), () => HS.waiterG && HS.waiterG.a));
@@ -48299,7 +48354,8 @@ try {
 
   // ---------------------------------------------------------------- the flight south under the coast radar
   // Between Westgate and Serena Isle the pilot keeps the plane inside a height band that keeps drifting (the gauge on the right).
-  // Outside it the radar builds a lock; a full lock gets Westgate to call the police, and the landing waits until they're lost.
+  // Outside it the lock builds: 5 s outside in all (it bleeds off slowly inside the band) and Westgate has them — the job fails.
+  // The band opens round the plane's height and drifts onto its course over the first 12 s.
   const RD = document.createElement('div'); RD.id = 'heist-radar';
   RD.innerHTML = '<i></i><b></b><span></span><small>RADAR</small>';
   RD.style.cssText = 'position:fixed;right:max(24px,env(safe-area-inset-right));top:50%;width:26px;height:min(220px,38vh);transform:translateY(-50%);z-index:5;display:none;pointer-events:none;background:rgba(8,12,18,.6);border:1px solid rgba(255,255,255,.3);border-radius:3px;font:700 12px/1 system-ui,sans-serif;color:#fff;text-shadow:0 1px 2px #000';
@@ -48309,22 +48365,22 @@ try {
   rdAlt.style.cssText = 'position:absolute;right:34px;margin-top:-7px;white-space:nowrap';
   rdTag.style.cssText = 'position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%);font-size:9px;letter-spacing:.12em;opacity:.8';
   document.body.appendChild(RD);
-  const RADAR = { on: false, k: 0, t: 0, lo: 0, hi: 0, off: 0, ping: 0 }, RTOP = 100;
+  const RADAR = { on: false, k: 0, t: 0, b: 0, lo: 0, hi: 0, off: 0, ping: 0 }, RTOP = 100, RLOCK = 5;
   const radarTick = (dt) => {
     const pl = AF.mode === 'fly' && AF.planes ? AF.planes.cur : null;
-    const on = is('fly') && !!pl && !pl.onGround && !H.flag.radar && !H.failing && !MI.cut.on && !wanted() && dist(pl, A.plane) > 300 && dist(pl, A.strip) > 450;
+    const on = is('fly') && !!pl && !pl.onGround && !H.failing && !MI.cut.on && !wanted() && dist(pl, A.plane) > 300 && dist(pl, A.strip) > 450;
+    const alt = pl ? Math.max(0, pl.y - Math.max(0, AF.W.groundY(pl.x, pl.z))) : 0, band = (t) => 48 + 22 * Math.sin(t * 0.13) + 10 * Math.sin(t * 0.31 + 2);
     if (on !== RADAR.on) {
       RADAR.on = on; RD.style.display = on ? 'block' : 'none';
-      if (on && !H.flag.radarSaid) { H.flag.radarSaid = true; RADAR.k = RADAR.t = 0; note('Coast radar ahead \u2014 keep the plane inside the green band on the right. It keeps moving.', 'warn'); }
+      if (on && !H.flag.radarSaid) { H.flag.radarSaid = true; RADAR.k = RADAR.t = 0; RADAR.b = AF.clamp(alt, 24, 80) - band(0); note('Coast radar ahead \u2014 keep the plane inside the green band on the right. It keeps moving.', 'warn'); }
     }
     if (!on) return;
-    const t = RADAR.t += dt, c = AF.clamp(48 + 22 * Math.sin(t * 0.13) + 10 * Math.sin(t * 0.31 + 2), 24, 80);
+    const t = RADAR.t += dt, c = AF.clamp(band(t) + RADAR.b * Math.max(0, 1 - t / 12), 24, 80);
     RADAR.lo = c - 8; RADAR.hi = c + 8;
-    const alt = Math.max(0, pl.y - Math.max(0, AF.W.groundY(pl.x, pl.z)));
     RADAR.off = alt < RADAR.lo ? RADAR.lo - alt : alt > RADAR.hi ? alt - RADAR.hi : 0;
-    RADAR.k = AF.clamp(RADAR.k + (RADAR.off ? 0.08 + RADAR.off * 0.01 : -0.1) * dt, 0, 1);
+    RADAR.k = AF.clamp(RADAR.k + (RADAR.off ? 1 / RLOCK : -0.03) * dt, 0, 1);
     if (RADAR.off && (RADAR.ping -= dt) <= 0) { RADAR.ping = 1.1 - RADAR.k * 0.8; sfx('ui_click'); }
-    if (RADAR.k >= 1) { H.flag.radar = true; sfx('jg_spot'); const C = CB(); if (C) C.crime(80); note('Radar lock! Westgate called it in \u2014 lose the police before you land.', 'bad'); }
+    if (RADAR.k >= 1) { sfx('jg_spot'); fail('Radar lock \u2014 Westgate tracked the plane.'); return; }
     const Y = (v) => (100 - AF.clamp(v, 0, RTOP) / RTOP * 100).toFixed(1) + '%';
     rdBand.style.top = Y(RADAR.hi); rdBand.style.bottom = (AF.clamp(RADAR.lo, 0, RTOP) / RTOP * 100).toFixed(1) + '%';
     rdBand.style.background = RADAR.off ? 'rgba(255,90,74,.55)' : 'rgba(125,220,138,.6)';
@@ -48397,7 +48453,7 @@ try {
     N.on('left', () => { if (sheetOpen) AF.shop.refresh(); if (H.on && crewN() < NEED) { note('Your partner left the crew. You can still finish \u2014 every step has a way through alone.', 'warn'); if (H.roles.length && host()) { H.roles = ['solo']; send({ op: 'roles', r: H.roles }); } } });
     N.on('end', () => { if (sheetOpen) AF.shop.refresh(); if (H.on) { note('The crew split up. You\u2019re on your own now \u2014 finish the job, or call it off from the pause menu.', 'warn'); if (H.roles.length) H.roles = ['solo']; } });
   }
-  AF.on('died', () => { if (H.on && !H.failing) fail((AF.friends.current ? AF.friends.current.name : 'Someone') + ' was knocked out.'); });
+  AF.on('died', (src) => { if (H.on && !H.failing) fail(src === 'crash' ? 'The plane went down.' : (AF.friends.current ? AF.friends.current.name : 'Someone') + ' was knocked out.'); });
   AF.respawnAt = () => { if (!H.on) return null; const at = spotFor(CPS[H.cp].at()); return at ? { label: CPS[H.cp].label, x: at.x, y: at.y, z: at.z, yaw: at.yaw || 0 } : null; };
   if (AF.casino) AF.casino.can = () => !H.lifting && !H.dealing;
   // stealth events -> Vera on the radio. "Clean" only if it still is when she'd say it: no alarm, no reflex, nobody hunting the crew
@@ -48443,6 +48499,15 @@ try {
     MI.bar('heist-chase', is('chase') && CH.list.length ? { label: 'Moretti skis', value: chaseLeft() + ' left', hot: chaseLeft() > 0 } : null);
     MI.bar('heist-hold', is('sting') && (H.detHold > 0 || H.pitHold > 0) ? { label: H.detHold > 0 ? 'Detective distracted' : 'Pit boss distracted', value: Math.ceil(Math.max(H.detHold, H.pitHold)) + ' s', ok: true } : null);
   };
+  // first person inside the smugglers' tunnel and its maze (a chase camera fights the tight walls); the player's own setting is
+  // given back on the way out (never saved)
+  let caveV = -1;
+  const caveView = () => {
+    const p = AF.player, b = A.tunnelBox, O = AF.outland, V = AF.view;
+    const inside = H.on && AF.mode === 'walk' && !!b && !!p && p.x > b[0] && p.x < b[3] && p.z > b[2] && p.z < b[5] && O.tunnelAt(p.x, p.z) === 2 && p.y < O.tunnelInfo.ceil;
+    if (inside && caveV < 0) { caveV = V.i; if (V.i !== 0) { V.i = 0; note('First person in the tunnel \u2014 V changes the camera.'); } }
+    else if (!inside && caveV >= 0) { if (V.i === 0) V.i = caveV; caveV = -1; }
+  };
   let natT = 0, laserT = 0, drillNT = 0, warnT = 0, mgT = 0;
   AF.onTick('heist', 425, (dt, tw) => {
     voiceNow();
@@ -48450,7 +48515,7 @@ try {
     const mn = H.on ? '' : 'none'; if (MN.style.display !== mn) MN.style.display = mn;
     const tb = tabletOk() && crewN() < 2 ? '' : 'none'; if (TB.style.display !== tb) TB.style.display = tb;
     if (AF.quiet !== H.on) quiet(H.on);
-    radarTick(dt);
+    radarTick(dt); caveView();
     if (!H.on) { if (muCur) music(); return; }
     H.t += dt;
     const s = ST[H.i]; if (!s) return;

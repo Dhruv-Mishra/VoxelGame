@@ -103,7 +103,7 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Keys: Q / click attack, Z / right mouse aim, wheel / 1–5 / X weapon (hold X = weapon wheel; the weapon HUD's ▸ = next), R reload,
   C crouch (`AF.player.crouch/noise/eyeH`), V camera, J job, H horn (driving), F1 / ? controls sheet, P photo, M map, I bag.
   Drive-by: seated (drive, jetski, passenger, tender) the same aim / fire / switch / reload keys shoot from the seat (77 `fireSeat`,
-  same gunfire path; passengers aim all round, a driver front + sides; own vehicle + crewmates aboard never hit); state
+  same gunfire path; passengers + jet-ski riders aim all round, a driver front + sides; aiming holds the look as the vehicle turns; own vehicle + crewmates aboard never hit); state
   `AF.combat.vfire` {on, aim, firing, arc, veh, driver, seat, t, shots, dir}, local 'gunshot' events carry `veh`; touch adds FIRE / AIM.
   Escape does ONE thing per press (71 `escape`): close the topmost open thing (minigame, casino, shop, bag, map, controls, menu,
   dialogue, weapon wheel, photo mode, an unlocked CCTV feed, or a `UI.onEscape(fn → true)` hook), else open the pause menu; a
@@ -119,12 +119,14 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   `CHROME=`) plays it end to end with two real clients: lockstep, the two-key step, fail → shared checkpoint, retry, payout.
   Crew of 2–4: per-player tasks (`H.mg`: a padlock each on Kovac's grille, a uniform each off the rail, a licence each from Ezra; the
   shared fact lands when every crew slot is done, `mg` op) — the arms cache (one cracker, `crack`/`crackp`) and the night's roles are the
-  exceptions. Act II: the stash maze (44-island fills chamber B with a 3 m-grid maze + rock; `AF.island.heist.nav/maze/racks/waveSpawns`),
-  cracking starts a siege (waves of reserve guards, `S.spawn`, sized by crew), then a jet-ski chase (`chase` step, host-steered riders =
+  exceptions. Act II: the stash maze (44-island fills chamber B with a 4 m-grid maze + rock; `AF.island.heist.nav/maze/racks/waveSpawns/holds`;
+  the player is in first person inside the tube; the cache / racks answer only with a clear line to their front),
+  cracking starts a siege (waves of reserve guards, `S.spawn`, sized by crew; in combat only `zone.hunters` (2) close in, the rest wait at
+  `zone.holds` past the maze's way out), then a jet-ski chase (`chase` step, 1 + 2 per player, riders need line of sight + miss fast / off-screen targets, host-steered riders =
   'heist chase riders' path walkers with `actor.chase`, hulls in `AF.island.jetski.extra`; `ch`/`chit`/`chshot` ops). Act III: crews of
   3–4 take ship's-security uniforms (`sec0..5`) and distract the detective / pit boss (`hold`). Conditional radio lines:
   `radio(id, urgent, when)` re-checks `when()` at play time.
-  Stealth (80-stealth): every guard is killable (armed 240 hp; a takedown from behind / headshot on an unaware guard is still one hit);
+  Stealth (80-stealth): every guard is killable (armed 240 hp); one hit only from behind (melee or a headshot on a guard not yet fighting);
   guards steered off their path stay hittable (54 `WK.near` tests `ctl` actors outside the path bounds); `zone.strict` (the liner): a
   weapon in hand or a carried body seen = instant alarm, any witnessed violence = alarm (`S.witness`); bodies are carried / hidden with
   E (`zone.hides`, `carry`/`cpos` ops); `S.requestAlarm` routes a mission's alarm through the zone authority.

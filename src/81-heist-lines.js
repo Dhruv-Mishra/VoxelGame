@@ -72,6 +72,7 @@ try {
     spotted: 'They\u2019ve seen you!',
     reflex: 'Take him down, now, before he raises the alarm!',
     maze: 'They\u2019ve stacked the hall into a maze of crates. Every man in there walks a beat. Watch the corners, and keep your head down.',
+    tough: 'And careful. These Moretti boys are built like doors. Face to face, they\u2019ll soak up a whole clip. But sneak up behind one, and a single blow puts him down.',
     siege: 'It was wired! Every Moretti on the island heard that. Grab the guns off the rack and hold them off until the cache is open!',
     siege2: 'More of them coming down the tunnel! Keep them off the locks!',
     chase: 'Moretti skis on your tail! Shoot from the saddle. Take every one of them down before you lead them to the Queen.',
