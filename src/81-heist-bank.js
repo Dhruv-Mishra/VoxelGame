@@ -7,7 +7,7 @@ try {
 // staff door -> the banking hall (round the back of the teller cages) -> the vault door -> keys + time lock -> lasers -> drill -> cash.
 {
   const PI = Math.PI, S = AF.stealth;
-  const HB = AF.heistBank = { ready: false, on: false, doors: {}, beams: [], laserOn: false, laserCut: 0, cageOpen: false, bags: [], spots: {}, zone: null, guards: [] };
+  const HB = AF.heistBank = { ready: false, on: false, doors: {}, beams: [], laserOn: false, laserCut: 0, cageOpen: false, bags: [], spots: {}, zone: null, guards: [], RESERVE: 8, reserve: [], reservePaths: [] };
   const c = (h, o) => AF.col(h, Object.assign({ jitter: 0.15, edge: 0.3 }, o));
   const mesh = (m, vs, anchor, x, y, z, yaw = 0) => { const g = AF.meshModel(m, { vs, anchor }); delete g.userData.src; const o = AF.modelMesh(g); o.position.set(x, y, z); o.rotation.y = yaw; o.castShadow = false; o.visible = false; AF.scene.add(o); return o; };
   const NOCOL = 1e-6;
@@ -85,6 +85,13 @@ try {
     HB.spots.hall = { x: 14.4, y: 0.5, z: -114.5 };
     HB.spots.fire = { x: 39.6, y: 0.5, z: -103.4 };
     HB.spots.front = { x: 8.5, y: 0.25, z: -125 };
+    // the exit: the fire door onto Charter Street, beside the getaway car; stays locked until the hacker (or its keypad) opens it
+    HB.spots.exit = HB.spots.fire;
+    HB.spots.exitPad = { x: 39.6, y: 0.5, z: -105.9 };
+    // inside the vault, past the cages: the defence locker (guns + vests) the crew holds the room with while one cracks
+    HB.spots.loadout = { x: 45.2, y: 0.5, z: -121 };
+    // where alarm reinforcements come in: the front lobby, the fire corridor, the stair foot
+    HB.spots.waves = [{ x: 12, y: 0.5, z: -125 }, { x: 39.6, y: 0.5, z: -106.4 }, { x: 47, y: 0.5, z: -106.6 }];
   };
 
   // ---------------------------------------------------------------- the stealth zone: guards, cameras, light circuits, noise makers, nav
@@ -100,6 +107,8 @@ try {
     };
     const z = HB.zone = S.define('bank', { box: [10, 0, -147, 50, 18, -103], mode: 'fight', nav, voice: 'g1', reflexS: 2.0, radius: 120, feedTitle: 'KESTREL \u00b7 HARBOUR TRUST' });
     HB.guards.forEach((p, i) => S.guard('bank', { path: p.path, voice: ['g1', 'g2', 'g3', 'g4'][i % 4], name: p.name, range: p.range || 15 }));
+    HB.reserve.length = 0;
+    HB.reservePaths.forEach((p, k) => { const g = S.guard('bank', { path: p, voice: ['g1', 'g2', 'g3', 'g4'][k % 4], name: 'Guard', range: 15, reserve: true }); if (g) { g.down = true; g.hid = true; HB.reserve.push(g); } });
     const cam = (o) => { const k = S.camera('bank', o); if (HB.camGeo) { const m = AF.modelMesh(HB.camGeo); m.position.set(o.x, o.y, o.z); m.castShadow = false; m.visible = false; AF.scene.add(m); k.mesh = m; } return k; };
     cam({ name: 'ROOF ACCESS', x: 41.2, y: 16.4, z: -108.6, yaw0: 0.95, sweep: 0, pitch: 0.42, range: 0 });
     cam({ name: 'STAIRWELL', x: 49.0, y: 3.9, z: -112.5, yaw0: -0.25, sweep: 0, pitch: 0.3, range: 0 });
@@ -135,6 +144,10 @@ try {
     add('hall-e', [[27.6, 0.5, -115.5], [37.5, 0.5, -115.5], [37.5, 0.5, -123.5], [27.6, 0.5, -123.5]], { speed: 0.95, mode: 'loop' });
     add('vault', [[40.2, 0.5, -125], [40.2, 0.5, -122.6]], { speed: 0.5, mode: 'pingpong', dwell: [{ i: 0, t: 8 }, { i: 1, t: 5 }] }, { name: 'Vault guard' });
     add('cages', [[16.5, 0.5, -135.6], [39.6, 0.5, -135.6]], { speed: 1.05, mode: 'pingpong', dwell: [{ i: 0, t: 3 }, { i: 1, t: 3 }] });
+    // alarm reinforcements: off stage (below the floor) until 81's waves S.spawn them at a street entry
+    for (let k = 0; k < HB.RESERVE; k++) {
+      try { const p = WK.addPath('heist bank reserve' + k, [[30, -40, -125]], { count: 1, activeRadius: 110, speed: 0, looks: [look(0)] }); p.enabled = false; HB.reservePaths.push(p); } catch (e) { AF.warnOnce('heist bank reserve', e); }
+    }
   });
   AF.onBuild('heist-bank', 890, () => { try { props(); zone(); HB.ready = true; } catch (e) { AF.warnOnce('heist bank', e); } });
 
@@ -153,16 +166,21 @@ try {
   };
   HB.reset = () => {
     for (const k of ['bulkhead', 'hallEast', 'c4', 'fire', 'front', 'gate']) if (HB.doors[k]) HB.doors[k].open = false;
-    armDoors(HB.on); HB.cage(false); HB.laserCut = 0; if (S) S.reset('bank');
+    armDoors(HB.on); HB.cage(false); HB.laserCut = 0; HB.lasersOff = false; if (S) S.reset('bank');
   };
+  // the exit door beside the getaway car (= the fire door); closed = solid for anyone on foot
+  HB.exit = (open) => HB.door('fire', !!open);
+  HB.exitOpen = () => !!(HB.doors.fire && HB.doors.fire.open);
   HB.cage = (open) => { HB.cageOpen = !!open; if (HB.cageCol) HB.cageCol.y1 = open ? HB.cageCol.y0 + NOCOL : HB.cageCol.y0 + 3.25; if (HB.cageMesh) HB.cageMesh.visible = HB.on && !open; };
   HB.bagsShow = (mask) => { HB.bags.forEach((b, k) => { b.visible = !!(mask & (1 << k)); }); };
-  HB.lasers = (on) => { HB.laserOn = !!on; for (const b of HB.beams) b.mesh.visible = !!on; };
+  // lasersOff = the hacker killed the grid for good: no beams, no contact, no alarm, until HB.reset
+  HB.lasers = (on) => { HB.laserOn = !!on && !HB.lasersOff; for (const b of HB.beams) b.mesh.visible = HB.laserOn; };
   HB.cutLasers = (s) => { HB.laserCut = s; };
+  HB.killLasers = () => { HB.lasersOff = true; HB.laserCut = 0; HB.lasers(false); };
   // per frame while armed: move the sweepers, blink when cut, and report contact with the player
   const PB = { x: 0, y: 0, z: 0 };
   HB.touch = () => {
-    if (!HB.laserOn || HB.laserCut > 0 || AF.mode !== 'walk') return false;
+    if (HB.lasersOff || !HB.laserOn || HB.laserCut > 0 || AF.mode !== 'walk') return false;
     const p = AF.player; PB.x = p.x; PB.y = p.y; PB.z = p.z;
     if (p.x < 43.3 || p.x > 48.2 || p.z < -132 || p.z > -118) return false;
     const h = p.crouch ? 1.12 : 1.75, r = 0.26;

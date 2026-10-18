@@ -520,39 +520,92 @@ try {
   });
 
   // ================================================================ spoken lines + heist music (OWNER: audio)
-  // AF.audio.voice(id, { x, y, z, vol, ref, radio }) -> seconds   a line from AF.VO (assets/vo/<id>.mp3, Kokoro TTS via tools/vo-build.mjs).
-  //   Channels: radio (band-passed, squelch clicks), plain (non-positional), positional (x/y/z; up to 3 barks overlap). A new radio or
-  //   plain line replaces the one on its channel. Returns the length from assets/vo/index.json (fetched at unlock; before that an
-  //   estimate from the text), 0 for an unknown id; the duration is returned even while the sound is off (subtitles time on it).
+  // AF.audio.voice(id, { x, y, z, vol, ref, radio }) -> seconds   a fresh, text-matched line from assets/vo/<id>.mp3.
+  //   New Fish Audio lines are exported/imported by tools/vo-build.mjs; stale or absent audio is not played against new subtitles.
+  //   Channels: radio (shared band-pass / soft clipping / squelch), plain (non-positional), positional (x/y/z; up to 3 barks overlap).
+  //   A new radio or plain line replaces the one on its channel. Returns a duration (or text estimate), 0 for an unknown id.
   // AF.audio.voiceLen(id) -> seconds · AF.audio.voicePreload([ids]) -> Promise (fetch + decode ahead) · AF.audio.stopVoice(channel?)
   // AF.audio.music(id | null, { fade = 2, vol = 1 })   crossfades heist loops (assets/music/<id>.mp3, tools/music-build.mjs), fetched
   //   on first request; muted with Sound off; its own gain (AF.audio.musicVol, menu slider) ducked under speech, as are the beds.
   // Decoded lines live in a small LRU (reaped after 90 s unused); music keeps at most the playing + previous track decoded.
   {
-    const VO_BASE = 'assets/vo/', MU_BASE = 'assets/music/';
-    let voMan = null, voManP = null, muMan = null;
+    const VO_BASE = 'assets/vo/', MU_BASE = 'assets/music/', FISH_MODEL = 'Fish Audio Drama 3 Newest';
+    let voMan = null, voManP = null, muMan = null, fishMan = null, fishEntries = null;
     A.musicVol = 0.6;
     try { const v = localStorage.getItem('portSolace.musicVol'); if (v !== null && +v >= 0 && +v <= 1) A.musicVol = +v; } catch (e) { /* storage blocked */ }
-    const getJSON = (u) => fetch(u).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
-    const loadMan = () => voManP || (voManP = Promise.all([getJSON(VO_BASE + 'index.json'), getJSON(MU_BASE + 'index.json')]).then(([v, m]) => { voMan = v || {}; muMan = m || {}; return voMan; }));
+    const getJSON = (u) => fetch(u, { cache: 'no-cache' }).then((r) => {
+      if (!r.ok) throw new Error(r.status + ' ' + u);
+      return r.json();
+    }).catch((e) => { AF.warnOnce('audio manifest ' + u, e); return {}; });
+    const loadMan = () => voManP || (voManP = Promise.all([getJSON(VO_BASE + 'index.json'), getJSON(MU_BASE + 'index.json'), getJSON(VO_BASE + 'fish-manifest.json')]).then(([v, m, f]) => {
+      voMan = v || {}; muMan = m || {}; fishMan = f || {}; fishEntries = Object.create(null);
+      if (Array.isArray(fishMan.entries)) {
+        for (const e of fishMan.entries) if (e && typeof e.id === 'string') fishEntries[e.id] = e;
+      } else if (fishMan.entries && typeof fishMan.entries === 'object') fishEntries = fishMan.entries;
+      return voMan;
+    }));
     const onUnlock = () => loadMan();
     for (const ev of ['pointerdown', 'keydown', 'touchend']) addEventListener(ev, onUnlock, { capture: true, once: true });
     const lineOf = (id) => (AF.VO && AF.VO[id]) || null;
-    A.voiceLen = (id) => {
-      if (voMan && voMan[id] != null) return voMan[id];
+    const freshIds = new Set(), freshChecks = new Map();
+    const lineHash = async (id) => {
+      const L = lineOf(id), m = L && L[3];
+      if (!L || !m || !globalThis.crypto || !crypto.subtle || !globalThis.TextEncoder) return null;
+      const tags = Array.isArray(m.fishTags) ? m.fishTags : [];
+      const payload = JSON.stringify([id, m.speakerId, L[1], L[0], m.voiceSlot, m.fishVoiceName,
+        String(L[2]), String(m.expressionText), tags, String(m.generationText)]);
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
+      return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    };
+    let staleWarned = false;
+    const warnStale = (id) => {
+      if (staleWarned) return; staleWarned = true;
+      const msg = `Heist voice audio for “${id}” is missing or out of date. Subtitles remain available; run the Fish Audio web import before enabling matching voices.`;
+      AF.warnOnce('fish voice freshness', new Error(msg));
+      AF.emit('toast', { text: 'Heist voice audio is not up to date. Subtitles are shown instead.', kind: 'info' });
+    };
+    const freshLine = (id) => {
+      if (freshChecks.has(id)) return freshChecks.get(id);
+      const p = loadMan().then(async () => {
+        const entry = fishEntries && fishEntries[id], h = entry && await lineHash(id);
+        const ok = !!(fishMan && fishMan.schemaVersion === 1 && fishMan.model === FISH_MODEL && fishMan.generatedBy === 'Fish Audio web UI' &&
+          entry && entry.fileId === id && /^[\da-f]{64}$/i.test(entry.assetHash || '') && h && entry.inputHash === h);
+        if (ok) freshIds.add(id); else warnStale(id);
+        return ok;
+      }).catch(() => { warnStale(id); return false; });
+      freshChecks.set(id, p); return p;
+    };
+    const estimateLen = (id) => {
       const L = lineOf(id); if (!L) return 0;
       return Math.max(0.8, Math.round((String(L[2]).length / 14.5 + 0.3) * 100) / 100);
     };
+    A.voiceLen = (id) => {
+      if (!lineOf(id)) return 0;
+      if (freshIds.has(id)) {
+        const row = fishEntries && fishEntries[id];
+        const n = row && +row.duration; if (n > 0) return n;
+        if (voMan && typeof voMan[id] === 'number') return voMan[id];
+      }
+      return estimateLen(id);
+    };
     // ---- graph: voice lines -> bus.voice; music tracks -> mus (setting) -> duck -> master
-    let mus = null, musDuck = null, radioCurve = null, squelch = null;
+    let mus = null, musDuck = null, radioCurve = null, squelch = null, radioBed = null, radioIn = null;
     const graph = () => {
       if (!make()) return null;
       if (!mus) {
         mus = ctx.createGain(); mus.gain.value = A.musicVol; musDuck = ctx.createGain(); musDuck.gain.value = 1; mus.connect(musDuck).connect(master);
         radioCurve = new Float32Array(1024); for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; radioCurve[i] = Math.tanh(2.4 * x) / Math.tanh(2.4); }
+        radioIn = ctx.createGain();
+        const radioHP = ctx.createBiquadFilter(), radioLP = ctx.createBiquadFilter(), radioWS = ctx.createWaveShaper(), radioGain = ctx.createGain();
+        radioHP.type = 'highpass'; radioHP.frequency.value = 350; radioHP.Q.value = 0.8;
+        radioLP.type = 'lowpass'; radioLP.frequency.value = 3200; radioLP.Q.value = 1.1;
+        radioWS.curve = radioCurve; radioWS.oversample = 'none'; radioGain.gain.value = 0.75;
+        radioIn.connect(radioHP).connect(radioWS).connect(radioLP).connect(radioGain).connect(bus.voice);
         // the squelch: 70 ms of decaying noise, band-passed on the way out like the line itself
         const n = Math.round(ctx.sampleRate * 0.07); squelch = ctx.createBuffer(1, n, ctx.sampleRate);
         const d = squelch.getChannelData(0); let s = 0x9e37; for (let i = 0; i < n; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; d[i] = (s / 0x3fffffff - 1) * Math.exp(-i / (n * 0.28)) * (i < 24 ? i / 24 : 1); }
+        const rn = Math.round(ctx.sampleRate * 0.2); radioBed = ctx.createBuffer(1, rn, ctx.sampleRate);
+        const rd = radioBed.getChannelData(0); s = 0x4b1d; for (let i = 0; i < rn; i++) { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; rd[i] = ((s >>> 8) / 0xffffff * 2 - 1) * 0.08; }
       }
       return ctx;
     };
@@ -563,13 +616,22 @@ try {
       let f = vo.get(id); if (f) { f.used = AF.clock.t; return f.p; }
       if (!graph()) return Promise.resolve(null);
       f = { buf: null, p: null, used: AF.clock.t, bytes: 0 }; vo.set(id, f);
-      f.p = fetch(VO_BASE + encodeURIComponent(id) + '.mp3').then((r) => { if (!r.ok) throw new Error(r.status + ' ' + id); return r.arrayBuffer(); }).then(decode).then((buf) => {
+      f.p = fetch(VO_BASE + encodeURIComponent(id) + '.mp3?v=' + fishEntries[id].assetHash).then(async (r) => {
+        if (!r.ok) throw new Error(r.status + ' ' + id);
+        const bytes = await r.arrayBuffer(), expected = fishEntries && fishEntries[id] && fishEntries[id].assetHash;
+        const digest = await crypto.subtle.digest('SHA-256', bytes), actual = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+        if (actual !== expected) throw new Error('Fish audio hash mismatch: ' + id);
+        return bytes;
+      }).then(decode).then((buf) => {
         f.buf = buf; f.bytes = buf.length * buf.numberOfChannels * 4; A.stats.bytes += f.bytes; return buf;
-      }).catch((e) => { AF.warnOnce('voice load ' + id, e); vo.delete(id); return null; });
+      }).catch((e) => { AF.warnOnce('voice load ' + id, e); warnStale(id); vo.delete(id); return null; });
       if (vo.size > VO_KEEP) { let old = null; for (const [k, g] of vo) if (g.buf && !playing(k) && (!old || g.used < old[1].used)) old = [k, g]; if (old) { A.stats.bytes -= old[1].bytes; vo.delete(old[0]); } }
       return f.p;
     };
-    A.voicePreload = (ids) => { if (!A.on || !graph()) return Promise.resolve([]); loadMan(); return Promise.all((ids || []).filter(lineOf).map(loadVo)); };
+    A.voicePreload = (ids) => {
+      if (!A.on || !graph()) return Promise.resolve([]);
+      return Promise.all([...new Set((ids || []).filter(lineOf))].map(async (id) => (await freshLine(id)) ? loadVo(id) : null));
+    };
     // ---- playing lines: { id, ch, src, gn, pan, nodes, pos, ref, vol, k, end, sq }
     const lines = [];
     const playing = (id) => { for (const l of lines) if (l.id === id) return true; return false; };
@@ -578,34 +640,37 @@ try {
       voices.delete(l); A.stats.voices = voices.size;
       if (!l.src || !ctx) { l.dead = true; return; }
       const t = ctx.currentTime, f = fade || 0.06;
-      try { l.gn.gain.cancelScheduledValues(t); l.gn.gain.setTargetAtTime(0, t, f / 3); l.src.stop(t + f + 0.02); if (l.sq) l.sq.stop(t + 0.001); } catch (e) { /* ended */ }
+      try {
+        l.gn.gain.cancelScheduledValues(t); l.gn.gain.setTargetAtTime(0, t, f / 3); l.src.stop(t + f + 0.02);
+        if (l.buzzGain) { l.buzzGain.gain.cancelScheduledValues(t); l.buzzGain.gain.setTargetAtTime(0, t, f / 3); }
+        if (l.buzz) l.buzz.stop(t + f + 0.02); if (l.sq) l.sq.stop(t + 0.001);
+      } catch (e) { /* ended */ }
       if (l.ch === 'radio' && !l.ended) chirp(t + 0.02, 0.25);
     };
     A.stopVoice = (ch) => { for (let i = lines.length - 1; i >= 0; i--) if (!ch || lines[i].ch === ch) kill(lines[i], 0.08); };
     const chirp = (t, g) => {
-      if (!squelch || !ctx) return null;
+      if (!squelch || !radioIn || !ctx) return null;
       try {
-        const s = ctx.createBufferSource(), hp = ctx.createBiquadFilter(), gn = ctx.createGain();
-        s.buffer = squelch; hp.type = 'bandpass'; hp.frequency.value = 1800; hp.Q.value = 0.7; gn.gain.value = g;
-        s.connect(hp).connect(gn).connect(bus.voice); s.onended = () => { try { gn.disconnect(); } catch (e) { /* gone */ } }; s.start(t); return s;
+        const s = ctx.createBufferSource(), gn = ctx.createGain();
+        s.buffer = squelch; gn.gain.value = g;
+        s.connect(gn).connect(radioIn); s.onended = () => { try { gn.disconnect(); } catch (e) { /* gone */ } }; s.start(t); return s;
       } catch (e) { return null; }
     };
     const start = (l, buf) => {
       if (l.dead || !ctx) return;
       if (voices.size >= MAX_VOICES) { let q = null; for (const v of voices) if (!q || v.k < q.k) q = v; if (q && q.k < l.k) { try { q.src.stop(); } catch (e) { /* ended */ } voices.delete(q); } else { const i = lines.indexOf(l); if (i >= 0) lines.splice(i, 1); return; } }
       const src = ctx.createBufferSource(), gn = ctx.createGain(); src.buffer = buf; gn.gain.value = 0;
+      src.connect(gn);
       let head = gn;
-      if (l.ch === 'radio') {
-        // a hand radio: 350 Hz - 3.2 kHz, a little drive, squelch clicks either side
-        const hp = ctx.createBiquadFilter(), lp = ctx.createBiquadFilter(), ws = ctx.createWaveShaper(), mk = ctx.createGain();
-        hp.type = 'highpass'; hp.frequency.value = 350; hp.Q.value = 0.8; lp.type = 'lowpass'; lp.frequency.value = 3200; lp.Q.value = 1.1;
-        ws.curve = radioCurve; ws.oversample = 'none'; mk.gain.value = 0.75;
-        src.connect(hp).connect(ws).connect(lp).connect(mk).connect(gn); l.nodes = [hp, ws, lp, mk];
-      } else src.connect(gn);
       if (l.pos && ctx.createStereoPanner) { l.pan = ctx.createStereoPanner(); gn.connect(l.pan); head = l.pan; }
-      head.connect(bus.voice);
+      head.connect(l.ch === 'radio' ? radioIn : bus.voice);
       const t = ctx.currentTime + (l.ch === 'radio' ? 0.06 : 0.01);
       l.src = src; l.gn = gn; l.tail = head; l.end = t + buf.duration;
+      if (l.ch === 'radio' && radioBed) try {
+        l.buzz = ctx.createBufferSource(); l.buzzGain = ctx.createGain(); l.buzz.buffer = radioBed; l.buzz.loop = true; l.buzzGain.gain.value = 0.018;
+        l.buzz.connect(l.buzzGain).connect(radioIn); l.buzz.onended = () => { try { l.buzzGain.disconnect(); } catch (e) { /* gone */ } };
+        l.buzz.start(t); l.buzz.stop(l.end + 0.1);
+      } catch (e) { l.buzz = null; l.buzzGain = null; }
       gain(l, true);
       src.onended = () => { l.ended = true; const i = lines.indexOf(l); if (i >= 0) lines.splice(i, 1); voices.delete(l); A.stats.voices = voices.size; try { head.disconnect(); } catch (e) { /* gone */ } };
       src.start(t);
@@ -624,18 +689,21 @@ try {
       const d = A.voiceLen(id);
       loadMan();
       if (!A.on || !graph() || ctx.state !== 'running') return d;
-      const pos = o && o.x != null, ch = o && o.radio ? 'radio' : pos ? 'pos' : 'line';
+      const pos = o && o.x != null, ch = o && o.radio != null ? (o.radio ? 'radio' : pos ? 'pos' : 'line') : L[3] && L[3].channel === 'radio' ? 'radio' : pos ? 'pos' : 'line';
       // one line per channel; positional barks overlap up to three (the oldest makes way)
       if (ch !== 'pos') A.stopVoice(ch);
       else { let n = 0, old = null; for (const q of lines) if (q.ch === 'pos') { n++; if (!old) old = q; } if (n >= 3) kill(old, 0.1); }
       const l = { id, ch, src: null, gn: null, pan: null, nodes: null, pos: pos ? { x: o.x, y: o.y ?? LS.y, z: o.z } : null, ref: (o && o.ref) || 7, vol: (o && o.vol != null ? o.vol : 1) * (ch === 'radio' ? 1.1 : 1), k: 4, end: 0, sq: null, dead: false, ended: false, t0: ctx.currentTime };
       lines.push(l);
-      const f = vo.get(id);
-      if (f && f.buf) { f.used = AF.clock.t; start(l, f.buf); }
-      else loadVo(id).then((buf) => {
-        // a line still loading after a beat is dropped for barks (they would land late); story lines start late instead
-        if (!buf || l.dead || lines.indexOf(l) < 0 || (ch === 'pos' && ctx.currentTime - l.t0 > 0.7) || ctx.currentTime - l.t0 > 3) { const i = lines.indexOf(l); if (i >= 0) lines.splice(i, 1); return; }
-        start(l, buf);
+      freshLine(id).then((ok) => {
+        if (!ok || l.dead || lines.indexOf(l) < 0) { const i = lines.indexOf(l); if (i >= 0) lines.splice(i, 1); l.dead = true; return null; }
+        const f = vo.get(id);
+        if (f && f.buf) { f.used = AF.clock.t; start(l, f.buf); return f.buf; }
+        return loadVo(id).then((buf) => {
+          // a line still loading after a beat is dropped for barks (they would land late); story lines start late instead
+          if (!buf || l.dead || lines.indexOf(l) < 0 || (ch === 'pos' && ctx.currentTime - l.t0 > 0.7) || ctx.currentTime - l.t0 > 3) { const i = lines.indexOf(l); if (i >= 0) lines.splice(i, 1); return null; }
+          start(l, buf); return buf;
+        });
       });
       return d;
     };

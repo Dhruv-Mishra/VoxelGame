@@ -3,8 +3,8 @@ try {
 // ===== 81-heist-sets: the people, props and stealth zones of the Harbour Trust Job outside the bank (OWNER: game) =====
 // Built late (940) so the island, liner, zoo den and Corsair Key have published their spots (AF.island.heist, AF.liner.spots,
 // AF.den.spots, AF.key.spots); every lookup has a fallback so the job still runs if one of them is missing. 81-heist drives it all.
-//   shop   Kovac's tailor shop after closing: a padlocked night grille, a night watchman on a loop (window -> counter -> rail), coat
-//          racks to hide behind, the uniform rail behind the counter (Kovac himself goes home: AF.closedAt)
+//   shop   Kovac's tailor shop after closing: a padlocked night grille, a maze of coat racks splitting the floor into three rooms,
+//          a torch-carrying watchman on a loop in each, the uniform rail in the back room (Kovac himself goes home: AF.closedAt)
 //   ezra   Ezra Quill, forger, in the back of Harbour Stationers
 //   gate   the Westgate crew gate: a booth, a barrier and its guard
 //   tunnel the Moretti smugglers' tunnel on Serena Isle: armed men on patrol, the arms cache
@@ -80,7 +80,12 @@ try {
     A.rail = { x: tx + 11.4, y: ty, z: tz + 1.3 };
     A.shopBox = [tx - 1, ty - 1, tz - 1, tx + 14, ty + 5, tz + 14];
     HS.shopId = tb ? tb.id : null;
-    walker('watch', 'Night watchman', [[tx + 3.2, ty, tz + 4.2], [tx + 10.4, ty, tz + 7.1], [tx + 10.6, ty, tz + 2.2]], { speed: 0.8, mode: 'loop', dwell: [{ i: 0, t: 8 }, { i: 1, t: 5 }, { i: 2, t: 4 }] }, crowdLook('worker', 'm', rng, 0x2a3550, 0x22222a));
+    // three watchmen, one per room of the rack maze below (offsets from the shop corner; every leg runs clear of the racks and crosses
+    // a partition only through a doorway): front room <-> the east doorway <-> the rail room, the stockroom ring, the rail room ring
+    const TP = (pts) => pts.map(([x, z]) => [tx + x, ty, tz + z]);
+    walker('watch', 'Night watchman', TP([[1.8, 9.7], [11.6, 9.7], [9.0, 9.7], [9.0, 6.6], [11.8, 6.6], [9.0, 6.6], [9.0, 9.7]]), { speed: 0.8, mode: 'loop', dwell: [{ i: 0, t: 7 }, { i: 1, t: 4 }, { i: 4, t: 5 }] }, crowdLook('worker', 'm', rng, 0x2a3550, 0x22222a));
+    walker('shop2', 'Night watchman', TP([[1.6, 1.8], [5.6, 1.8], [5.6, 7.4], [1.6, 7.4]]), { speed: 0.7, mode: 'loop', dwell: [{ i: 0, t: 6 }, { i: 2, t: 5 }] }, crowdLook('worker', 'm', rng, 0x33402a, 0x22222a));
+    walker('shop3', 'Night watchman', TP([[7.8, 3.6], [11.8, 3.6], [11.8, 7.2], [7.8, 7.2]]), { speed: 0.75, mode: 'loop', dwell: [{ i: 1, t: 5 }, { i: 3, t: 6 }] }, crowdLook('worker', 'f', rng, 0x402a2a, 0x22222a));
     // the night grille: a steel lattice + padlock filling the doorway (a mesh + a collider; open = collider flattened, leaf hidden)
     {
       const gz = td ? td.z + 0.125 : -90, gx = tx + 0.125, steel = col(0x3a3e44, { metal: 0.8, rough: 0.4 }), brass = col(0xc9a24a, { metal: 0.9, rough: 0.3 });
@@ -99,21 +104,58 @@ try {
     // the rail of finished uniforms
     { const m = new AF.Model(16, 16, 4), steel = col(0x8a8f96, { metal: 0.8 }), navy = col(0x1c2848), gold = col(0xd8b04a, { metal: 0.7 }); m.box(0, 0, 1, 1, 16, 3, steel); m.box(15, 0, 1, 16, 16, 3, steel); m.box(0, 15, 1, 16, 16, 3, steel);
       for (let k = 0; k < 5; k++) { m.box(2 + k * 2.6, 5, 0, 4 + k * 2.6, 15, 4, navy); m.box(2 + k * 2.6, 13, 0, 4 + k * 2.6, 14, 4, gold); } HS.props.rail = mesh(m, 1 / 8, [0.5, 0, 0.5], A.rail.x, A.rail.y, A.rail.z, PI / 2); HS.props.rail.visible = false; }
-    // coat racks packed with stock across the shop floor: 1.9 m screens the watchman can't see through, set clear of his loop, so
-    // there's a way from the door to the rail from cover to cover. Out only for the burglary (HS.racks); solid only then.
+    // the stock maze: 1.9 m coat racks packed with clothes (the watchmen's torches can't see through them — they're colliders) partition
+    // the shop floor into three rooms joined by doorways >= 1.4 m: the front room by the door, the stockroom (west, behind it) and the
+    // rail room (east, the uniform rail at its back). Sneak route: door -> front room (cover rack) -> the west doorway -> stockroom (round
+    // its island) -> the middle doorway -> rail room (round its island) -> the rail. The watchmen's loops above cross partitions only
+    // at doorways. All racks are one merged mesh (one draw, burglary only); colliders are solid only then (HS.racks).
     {
       const steel = col(0x5a5e66, { metal: 0.8, rough: 0.4 }), cloth = [0x2a3550, 0x6a2a2a, 0x3a4a32, 0x8a7a60, 0x4a3a2a, 0x22222a, 0x7a6a8a, 0xd8d0c0].map((h) => col(h));
       const m = new AF.Model(16, 15, 4);
       m.box(0, 0, 0, 1, 15, 4, steel); m.box(15, 0, 0, 16, 15, 4, steel); m.box(0, 14, 1, 16, 15, 3, steel);
       for (let x = 1, k = 0; x < 15; x += 2, k++) { const low = 2 + ((k * 5) % 4); m.box(x, low, 0, x + 2, 14, 4, cloth[k % cloth.length]); m.box(x, 13, 1, x + 2, 14, 3, cloth[(k + 3) % cloth.length]); }
-      // [x, z offset from the shop's corner, along x (else along z)]
-      const RACKS = [[3.0, 7.6, 1], [6.4, 9.0, 1], [9.0, 9.4, 0], [7.2, 4.5, 1], [1.8, 3.2, 0], [4.6, 2.4, 1]];
-      const racks = RACKS.map(([ox, oz, alongX]) => {
-        const x = tx + ox, z = tz + oz, hx = alongX ? 1 : 0.25, hz = alongX ? 0.25 : 1;
-        const o = mesh(m, 1 / 8, [0.5, 0, 0.5], x, ty, z, alongX ? 0 : PI / 2); o.visible = false;
-        return { o, c: AF.addCollider(x - hx, ty, z - hz, x + hx, ty + 1e-6, z + hz, 'heist-shop-rack') };
+      // [x, z offset of the rack's centre from the shop's corner, along x (else along z)]
+      const RACKS = [
+        [3.4, 8.4, 1], [5.4, 8.4, 1], [7.4, 8.4, 1], [11.2, 8.4, 1],   // front | back partition: west doorway x 1.0..2.4, east doorway x 8.4..10.2
+        [6.8, 6.6, 0], [6.8, 2.0, 0],                                    // stockroom | rail room partition: doorway z 3.0..5.6
+        [4.2, 11.4, 0],                                                  // front room cover by the door
+        [3.6, 4.6, 0],                                                   // stockroom island
+        [9.8, 5.4, 1], [9.8, 1.8, 0],                                    // rail room island + the screen beside the rail
+      ];
+      // keep clear of the shop's own furniture (41-homes-2 places it with untagged colliders, mirrored per house): a rack that would
+      // overlap one slides along its length by up to 1 m, else it is left out (the partitions keep their doorways either way)
+      const blocked = (x0, z0, x1, z1) => {
+        for (let i = Math.floor(x0 / 8); i <= Math.floor(x1 / 8); i++) for (let k = Math.floor(z0 / 8); k <= Math.floor(z1 / 8); k++) {
+          const a = AF.colliders.get(i * 100000 + k); if (a) for (const b of a) {
+            if (b.tag || b.y1 <= ty + 0.1 || b.y0 >= ty + 1.9) continue;
+            if (b.x1 - b.x0 > 6 || b.z1 - b.z0 > 6) continue;   // walls / whole-house boxes, not furniture
+            if (b.x0 < x1 - 0.1 && b.x1 > x0 + 0.1 && b.z0 < z1 - 0.1 && b.z1 > z0 + 0.1) return true;
+          }
+        }
+        return false;
+      };
+      const placed = [];
+      for (const [ox, oz, alongX] of RACKS) {
+        const hx = alongX ? 1 : 0.25, hz = alongX ? 0.25 : 1;
+        for (const s of [0, 0.5, -0.5, 1, -1]) {
+          const px = ox + (alongX ? s : 0), pz = oz + (alongX ? 0 : s);
+          if (px - hx < 0.1 || pz - hz < 0.1 || px + hx > 12.9 || pz + hz > 12.9) continue;
+          if (!blocked(tx + px - hx, tz + pz - hz, tx + px + hx, tz + pz + hz)) { placed.push([px, pz, alongX]); break; }
+        }
+      }
+      HS.rackLayout = placed; HS.rackSkipped = RACKS.length - placed.length;
+      // the rail must stand in the open: step it toward the room's middle until no furniture collider holds it
+      for (let k = 0; k < 8 && blocked(A.rail.x - 0.3, A.rail.z - 0.3, A.rail.x + 0.3, A.rail.z + 0.3); k++) { A.rail.x -= 0.5; A.rail.z += 0.4; }
+      if (HS.props.rail) HS.props.rail.position.set(A.rail.x, A.rail.y, A.rail.z);
+      const MW = 104, MD = 104, maze = new AF.Model(MW, 15, MD);   // 13 m x 13 m at 1/8 m
+      const racks = placed.map(([ox, oz, alongX]) => {
+        const hx = alongX ? 1 : 0.25, hz = alongX ? 0.25 : 1, x0 = Math.round((ox - hx) * 8), z0 = Math.round((oz - hz) * 8);
+        for (let i = 0; i < 16; i++) for (let y = 0; y < 15; y++) for (let k = 0; k < 4; k++) { const c = m.get(i, y, k); if (c) maze.set(alongX ? x0 + i : x0 + k, y, alongX ? z0 + k : z0 + i, c); }
+        const x = tx + ox, z = tz + oz;
+        return AF.addCollider(x - hx, ty, z - hz, x + hx, ty + 1e-6, z + hz, 'heist-shop-rack');
       });
-      HS.racks = (on) => { for (const r of racks) { r.o.visible = !!on; r.c.y1 = ty + (on ? 1.9 : 1e-6); } };
+      const o = mesh(maze, 1 / 8, [0, 0, 0], tx, ty, tz, 0); o.visible = false; HS.props.racks = o;
+      HS.racks = (on) => { o.visible = !!on; for (const c of racks) c.y1 = ty + (on ? 1.9 : 1e-6); };
     }
     // ---------------------------------------------------------------- Ezra in the back of Harbour Stationers
     const st = AF.buildings.find((b) => b.id === 'bs-stationer');
@@ -133,7 +175,9 @@ try {
     A.c2 = free(A.strip.x - 40, strip.z + 14, A.strip.y + 12, 24); A.c2.yaw = 0;
     const kit = IH.kit || free(I.cx - 89, I.cz + 46, 14, 24);
     A.kit = { x: kit.x, y: kit.y, z: kit.z }; A.kitYaw = kit.yaw ?? PI;
-    const km = free(A.kit.x + Math.sin(A.kitYaw) * 2.2, A.kit.z + Math.cos(A.kitYaw) * 2.2, A.kit.y + 2, 4); A.kitMeet = { x: km.x, y: km.y, z: km.z, yaw: A.kitYaw + PI };
+    // the meeting point stays on Kit's own floor (the Sky Terrace is a storey up; never drop to the ground below it)
+    const mx = A.kit.x + Math.sin(A.kitYaw) * 2.2, mz = A.kit.z + Math.cos(A.kitYaw) * 2.2, km = free(mx, mz, A.kit.y + 2, 4);
+    A.kitMeet = Math.abs(km.y - A.kit.y) < 1 ? { x: km.x, y: km.y, z: km.z, yaw: A.kitYaw + PI } : { x: mx, y: A.kit.y, z: mz, yaw: A.kitYaw + PI };
     npc('kit', 'Kit Morrow', 'Harbour Trust clerk \u00b7 on holiday', LOOKS.kit, A.kit, A.kitYaw, { greet: ['Over here. Quietly.'], lines: [['Keep your voices down.']] });
     A.tunnelEntry = IH.tunnelEntry || free(I.cone.x - 60, I.cone.z - 40 + (I.cz - 600), 60, 60);
     A.cache = IH.cache || A.tunnelEntry;
@@ -244,7 +288,7 @@ try {
       // two far-apart points: the path's bounds span the whole chase area (it stays active wherever the riders are steered)
       const p = AF.walkers.addPath('heist chase riders', [[A.cove.x - 500, -60, A.cove.z - 500], [A.cove.x + 500, -60, A.cove.z + 500]], { count: 8, speed: 0, activeRadius: 600, looks });
       p.enabled = false; WKR.chase = p;
-      for (const a of p.actors) a.ctl = { x: A.cove.x, y: -60, z: A.cove.z, yaw: 0, moving: false, ph: 0 };
+      for (const a of p.actors) { a.ctl = { x: A.cove.x, y: -60, z: A.cove.z, yaw: 0, moving: false, ph: 0 }; a.weapon = 'tommy'; }
     } catch (e) { AF.warnOnce('heist chase riders', e); }
     HS.ready = true;
   });

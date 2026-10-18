@@ -1,11 +1,14 @@
 // ================================================================ 77-combat.js
 try {
 // ===== 77-combat: weapons, gunplay, fighting, the crowd's fight-or-flight, run-overs, police + the wanted level, vehicle damage  (OWNER: game) =====
-// Weapons: slot 0 = bare fists, then the friend's signature melee (keyboard, handbag, dumbbell, microphone, bat, pan, cutlass, guitar),
-//   then firearms from a gun counter (AF.save.guns / .ammo) and mission weapons lent by AF.combat.lend(id, ammo) (spistol, ssmg, lmg;
-//   never saved). Click or Q attack, right mouse (hold) or Z aim (tighter FOV, steadier), R reload. Switching: mouse wheel, 1-5, X taps
+// Weapons: slot 0 = the baton for everyone (held id stays 'fists'; no friend signature weapon is granted), then firearms from a gun
+//   counter (AF.save.guns / .ammo) and mission weapons lent by AF.combat.lend(id, ammo) (spistol, ssmg, tommy, lmg; never saved).
+//   Click or Q attack, right mouse (hold) or Z aim (tighter FOV, steadier), R reload. Switching: mouse wheel, 1-5, X taps
 //   to the next one, holding X opens the weapon wheel; the weapon HUD (top right) has a ▸ that takes the next weapon (tap / click) and
 //   opens the wheel when held. Touch: HIT / FIRE / AIM / CROUCH (72-touch); weapons from the HUD chip.
+//   Armour: AF.combat.armor(amount, src) per source (cap G.armorMax, absorbs G.armorAbsorb of each hit), cleared on death.
+//   Cheat: typing GODMODE within G.cheatWindow s (not in text fields / modals) toggles AF.combat.cheat.god (invulnerable, one-hit
+//   kills on locally owned targets only, every gun lent in memory); off removes only the cheat's guns. AF.combat.setGod(on).
 // Drive-by: seated (driving, a jet ski, riding along, the liner's launch) a drawn gun aims (right mouse / Z) and fires (click / Q) from
 //   the seat through the same gunfire path; passengers all round, a driver to the front and sides. State: AF.combat.vfire (below volley).
 // Gunplay: per-weapon spread that blooms with each shot and with moving / sprinting / jumping and tightens crouched or aiming
@@ -17,8 +20,11 @@ try {
 //   shoots near it, runs it over or barges into it at a sprint. Kinds flee | brawl | melee | gun (+ the cop pool + the mob pool).
 //   Gunners pick cover behind solid blocks, peek, strafe, flank and fire bursts with tracers; hits make them flinch; they fall the way
 //   the hit pushed them (55 putFall). Engaged peds calm down past G.pedForgetD. Kids and wheelchair users only ever flee.
-// Wanted: crimes add heat -> 1..5 stars (G.stars): foot cops (the cop pool), squad cars (physics-driven 'police' cars that unload
-//   two officers) and from 3 stars an autogyro. Out of every officer's sight for G.evadeS[stars] s clears it; so does dying.
+// Wanted: main island only (CB.inJurisdiction: geographic — z < G.mainZ inside the play x bounds, heist or not; a live un-alarmed heist stealth zone gates ambient crimes); elsewhere a crime turns nearby goons hostile (thugs) instead.
+//   Crimes add heat -> 1..5 stars (G.stars): foot cops (the cop pool), squad cars (physics-driven 'police' cars that unload
+//   two officers), from 3 stars an autogyro and from G.jetStars pooled strike jets with telegraphed, evadable seeker missiles.
+//   Officers, the autogyro and jets fire only with a clear voxel line (AF.segClear) to the player's body. Out of every officer's sight
+//   for G.evadeS[stars] s clears it; so does dying or leaving the jurisdiction.
 // Vehicles: car.hp -> car.dmg (0..1, the paint shader's soot), smoke below G.vehSmoke, burning at 0, then an explosion and a wreck.
 {
   const PI = Math.PI, G = AF.G, S = AF.save, I = AF.input, VV = AF.vehicles, H = AF.health, FX = AF.fx, SFX = AF.sfx, UI = AF.ui;
@@ -31,13 +37,9 @@ try {
   const V3 = () => new THREE.Vector3(), MZ = V3(), DIR = V3(), TMP = V3(), PU = V3(), PV = V3();
 
   // ---------------------------------------------------------------- weapons
-  // melee per friend: [name, damage, reach m, seconds between swings, model]
-  const MELEE = {
-    dhruv: ['Mech Keyboard', 15, 1.9, 0.55, 'keyboard'], hunar: ['Designer Handbag', 12, 1.8, 0.45, 'bag'], tanishk: ['Dumbbell', 19, 1.6, 0.7, 'dumbbell'],
-    diksha: ['Microphone', 11, 1.7, 0.4, 'mic'], kush: ['Boss Bat', 17, 2.1, 0.6, 'bat'], divyangana: ['Frying Pan', 16, 1.9, 0.55, 'pan'],
-    kaybee: ['Pirate Cutlass', 19, 2.2, 0.5, 'cutlass'], niranjan: ['Old Guitar', 17, 2.2, 0.7, 'guitar'],
-  };
-  const FISTS = ['Fists', 8, 1.4, 0.38, null];
+  // slot 0 for everyone: a police-style side-handle baton ([name, damage, reach m, seconds between swings, model]). Its held id stays
+  // 'fists' (= the unarmed slot) so 80-coop HELD / 80-stealth ARMS / 81-heist holster keep working; heldGeo('fists') is the baton.
+  const BATON = ['Baton', G.batonDmg || 12, G.batonReach || 1.9, G.batonCd || 0.5, 'fists'];
   // cls: pose + feel family. spread (rad, hip) grows by bloom per shot up to bloomMax; kick = camera pitch per shot (recovers at rec /s);
   // loud = hearing radius (m) for 'gunshot'; zoom = aiming FOV; tr = tracer [width m, length m, r, g, b]; flash = muzzle flash size
   const GUNS = {
@@ -77,13 +79,38 @@ try {
       m.box(0, B, 3, 3, B + R, 8, dark); m.box(1, B + 2, 8, 2, B + 6, 9, steel); m.box(0, B + 1, 0, 3, B + 5, 3, olive); m.box(1, B + R - 2, 0, 2, B + R, 3, dark);
       m.box(0, B + R, 3, 3, hgt, 7, olive);
       anchor = [0.5, (B + R - 1) / hgt, 3 / 9]; tipZ = 5.5;
-    } else if (g) {   // [barrel length, stock] in 1/16 m voxels
-      const [L, stock] = g.model, hgt = L + 3 + stock; m = new AF.Model(2, hgt, 5);
-      m.box(0, 0, 3, 2, L + 3, 5, dark); m.box(0, L, 2, 2, L + 3, 5, dark); m.box(0, L + 1, 0, 2, L + 3, 2, wood);
-      if (stock) m.box(0, L + 3, 1, 2, hgt, 4, wood);
-      if (id === 'tommy') { m.box(0, 3, 0, 2, 6, 2, wood); m.box(0, L - 2, 0, 2, L, 3, dark); }
-      if (id === 'revolver') m.box(0, L - 1, 2, 2, L + 1, 5, steel);
+    } else if (id === 'revolver') {   // slim barrel with a top rib, fluted cylinder, hammer, trigger guard, raked wooden grip
+      const L = g.model[0], hgt = L + 4; m = new AF.Model(2, hgt, 5);
+      m.box(0, 0, 3, 2, L - 1, 5, dark); m.box(0, 0, 4, 2, L - 1, 5, black); m.box(0, L - 1, 2, 2, L + 1, 5, steel); m.box(0, L - 1, 3, 2, L + 1, 4, dark);
+      m.box(0, L + 1, 3, 2, L + 2, 5, dark); m.box(0, L + 2, 4, 2, L + 3, 5, black); m.box(0, L, 1, 2, L + 1, 2, dark);
+      m.box(0, L + 1, 0, 2, L + 4, 2, wood); m.box(0, L + 2, 2, 2, L + 3, 3, wood);
       anchor = [0.5, (L + 2) / hgt, 2 / 5]; tipZ = 4;
+    } else if (id === 'shotgun') {   // barrel over a magazine tube, wooden pump, receiver, pistol grip, tapered stock
+      const [L, stock] = g.model, hgt = L + 3 + stock; m = new AF.Model(2, hgt, 5);
+      m.box(0, 0, 4, 2, L + 1, 5, dark); m.box(0, 1, 3, 2, L - 1, 4, black); m.box(0, 3, 2, 2, 7, 4, wood);
+      m.box(0, L - 1, 2, 2, L + 3, 5, dark); m.box(0, L + 1, 0, 2, L + 3, 2, black);
+      m.box(0, L + 3, 2, 2, hgt, 4, wood); m.box(0, hgt - 3, 1, 2, hgt, 5, wood);
+      anchor = [0.5, (L + 2) / hgt, 2 / 5]; tipZ = 4.5;
+    } else if (id === 'tommy') {   // finned barrel, drum magazine, front + rear grips, wooden stock
+      const [L, stock] = g.model, hgt = L + 3 + stock; m = new AF.Model(2, hgt, 5);
+      m.box(0, 0, 3, 2, L + 3, 5, dark); for (let y = 1; y < 6; y += 2) m.box(0, y, 3, 2, y + 1, 5, steel);
+      m.box(0, 3, 0, 2, 5, 3, wood); m.box(0, L - 3, 0, 2, L, 3, black); m.box(0, L + 1, 0, 2, L + 3, 2, wood);
+      m.box(0, L + 3, 2, 2, hgt, 4, wood); m.box(0, hgt - 2, 1, 2, hgt, 4, wood);
+      anchor = [0.5, (L + 2) / hgt, 2 / 5]; tipZ = 4;
+    } else if (id === 'rifle') {   // long slim barrel, wooden forestock, bolt receiver, scope on mounts, stock
+      const [L, stock] = g.model, hgt = L + 3 + stock; m = new AF.Model(2, hgt, 6);
+      m.box(0, 0, 3, 2, L, 4, dark); m.box(0, 5, 2, 2, L + 1, 4, wood); m.box(0, L, 2, 2, L + 3, 5, dark);
+      m.box(0, L - 5, 5, 2, L + 3, 6, black); m.box(0, L - 4, 4, 2, L - 3, 5, dark); m.box(0, L + 1, 4, 2, L + 2, 5, dark);
+      m.box(0, L + 2, 0, 2, L + 4, 2, wood); m.box(0, L + 3, 1, 2, hgt, 4, wood); m.box(0, hgt - 3, 0, 2, hgt, 4, wood);
+      anchor = [0.5, (L + 2) / hgt, 2 / 6]; tipZ = 3.5;
+    } else if (g) {   // fallback: [barrel length, stock] in 1/16 m voxels
+      const [L, stock] = g.model, hgt = L + 3 + stock; m = new AF.Model(2, hgt, 5);
+      m.box(0, 0, 3, 2, L + 3, 5, dark); m.box(0, L + 1, 0, 2, L + 3, 2, wood);
+      if (stock) m.box(0, L + 3, 1, 2, hgt, 4, wood);
+      anchor = [0.5, (L + 2) / hgt, 2 / 5]; tipZ = 4;
+    } else if (id === 'baton' || id === 'fists') {   // police side-handle baton: black shaft, steel cap, rubber grip, the side handle
+      m = new AF.Model(4, 20, 1); m.box(1, 0, 0, 2, 20, 1, black); m.box(1, 0, 0, 2, 1, 1, steel); m.box(1, 13, 0, 2, 20, 1, c(0x3a3c40, { rough: 0.9 })); m.box(2, 14, 0, 4, 15, 1, black);
+      anchor = [1.5 / 4, 1, 0.5];
     } else if (id === 'keyboard') { m = new AF.Model(5, 16, 2); m.box(0, 0, 0, 5, 13, 2, dark); for (let y = 1; y < 12; y += 2) for (let x = 1; x < 4; x++) m.set(x, y, 1, (x + y) % 5 ? c(0xe8e4dc) : c(0x3aa0ff)); m.box(2, 13, 0, 3, 16, 1, dark); }
     else if (id === 'bag') { m = new AF.Model(7, 10, 3); m.box(0, 0, 0, 7, 6, 3, c(0xff5fae)); m.box(3, 2, 2, 4, 4, 3, gold); m.box(1, 6, 1, 2, 9, 2, gold); m.box(5, 6, 1, 6, 9, 2, gold); m.box(1, 9, 1, 6, 10, 2, gold); }
     else if (id === 'dumbbell') { m = new AF.Model(6, 12, 6); m.box(0, 0, 0, 6, 3, 6, dark); m.box(0, 9, 0, 6, 12, 6, dark); m.box(2, 3, 2, 4, 9, 4, steel); }
@@ -101,21 +128,40 @@ try {
   // ---------------------------------------------------------------- state
   const CB = AF.combat = { slot: 0, aimToggle: false, cd: 0, swing: 0, swingDur: 0.3, side: 0, hitAt: -1, reloadT: 0, mag: S.mag || (S.mag = {}), heat: 0, stars: 0, seenT: 0, engaged: 0, recoil: 0, flinch: 0, held: null, heldId: null, gallery: null,
     bloom: 0, kick: 0, raise: 0, lastShot: -9 };
-  const OWNED = [null], MELEE_ID = '@melee', LEND = {};
+  const OWNED = [null], LEND = {}, CHEAT = {};
+  // GODMODE (typed, see the cheat block): local only, never saved
+  CB.cheat = { god: false };
+  // body armour, granted per source (the heist's vault: AF.combat.armor(100, 'heist'), cleared with armor(0, 'heist')); never saved.
+  // CB.armor() = the total; 76's H.hurt routes damage through CB.absorb(n) → the part that still reaches health
+  const ARMOR = new Map();
+  CB.armor = (amount, src = 'misc') => {
+    if (amount != null) { const a = AF.clamp(+amount || 0, 0, G.armorMax); if (a > 0) ARMOR.set(src, a); else ARMOR.delete(src); }
+    let t = 0; for (const v of ARMOR.values()) t += v; return Math.min(t, G.armorMax);
+  };
+  CB.absorb = (n) => {
+    if (!ARMOR.size || !(n > 0)) return n;
+    let take = Math.min(CB.armor(), n * G.armorAbsorb); const got = take;
+    for (const [k, v] of ARMOR) { const d = Math.min(v, take); take -= d; if (v - d <= 0.01) ARMOR.delete(k); else ARMOR.set(k, v - d); if (take <= 0) break; }
+    return n - got;
+  };
   // drive-by (shooting from a vehicle seat): AF.combat.vfire, see the block after volley(); SELF = the shooter's own vehicle (never hit)
   const VF = CB.vfire = { can: false, on: false, aim: false, firing: false, want: false, edge: false, arc: true, veh: null, driver: false, seat: 0, t: -9, shots: 0, dir: new THREE.Vector3(0, 0, 1), posed: false };
   let SELF = null;
-  const sig = () => { const f = AF.friends && AF.friends.current; return f && MELEE[f.id]; };
-  // slot 0 = bare fists (every spawn starts there), then the friend's signature melee, then the guns bought or lent
-  const owned = () => { OWNED.length = 1; if (sig()) OWNED.push(MELEE_ID); for (const id of GUN_IDS) if (S.guns[id] || LEND[id]) OWNED.push(id); return OWNED; };
+  // slot 0 = the baton (every spawn starts there), then the guns bought, lent or (GODMODE only) granted by the cheat
+  const owned = () => { OWNED.length = 1; for (const id of GUN_IDS) if (S.guns[id] || LEND[id] || CHEAT[id]) OWNED.push(id); return OWNED; };
   const slotId = () => { const o = owned(); if (CB.slot >= o.length) CB.slot = 0; return o[CB.slot]; };
-  const cur = () => { const id = slotId(); return id && id !== MELEE_ID ? id : null; };
-  const melee = () => (slotId() === MELEE_ID && sig()) || FISTS;
-  // ammo: a lent weapon has its own mag + reserve (never saved); bought ones use AF.save
-  const magOf = (id) => LEND[id] ? LEND[id].mag : CB.mag[id] || 0;
-  const resOf = (id) => LEND[id] ? LEND[id].ammo : S.ammo[id] || 0;
-  const setMag = (id, n) => { if (LEND[id]) LEND[id].mag = n; else { CB.mag[id] = n; AF.saveSoon(); } };
-  const setRes = (id, n) => { if (LEND[id]) LEND[id].ammo = n; else { S.ammo[id] = n; AF.saveSoon(); } };
+  const cur = () => slotId() || null;
+  const melee = () => BATON;
+  // ammo: a lent weapon has its own mag + reserve (never saved); bought ones use AF.save; a cheat-only gun never runs dry (never saved)
+  const tmpOf = (id) => LEND[id] || (!S.guns[id] && CHEAT[id]) || null;
+  const magOf = (id) => { const L = tmpOf(id); return L ? L.mag : CB.mag[id] || 0; };
+  const resOf = (id) => { const L = tmpOf(id); return L ? L.ammo : S.ammo[id] || 0; };
+  const setMag = (id, n) => { const L = tmpOf(id); if (L) L.mag = n; else { CB.mag[id] = n; AF.saveSoon(); } };
+  const setRes = (id, n) => { const L = tmpOf(id); if (L) { if (L !== CHEAT[id]) L.ammo = n; } else { S.ammo[id] = n; AF.saveSoon(); } };
+  // NPC weapon ids (path guards, peds) → a GUNS id with a held model: exact ids pass, prop / class names alias, unknown → revolver
+  const NPC_ALIAS = { pistol: 'revolver', sidearm: 'revolver', smg: 'tommy', rifle: 'rifle', sniper: 'rifle', shotgun: 'shotgun', lmg: 'lmg', silenced: 'spistol', sil: 'spistol' };
+  CB.npcGun = (id) => (!id ? null : GUNS[id] ? id : NPC_ALIAS[id] || 'revolver');
+  CB.GUN_IDS = GUN_IDS;
   CB.gun = cur; CB.GUNS = GUNS; CB.melee = melee; CB.heldGeo = heldGeo; CB.pvp = false; CB.owned = owned; CB.magOf = magOf; CB.resOf = resOf;
   CB.give = (id) => { S.guns[id] = true; S.ammo[id] = (S.ammo[id] || 0) + GUNS[id].pack; CB.mag[id] = CB.mag[id] || 0; AF.saveSoon(); };
   const select = (slot) => { const o = owned(); CB.slot = ((slot % o.length) + o.length) % o.length; CB.reloadT = 0; attachHeld(); SFX.play('click'); hudPop = 0.35; };
@@ -133,11 +179,52 @@ try {
     if (CB.reloadT > 0 && !CB.has(CB.reloadG)) CB.reloadT = 0;
     const i = owned().indexOf(was); CB.slot = i >= 0 ? i : 0; attachHeld();
   };
-  CB.has = (id) => !!(GUNS[id] ? S.guns[id] || LEND[id] : id === 'fists' || (id === 'melee' && sig()));
+  CB.has = (id) => !!(GUNS[id] ? S.guns[id] || LEND[id] || CHEAT[id] : id === 'fists' || id === 'melee' || id === 'baton');
   CB.lent = () => Object.keys(LEND);
+  // ---------------------------------------------------------------- GODMODE: type G-O-D-M-O-D-E within G.cheatWindow s (not in a text field
+  // or a modal) to toggle: no damage taken (76 H.hurt / H.kill), one-hit kills on things this client simulates, every gun with endless
+  // ammo. In memory only. A co-op guest's hits on host-owned things and every hit on a peer / remote thing keep their normal damage.
+  const CODE = 'GODMODE', KEYS = [], KEYT = [];
+  let mapAtStart = false;
+  const godDmg = (o, n) => {
+    if (!CB.cheat.god || (AF.net && AF.net.role === 'guest') || (o && o.net != null && o.net !== false)) return n;
+    return Math.max(n, G.cheatDmg);
+  };
+  CB.setGod = (on) => {
+    on = !!on; if (on === CB.cheat.god) return on;
+    const was = slotId();
+    CB.cheat.god = on;
+    if (on) { for (const id of GUN_IDS) if (!S.guns[id]) CHEAT[id] = { mag: GUNS[id].mag, ammo: 9999 }; }
+    else {
+      for (const k in CHEAT) delete CHEAT[k];
+      if (CB.reloadT > 0 && !CB.has(CB.reloadG)) CB.reloadT = 0;
+    }
+    const i = owned().indexOf(was); CB.slot = i >= 0 ? i : 0; attachHeld();
+    AF.emit('toast', on ? 'GODMODE on \u2014 invulnerable, one-hit kills, every weapon.' : 'GODMODE off.');
+    SFX.play('click');
+    return on;
+  };
+  addEventListener('keydown', (e) => {
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !e.key || e.key.length !== 1) return;
+    const t = e.target, tag = t && t.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
+    const st = UI.state, now = performance.now() / 1000;
+    // The code's own M opens the map (M key) mid-sequence: that one modal is let through while a recent sequence is in progress.
+    const typing = KEYS.length && now - KEYT[KEYT.length - 1] <= G.cheatWindow;
+    const modal = UI.modalOpen && UI.modalOpen(), onlyMap = st && st.map && !st.menu && !st.help && !st.title && !st.shop && !st.casino && !st.inv && !(AF.minigame && AF.minigame.open);
+    if (modal && !(typing && onlyMap && !mapAtStart)) { KEYS.length = 0; KEYT.length = 0; return; }
+    if (!KEYS.length) mapAtStart = !!(st && st.map);
+    KEYS.push(e.key.toUpperCase()); KEYT.push(now);
+    if (KEYS.length > CODE.length) { KEYS.shift(); KEYT.shift(); }
+    if (KEYS.length === CODE.length && now - KEYT[0] <= G.cheatWindow && KEYS.join('') === CODE) {
+      KEYS.length = 0; KEYT.length = 0;
+      if (st && st.map && UI.toggleMap) UI.toggleMap(false);
+      CB.setGod(!CB.cheat.god);
+    }
+  });
   // ---------------------------------------------------------------- weapon HUD (top right), weapon wheel, crosshair, hit markers
   const WI = {
-    fists: '<path d="M7 11V7a2 2 0 0 1 4 0v3M11 10V6a2 2 0 0 1 4 0v4M15 10V8a2 2 0 0 1 4 0v5a7 7 0 0 1-7 7h-1a6 6 0 0 1-6-6v-2a2 2 0 0 1 2-2z"/>',
+    fists: '<path d="M6 19 16 9M14 7.5l3 3M16.5 5.5l2 2M9 13h4"/>',
     melee: '<path d="M5 19 17 7M14.5 4.5l5 5M4 20l2-2M8 13l3 3"/>',
     revolver: '<path d="M3 9h13l2-2h2v5h-4l-1 1h-3l-1 4H7l1-4H3zM12 12v1"/>',
     shotgun: '<path d="M1 10h17l2-1h3v3h-7l-2 2h-3l-1 3H6l1-3-6-1z"/>',
@@ -194,12 +281,12 @@ try {
   const xh = document.createElement('div'); xh.id = 'h-xh'; xh.innerHTML = '<i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="d"></i>'; uiRoot.appendChild(xh);
   const hm = document.createElement('div'); hm.id = 'h-hm'; hm.innerHTML = '<i></i><i></i><i></i><i></i>'; uiRoot.appendChild(hm);
   const slotInfo = (id) => GUNS[id] ? { k: id, name: GUNS[id].name, mag: CB.reloadT > 0 && CB.reloadG === id ? -1 : magOf(id), res: resOf(id), out: !(magOf(id) > 0) && !(resOf(id) > 0) }
-    : id === MELEE_ID && sig() ? { k: 'melee', name: sig()[0], mag: null, res: 0, out: false } : { k: 'fists', name: FISTS[0], mag: null, res: 0, out: false };
+    : { k: 'fists', name: BATON[0], mag: null, res: 0, out: false };
   const ammoTxt = (f) => f.mag == null ? '' : (f.mag < 0 ? '\u21bb' : f.mag) + ' / ' + f.res;
   let hudId = null, hudMag = NaN, hudRes = NaN, hudN = -1, hudSig = null, hudPop = 0, firedT = 9, hmT = 0;
   const WH = CB.wheel = { open: false, pick: 0, vx: 0, vy: 0, key: '', items: [] };
   const wheelBuild = () => {
-    const o = owned(), n = o.length, key = o.join() + '|' + (sig() || FISTS)[0];
+    const o = owned(), n = o.length, key = o.join();
     if (key === WH.key) return;
     WH.key = key; for (const e of WH.items) e.remove(); WH.items.length = 0;
     o.forEach((id, i) => {
@@ -255,7 +342,7 @@ try {
     chip.classList.toggle('on', on); chip.classList.toggle('pop', hudPop > 0);
     if (!on) return;
     // repaint only on a change (nothing is built per frame)
-    const gal = CB.gallery, id = gal ? '@gal' : slotId(), n = owned().length, gun = !gal && !!GUNS[id], sg = sig();
+    const gal = CB.gallery, id = gal ? '@gal' : slotId(), n = owned().length, gun = !gal && !!GUNS[id], sg = CB.cheat.god;
     const mag = gal ? gal.shots : gun ? (CB.reloadT > 0 && CB.reloadG === id ? -1 : magOf(id)) : -2, res = gun ? resOf(id) : 0;
     if (id === hudId && mag === hudMag && res === hudRes && n === hudN && sg === hudSig) return;
     hudId = id; hudMag = mag; hudRes = res; hudN = n; hudSig = sg;
@@ -291,17 +378,47 @@ try {
   AF.on('look', () => { CB.held = null; attachHeld(); });
   AF.on('friend', () => { CB.slot = 0; attachHeld(); });
   AF.on('respawn', () => { CB.slot = 0; CB.aimToggle = false; CB.bloom = 0; CB.kick = 0; attachHeld(); });
-  // ---------------------------------------------------------------- wanted level
+  // ---------------------------------------------------------------- wanted level (police jurisdiction: geographic — the main island and its coastal
+  // waters, z < G.mainZ inside the world's x bounds; never Serena Isle (z ≈ 2970+), Corsair Key (z ≈ 3116+) or the liner (z 1450), heist or not)
   const starsOf = (h) => { let n = 0; for (const t of G.stars) if (h >= t) n++; return n; };
-  CB.crime = (n) => {
+  CB.mainIsland = (x, z) => {
+    const W = AF.PLAN && AF.PLAN.world, b = W && W.play, m = 60;
+    return z < (G.mainZ || 1000) && (!b || (x >= b.x0 - m && x < b.x1 + m && z >= b.z0 - m));
+  };
+  CB.inJurisdiction = (x, z) => {
+    if (x == null) { const p = AF.player; if (!p) return false; x = p.x; z = p.z; }
+    return CB.mainIsland(x, z);
+  };
+  // mid-heist, inside an un-alarmed stealth zone (the night bank, the liner…) 80-stealth owns detection + alarms: ambient crimes add no heat
+  // until that zone's alarm is raised or the player leaves it; the heist's own calls (CB.crime(n, 'heist'), e.g. the getaway) always count
+  const stealthOwns = () => {
+    if (!(AF.heist && AF.heist.on)) return false;
+    const S = AF.stealth, z = S && S.zone, b = z && z.box, p = AF.player;
+    return !!(b && !S.alarm && p && p.x > b[0] && p.x < b[3] && p.y > b[1] && p.y < b[4] && p.z > b[2] && p.z < b[5]);
+  };
+  CB.stealthOwns = stealthOwns;
+  // off the main island (Serena Isle, Corsair Key, the open sea) nobody calls the police: local toughs answer instead (the heist runs its own mobs)
+  let thugCd = 0, thugHeat = 0;
+  const thugs = (n) => {
+    if (AF.heist && AF.heist.on) return;
+    thugHeat = Math.min(200, thugHeat + n); const now = AF.clock.t;
+    if (thugHeat < G.stars[0] || now < thugCd || CB.goons().length >= 2) return;
+    const P = spawnPoint(22, 36); if (!P) return;
+    thugCd = now + 12; thugHeat = 0;
+    const w = CB.spawnGoon(P.x, P.y, P.z, { kind: cur() ? 'gun' : 'brawl', weapon: 'pistol', name: 'Thug' });
+    if (w) { w.thug = true; say(w, 'You picked the wrong island, pal!'); }
+  };
+  CB.crime = (n, src) => {
     if (CB.gallery || H.dead || !(n > 0)) return;
+    if (!CB.inJurisdiction()) { thugs(n); return; }
+    if (src !== 'heist' && stealthOwns()) return;
     CB.heat = Math.min(600, CB.heat + n); CB.seenT = 0;
     const s = starsOf(CB.heat);
     if (s > CB.stars) { CB.stars = s; AF.emit('toast', s === 1 ? 'The police are looking for you.' : s >= 4 ? 'Every cop in Port Solace wants a word with you!' : 'Wanted level up!'); }
   };
-  const clearWanted = (msg) => { if (!CB.stars && !CB.heat) return; CB.heat = 0; CB.stars = 0; CB.seenT = 0; if (msg) AF.emit('toast', msg); };
+  const clearWanted = (msg) => { jetsClear(); if (!CB.stars && !CB.heat) return; CB.heat = 0; CB.stars = 0; CB.seenT = 0; if (msg) AF.emit('toast', msg); };
   CB.clearWanted = clearWanted;
-  AF.on('died', () => clearWanted());
+  AF.on('died', () => { clearWanted(); ARMOR.clear(); });
 
   // ---------------------------------------------------------------- engaging peds
   const say = (w, t) => AF.emit('bubble', { who: w, name: '', text: t, dur: 2.2 });
@@ -418,6 +535,10 @@ try {
     const A = w.agg, N = G.npcGun[A.wpn] || G.npcGun.pistol;
     const hx = Math.sin(w.yaw), hz = Math.cos(w.yaw), mx = w.x + hx * 0.55 - hz * 0.12, my = w.y + 1.35, mz = w.z + hz * 0.55 + hx * 0.12;
     const crouch = T === TG && !T.car && AF.player.crouch;
+    // no shooting through walls: the same world ray test as every other shot, from the shooter's body (not the muzzle, which can poke
+    // through a wall it stands against) to the target's chest or head (a fair picture: only part of the body showing still counts)
+    const ty0 = T.y + (T.car ? 0.9 : crouch ? 0.8 : 1.1), ty1 = T.y + (T.car ? 1.3 : crouch ? 1.15 : 1.6);
+    if (!los(w.x, w.y + 1.35, w.z, T.x, ty0, T.z) && !los(w.x, w.y + 1.35, w.z, T.x, ty1, T.z)) { A.see = false; A.losT = 0.15; return; }
     const p = AF.clamp(N[1] + (w.cop ? 0.12 : 0) - d * 0.01 - T.speed * 0.03 - (crouch ? 0.08 : 0) - (A.flinch > 0 ? 0.2 : 0), 0.05, 0.75), hit = Math.random() < p;
     const th = crouch ? 0.8 : 1.2, ex = T.x + (hit ? 0 : (Math.random() - 0.5) * 3), ey = T.y + (hit ? th : 0.3 + Math.random() * 1.4), ez = T.z + (hit ? 0 : (Math.random() - 0.5) * 3);
     // misses fly on past the target to whatever they hit
@@ -474,7 +595,7 @@ try {
       return A.t < 30 && d < G.pedForgetD + 20;
     }
     if (T.away && A.t > 3) return false;
-    if (!w.cop && !w.goon && d > G.pedForgetD) return false;
+    if ((!w.cop && !w.goon || w.thug) && d > G.pedForgetD) return false;
     if (A.kind === 'flee' && A.t > 8 && d > 40) return false;
     if (w.cop && !CB.stars && (d > 30 || A.t > 25)) return false;
     A.hurtT -= dt;
@@ -684,12 +805,12 @@ try {
       const h = ray(ox, oy, oz, TMP.x, TMP.y, TMP.z, W.range, t0);
       if (!gal) tracerShot(MZ.x, MZ.y, MZ.z, h.x, h.y, h.z, W);
       if (!gal && CB.onShot) CB.onShot(GUN_IDS.indexOf(g) + 1, MZ.x, MZ.y, MZ.z, h.x, h.y, h.z, h.kind === 'world' ? 1 : h.kind === 'car' || h.kind === 'heli' || (h.kind === 'peer' && h.obj.heli) ? 3 : h.kind ? 2 : 0);
-      const dmg = W.dmg * (h.head ? G.headK : 1);
+      const dmg = godDmg(h.obj, W.dmg * (h.head ? G.headK : 1));
       if ((h.kind === 'ped' || h.kind === 'walker') && sil && unseen === null) unseen = !witnessed(p.x, p.y, p.z, h.obj);
       if (h.kind === 'ped') { const r2 = hitPed(h.obj, dmg, 'gun', TMP.x, TMP.z, !!unseen, h.head); if (r2) { res = Math.max(res, r2 - 1); head = head || h.head; impact(h.x, h.y, h.z, 1, 1); } }
       else if (h.kind === 'walker') { const r2 = hitWalker(h.obj, dmg, 'gun', TMP.x, TMP.z, !!unseen, { head: h.head, dmg, silenced: sil, weapon: g }); if (r2) { res = Math.max(res, r2 - 1); head = head || h.head; impact(h.x, h.y, h.z, 1, 1); } }
-      else if (h.kind === 'car') { dmgCar(h.obj, W.dmg * 0.35, true); impact(h.x, h.y, h.z, 2, 0); res = Math.max(res, 0); }
-      else if (h.kind === 'heli') { heliHit(W.dmg); impact(h.x, h.y, h.z, 2, 0); res = Math.max(res, 0); }
+      else if (h.kind === 'car') { dmgCar(h.obj, godDmg(h.obj, W.dmg * 0.35), true); impact(h.x, h.y, h.z, 2, 0); res = Math.max(res, 0); }
+      else if (h.kind === 'heli') { heliHit(godDmg(HELI, W.dmg)); impact(h.x, h.y, h.z, 2, 0); res = Math.max(res, 0); }
       else if (h.kind === 'peer') { if (CB.hitPeer) CB.hitPeer(h.obj, W.dmg, 'gun', TMP.x, TMP.z); if (h.obj.heli) impact(h.x, h.y, h.z, 2, 0); else FX.burst('hit', h.x, h.y, h.z, 1); res = Math.max(res, 0); }
       else if (h.kind === 'duck') { gal.hit(h.obj); res = Math.max(res, 0); }
       else if (h.kind === 'world') { impact(h.x - TMP.x * 0.08, h.y - TMP.y * 0.08, h.z - TMP.z * 0.08, 0, W.heavy ? 3 : 2); if (k === 0) AU(Math.random() < 0.3 ? 'ricochet' : 'bullet_hit', { x: h.x, y: h.y, z: h.z }); }
@@ -784,9 +905,9 @@ try {
       if (d > 0.4 && (dx * fx + dz * fz) / d < 0.35) continue;
       bd = d; walker = a;
     }
-    if (walker) { const r = hitWalker(walker, W[1], 'melee', fx, fz, false, { head: false, dmg: W[1], silenced: true, weapon: W[4] || 'fists' }); SFX.play('punch', p.x, p.z); hitMark(r === 2 ? 1 : 0); scareWalkers(p.x, p.z, 12); return; }
+    if (walker) { const dm = godDmg(walker, W[1]); const r = hitWalker(walker, dm, 'melee', fx, fz, false, { head: false, dmg: dm, silenced: true, weapon: W[4] || 'fists' }); SFX.play('punch', p.x, p.z); hitMark(r === 2 ? 1 : 0); scareWalkers(p.x, p.z, 12); return; }
     if (CB.meleePeer && CB.meleePeer(p.x, p.y, p.z, fx, fz, best ? bd : W[2], W[1])) { SFX.play('punch', p.x, p.z); hitMark(0); return; }
-    if (best) { const r = hitPed(best, W[1], 'melee', fx, fz); SFX.play('punch', p.x, p.z); hitMark(r === 2 ? 1 : 0); if (AF.camfx && AF.camfx.shake) AF.camfx.shake(0.01, 0.1); return; }
+    if (best) { const r = hitPed(best, godDmg(best, W[1]), 'melee', fx, fz); SFX.play('punch', p.x, p.z); hitMark(r === 2 ? 1 : 0); if (AF.camfx && AF.camfx.shake) AF.camfx.shake(0.01, 0.1); return; }
     for (const c of VV.cars) if (c.active !== false && !c.player && Math.abs(c.x - p.x) < 4 && Math.abs(c.z - p.z) < 4 && VV.bodyDist(c, p.x + fx * 0.8, p.z + fz * 0.8) < 0.3) { dmgCar(c, 2, true); SFX.play('crash', c.x, c.z); return; }
   };
   // ---------------------------------------------------------------- vehicle damage + wrecks
@@ -917,7 +1038,9 @@ try {
       const a = Math.random() * PI * 2, r = rMin + Math.random() * (rMax - rMin), x = p.x + Math.sin(a) * r, z = p.z + Math.cos(a) * r;
       if ((Math.sin(a) * DIR.x + Math.cos(a) * DIR.z) > 0.4 && i < 8) continue;   // prefer behind the camera
       const y = AF.surfaceBelow(x, z, p.y + 8, 20);
-      if (Number.isFinite(y) && Math.abs(y - p.y) < 6 && !AF.boxBlocked(x, y + 0.05, z, 0.3, 1.7)) return TMP.set(x, y, z);
+      if (!Number.isFinite(y) || Math.abs(y - p.y) >= 6) continue;
+      if (AF.PL && AF.PL.waterAt && AF.PL.waterAt(x, z) > y + 0.3) continue;   // never on a sea / river bed
+      if (!AF.boxBlocked(x, y + 0.05, z, 0.3, 1.7)) return TMP.set(x, y, z);
     }
     return null;
   };
@@ -935,7 +1058,7 @@ try {
   CB.spawnGoon = (x, y, z, o = {}) => {
     const C = CR(); if (!C) return null;
     const w = C.walkers.find((q) => q.goon && !q.act); if (!w) return null;
-    w.x = x; w.y = y; w.z = z; w.yaw = o.yaw ?? Math.atan2(pl().x - x, pl().z - z); w.act = true; w.ph = 0;
+    w.x = x; w.y = y; w.z = z; w.yaw = o.yaw ?? Math.atan2(pl().x - x, pl().z - z); w.act = true; w.ph = 0; w.thug = false;
     // o.look: a crowd look name (CR.SP key, e.g. 'cop') or index; else the pinstripe goon
     if (w.v0 == null) w.v0 = w.v;
     const SP = C.SP || {}, lv = typeof o.look === 'number' ? o.look : o.look != null ? SP[o.look] : undefined;
@@ -1004,7 +1127,7 @@ try {
   };
   CB.heliHit = heliHit;
   const heliStep = (dt) => {
-    const want = CB.stars >= 3 && !HELI.fall;
+    const want = CB.stars >= 3 && !HELI.fall && CB.inJurisdiction();
     if (!HELI.on) { if (!want) return; const P = target(), a = Math.random() * PI * 2; Object.assign(HELI, { on: true, x: P.x + Math.sin(a) * 160, z: P.z + Math.cos(a) * 160, y: P.y + 60, hp: 250, fall: false, vx: 0, vz: 0, cd: 3 }); HELI.grp.visible = true; }
     const P = target(), gy = AF.W.groundY(HELI.x, HELI.z);
     if (HELI.fall) {
@@ -1020,17 +1143,114 @@ try {
       if (leave && (HELI.x - P.x) ** 2 + (HELI.z - P.z) ** 2 > 250 ** 2) { HELI.on = false; HELI.grp.visible = false; return; }
       if (!leave && AF.time.night > 0.3) FX.glow.spawn(P.x, Math.max(P.y, gy) + 0.3, P.z, 0, 0, 0, 0.05, 6, 0, 0, 0.5, 0.48, 0.38);
       if (!leave && CB.stars >= 4 && (HELI.cd -= dt) <= 0 && !P.away) {
-        HELI.cd = 1.6; const d3 = Math.hypot(P.x - HELI.x, P.y - HELI.y, P.z - HELI.z), hit = Math.random() < 0.3;
-        FX.burst('flash', HELI.x, HELI.y + 0.4, HELI.z, 1, { size: 0.6 }); FX.line(HELI.x, HELI.y + 0.4, HELI.z, P.x + (hit ? 0 : 2), P.y + 1, P.z + (hit ? 0 : 2)); SFX.play('shot', HELI.x, HELI.z);
-        if (CB.onShot) CB.onShot(1, HELI.x, HELI.y + 0.4, HELI.z, P.x + (hit ? 0 : 2), P.y + 1, P.z + (hit ? 0 : 2), hit ? 2 : 1);
-        if (hit && d3 < 80) { if (P.car) dmgCar(P.car, 6); else H.hurt(8, 'shot'); }
+        HELI.cd = 1.6; const d3 = Math.hypot(P.x - HELI.x, P.y - HELI.y, P.z - HELI.z), clear = los(HELI.x, HELI.y - 0.2, HELI.z, P.x, P.y + 1, P.z) || los(HELI.x, HELI.y - 0.2, HELI.z, P.x, P.y + 1.6, P.z), hit = clear && Math.random() < 0.3;
+        if (!clear) HELI.cd = 0.4;
+        else {
+          FX.burst('flash', HELI.x, HELI.y + 0.4, HELI.z, 1, { size: 0.6 }); FX.line(HELI.x, HELI.y + 0.4, HELI.z, P.x + (hit ? 0 : 2), P.y + 1, P.z + (hit ? 0 : 2)); SFX.play('shot', HELI.x, HELI.z);
+          if (CB.onShot) CB.onShot(1, HELI.x, HELI.y + 0.4, HELI.z, P.x + (hit ? 0 : 2), P.y + 1, P.z + (hit ? 0 : 2), hit ? 2 : 1);
+          if (hit && d3 < 80) { if (P.car) dmgCar(P.car, 6); else H.hurt(8, 'shot'); }
+        }
       }
     }
     HELI.grp.position.set(HELI.x, HELI.y, HELI.z); HELI.grp.rotation.set(0.12, HELI.yaw, -AF.clamp(HELI.vx * Math.cos(HELI.yaw) - HELI.vz * Math.sin(HELI.yaw), -8, 8) * 0.02);
     HELI.rotor.rotation.y += dt * 22;
   };
+  // ---------------------------------------------------------------- strike jets (G.jetStars+, main island only)
+  // G.jetN pooled jets orbit with a capped turn rate; each warns (toast + lock tone) for G.jetWarnS, fires one seeker only with a
+  // clear line, then cools down G.jetCdS. G.missileN pooled seekers turn at most G.missileTurn rad/s, so a hard break or cover
+  // beats them; they burst on a voxel, near the target or at G.missileLife. All local, no allocations per frame.
+  const JET = CB.jets = { on: false, grp: null, jets: [], msl: [], warnT: 0 };
+  const jetBuild = () => {
+    const c = (hex, o) => AF.col(hex, Object.assign({ jitter: 0.1, edge: 0.3 }, o)), grey = c(0x5c6670, { metal: 0.5 }), dark = c(0x2a2e33), glass = AF.col('glass'), red = c(0xff4020, { emit: 1 });
+    const m = new AF.Model(28, 6, 44);
+    m.box(12, 1, 2, 16, 4, 40, grey); m.box(13, 4, 28, 15, 5, 36, glass); m.box(13, 1, 40, 15, 3, 44, dark);
+    m.box(0, 2, 12, 28, 3, 24, grey); m.box(6, 2, 2, 22, 3, 8, grey); m.box(13, 4, 2, 15, 6, 9, grey); m.box(12, 1, 0, 16, 4, 2, dark);
+    m.box(0, 2, 12, 1, 3, 14, red); m.box(27, 2, 12, 28, 3, 14, red);
+    const geo = AF.meshModel(m, { vs: 1 / 4, anchor: [0.5, 0.5, 0.5] });
+    const mm = new AF.Model(2, 2, 10); mm.box(0, 0, 0, 2, 2, 9, grey); mm.box(0, 0, 9, 2, 2, 10, red);
+    const mgeo = AF.meshModel(mm, { vs: 1 / 8, anchor: [0.5, 0.5, 0.5] });
+    const grp = new THREE.Group(); grp.name = 'jets';
+    for (let i = 0; i < G.jetN; i++) { const mesh = AF.modelMesh(geo); mesh.rotation.order = 'YXZ'; mesh.visible = false; grp.add(mesh); JET.jets.push({ mesh, on: false, x: 0, y: 0, z: 0, yaw: 0, bank: 0, st: 0, t: 0, a: i * PI }); }
+    for (let i = 0; i < G.missileN; i++) { const mesh = AF.modelMesh(mgeo, { cast: false }); mesh.rotation.order = 'YXZ'; mesh.visible = false; grp.add(mesh); JET.msl.push({ mesh, on: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, t: 0 }); }
+    AF.scene.add(grp); JET.grp = grp;
+  };
+  function jetsClear() {
+    JET.on = false; JET.warnT = 0;
+    for (const j of JET.jets) { j.on = false; j.mesh.visible = false; }
+    for (const s of JET.msl) { s.on = false; s.mesh.visible = false; }
+  }
+  CB.jetsClear = jetsClear;
+  const mslBurst = (s) => {
+    s.on = false; s.mesh.visible = false; FX.boom(s.x, s.y, s.z, 0.8); SFX.play('crash', s.x, s.z);
+    const P = target(), d = Math.hypot(P.x - s.x, P.y + 1 - s.y, P.z - s.z);
+    if (d < G.missileR && !P.away) {
+      const k = 1 - d / G.missileR, n = Math.round(G.missileDmg * (0.35 + 0.65 * k));
+      if (P.car) dmgCar(P.car, n * 2); else H.hurt(n, 'boom');
+      if (AF.camfx && AF.camfx.shake) AF.camfx.shake(0.03 * k + 0.01, 0.5);
+    }
+  };
+  const mslFire = (j, P) => {
+    const s = JET.msl.find((m) => !m.on); if (!s) return false;
+    const dx = P.x - j.x, dy = P.y + 1 - j.y, dz = P.z - j.z, d = Math.hypot(dx, dy, dz) || 1;
+    Object.assign(s, { on: true, x: j.x, y: j.y - 0.8, z: j.z, vx: dx / d * G.missileSpeed, vy: dy / d * G.missileSpeed, vz: dz / d * G.missileSpeed, t: G.missileLife });
+    s.mesh.visible = true; FX.burst('flash', s.x, s.y, s.z, 1, { size: 0.8 }); SFX.play('shot', j.x, j.z); return true;
+  };
+  const jetStep = (dt) => {
+    if (!(dt > 0)) return;
+    const want = CB.stars >= G.jetStars && CB.inJurisdiction() && !H.dead, P = target();
+    let any = false;
+    for (const j of JET.jets) {
+      if (!j.on) {
+        if (!want) continue;
+        const a = j.a + Math.random(); Object.assign(j, { on: true, x: P.x + Math.sin(a) * 300, z: P.z + Math.cos(a) * 300, y: P.y + G.jetAlt, yaw: a + PI, st: 0, t: 2 + Math.random() * 3 });
+        j.mesh.visible = true;
+      }
+      any = true;
+      const gy = AF.W.groundY(j.x, j.z);
+      // aim: a lead point on an orbit, or straight away when leaving; yaw turn capped by G.jetTurn, constant speed
+      j.a += dt * 0.18;
+      const tx = want ? P.x + Math.sin(j.a) * 140 : j.x + Math.sin(j.yaw) * 100, tz = want ? P.z + Math.cos(j.a) * 140 : j.z + Math.cos(j.yaw) * 100;
+      const turn = AF.clamp(AF.angDiff(j.yaw, Math.atan2(tx - j.x, tz - j.z)), -G.jetTurn * dt, G.jetTurn * dt);
+      j.yaw += turn; j.bank += (-turn / dt * 0.9 - j.bank) * Math.min(1, dt * 3);
+      j.x += Math.sin(j.yaw) * G.jetSpeed * dt; j.z += Math.cos(j.yaw) * G.jetSpeed * dt;
+      // terrain / towers: never below the ground under or just ahead
+      const gya = AF.W.groundY(j.x + Math.sin(j.yaw) * 40, j.z + Math.cos(j.yaw) * 40), ty = want ? Math.max(gy, gya, P.y) + G.jetAlt : j.y + 40;
+      j.y += AF.clamp(ty - j.y, -12 * dt, 18 * dt);
+      j.mesh.position.set(j.x, j.y, j.z); j.mesh.rotation.set(0, j.yaw, AF.clamp(j.bank, -1, 1));
+      if (!want) { if ((j.x - P.x) ** 2 + (j.z - P.z) ** 2 > 450 ** 2) { j.on = false; j.mesh.visible = false; } continue; }
+      // attack: 0 cruise/cooldown → 1 locking (telegraphed) → fire → 0
+      j.t -= dt;
+      const d = Math.hypot(P.x - j.x, P.z - j.z);
+      if (j.st === 0 && j.t <= 0 && d < G.jetRange && !P.away && JET.warnT <= 0) {
+        j.st = 1; j.t = G.jetWarnS; JET.warnT = G.jetWarnS;
+        AF.emit('toast', 'Missile lock! Break line of sight.'); SFX.play('click', P.x, P.z);
+      } else if (j.st === 1 && j.t <= 0) {
+        if (!P.away && los(j.x, j.y - 1, j.z, P.x, P.y + 1.2, P.z) && mslFire(j, P)) { j.st = 0; j.t = G.jetCdS; }
+        else if (d > G.jetRange * 1.4) { j.st = 0; j.t = 1; }
+        else j.t = 0.5;
+      }
+    }
+    if (JET.warnT > 0) JET.warnT -= dt;
+    for (const s of JET.msl) {
+      if (!s.on) continue;
+      any = true; s.t -= dt;
+      const dx = P.x - s.x, dy = P.y + 1 - s.y, dz = P.z - s.z, d = Math.hypot(dx, dy, dz) || 1;
+      if (d < 1.5 || s.t <= 0) { mslBurst(s); continue; }
+      // steer the velocity toward the target, at most G.missileTurn rad/s
+      const sp = G.missileSpeed, ux = s.vx / sp, uy = s.vy / sp, uz = s.vz / sp, cos = AF.clamp(ux * dx / d + uy * dy / d + uz * dz / d, -1, 1), ang = Math.acos(cos), k = ang > 1e-4 ? Math.min(1, G.missileTurn * dt / ang) : 1;
+      let nx = ux + (dx / d - ux) * k, ny = uy + (dy / d - uy) * k, nz = uz + (dz / d - uz) * k; const nl = Math.hypot(nx, ny, nz) || 1;
+      nx /= nl; ny /= nl; nz /= nl; s.vx = nx * sp; s.vy = ny * sp; s.vz = nz * sp;
+      const x1 = s.x + s.vx * dt, y1 = s.y + s.vy * dt, z1 = s.z + s.vz * dt;
+      if (!los(s.x, s.y, s.z, x1, y1, z1) || y1 < AF.W.groundY(x1, z1)) { mslBurst(s); continue; }
+      s.x = x1; s.y = y1; s.z = z1;
+      s.mesh.position.set(s.x, s.y, s.z); s.mesh.rotation.set(-Math.asin(AF.clamp(ny, -1, 1)), Math.atan2(nx, nz), 0);
+      if (Math.random() < dt * 30) FX.burst('smoke', s.x - nx, s.y - ny, s.z - nz, 1);
+    }
+    JET.on = any;
+  };
   const wanted = (dt) => {
     const C = CR(); if (!C) return;
+    if (CB.stars && !CB.inJurisdiction()) { clearWanted(AF.heist && AF.heist.on ? null : 'Out of police jurisdiction.'); }
     if (!CB.stars && !SQUADS.length && !CB.copsUp) { SFX.siren(0); return; }   // nobody on duty: skip the crowd scan
     const T = target();
     let seen = false, copsUp = 0, sirenK = 0;
@@ -1145,6 +1365,10 @@ try {
   const warm = () => {
     const o = TR.mesh; if (!o || !AF.stream || !AF.stream.compileAhead) return;
     o.visible = true; AF.stream.compileAhead(o).then(() => { o.visible = TR.n > 0; });
+    if (JET.grp) {
+      const pool = JET.jets.concat(JET.msl); for (const p of pool) { p.mesh.visible = true; p.mesh.position.set(0, -500, 0); }
+      AF.stream.compileAhead(JET.grp).then(() => { for (const p of pool) p.mesh.visible = p.on; });
+    }
   };
   // ---------------------------------------------------------------- the player's animation overlay (after the walk mode animates)
   // poses per weapon class: carry (low ready / across the body), aim (raised, both hands), sprint (lowered), reload; recoil on the arms.
@@ -1275,6 +1499,7 @@ try {
     if ((slowT += dt) >= 1 / 15) { const t = slowT; slowT = 0; runOver(); wanted(t); }
     for (const car of SQUADS) if (car.squad && !car.dead && !car.player) { if (CB.stars) driveSquad(car, dt); else standDown(car, dt); }
     if (HELI.grp && (HELI.on || CB.stars >= 3)) heliStep(dt);
+    if (JET.grp && (JET.on || CB.stars >= G.jetStars)) jetStep(dt);
     carFx(dt);
     if (TR.mesh && (TR.n || TR.was)) {
       const R = AF.post && AF.post.enabled && AF.post.sceneRT ? AF.post.sceneRT.height : AF.renderer.domElement.height;
@@ -1328,7 +1553,7 @@ try {
     }
   });
   AF.on('mode', (m) => { if (m !== 'walk') { AF.PL.aim = false; CB.swing = 0; crossPaint(false, 0); } if (VF.posed) seatUnpose(); AF.Vehicle.aim = false; });
-  AF.onBuild('combat', 875, () => { heliBuild(); trBuild(); magBuild(); });
+  AF.onBuild('combat', 875, () => { heliBuild(); jetBuild(); trBuild(); magBuild(); });
   if (AF.preloaded) setTimeout(warm, 0); else AF.on('preloaded', warm);
 
   AF.test('combat: a punch engages a ped, fleeing peds calm down, a bullet can down one', () => {
@@ -1357,6 +1582,33 @@ try {
     const cop = C.walkers.find((q) => q.cop && q.act), armed = !!cop && cop.agg.kind === 'gun';
     if (cop) CB.release(cop);
     clearWanted(); return { ok: two && spawned && armed && CB.stars === 0, info: `stars2 ${two}, spawned ${spawned}, armed ${armed}` };
+  });
+  AF.test('combat: police jurisdiction is geographic — city + bank yes, Serena / Corsair / liner no, heist or not', () => {
+    const J = CB.inJurisdiction, heist = AF.heist, on = heist && heist.on;
+    const at = () => [J(0, -40), J(-120, 60), !J(-60, 3100), !J(560, 3192), !J(-225, 1450), !J(0, 2000)];
+    const off = at(); if (heist) heist.on = true; let mid;
+    try { mid = at(); } finally { if (heist) heist.on = on; }
+    const ok = off.every(Boolean) && mid.every(Boolean);
+    return { ok, info: `heist off ${off.map(Number).join('')}, heist on ${mid.map(Number).join('')}` };
+  });
+  AF.test('combat: mid-heist a city crime still raises stars; an un-alarmed stealth zone holds ambient crimes until its alarm', () => {
+    const P = AF.player, hs = AF.heist, S = AF.stealth;
+    if (!P || !CB.inJurisdiction()) return { ok: true, info: 'player off the main island — skipped' };
+    const on = hs && hs.on, zone = S && S.zone, alarm = S && S.alarm, out = {};
+    clearWanted();
+    try {
+      if (hs) hs.on = true;
+      if (S) { S.zone = null; }
+      CB.crime(G.stars[1] + 1); out.city = CB.stars >= 2; clearWanted();
+      if (S) {
+        S.zone = { id: 'bank', box: [P.x - 5, P.y - 5, P.z - 5, P.x + 5, P.y + 5, P.z + 5] }; S.alarm = false;
+        CB.crime(G.stars[1] + 1); out.held = CB.stars === 0;
+        CB.crime(G.stars[1] + 1, 'heist'); out.heist = CB.stars >= 2; clearWanted();
+        S.alarm = true; const top = G.stars[G.stars.length - 1]; CB.crime(top); out.alarm = CB.stars === G.stars.length; clearWanted();
+      } else out.held = out.heist = out.alarm = true;
+    } finally { if (hs) hs.on = on; if (S) { S.zone = zone; S.alarm = alarm; } clearWanted(); }
+    const ok = out.city && out.held && out.heist && out.alarm;
+    return { ok, info: Object.entries(out).map(([k, v]) => `${k} ${v}`).join(', ') };
   });
   AF.test('combat: officers stand down once the wanted level clears (no shots, they walk off)', () => {
     const C = CR(), mode = AF.mode, hp = H.v, P = AF.player;

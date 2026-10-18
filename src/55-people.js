@@ -217,6 +217,7 @@ try {
       else if (prop === 'rod') { const c = ck(0x6a4424); for (let i = 0; i < 12; i++) m.set(hx, yb + Math.min(13, i), hz + 1 + i >> 0, c); }
       else if (prop === 'bucket') { const c = ck(0x9aa0aa, 0.1); m.box(hx - 2, yb - 5, hz - 2, hx + 4, yb - 1, hz + 4, c); m.box(hx - 1, yb - 2, hz - 1, hx + 3, yb - 1, hz + 3, ck(0x6f5a3a)); m.box(hx, yb - 1, hz, hx + 2, yb, hz + 2, c); }
       else if (prop === 'pitchfork') { const c = ck(0x9a7040); m.box(hx, 0, hz + 1, hx + 1, yb + 8, hz + 2, c); const t = ck(0x8a8a86); m.box(hx - 1, yb + 8, hz + 1, hx + 2, yb + 9, hz + 2, t); m.box(hx - 1, yb + 9, hz + 1, hx, yb + 12, hz + 2, t); m.box(hx + 1, yb + 9, hz + 1, hx + 2, yb + 12, hz + 2, t); m.box(hx, yb + 9, hz + 1, hx + 1, yb + 12, hz + 2, t); }
+      else if (prop === 'pistol') { const k = ck(0x16171a, 0.05), st = ck(0x6a6e74, 0.05), gr = ck(0x3a2618, 0.1); m.box(hx, yb - 6, hz + 1, hx + 1, yb - 1, hz + 2, k); m.box(hx, yb - 4, hz, hx + 1, yb, hz + 2, st); m.box(hx, yb - 1, hz - 2, hx + 1, yb + 1, hz, gr); m.set(hx, yb - 6, hz + 2, k); }
       else if (prop === 'broom') { const c = ck(0x9a7040); m.box(hx, 3, hz + 1, hx + 1, yb + 6, hz + 2, c); m.box(hx - 2, 0, hz, hx + 3, 4, hz + 3, ck(0xd8b86a, 0.3)); }
     }
     return { m, extra };
@@ -1250,9 +1251,9 @@ try {
     sp('teenM', man({ age: 'teen', set: { top: { style: 'letterman', col: 0x7a2630, col2: 0xf3e7c8, col3: 0xf3e7c8, sleeve: 0xf3e7c8 }, bottom: { style: 'pants', col: 0x3e5f8a, cuff: true }, hat: null, skirt: null, apron: null, propR: null } }));
     sp('teenM2', man({ age: 'teen', set: { top: { style: 'shirt', col: 0xf3f0e6, short: true }, bottom: { style: 'pants', col: 0x45464b, cuff: true }, hat: 'newsboy', hatCol: 0x6a6258, hatCol2: 0x4a4238, skirt: null, apron: null, propR: null } }));
     // the beat cop (77-combat's police pool): navy tunic, peaked cap, a revolver in the right hand
-    sp('cop', man({ set: { top: { style: 'suit', col: 0x1f2a44, tie: 0x141418, cuffs: true }, bottom: { style: 'pants', col: 0x1f2a44 }, hat: 'conductor', hatCol: 0x1f2a44, hatCol2: 0x141418, skirt: null, apron: null, propR: null, moustache: true } }), { cop: true });
+    sp('cop', man({ set: { top: { style: 'suit', col: 0x1f2a44, tie: 0x141418, cuffs: true }, bottom: { style: 'pants', col: 0x1f2a44 }, hat: 'conductor', hatCol: 0x1f2a44, hatCol2: 0x141418, skirt: null, apron: null, propR: 'pistol', moustache: true } }), { cop: true });
     // the mob (81-heist via 77's CB.spawnGoon): charcoal pinstripe, red tie, black fedora — drawn with the police frames
-    sp('goon', man({ set: { top: { style: 'suit', col: 0x2a2a30, tie: 0xb02a2a, cuffs: true }, bottom: { style: 'pants', col: 0x2a2a30 }, hat: 'fedora', hatCol: 0x141418, hatCol2: 0xb02a2a, skirt: null, apron: null, propR: null } }), { cop: true });
+    sp('goon', man({ set: { top: { style: 'suit', col: 0x2a2a30, tie: 0xb02a2a, cuffs: true }, bottom: { style: 'pants', col: 0x2a2a30 }, hat: 'fedora', hatCol: 0x141418, hatCol2: 0xb02a2a, skirt: null, apron: null, propR: 'pistol' } }), { cop: true });
     for (const L of out) { if (L.skirt === null) delete L.skirt; if (!L.bottom) L.bottom = { style: 'pants', col: 0x45464b }; if (L.skirt && L.bottom.style !== 'skirt' && !L.skirt.open) L.bottom = { style: 'skirt', col: L.skirt.col }; }
     return out;
   }

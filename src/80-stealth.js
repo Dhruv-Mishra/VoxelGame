@@ -11,7 +11,7 @@ try {
 //   last known position and shoots on sight (zone.mode 'fight'), or the job fails (zone.mode 'fail'). 45 s unseen = evasion over.
 // Knocked-out guards stay down; a guard who sees one raises the alarm. A guard off its timetable is steered through actor.ctl (54)
 // and walks back onto its route afterwards (the timetable resumes where he left: actor.lag).
-// Co-op: one client is the zone's AUTHORITY (the lowest slot inside the zone, else the host). It runs every guard against every
+// Co-op: the host is the zone's AUTHORITY, including when watching CCTV off site. It runs every guard against every
 // player (remote players from 80-coop's snapshots) and streams guard states at 6 Hz ('stealth' gs); the others render them and
 // forward their hits / hacker actions ('hit', 'act'). Cameras sweep on the shared world clock W.
 {
@@ -96,11 +96,12 @@ try {
   S.guard = (zid, o) => {
     const z = Z(zid); if (!z) return null;
     const g = Object.assign({ i: z.guards.length, z: zid, a: null, path: null, npc: null, voice: z.voice, name: 'Guard', range: 15, fov: 0.34, eye: 1.62, hp: 100, armed: true,
-      st: 'patrol', lv: 0, t: 0, tgt: { x: 0, y: 0, z: 0 }, route: null, ri: 0, ctl: null, leftW: 0, barkT: -9, fireT: 0, look0: 0, lookT: 0, heard: 0, down: false, spotT: 0, who: -1, hid: false, carrier: -1 }, o);
+      st: 'patrol', lv: 0, t: 0, tgt: { x: 0, y: 0, z: 0 }, route: null, ri: 0, ctl: null, leftW: 0, barkT: -9, fireT: 0, look0: 0, lookT: 0, heard: 0, hearT: 0, down: false, dead: false, spotT: 0, who: -1, hid: false, carrier: -1 }, o);
     // armed guards soak a lot more (a takedown from behind is still one blow); everyone can be put down
     g.hp0 = o.hp != null ? o.hp : g.armed ? 240 : 100; g.hp = g.hp0;
     if (g.path) g.a = g.path.actors[0];
     if (g.npc) g.a = g.npc;
+    if (g.a) { g.a.weapon = g.armed ? (g.weapon || 'revolver') : null; g.a.torch = g.torch || null; }
     z.guards.push(g); return g;
   };
   // a camera: x,y,z (lens), yaw0 + sweep amplitude (rad) over period s, pitch (down, rad), range, fov cos(half angle)
@@ -144,6 +145,13 @@ try {
   const inBox = (b, x, y, z, pad = 0) => !!b && x > b[0] - pad && x < b[3] + pad && y > b[1] - pad && y < b[4] + pad && z > b[2] - pad && z < b[5] + pad;
   S.inZone = (zid, x, y, z, pad) => { const zz = Z(zid); return !!zz && inBox(zz.box, x, y, z, pad); };
   S.isDark = (z, x, y, zz) => { for (const l of z.lights) if (l.off > 0 && x > l.box[0] && x < l.box[2] && zz > l.box[1] && zz < l.box[3]) return true; return false; };
+  // A torch is an actual narrow sight cone, not a room-wide detection buff or an extra renderer light.
+  const torchSees = (g, x, y, z) => {
+    const t = g.torch; if (!t) return false;
+    const a = g.a, c = a.ctl || a, dx = x - c.x, dy = y - c.y - (t.eye ?? 1.35), dz = z - c.z, d = Math.hypot(dx, dy, dz);
+    return d <= (t.range ?? 9) && (dx * Math.sin(c.yaw) + dz * Math.cos(c.yaw)) / (d || 1) >= (t.cone ?? 0.8) && los(c.x, c.y + (t.eye ?? 1.35), c.z, x, y, z);
+  };
+  S.torchSees = torchSees;
 
   // ---------------------------------------------------------------- players in the zone (local + remote), scratch objects, no garbage
   const PS = []; for (let k = 0; k < 4; k++) PS.push({ slot: k, x: 0, y: 0, z: 0, eye: 1.5, noise: 0, crouch: false, moving: false, on: false, px: 0, pz: 0, has: false, armed: false, carry: false });
@@ -153,15 +161,15 @@ try {
   const gather = (z) => {
     let n = 0; const me = mySlot(), p = AF.player;
     for (const q of PS) q.on = false;
-    if (AF.mode === 'walk' && p && inBox(z.box, p.x, p.y, p.z, 6)) {
+    if ((AF.mode === 'walk' || AF.mode === 'cctv') && p && inBox(z.box, p.x, p.y, p.z, 6)) {
       const q = PS[me & 3]; q.on = true; q.x = p.x; q.y = p.y; q.z = p.z; q.eye = p.eyeH || (p.crouch ? 0.95 : 1.55); q.crouch = !!p.crouch;
-      const sp = AF.PL && AF.PL.walk ? AF.PL.walk.speed || 0 : 0; q.moving = sp > 0.4;
-      q.noise = p.noise != null ? p.noise : (sp > 4.5 ? 1 : sp > 0.4 ? 0.35 : 0); n++;
+      const sp = AF.mode === 'walk' && AF.PL && AF.PL.walk ? AF.PL.walk.speed || 0 : 0; q.moving = sp > 0.4;
+      q.noise = AF.mode === 'cctv' ? 0 : p.noise != null ? p.noise : (sp > 4.5 ? 1 : sp > 0.4 ? 0.35 : 0); n++;
       q.armed = !!AF.combat && ARMS.has(AF.combat.heldId); q.carry = !!S.carrying;
     }
     if (online() && AF.coop && AF.coop.players) for (const [slot, r] of AF.coop.players) {
       if (!r || !r.seen || r.dead || r.veh || slot === me || !inBox(z.box, r.x, r.y, r.z, 6)) continue;
-      const q = PS[slot & 3], sp = q.has ? Math.hypot(r.x - q.px, r.z - q.pz) * 15 : 0;
+      const q = PS[slot & 3], sp = r.speed || 0;
       q.on = true; q.x = r.x; q.y = r.y; q.z = r.z; q.crouch = !!r.crouch; q.eye = q.crouch ? 0.95 : 1.55; q.moving = sp > 0.4;
       q.noise = r.noise != null ? r.noise : q.crouch ? (sp > 0.4 ? 0.12 : 0) : sp > 4.5 ? 1 : sp > 0.4 ? 0.35 : 0; n++;
       q.armed = ARMS.has(r.heldId); q.carry = carrying(slot);
@@ -169,14 +177,8 @@ try {
     for (const q of PS) { if (q.on) { q.px = q.x; q.pz = q.z; q.has = true; } else q.has = false; }
     return n;
   };
-  // who simulates a zone: the lowest slot standing in it, else the host
-  const authority = (z) => {
-    if (!online()) return 0;
-    let a = 99; const me = mySlot(), p = AF.player;
-    if (p && inBox(z.box, p.x, p.y, p.z, 4) && AF.mode !== 'cctv') a = me;
-    if (AF.coop && AF.coop.players) for (const [slot, r] of AF.coop.players) if (r && r.seen && !r.dead && inBox(z.box, r.x, r.y, r.z, 4) && slot < a) a = slot;
-    return a === 99 ? 0 : a;
-  };
+  // Authority must not depend on delayed player poses or which camera a client is viewing.
+  const authority = () => 0;
   S.isAuth = () => !!S.zone && S.auth === mySlot();
 
   // ---------------------------------------------------------------- guard voice + steering
@@ -243,7 +245,7 @@ try {
     if (z.onSpot) z.onSpot(g);
   };
   const toCombat = (g) => { if (g.down) return; takeCtl(g); set(g, 'combat'); g.lv = 1; const z = Z(g.z); g.tgt.x = z.lastSeen.x; g.tgt.y = z.lastSeen.y; g.tgt.z = z.lastSeen.z; goTo(g, g.tgt.x, g.tgt.y, g.tgt.z); g.fireT = 0.6 + AF.whash(g.i, 3) * 0.6; };
-  const emit = (type, g, extra) => { AF.emit('stealth', Object.assign({ type, zone: S.zone && S.zone.id, g }, extra)); };
+  const emit = (type, g, extra) => { AF.emit('stealth', Object.assign({ type, zone: g ? g.z : S.zone && S.zone.id, g }, extra)); };
   S.raiseAlarm = (why, g, remote) => {
     const z = S.zone; if (!z || z.alarm) return;
     z.alarm = true; S.alarm = true; S.reflex = null; S.rset.length = 0; S.evadeT = 0;
@@ -263,9 +265,16 @@ try {
     if (z.onCalm) z.onCalm();
   };
   const knockOut = (g, fx, fz, how) => {
-    if (g.down) return;
-    const a = g.a, z = Z(g.z); takeCtl(g); g.down = true; g.lv = 0; set(g, 'down'); if (a.ctl) { a.ctl.moving = false; a.aim = 0; }
-    if (g.path) AF.walkers.knock(a, fx || 0, fz || 1, 1.3, 1e6);
+    const lethal = how === 'shot' || how === 'head' || how === 'dead';
+    if (g.dead || g.down && !lethal) return;
+    const a = g.a, z = Z(g.z); if (!a) return;
+    takeCtl(g); g.down = true; g.dead = lethal; g.downAt = AF.clock.t; g.retired = false; g.lv = 0; g.see = false; g.net = null; set(g, 'down'); a.aim = 0; if (lethal) g.hp = 0;
+    if (a.ctl) a.ctl.moving = false;
+    if (g.path) {
+      if (lethal) AF.walkers.kill(a, fx || 0, fz || 1); else AF.walkers.sleep(a, fx || 0, fz || 1);
+      // Corpses use the transmitted control pose, not an unsent local sliding offset.
+      bodyAt(g, a.x, a.y, a.z, a.ctl.yaw);
+    }
     else if (g.npc && g.npc.root) { g.npc.root.rotation.x = -PI / 2; g.npc.down = true; }
     const ri = S.rset.indexOf(g); if (ri >= 0) S.rset.splice(ri, 1);
     if (S.reflex && !S.rset.length) { S.reflex = null; emit('reflexOk', g); } else if (S.reflex === g) S.reflex = S.rset[0];
@@ -285,24 +294,30 @@ try {
     if (!g) {
       for (const zz of S.zones.values()) { const q = zz.guards.find((r) => r.a === a); if (q) { g = q; z = zz; break; } }
       if (!g) return false;
-      // a guard of a zone that isn't running (nobody simulates it): plain damage, applied where the shot landed
-      if (!g.down) { g.hp -= (info && info.dmg) || 20; if (g.hp <= 0 || kind === 'melee' && g.st !== 'combat' && behindOf(a, AF.player)) knockOut(g, fx, fz, kind); else AF.walkers.stagger(a, fx || 0, fz || 1); }
+      // Inactive mission guards still have one owner; shooting one must not create a client-local corpse.
+      if (online() && mySlot() !== 0) { send({ op: 'hit', z: z.id, i: g.i, k: kind === 'melee' ? 1 : 0, h: info && info.head ? 1 : 0, s: info && info.silenced ? 1 : 0, d: Math.round((info && info.dmg) || 30), fx: +(fx || 0).toFixed(2), fz: +(fz || 0).toFixed(2) }, 0); return true; }
+      if (!g.dead) {
+        g.hp -= (info && info.dmg) || 20;
+        const P = from == null || from === mySlot() ? AF.player : AF.coop && AF.coop.players.get(from);
+        if (g.hp <= 0 || kind === 'melee' && !g.down && g.st !== 'combat' && behindOf(a, P)) { knockOut(g, fx, fz, kind === 'melee' ? 'melee' : 'shot'); broadcastKO(g, fx, fz); }
+        else if (!g.down) AF.walkers.stagger(a, fx || 0, fz || 1);
+      }
       return true;
     }
-    if (g.down) return true;
     if (!S.isAuth() && online()) { send({ op: 'hit', z: z.id, i: g.i, k: kind === 'melee' ? 1 : 0, h: info && info.head ? 1 : 0, s: info && info.silenced ? 1 : 0, d: Math.round((info && info.dmg) || 30), fx: +(fx || 0).toFixed(2), fz: +(fz || 0).toFixed(2) }, S.auth); predictHit(g, kind, info); return true; }
     applyHit(g, kind, fx, fz, info, from == null ? mySlot() : from);
     return true;
   };
-  const predictHit = (g, kind, info) => { if (g.st !== 'combat' && (kind === 'melee' || (info && info.head)) && behindOf(g.a, AF.player)) { g.down = true; if (g.path) AF.walkers.knock(g.a, 0, 1, 1.3, 1e6); } };
+  // A predicted stagger must never commit a death/KO which the authority has not accepted.
+  const predictHit = (g) => { if (!g.down && g.path) AF.walkers.stagger(g.a, 0, 1); };
   // somebody else on duty sees (x, y, z)? (a takedown, a body being dragged, a brawl with a passenger) -> that guard, else null
   const witness = S.witness = (z, x, y, zz, not) => {
     if (!z) return null;
     for (const o of z.guards) {
-      if (o === not || o.down || !o.a || (o.path && !o.path.active && !o.a.ctl)) continue;
+      if (o === not || o.down || !o.a || o.path && !o.path.enabled) continue;
       const a = o.a, yaw = a.ctl ? a.ctl.yaw : a.yaw, dx = x - a.x, dz = zz - a.z, d = Math.hypot(dx, dz);
       if (d > o.range * 0.85 || Math.abs(y - a.y) > 3 || (d > 1.5 && (dx * Math.sin(yaw) + dz * Math.cos(yaw)) / (d || 1) < o.fov)) continue;
-      if (S.isDark(z, x, y, zz) && d > 4) continue;
+      if (o.torch ? !torchSees(o, x, y + 1, zz) : S.isDark(z, x, y, zz) && d > 4) continue;
       if (los(a.x, a.y + o.eye, a.z, x, y + 1.0, zz)) return o;
     }
     return null;
@@ -313,6 +328,8 @@ try {
     if (z.strict) S.raiseAlarm('A guard saw the attack', w); else toAlert(w, from);
   };
   const applyHit = (g, kind, fx, fz, info, from) => {
+    if (g.dead) return;
+    if (g.down) { if (kind !== 'melee') { knockOut(g, fx, fz, 'shot'); broadcastKO(g, fx, fz); } return; }
     const a = g.a, P = from === mySlot() ? AF.player : AF.coop && AF.coop.players.get(from);
     const behind = behindOf(a, P), head = !!(info && info.head), dmg = (info && info.dmg) || 30, fighting = g.st === 'combat';
     if (kind === 'melee') {
@@ -327,7 +344,8 @@ try {
     if (P) { const z = Z(g.z); z.lastSeen.x = P.x; z.lastSeen.y = P.y; z.lastSeen.z = P.z; z.lastSeen.t = AF.clock.t; }
     toAlert(g, from); seenViolence(g, from);
   };
-  const broadcastKO = (g, fx, fz) => { if (S.isAuth()) send({ op: 'ko', z: g.z, i: g.i, fx: +(fx || 0).toFixed(2), fz: +(fz || 0).toFixed(2) }); };
+  // Same-size rare event: ko = unconscious, kd = dead. gs[9] also persists that distinction.
+  const broadcastKO = (g, fx, fz) => { if (mySlot() === 0) send({ op: g.dead ? 'kd' : 'ko', z: g.z, i: g.i, fx: +(fx || 0).toFixed(2), fz: +(fz || 0).toFixed(2) }); };
 
   // ---------------------------------------------------------------- noises: footsteps (sensed), gunshots (events), distractions
   S.noiseAt = (x, y, z, r, kind) => {
@@ -375,6 +393,7 @@ try {
     const a = g.a; if (!a) return;
     if (!a.ctl) a.ctl = { x, y, z: zz, yaw, moving: false, ph: 0 };
     a.ctl.x = x; a.ctl.y = y; a.ctl.z = zz; a.ctl.yaw = yaw; a.ctl.moving = false;
+    a.x = x; a.y = y; a.z = zz; a.yaw = yaw;
     if (a.rx) { a.rx.ox = a.rx.oz = a.rx.vx = a.rx.vz = 0; }
   };
   const putDown = (g, x, y, zz, yaw, hid) => {
@@ -403,22 +422,35 @@ try {
   // whoever decides sends it to everyone, the zone's authority then steers him)
   S.spawn = (zid, i, x, y, zz, remote) => {
     const z = Z(zid), g = z && z.guards[i]; if (!g || !g.reserve || !g.a || ![x, y, zz].every(Number.isFinite)) return null;
+    if (!remote && online() && mySlot() !== 0) return null;
+    if (g.live && !g.down) return g;
     const a = g.a;
-    g.down = false; g.hid = false; g.live = true; g.carrier = -1; g.seenBy = null; g.hp = g.hp0; g.lv = 1; g.route = null; g.net = null;
-    if (a.rx) { const R = a.rx; R.down = R.fall = R.st = R.fear = R.hold = 0; R.ox = R.oz = R.vx = R.vz = 0; }
-    a.rxOn = false; a.tilt = a.lift = 0;
+    g.down = g.dead = false; g.hid = false; g.live = true; g.retired = false; g.downAt = -Infinity; g.carrier = -1; g.seenBy = null; g.hp = g.hp0; g.lv = 1; g.route = null; g.net = null;
+    AF.walkers.revive(a);
     a.ctl = { x, y, z: zz, yaw: 0, moving: false, ph: 0 }; g.home = { x, y, z: zz }; g.leftW = AF.clock.w;
+    bodyAt(g, x, y, zz, 0);
+    // A spawn/death between gs ticks can return to the cached corpse pose after cleanup.
+    SYNC.clear();
     if (S.carrying === g) S.carrying = null;
     if (g.path) g.path.enabled = true;
     if (z.alarm) toCombat(g); else { set(g, 'search'); g.tgt.x = z.lastSeen.x; g.tgt.y = z.lastSeen.y; g.tgt.z = z.lastSeen.z; goTo(g, g.tgt.x, g.tgt.y, g.tgt.z); }
     if (!remote) send({ op: 'spawn', z: zid, i, x: +x.toFixed(2), y: +y.toFixed(2), zz: +zz.toFixed(2) });
     return g;
   };
-  // the next free reserve of a zone: one never used, or a body nobody is near (reused off screen)
+  // Reserve bodies explicitly expire, then stay hidden for a full second before a different life may enter.
+  // The existing gs hidden bit carries cleanup; no observer can see a corpse stand up in place.
+  const retireReserves = (z) => {
+    for (const g of z.guards) if (g.reserve && g.live && g.down && !g.retired && g.carrier < 0 && AF.clock.t - g.downAt >= 15) {
+      g.retired = true; g.retiredAt = AF.clock.t; g.hid = true;
+      if (g.path) g.path.enabled = false;
+      bodyAt(g, g.a.x, g.a.y - 40, g.a.z, g.a.yaw);
+    }
+  };
   S.freeReserve = (zid, far) => {
-    const z = Z(zid); if (!z) return -1; const p = AF.player;
+    const z = Z(zid); if (!z || online() && mySlot() !== 0) return -1;
     for (const g of z.guards) if (g.reserve && !g.live) return g.i;
-    for (const g of z.guards) if (g.reserve && g.down && g.carrier < 0 && Math.hypot(g.a.x - p.x, g.a.z - p.z) > (far || 25)) return g.i;
+    for (const g of z.guards) if (g.reserve && g.down && g.retired && g.carrier < 0 && AF.clock.t - g.retiredAt >= 1) return g.i;
+    void far; // retained for existing mission callers; cleanup no longer depends on camera visibility
     return -1;
   };
   const bodyIt = AF.addInteract({ x: 0, y: -999, z: 0, r: 1.7, prio: 2.7, label: 'Carry the body', can: () => AF.mode === 'walk' && (!!S.carrying || !!bodyIt.g), act: () => { if (S.carrying) drop(); else pickUp(bodyIt.g); } });
@@ -450,7 +482,8 @@ try {
     if (S.zone === z) return;
     if (S.zone) leave(S.zone);
     S.zone = z; S.alarm = false; S.reflex = null; S.rset.length = 0; S.caution = 0;
-    if (z) { z.alarm = false; for (const g of z.guards) if (g.path) g.path.enabled = true; }
+    S.auth = authority(); senseAcc = syncAcc = 0; SYNC.clear();
+    if (z) { z.alarm = false; for (const g of z.guards) if (g.path) g.path.enabled = !g.reserve || !!g.live; }
     hud(true);
   };
   const leave = (z) => {
@@ -462,16 +495,17 @@ try {
     const z = Z(zid); if (!z) return;
     z.alarm = false; if (S.zone === z) { S.alarm = false; S.reflex = null; S.rset.length = 0; S.caution = 0; }
     for (const g of z.guards) {
-      const a = g.a; g.down = false; g.lv = 0; g.hp = g.hp0 || 100; g.st = 'patrol'; g.t = 0; g.route = null; g.home = null; g.hid = false; g.carrier = -1; g.seenBy = null; g.flagged = false;
+      const a = g.a; g.down = g.dead = false; g.retired = false; g.downAt = -Infinity; g.lv = 0; g.hp = g.hp0 || 100; g.st = 'patrol'; g.t = 0; g.route = null; g.home = null; g.hid = false; g.carrier = -1; g.seenBy = null; g.flagged = false; g.heard = g.hearT = g.spotT = 0; g.net = null; g.evidence = null; g.evidenceT = 0;
       if (g.path && S.carrying === g) S.carrying = null;
-      if (g.path) { a.ctl = null; a.aim = 0; a.lag = 0; a.rx = null; a.rxOn = false; a.tilt = a.lift = 0; }
+      if (g.path) { a.ctl = null; a.aim = 0; a.lag = 0; AF.walkers.revive(a); }
       if (g.npc && g.npc.root) { g.npc.root.rotation.x = 0; g.npc.down = false; }
-      if (g.reserve) { g.down = true; g.hid = true; g.live = false; }
+      if (g.reserve) { g.down = true; g.hid = true; g.live = false; g.st = 'down'; if (g.path) g.path.enabled = false; }
       AF.alertMark.clear('g' + z.id + g.i);
     }
     for (const c of z.cams) { c.off = 0; c.lv = 0; c.alarmed = false; AF.alertMark.clear('c' + z.id + c.i); }
     for (const l of z.lights) { l.off = 0; setLamps(l, true); }
     for (const p of z.points) p.cd = 0;
+    SYNC.clear();
     hud(true);
   };
 
@@ -481,26 +515,33 @@ try {
     const np = gather(z); z.seen = false;
     const caution = S.caution > 0 ? 1.35 : 1;
     for (const g of z.guards) {
-      if (g.down || !g.a || (g.path && !g.path.active && !g.a.ctl)) continue;
+      if (g.down || !g.a || g.path && !g.path.enabled) continue;
       const a = g.a, yaw = a.ctl ? a.ctl.yaw : a.yaw, fx = Math.sin(yaw), fz = Math.cos(yaw), ex = a.x, ey = a.y + g.eye, ez = a.z;
-      let best = 0, bq = null;
+      let best = 0, bq = null, heard = null, loudest = 0;
+      g.hearT = Math.max(0, g.hearT - dt);
       if (np) for (const q of PS) {
         if (!q.on) continue;
         const dx = q.x - ex, dz = q.z - ez, d = Math.hypot(dx, dz), dy = q.y - a.y;
         if (Math.abs(dy) > 3.2) continue;
         // hearing: footsteps carry noise * 15 m (sprint 15, walk ~5, crouch-walk ~2)
-        const hr = q.noise * 15 * z.hearing;
-        if (hr > 0.5 && d < hr && g.st !== 'combat' && g.st !== 'alert') { g.heard += dt; if (g.heard > 0.25) { g.heard = 0; g.lv = Math.max(g.lv, 0.36); toSus(g, q.x, q.y, q.z, 'noise'); } }
+        let hr = q.noise * 15 * z.hearing;
+        if (hr > 0.5 && d < hr && g.st !== 'combat' && g.st !== 'alert') {
+          if (!los(ex, ey, ez, q.x, q.y + 1, q.z)) hr *= 0.28;
+          const loud = hr > d ? 1 - d / hr : 0;
+          if (loud > loudest) { loudest = loud; heard = q; }
+        }
         // sight
-        const rng = g.range * z.sight * caution * (z.alarm ? 1.5 : 1);
+        const rng = (g.torch ? g.torch.range ?? 9 : g.range) * z.sight * caution * (z.alarm ? 1.5 : 1);
         if (d > rng) continue;
         const c = (dx * fx + dz * fz) / (d || 1);
         if (d > 1.3 && c < g.fov) continue;
         const ty = q.y + q.eye * 0.8;
+        const lit = torchSees(g, q.x, ty, q.z);
+        if (g.torch && !lit) continue;
         if (!los(ex, ey, ez, q.x, ty, q.z) && !los(ex, ey, ez, q.x, q.y + q.eye, q.z)) continue;
         let k = Math.pow(1 - d / rng, 0.55) * (c > 0.8 ? 1 : 0.5);
         if (d < 1.3) k = 0.9;
-        if (S.isDark(z, q.x, q.y, q.z)) k *= d < 3 ? 0.7 : 0.32;
+        if (!lit && S.isDark(z, q.x, q.y, q.z)) k *= d < 3 ? 0.7 : 0.32;
         if (q.crouch) k *= d < 3.5 ? 0.8 : 0.5;
         k *= q.moving ? (q.noise > 0.8 ? 1.35 : 1) : 0.6;
         // a weapon in hand or a body over the shoulder: no uniform covers that, and a strict zone (the liner) reacts at once
@@ -509,22 +550,35 @@ try {
         else if (z.disguise && z.disguise(q.slot)) k *= d < 2.2 && c > 0.8 ? 0.35 : 0.08;
         if (k > best) { best = k; bq = q; g.flagged = flagged; }
       }
+      if (heard && !g.hearT) {
+        g.heard += dt * (0.5 + loudest);
+        if (g.heard >= 0.35) { g.heard = 0; g.hearT = 1.2; g.lv = Math.max(g.lv, 0.36); toSus(g, heard.x, heard.y, heard.z, 'noise'); }
+      } else g.heard = Math.max(0, g.heard - dt * 2);
       // bodies: a guard who sees a downed colleague raises the alarm (hidden bodies and ones being carried don't count)
-      if (!best && !z.alarm && g.st !== 'alert') for (const o of z.guards) {
+      let evidence = null;
+      if (!z.alarm && g.st !== 'alert') for (const o of z.guards) {
         if (!o.down || o === g || o.seenBy || o.hid || o.carrier >= 0) continue;
         const dx = o.a.x - ex, dz = o.a.z - ez, d = Math.hypot(dx, dz);
         if (d > 11 || Math.abs(o.a.y - a.y) > 3 || (dx * fx + dz * fz) / (d || 1) < g.fov || !los(ex, ey, ez, o.a.x, o.a.y + 0.3, o.a.z)) continue;
-        o.seenBy = g; bark(g, 'body', true); g.tgt.x = o.a.x; g.tgt.y = o.a.y; g.tgt.z = o.a.z; toAlert(g, -1); break;
+        if (g.torch ? !torchSees(g, o.a.x, o.a.y + 0.3, o.a.z) : S.isDark(z, o.a.x, o.a.y, o.a.z) && d > 4) continue;
+        evidence = o; break;
       }
+      if (evidence) {
+        g.evidenceT = g.evidence === evidence ? (g.evidenceT || 0) + dt : dt; g.evidence = evidence;
+        if (g.evidenceT >= 0.45) { evidence.seenBy = g; bark(g, 'body', true); g.tgt.x = evidence.a.x; g.tgt.y = evidence.a.y; g.tgt.z = evidence.a.z; toAlert(g, -1); }
+      } else { g.evidence = null; g.evidenceT = 0; }
       if (best > 0) {
         z.seen = true; z.lastSeen.x = bq.x; z.lastSeen.y = bq.y; z.lastSeen.z = bq.z; z.lastSeen.t = AF.clock.t;
         g.lastQ = bq.slot;
         if (g.st === 'combat') { g.tgt.x = bq.x; g.tgt.y = bq.y; g.tgt.z = bq.z; g.see = true; continue; }
-        g.lv = Math.min(1, g.lv + best * 1.55 * dt);
+        g.spotT += dt;
+        if (g.flagged) g.lv = 1;
+        else if (g.spotT >= 0.18) g.lv = Math.min(1, g.lv + best * 1.55 * dt);
         g.tgt.x = bq.x; g.tgt.y = bq.y; g.tgt.z = bq.z;
         if (g.lv >= 1) { toAlert(g, bq.slot); if (g.flagged && !z.alarm) S.raiseAlarm(bq.carry ? 'A guard saw you carrying a body' : 'A guard saw your weapon', g); }
         else if (g.lv > 0.3 && (g.st === 'patrol' || g.st === 'return' || g.st === 'look')) toSus(g, bq.x, bq.y, bq.z, 'sight');
       } else {
+        g.spotT = Math.max(0, g.spotT - dt * 2);
         g.see = false;
         if (g.st !== 'alert' && g.st !== 'combat') g.lv = Math.max(0, g.lv - dt * (g.st === 'search' || g.st === 'look' ? 0.06 : 0.16));
       }
@@ -539,7 +593,7 @@ try {
         if (d > c.range) continue;
         const cc = (dx * Math.sin(c.yaw) * cy + dz * Math.cos(c.yaw) * cy - dy * Math.sin(c.pitch)) / (d || 1);
         if (cc < c.fov || !los(c.x, c.y - 0.2, c.z, q.x, q.y + q.eye * 0.7, q.z)) continue;
-        let k = Math.pow(1 - d / c.range, 0.4); if (S.isDark(z, q.x, q.y, q.z)) k *= 0.45; if (q.crouch) k *= 0.8; if (z.disguise && z.disguise(q.slot)) k *= 0.1;
+        let k = Math.pow(1 - d / c.range, 0.4); if (S.isDark(z, q.x, q.y, q.z)) k *= 0.45; if (q.crouch) k *= 0.8; if (q.armed || q.carry) k *= 1.6; else if (z.disguise && z.disguise(q.slot)) k *= 0.1;
         if (k > best) { best = k; z.lastSeen.x = q.x; z.lastSeen.y = q.y; z.lastSeen.z = q.z; z.lastSeen.t = AF.clock.t; }
       }
       if (best > 0) { c.lv = Math.min(1, c.lv + best * 0.75 * dt); if (c.lv >= 1 && !z.alarm) { c.alarmed = true; S.raiseAlarm('A camera saw you', null); } }
@@ -624,6 +678,7 @@ try {
     }
   };
   const shoot = (g, q, d) => {
+    if (!q || !q.on || g.down || !los(g.a.x, g.a.y + g.eye, g.a.z, q.x, q.y + q.eye * 0.8, q.z)) return;
     const a = g.a, yaw = a.ctl.yaw, gx = a.x + Math.sin(yaw) * 0.5, gy = a.y + 1.35, gz = a.z + Math.cos(yaw) * 0.5;
     const hitP = AF.clamp(0.62 - d / 34 - (q.moving ? 0.18 : 0) - (q.crouch ? 0.12 : 0), 0.1, 0.7), hit = Math.random() < hitP;
     const tx = q.x + (hit ? 0 : (Math.random() - 0.5) * 2.2), ty = q.y + (hit ? 1.1 : 0.4 + Math.random() * 1.6), tz = q.z + (hit ? 0 : (Math.random() - 0.5) * 2.2);
@@ -638,16 +693,27 @@ try {
   };
 
   // ---------------------------------------------------------------- co-op: guard state stream from the authority
-  const GS = [];
+  const GS = [], SYNC = new Map(), UTF8 = new TextEncoder();
+  S.syncStats = { sent: 0, skipped: 0, bytes: 0 };
+  const interested = (z, r) => !r || !r.seen || r.observer || inBox(z.box, r.x, r.y, r.z, z.radius);
   const syncOut = (z) => {
     GS.length = 0;
     for (const g of z.guards) {
       if (!g.a || (!g.a.ctl && g.lv < 0.02 && !g.down) || (g.reserve && !g.live)) continue;
       const a = g.a, c = a.ctl || a;
-      GS.push([g.i, ST.indexOf(g.st), +c.x.toFixed(2), +c.y.toFixed(2), +c.z.toFixed(2), +c.yaw.toFixed(2), c.moving ? 1 : 0, +(a.aim || 0).toFixed(2), +g.lv.toFixed(2), g.down ? 1 : 0, g.hid ? 1 : 0, g.carrier + 1]);
+      GS.push([g.i, ST.indexOf(g.st), +c.x.toFixed(2), +c.y.toFixed(2), +c.z.toFixed(2), +c.yaw.toFixed(2), (c.moving ? 1 : 0) | (a.rxOn && a.rx.st > 0 ? 2 : 0), +(a.aim || 0).toFixed(2), +g.lv.toFixed(2), g.down ? g.dead ? 2 : 1 : 0, g.hid ? 1 : 0, g.carrier + 1]);
     }
     const cams = z.cams.map((c) => +c.lv.toFixed(2));
-    send({ op: 'gs', z: z.id, g: GS, c: cams, al: z.alarm ? 1 : 0 });
+    const m = { op: 'gs', z: z.id, g: GS, c: cams, al: z.alarm ? 1 : 0 }, key = JSON.stringify(m);
+    // Reliable ordered delivery needs no identical refreshes. A newly interested observer always gets the full touched state.
+    for (const [slot] of N.peers) {
+      const r = AF.coop && AF.coop.players.get(slot);
+      if (!interested(z, r)) { SYNC.delete(slot); continue; }
+      const peer = N.peers.get(slot), prev = SYNC.get(slot), observer = !!(r && r.observer);
+      if (prev && prev.peer === peer && prev.key === key && prev.observer === observer) { S.syncStats.skipped++; continue; }
+      SYNC.set(slot, { peer, key, observer }); send(m, slot); S.syncStats.sent++;
+      S.syncStats.bytes += UTF8.encode(JSON.stringify(m)).byteLength;
+    }
   };
   const ST = ['patrol', 'sus', 'search', 'look', 'return', 'alert', 'combat', 'down'];
   const remoteStep = (g, dt) => {
@@ -659,16 +725,22 @@ try {
   const ingest = (z, list, cams, al) => {
     const seen = new Set();
     for (const r of list) {
-      if (!Array.isArray(r) || r.length < 10) continue;
-      const g = z.guards[r[0] | 0]; if (!g || !g.a) continue; seen.add(g);
-      const st = ST[r[1] | 0] || 'patrol';
-      if (r[9] && !g.down) { g.down = true; if (g.path) { takeCtl(g); AF.walkers.knock(g.a, 0, 1, 1.3, 1e6); } }
+      if (!Array.isArray(r) || r.length !== 12 || !r.every(Number.isFinite) || !Number.isInteger(r[0]) || r[0] < 0 || !Number.isInteger(r[1]) || r[1] < 0 || r[1] >= ST.length || ![0, 1, 2].includes(r[9]) || r[6] < 0 || r[6] > 3 || r[8] < 0 || r[8] > 1 || r[11] < 0 || r[11] > 4) continue;
+      const g = z.guards[r[0]]; if (!g || !g.a) continue; seen.add(g);
+      if (g.down && !r[9] || g.dead && r[9] !== 2) continue;
+      const st = ST[r[1]];
+      if (r[9] && (!g.down || r[9] === 2 && !g.dead)) knockOut(g, 0, 1, r[9] === 2 ? 'dead' : 'remote');
       g.st = st; g.lv = +r[8] || 0;
+      if (g.down) g.st = 'down';
       if (g.down && r.length >= 12) {
         const cr = (r[11] | 0) - 1; g.hid = !!r[10];
         if (cr !== mySlot() || S.carrying !== g) { g.carrier = AF.clamp(cr, -1, 3); if (S.carrying === g) S.carrying = null; bodyAt(g, +r[2], +r[3], +r[4], +r[5]); }
       }
-      if (g.path && !g.down) { if (!g.a.ctl) takeCtl(g); g.net = g.net || {}; Object.assign(g.net, { x: +r[2], y: +r[3], z: +r[4], yaw: +r[5], mv: !!r[6], aim: +r[7] || 0 }); }
+      if (g.path && !g.down) {
+        if (!g.a.ctl) takeCtl(g);
+        const stagger = !!(r[6] & 2); if (stagger && !(g.net && g.net.stagger)) AF.walkers.stagger(g.a, 0, 0);
+        g.net = g.net || {}; Object.assign(g.net, { x: +r[2], y: +r[3], z: +r[4], yaw: +r[5], mv: !!(r[6] & 1), aim: +r[7] || 0, stagger });
+      }
     }
     for (const g of z.guards) if (!seen.has(g) && !g.down && g.a && g.a.ctl && g.net) { dropCtl(g); g.net = null; g.st = 'patrol'; g.lv = 0; }
     if (Array.isArray(cams)) cams.forEach((v, i) => { if (z.cams[i]) z.cams[i].lv = +v || 0; });
@@ -676,12 +748,17 @@ try {
   };
   if (N && N.on) N.on('stealth', (m, from) => {
     if (!m || typeof m.op !== 'string') return;
-    const z = typeof m.z === 'string' ? Z(m.z) : null; if (!z || S.zone !== z) return;
+    const z = typeof m.z === 'string' ? Z(m.z) : null; if (!z || S.zone !== z && !['hit', 'ko', 'kd'].includes(m.op)) return;
     const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
     switch (m.op) {
       case 'gs': if (from === S.auth && from !== mySlot() && Array.isArray(m.g) && m.g.length <= 32) ingest(z, m.g, m.c, m.al); break;
-      case 'hit': if (S.isAuth() && int(m.i, 0, z.guards.length - 1)) { const g = z.guards[m.i]; if (!g.down) applyHit(g, m.k ? 'melee' : 'shot', +m.fx || 0, +m.fz || 0, { head: !!m.h, silenced: !!m.s, dmg: AF.clamp(+m.d || 30, 1, 300) }, from); } break;
+      case 'hit': if (mySlot() === 0 && int(m.i, 0, z.guards.length - 1)) {
+        const g = z.guards[m.i], info = { head: !!m.h, silenced: !!m.s, dmg: AF.clamp(+m.d || 30, 1, 300) };
+        if (S.zone === z) applyHit(g, m.k ? 'melee' : 'shot', +m.fx || 0, +m.fz || 0, info, from);
+        else S.hit(g.a, m.k ? 'melee' : 'shot', +m.fx || 0, +m.fz || 0, info, from);
+      } break;
       case 'ko': if (from === S.auth && int(m.i, 0, z.guards.length - 1)) knockOut(z.guards[m.i], +m.fx || 0, +m.fz || 1, 'remote'); break;
+      case 'kd': if (from === S.auth && int(m.i, 0, z.guards.length - 1)) knockOut(z.guards[m.i], +m.fx || 0, +m.fz || 1, 'dead'); break;
       case 'act': if (S.isAuth() && ['loop', 'dark', 'dist', 'reset'].includes(m.k) && int(m.id, 0, 64)) S.act(m.k, m.id, AF.clamp(+m.s || 20, 1, 90), true); break;
       case 'actx': if (from === S.auth && ['loop', 'dark', 'dist', 'reset'].includes(m.k) && int(m.id, 0, 64)) applyAct(z, m.k, m.id, AF.clamp(+m.s || 20, 1, 90), true); break;
       case 'alarm': if (from === S.auth && !z.alarm) S.raiseAlarm(typeof m.why === 'string' ? m.why.slice(0, 80) : '', null, true); break;
@@ -692,9 +769,9 @@ try {
         else if (g.carrier === from && [m.x, m.y, m.zz].every(Number.isFinite)) { putDown(g, m.x, m.y, m.zz, +m.yaw || 0, m.hid === 1 && !!hideNear(z, m.x, m.y, m.zz)); emit('body', g, { hid: g.hid }); }
       } break;
       case 'cpos': if (S.isAuth() && int(m.i, 0, z.guards.length - 1) && [m.x, m.y, m.zz].every(Number.isFinite)) { const g = z.guards[m.i]; if (g.down && g.carrier === from) bodyAt(g, m.x, m.y, m.zz, +m.yaw || 0); } break;
-      case 'spawn': if (int(m.i, 0, z.guards.length - 1) && [m.x, m.y, m.zz].every(Number.isFinite)) S.spawn(z.id, m.i, m.x, m.y, m.zz, true); break;
+      case 'spawn': if (from === 0 && int(m.i, 0, z.guards.length - 1) && [m.x, m.y, m.zz].every(Number.isFinite)) S.spawn(z.id, m.i, m.x, m.y, m.zz, true); break;
       case 'areq': if (S.isAuth() && !z.alarm) S.raiseAlarm(typeof m.why === 'string' ? m.why.slice(0, 80) : 'Alarm'); break;
-      case 'shot': if (AF.health && !AF.health.dead && AF.mode === 'walk') AF.health.hurt(AF.clamp(+m.d || 10, 1, 20), 'guard'); break;
+      case 'shot': if (from === S.auth && AF.health && !AF.health.dead && (AF.mode === 'walk' || AF.mode === 'cctv')) AF.health.hurt(AF.clamp(+m.d || 10, 1, 20), 'guard'); break;
       case 'fire': if (from === S.auth && int(m.i, 0, z.guards.length - 1) && [m.x, m.y, m.zz].every(Number.isFinite)) { const a = z.guards[m.i].a, CB = AF.combat; if (a && CB && CB.tracer) CB.tracer(a.x, a.y + 1.35, a.z, m.x, m.y, m.zz, false); if (AF.audio && a) AF.audio.play('rev', { x: a.x, y: a.y + 1.3, z: a.z, vol: 0.8 }); } break;
     }
   });
@@ -732,11 +809,15 @@ try {
     const z = S.zone;
     if (!z) { if (S.carrying) S.carrying = null; if (bodyIt.g || bodyIt.y > -900) { bodyIt.g = null; bodyIt.y = -999; } if (tagTxt || vigOn) hud(true); return; }
     // only near the zone: everything sleeps when nobody is within its radius
-    const cp = AF.camera.position, b = z.box, near = cp.x > b[0] - z.radius && cp.x < b[3] + z.radius && cp.z > b[2] - z.radius && cp.z < b[5] + z.radius;
+    const cp = AF.camera.position, b = z.box;
+    S.auth = authority();
+    let near = cp.x > b[0] - z.radius && cp.x < b[3] + z.radius && cp.z > b[2] - z.radius && cp.z < b[5] + z.radius;
+    if (!near && S.isAuth() && online() && AF.coop) for (const r of AF.coop.players.values()) if (r.seen && (r.observer || inBox(b, r.x, r.y, r.z, z.radius))) { near = true; break; }
     camMeshes(z);
     if (!near) return;
     carryTick(z, dt);
-    S.auth = authority(z);
+    if (S.isAuth()) retireReserves(z);
+    if (S.isAuth()) for (const g of z.guards) if (g.path && g.path.enabled && !g.path.active) WK().step(g.path, g.a, dt, AF.clock.w);
     if (S.isAuth()) { senseAcc += dt; if (senseAcc >= 1 / 15) { sense(z, Math.min(0.2, senseAcc)); senseAcc = 0; } }
     motion(z, dt);
     marks(z); hud(false);
@@ -744,6 +825,53 @@ try {
   });
 
   // ---------------------------------------------------------------- tests
+  AF.test('stealth: lifecycle snapshots cannot revive a corpse; reserve spawn is an explicit reset', () => {
+    const keep = { zone: S.zone, auth: S.auth, alarm: S.alarm, reflex: S.reflex, reflexT: S.reflexT, caution: S.caution, rset: S.rset.slice() };
+    const a = { x: 0, y: 60.5, z: 0, yaw: 0, ph: 0, s: 0, lag: 0, look: {} }, path = { actors: [a], points: [[0, 60.5, 0]], speed: 0, length: 0, enabled: true };
+    const z = S.define('_lifecycle', { box: [-10, 55, -10, 10, 70, 10] }), g = S.guard(z.id, { path });
+    try {
+      S.zone = z; S.auth = mySlot(); knockOut(g, 0, 1, 'shot');
+      ingest(z, [[0, 0, 42, 60.5, 42, 0, 0, 0, 0, 0, 0, 0]], [], 0); WK().step(path, a, 3600, 3600);
+      const dead = g.dead && g.down && a.dead && g.st === 'down' && a.x === a.ctl.x && a.z === a.ctl.z && a.x === 0 && a.z === 0;
+      S.reset(z.id); const reset = !g.dead && !g.down && !a.dead;
+      knockOut(g, 0, 1, 'melee'); const asleep = g.down && !g.dead && a.unconscious;
+      g.reserve = true; S.reset(z.id); const hidden = !g.live && g.down && g.hid && !path.enabled;
+      SYNC.set(-99, {});
+      S.spawn(z.id, 0, 1, 60.5, 2, true); S.spawn(z.id, 0, 99, 60.5, 99, true);
+      const spawn = g.live && !g.down && !a.dead && !a.unconscious && a.ctl.x === 1 && a.ctl.z === 2 && a.x === 1 && a.z === 2 && !SYNC.has(-99);
+      knockOut(g, 0, 1, 'shot'); g.downAt = AF.clock.t - 16; retireReserves(z);
+      const cleanup = g.retired && g.hid && g.down && a.dead && !path.enabled && S.freeReserve(z.id, 1) === -1;
+      g.retiredAt = AF.clock.t - 1.1; const recycled = S.freeReserve(z.id, 1) === 0;
+      WK().step(path, a, 3600, 3600); const staysDead = g.down && a.dead;
+      return { ok: dead && reset && asleep && hidden && spawn && cleanup && recycled && staysDead, info: `dead ${dead}, reset ${reset}, unconscious ${asleep}, reserve hidden ${hidden}, idempotent spawn ${spawn}, TTL cleanup ${cleanup}, new-life slot ${recycled}, stays dead ${staysDead}` };
+    } finally { S.zones.delete(z.id); Object.assign(S, keep); }
+  });
+  AF.test('stealth: a torch detects only its visible cone, never the whole dark room', () => {
+    const clear = AF.segClear, g = { a: { x: 0, y: 0, z: 0, yaw: 0 }, torch: { range: 9, cone: 0.8, eye: 1.35 } };
+    try {
+      AF.segClear = () => true;
+      const front = torchSees(g, 0, 1.35, 5), back = !torchSees(g, 0, 1.35, -2), side = !torchSees(g, 4, 1.35, 2), far = !torchSees(g, 0, 1.35, 10);
+      AF.segClear = () => false; const blocked = !torchSees(g, 0, 1.35, 5);
+      return { ok: front && back && side && far && blocked, info: `front ${front}, behind ${back}, outside cone ${side}, range ${far}, occluded ${blocked}` };
+    } finally { AF.segClear = clear; }
+  });
+  AF.test('stealth: twelve-field lifecycle rows keep their byte width and identical states are not resent', () => {
+    if (!N || !AF.coop) return { ok: false, info: 'no co-op' };
+    const keep = { role: N.role, peers: N.peers, send: N.send, players: AF.coop.players, stats: { ...S.syncStats } }, sent = [];
+    const a = { x: 1, y: 0.5, z: 2, yaw: 0, aim: 0 }, g = { i: 0, st: 'down', a, lv: 0, down: true, dead: true, hid: false, carrier: -1 };
+    const z = { id: 'bank', guards: [g], cams: [], alarm: false, box: [-10, -10, -10, 10, 10, 10], radius: 90 }, r = { seen: true, observer: true, x: 1000, y: 0, z: 1000 };
+    try {
+      N.role = 'host'; N.peers = new Map([[1, {}]]); AF.coop.players = new Map([[1, r]]); SYNC.clear();
+      N.send = (type, m) => { m.t = type; m.from = 0; sent.push(JSON.stringify(m)); };
+      for (let i = 0; i < 6; i++) syncOut(z);
+      const row = JSON.parse(sent[0]).g[0], before = JSON.parse(sent[0]); before.g[0][9] = 1;
+      const oldBytes = UTF8.encode(JSON.stringify(before)).byteLength, newBytes = UTF8.encode(sent[0]).byteLength;
+      const same = row.length === 12 && row[9] === 2 && oldBytes === newBytes && sent.length === 1;
+      r.observer = false; a.x = 3; syncOut(z); const culled = sent.length === 1;
+      r.observer = true; syncOut(z); const resumed = sent.length === 2;
+      return { ok: same && culled && resumed, info: `row ${row.length}, message ${oldBytes}->${newBytes} B, six identical ${oldBytes * 6}->${newBytes} B, far culled ${culled}, observer refresh ${resumed}` };
+    } finally { N.role = keep.role; N.peers = keep.peers; N.send = keep.send; AF.coop.players = keep.players; Object.assign(S.syncStats, keep.stats); SYNC.clear(); }
+  });
   AF.test('stealth: a guard sees ahead not behind, hears a sprint, investigates and walks back onto his route', () => {
     const WKs = AF.walkers; if (!WKs || !WKs.addPath) return { ok: false, info: 'no walkers' };
     let path = S._tp;

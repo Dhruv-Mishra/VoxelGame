@@ -15,7 +15,7 @@ try {
 {
   const N = AF.net, PI = Math.PI, TAU = PI * 2, VV = AF.vehicles;
   const C = AF.coop = { pvp: false, players: new Map(), ride: null, stats: { rx: 0, stale: 0, extrap: 0 } };
-  const MODES = ['walk', 'drive', 'fly', 'jetski', 'carousel', 'funride', 'ride', 'ferry-ride', 'row', 'skydive', 'dead', 'passenger', 'photo', 'aerial', 'cine', 'other'];
+  const MODES = ['walk', 'drive', 'fly', 'jetski', 'carousel', 'funride', 'ride', 'ferry-ride', 'row', 'skydive', 'dead', 'passenger', 'photo', 'aerial', 'cine', 'other', 'cctv'];
   const MODE_I = new Map(MODES.map((m, i) => [m, i])), M = Object.fromEntries(MODES.map((m, i) => [m, i]));
   const JP = ['legL', 'legR', 'armL', 'armL', 'armR', 'armR', 'armR', 'chest', 'chest', 'head', 'head'], JA = ['x', 'x', 'x', 'z', 'x', 'y', 'z', 'x', 'y', 'x', 'y'], NJ = JP.length;
   const HELD = [null, 'keyboard', 'bag', 'dumbbell', 'mic', 'bat', 'pan', 'cutlass', 'guitar', 'revolver', 'shotgun', 'tommy', 'rifle', 'spistol', 'ssmg', 'lmg'];
@@ -276,7 +276,7 @@ try {
       if (!p.act || !p.agg || nn >= 20) continue;
       const dx = p.x - x, dy = p.y - y, dz = p.z - z; if (dx * dx + dz * dz > 22500) continue;
       const V = CR.V[p.v], A = p.agg; let f = A.f; if (!V || !V.im[f]) f = f === 'runA' || f === 'runB' ? WF[Math.floor(p.ph) & 3] : 'p';
-      w.u16(netId(p)); w.u8v(p.v); w.u8v(Math.max(0, FRAMES.indexOf(f)) | (A.lie ? 128 : 0)); w.i16(dx * 100); w.i16((dy + (A.dy || 0)) * 100); w.i16(dz * 100); w.u8v(((p.yaw % TAU + TAU) % TAU) / TAU * 256);
+      w.u16(netId(p)); w.u8v(p.v); w.u8v(Math.max(0, FRAMES.indexOf(f)) | (A.lie ? 128 : 0) | (A.st === 'down' ? A.ko ? 32 : 16 : 0)); w.i16(dx * 100); w.i16((dy + (A.dy || 0)) * 100); w.i16(dz * 100); w.u8v(((p.yaw % TAU + TAU) % TAU) / TAU * 256);
       nn++;
     }
     W.u8[nAt] = nn; sentNN = nn;
@@ -453,14 +453,14 @@ try {
     }
     e.tr.push(stamp, NV); e.last = now;
   };
-  const freeNpc = (e) => { RN.delete(e.key); e.w.act = false; e.w.netEntry = null; };
+  const freeNpc = (e) => { RN.delete(e.key); e.w.act = false; e.w.netEntry = null; e.w.dead = e.w.unconscious = e.w.lie = false; };
   const applyNpcs = (now) => {
     for (const e of RN.values()) {
       const r = RP.get(e.owner);
       if (!r || now - e.last > 1200) { freeNpc(e); continue; }
       const o = e.out; if (e.tr.sample(renderT(r.clk, now), o, 250) < 0) continue;
       const w = e.w, fr = o[5] | 0;
-      w.x = o[0]; w.y = o[1]; w.z = o[2]; w.yaw = o[3]; w.v = w.vd = w.vn = o[4] | 0; w.nf = FRAMES[fr & 15] || 'p'; w.lie = !!(fr & 128); w.s = 1; w.act = true;
+      w.x = o[0]; w.y = o[1]; w.z = o[2]; w.yaw = o[3]; w.v = w.vd = w.vn = o[4] | 0; w.nf = FRAMES[fr & 15] || 'p'; w.dead = !!(fr & 16); w.unconscious = !!(fr & 32); w.lie = !!(fr & 128) || w.dead || w.unconscious; w.s = 1; w.act = true;
     }
   };
 
@@ -472,7 +472,10 @@ try {
     ensureAvatar(r);
     const P = r.P, root = P.root, fl = o[P_FLAGS] | 0, mode = o[P_MODE] | 0;
     r.mode = mode; r.stars = (o[P_STAT] | 0) >> 5; r.hp = ((o[P_STAT] | 0) & 31) / 31; r.dead = !!(fl & F_DEAD);
+    r.modeName = MODES[mode] || 'other'; r.observer = mode === M.cctv;
     r.veh = (((o[P_VHI] | 0) << 16) | (o[P_VLO] | 0)) >>> 0; r.seat = o[P_SEAT] | 0; r.ak = o[P_AK] | 0; r.ai = o[P_AI] | 0; r.crouch = !(fl & F_SIT) && !!(fl & F_CROUCH);
+    // Footstep sensing uses the speed already on the wire, not displacement of delayed/interpolated snapshots.
+    r.speed = o[P_SPD]; r.noise = mode === M.walk ? (r.speed > 0.4 ? r.crouch ? 0.12 : r.speed > 4.5 ? 1 : 0.35 : 0) : 0;
     AF.avatar.sit(P, !!(fl & F_SIT), 0.6); if (AF.avatar.crouchLegs) AF.avatar.crouchLegs(P, !(fl & F_SIT) && !!(fl & F_CROUCH));
     for (let j = 0; j < NJ; j++) P[JP[j]].rotation[JA[j]] = o[6 + j];
     P.hips.position.y = o[P_HIPS];
@@ -947,6 +950,21 @@ try {
     } finally { arm.rotation.x = ax; }
     const still = Math.min(...sizes), refresh = sizes.filter((n) => n === moving).length;
     return { ok: moving - still === NJ && still <= 40 && refresh >= 4, info: `moving ${moving} B, still ${still} B, sizes ${sizes.join(' ')}` };
+  });
+  AF.test('coop: CCTV and ped lifecycle preserve the binary record widths', () => {
+    const old = { mode: AF.mode, peers: N.peers, cars: VV.cars, crowd: AF.peopleKit.crowd, heli: AF.combat.heli }, P = AF.player.mesh.position;
+    const p = { id: 0, gid: 0, act: true, v: 0, x: P.x, y: P.y, z: P.z, yaw: 0, agg: { f: 'p', lie: true, st: 'down', ko: false } };
+    try {
+      AF.mode = 'cctv'; N.peers = new Map(); VV.cars = []; AF.combat.heli = null;
+      AF.peopleKit.crowd = { walkers: [p], V: [{ im: { p: {} } }] };
+      const n0 = C.build(1000), j0 = W.u8[9] & F_J ? NJ : 0, base = n0 - j0, observer = W.u8[8] === M.cctv;
+      N.peers.set(1, { x: P.x, z: P.z });
+      const n1 = C.build(1050), j1 = W.u8[9] & F_J ? NJ : 0, ped = n1 - j1 - base, dead = !!(W.u8[39 + j1] & 16);
+      p.agg.ko = true; C.build(1100); const j2 = W.u8[9] & F_J ? NJ : 0, sleep = !!(W.u8[39 + j2] & 32) && !(W.u8[39 + j2] & 16);
+      const car = { type: VV.TYPES[0], wheels: [], netKey: 'test-layout', x: 0, y: 0, z: 0, yaw: 0 };
+      W.reset(); writeVeh(W, car); const vehicle = W.o;
+      return { ok: observer && base === 38 && ped === 11 && vehicle === 25 && dead && sleep, info: `idle ${base} B, vehicle ${vehicle} B, ped ${ped} B, joints ${NJ} B, CCTV ${observer}, dead ${dead}, unconscious ${sleep}` };
+    } finally { AF.mode = old.mode; N.peers = old.peers; VV.cars = old.cars; AF.peopleKit.crowd = old.crowd; AF.combat.heli = old.heli; }
   });
   AF.test('coop: riding along seats you in another player\u2019s car and lets you out', () => {
     const car = VV.cars.find((c) => !c.static && !c.player && !c.ai && c.active !== false && c.type.kind === 'car' && c.net == null); if (!car) return { ok: false, info: 'no car' };

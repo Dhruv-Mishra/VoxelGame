@@ -74,10 +74,11 @@ body.cctv-on #ui .hud,body.cctv-on #h-cross,body.cctv-on #h-xh,body.cctv-on #h-h
     const busy = !!(AF.minigame && AF.minigame.open); if (busy !== el.classList.contains('busy')) el.classList.toggle('busy', busy);
     const cp = AF.camera.position;
     for (const g of z.guards) {
-      const a = g.a; if (!a || (a.x - cp.x) ** 2 + (a.z - cp.z) ** 2 > 40 * 40) continue;
+      const a = g.a; if (!a || g.hid || g.reserve && !g.live || (a.x - cp.x) ** 2 + (a.z - cp.z) ** 2 > 40 * 40) continue;
       if (g.path && !g.path.active && !a.ctl) continue;
       const lvl = g.down ? 'dn' : g.st === 'alert' || g.st === 'combat' ? 'g2' : g.lv > 0.25 ? 'g1' : '';
-      tagAt(a.x, a.y + 2.2, a.z, (g.name || 'Guard').toUpperCase() + ' \u00b7 ' + STL[g.st], lvl, null, g);
+      const state = g.dead ? 'DEAD' : g.down ? 'UNCONSCIOUS' : a.rxOn && a.rx.st > 0 ? 'STAGGERED' : STL[g.st] || 'PATROL';
+      tagAt(a.x, a.y + (g.down ? 0.6 : 2.2), a.z, (g.name || 'Guard').toUpperCase() + ' \u00b7 ' + state, lvl, null, g);
     }
     if (AF.coop && AF.coop.players) for (const r of AF.coop.players.values()) if (r && r.seen && S.inZone(z.id, r.x, r.y, r.z, 4)) tagAt(r.x, r.y + 2.1, r.z, '\u25c6 ' + (r.name || 'CREW').toUpperCase(), 'me', null, r);
     if (CC.o && CC.o.tablet) { const p = AF.player; tagAt(p.x, p.y + 2.1, p.z, '\u25c6 YOU', 'me'); }
@@ -144,12 +145,15 @@ body.cctv-on #ui .hud,body.cctv-on #h-cross,body.cctv-on #h-xh,body.cctv-on #h-h
   CC.setFeed = setFeed;
   CC.open = (o) => {
     const z = S.zones.get(o.zone); if (!z || !z.cams.length) return false;
+    if (CC.on) CC.close();
     CC.o = o; CC.zone = z; CC.i = Math.min(o.feed || 0, z.cams.length - 1); CC.pan = CC.tilt = 0; CC.cd = 0; CC.busy = false;
     AF.setMode('cctv', o); return true;
   };
   CC.close = () => { if (AF.mode === 'cctv') AF.setMode('walk', { x: AF.player.x, y: AF.player.y, z: AF.player.z, yaw: AF.player.yaw, snap: true }); };
   AF.modes.cctv = {
     enter(o = {}) {
+      CC.prevZone = S.zone;
+      if (S.zone !== CC.zone) S.activate(CC.zone.id);
       CC.on = true; el.classList.add('on'); document.body.classList.add('cctv-on'); setFeed(CC.i);
       hintEl.innerHTML = AF.touch ? 'Drag to look \u00b7 tap a \u260e / \u2600 tag to use it' : 'Drag / mouse to look \u00b7 Q / E switch feeds \u00b7 1\u20139 pick \u00b7 click \u260e / \u2600 tags \u00b7 X exits';
       if (AF.input.releaseLock) AF.input.releaseLock();
@@ -163,6 +167,8 @@ body.cctv-on #ui .hud,body.cctv-on #h-cross,body.cctv-on #h-xh,body.cctv-on #h-h
       CC.on = false; el.classList.remove('on'); document.body.classList.remove('cctv-on'); for (const t of TAGS) t.e.style.display = 'none';
       if (AF.minigame && AF.minigame.open && AF.minigame.cancel) AF.minigame.cancel();
       if (CC.seat && AF.PL.seat === CC.seat) AF.PL.seat = null; CC.seat = null;
+      if (S.zone === CC.zone && CC.prevZone !== CC.zone) S.activate(CC.prevZone ? CC.prevZone.id : null);
+      CC.prevZone = null;
       AF.camera.fov = 50; AF.camera.updateProjectionMatrix();
       const o = CC.o; CC.o = null; if (o && o.onExit) o.onExit();
     },
@@ -207,12 +213,12 @@ body.cctv-on #ui .hud,body.cctv-on #h-cross,body.cctv-on #h-xh,body.cctv-on #h-h
     if (!S) return { ok: false, info: 'no stealth' };
     const z = S.zones.get('cctv-test') || S.define('cctv-test', { box: [0, 0, 0, 10, 10, 10] });
     if (!z.cams.length) { S.camera('cctv-test', { x: 2, y: 3, z: 2, yaw0: 0, range: 0, name: 'A' }); S.camera('cctv-test', { x: 8, y: 3, z: 8, yaw0: PI, range: 0, name: 'B' }); }
-    const mode = AF.mode, P = AF.player, k = { x: P.x, y: P.y, z: P.z, yaw: P.yaw };
+    const mode = AF.mode, previousZone = S.zone, P = AF.player, k = { x: P.x, y: P.y, z: P.z, yaw: P.yaw };
     try {
       const opened = CC.open({ zone: 'cctv-test' }); AF.modes.cctv.update(0.016);
-      const at0 = AF.camera.position.distanceTo(TV.set(2, 3, 2)) < 0.01;
+      const at0 = AF.camera.position.distanceTo(TV.set(2, 3, 2)) < 0.01 && S.zone === z;
       setFeed(1); AF.modes.cctv.update(0.016); const at1 = AF.camera.position.distanceTo(TV.set(8, 3, 8)) < 0.01;
-      CC.close(); const back = AF.mode === 'walk' && Math.hypot(P.x - k.x, P.z - k.z) < 0.5;
+      CC.close(); const back = AF.mode === 'walk' && S.zone === previousZone && Math.hypot(P.x - k.x, P.z - k.z) < 0.5;
       return { ok: opened && at0 && at1 && back, info: `open ${opened}, cam A ${at0}, cam B ${at1}, back ${back}` };
     } finally { if (AF.mode === 'cctv') CC.close(); if (mode !== 'walk') AF.setMode(mode === 'aerial' ? 'aerial' : 'walk', k); }
   });

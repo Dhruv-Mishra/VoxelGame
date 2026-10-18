@@ -130,16 +130,16 @@ try {
   // ---------------------------------------------------------------- the staff: Hazel in the ticket booth, keepers on duty for each feeding
   const keeper = (skin, hair, female) => ({ skin, hair, hairStyle: female ? 'pony' : 'short', female, top: { col: 0x5a6a3a, col2: 0xe8dcc0, style: 'shirt' }, bottom: { col: 0x6a5a3a, style: female ? 'skirt' : 'shorts' }, shoe: 0x4a3020, hat: 'cap', hatCol: 0x6a7a3a, height: female ? 0.97 : 1.02 });
   const TALK = {
-    elephants: ['Bath time! The elephants spray themselves to cool down and keep the bugs off.', 'Each one drinks up to two hundred litres a day. Our water bill is a scandal.'],
-    penguins: ['Fish o\u2019clock! Penguins swallow them head first, so the scales go down smooth.', 'Watch the underwater window \u2014 they fly down there.'],
-    lions: ['Feeding the pride. Leo always eats first \u2014 the lionesses do all the actual work.', 'They\u2019ll sleep it off for the rest of the afternoon.'],
-    giraffes: ['Breakfast for the giraffes \u2014 acacia leaves and a lot of lettuce.', 'That tongue is nearly half a metre long, and blue so it doesn\u2019t sunburn.'],
+    elephants: ['You caught bath time! The elephants spray water over themselves to cool down and keep insects away.', 'An adult can drink around two hundred litres a day. Keeping those troughs full is a job in itself.'],
+    penguins: ['Lunch is served! Watch how they swallow each fish head first, so the fins and scales slide down more easily.', 'Try the underwater window for the best view. They look clumsy on land, but they are wonderful swimmers.'],
+    lions: ['We spread the food around so every lion gets a share. Please stay behind the barrier while we feed them.', 'Once lunch is over, expect a long nap. Come back towards evening if you want to see them moving about.'],
+    giraffes: ['The giraffes are getting fresh leaves and leafy vegetables. You can offer a treat at the feeding station.', 'Watch how carefully they use those long tongues to reach between the branches.'],
   };
   AF.onBuild('zoo-visit-staff', 826, () => {
     const Z = AF.zoo, ZO = ZOO(), NP = AF.npc; if (!Z || !NP) return;
     const z1 = ZO.z1;
     const hazel = NP.spawn({ id: 'zoo-tickets', name: 'Hazel', role: 'Ticket booth \u00b7 Solace Zoo', look: { female: true, skin: 0xe8b894, hair: 0x6a3a1a, hairStyle: 'wavy', top: { col: 0x2f6a4a, col2: 0xf2ead0, style: 'cardigan' }, bottom: { col: 0x3a3a40, style: 'skirt' }, shoe: 0x2a1a10, glasses: 0x2a2a2e, height: 0.98 },
-      x: -533.8, y: 0.5, z: z1 + 2.25, yaw: -PI / 2, greet: ['Tickets, tickets!', 'Lovely day for the zoo.', 'Mind the flamingos.'], lines: [['One ticket gets you in all day. The paw prints take you round.', 'We close at ten sharp \u2014 the animals need their beauty sleep.']] });
+      x: -533.8, y: 0.5, z: z1 + 2.25, yaw: -PI / 2, greet: ['Welcome to Solace Zoo!', 'Lovely day to visit.', 'The trail board is just inside.'], lines: [['Your ticket is valid all day. Follow the coloured paw prints to find the different habitats, or check the trail board by the entrance.', 'We close at ten tonight. Read the habitat boards to collect passport stamps, and check the feeding board if you would like to meet our keepers.']] });
     B.staff.push(hazel);
     const NAMES = { lions: 'Ruth', penguins: 'June', elephants: 'Abel', giraffes: 'Mina' };
     for (const F of Z.feed) {

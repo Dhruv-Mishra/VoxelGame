@@ -399,7 +399,7 @@ try {
     if (AF.mode !== 'walk' || (p && Math.hypot(p.x - g.T.ix, p.z - g.T.iz) > 5) || (CZ.can && !CZ.can(g.T))) CZ.close();
   });
   const NAME = { slot: 'Solace Sevens', roulette: 'Roulette', blackjack: 'Blackjack', craps: 'Craps', baccarat: 'Baccarat' };
-  const HELLO = { slot: 'Pick a stake and spin.', roulette: 'Pick a chip and place your bets on the layout.', blackjack: 'Put a chip on BET, then deal.', craps: 'Back the pass line or the don\u2019t \u2014 or try the field.', baccarat: 'Player, banker or tie. The cards do the rest.' };
+  const HELLO = { slot: 'Choose your stake, then spin the reels.', roulette: 'Choose a chip and place your bets on the layout.', blackjack: 'Place a chip in the betting area, then deal.', craps: 'Bet on Pass, Don\u2019t Pass, or the Field, then roll.', baccarat: 'Bet on Player, Banker, or Tie, then deal.' };
   AF.onBuild('casino', 892, () => {
     if (!LN || !LN.tables.length) return;
     for (const t of LN.tables) {

@@ -403,9 +403,14 @@ try {
     canvas: fc(0xf2e8d0), stripe: fc(0x2a6a9a), steel: fc(0x7d858e, { metal: 0.6, rough: 0.4 }), steelD: fc(0x50565e, { metal: 0.6 }), leather: fc(0x1e4a30), paper: fc(0xf4f0e2), mahog: fc(0x4a2416) };
   const legs = (M, w, d, h) => { for (const [x, z] of [[1, 1], [w - 2, 1], [1, d - 2], [w - 2, d - 2]]) M.box(x, 0, z, x + 1, h, z + 1, FC.rim); };
   const MODELS = {
-    roulette: () => { const M = new AF.Model(26, 8, 13); legs(M, 26, 13, 6); M.box(0, 6, 0, 26, 7, 13, FC.rim); M.box(1, 6, 1, 25, 7, 12, FC.felt);
-      for (let i = 0; i < 12; i++) for (let j = 0; j < 3; j++) M.set(9 + i, 6, 3 + j * 2, (i + j) % 2 ? FC.red : FC.black); M.box(8, 6, 3, 9, 7, 9, FC.feltD);
-      M.box(1, 7, 2, 8, 8, 11, FC.rim); M.box(2, 7, 3, 7, 8, 10, FC.wood); for (const [x, z] of [[12, 10], [15, 10], [18, 2]]) M.box(x, 7, z, x + 1, 8, z + 1, (x & 1) ? FC.chipR : FC.chipB); return M; },
+    // the layout is one felt layer (numbers are voxels OF that layer, never stacked on it); the wheel well is an open bowl one voxel
+    // wider than the wheel each side, so the separately instanced wheel (lifted 0.03 m, see table()) never shares a face with the table
+    roulette: () => { const M = new AF.Model(26, 8, 13); legs(M, 26, 13, 6); M.box(10, 0, 4, 16, 5, 9, FC.rim); M.box(0, 5, 0, 26, 6, 13, FC.mahog); M.box(0, 6, 0, 26, 7, 13, FC.rim); M.box(1, 6, 1, 25, 7, 12, FC.felt);
+      for (let i = 0; i < 12; i++) for (let j = 0; j < 3; j++) M.set(10 + i, 6, 3 + j * 2, (i + j) % 2 ? FC.red : FC.black); M.box(9, 6, 3, 10, 7, 8, FC.feltD); M.box(22, 6, 3, 23, 7, 8, FC.feltD);
+      for (let x = 10; x < 22; x++) { M.set(x, 6, 4, FC.white); M.set(x, 6, 6, FC.white); }
+      M.box(0, 7, 0, 26, 8, 1, FC.rim); M.box(25, 7, 0, 26, 8, 13, FC.rim); M.box(9, 7, 12, 26, 8, 13, FC.rim);
+      M.box(0, 7, 1, 9, 8, 13, FC.rim); M.box(1, 7, 2, 8, 8, 11, 0); M.box(1, 6, 2, 8, 7, 11, FC.wood);
+      for (const [x, z] of [[13, 10], [16, 10], [19, 2]]) M.box(x, 7, z, x + 1, 8, z + 1, (x & 1) ? FC.chipR : FC.chipB); return M; },
     wheel: () => { const M = new AF.Model(6, 2, 6); for (let x = 0; x < 6; x++) for (let z = 0; z < 6; z++) { const d = Math.hypot(x - 2.5, z - 2.5); if (d < 3) M.set(x, 0, z, d < 1 ? FC.gold : ((x + z) & 1 ? FC.red : FC.black)); } M.box(2, 1, 2, 4, 2, 4, FC.gold); return M; },
     blackjack: () => { const M = new AF.Model(20, 8, 11); for (let x = 0; x < 20; x++) for (let z = 0; z < 11; z++) { const d = Math.hypot((x - 9.5) / 10, (z - 0) / 11); if (d < 1) { M.set(x, 6, z, d > 0.88 ? FC.rim : FC.felt); if (d > 0.88) M.set(x, 7, z, FC.rim); } }
       M.box(8, 0, 1, 12, 6, 5, FC.rim); M.box(7, 7, 0, 13, 8, 2, FC.black); for (let i = 0; i < 5; i++) M.set(8 + i, 7, 1, [FC.chipR, FC.chipB, FC.gold, FC.white, FC.chipR][i]); return M; },
@@ -437,12 +442,22 @@ try {
   // a casino table (local u/v): adds the instance(s), the stools / chairs and an AF.liner.tables entry
   const table = (kind, u, y, v, room, extra = {}) => {
     const x = CX + u, z = CZ + v; let t;
-    if (kind === 'roulette') { put('roulette', u, y, v); put('wheel', u - 1.06, y + 0.875, v); t = { kind, x, y, z, w: 3.25, d: 1.6 }; }
-    else if (kind === 'blackjack') { put('blackjack', u, y, v - 0.65); t = { kind, x, y, z: z - 0.65 + 0.7, w: 2.5, d: 1.4 }; for (const du of [-0.9, 0, 0.9]) put('stool', u + du, y, v + 0.75); }
+    // the wheel sits in the table's open bowl 0.03 m above the bowl floor (no shared plane); the blackjack half-moon (flat dealer edge
+    // at model z 0) is centred so its collider box matches the model: v-0.79 .. v+0.59
+    if (kind === 'roulette') { put('roulette', u, y, v); put('wheel', u - 1.0625, y + 0.905, v); t = { kind, x, y, z, w: 3.25, d: 1.625 }; }
+    else if (kind === 'blackjack') { put('blackjack', u, y, v - 0.1); t = { kind, x, y, z: z - 0.1, w: 2.5, d: 1.4 }; for (const du of [-0.9, 0, 0.9]) put('stool', u + du, y, v + 0.85); }
     else if (kind === 'craps') { put('craps', u, y, v, HP); t = { kind, x, y, z, w: 1.75, d: 3.75 }; }
     else { put('baccarat', u, y, v); t = { kind, x, y, z, w: 3.25, d: 1.75 }; for (const [du, dv] of [[-1.2, 1.2], [0, 1.25], [1.2, 1.2]]) put('chair', u + du, y, v + dv, PI); }
-    Object.assign(t, { room }, extra); LN.tables.push(t); return t;
+    Object.assign(t, { room }, extra);
+    // the dealer stands OUTSIDE the table box (behind the flat / far edge, DEALER_GAP clear of it); players stand on the near side
+    const cr = kind === 'craps', hw = t.w / 2, hd = t.d / 2;
+    t.dealer = cr ? { x: t.x + hw + DEALER_GAP, y, z: t.z, yaw: -HP } : { x: t.x, y, z: t.z - hd - DEALER_GAP, yaw: 0 };
+    t.seats = (cr ? [-1.2, 0, 1.2].map((o) => ({ x: t.x - hw - 0.6, y, z: t.z + o, yaw: HP }))
+      : (kind === 'blackjack' ? [-0.9, 0, 0.9] : kind === 'roulette' ? [-0.4, 0.5, 1.2] : [-1.2, 0, 1.2]).map((o) => ({ x: t.x + o, y, z: t.z + hd + 0.6, yaw: PI })));
+    t.playerSeat = t.seats[1];
+    LN.tables.push(t); return t;
   };
+  const DEALER_GAP = 0.55;
   const slotRow = (u0, n, y, v, face, room = 'floor') => { for (let i = 0; i < n; i++) { const u = u0 + i * 1.25; put('slot', u, y, v, face > 0 ? 0 : PI); LN.tables.push({ kind: 'slot', x: CX + u, y, z: CZ + v, w: 0.75, d: 0.65, face, room }); } };
   const layout = () => {
     // the main hall: two rows of seven stations either side of the marble aisle; slot banks along both walls + the galleries
@@ -507,12 +522,14 @@ try {
       crewStairs: P(61.5, F, -8, 0), crewStairsTop: P(61.5, F4, 4, -HP), serviceDoor: P(59.5, F4, 4, -HP),
       foyer: P(-29, F3, 0), lounge: P(24, F3, 0), salonStair: P(24, F3, 7.75, HP), salonDoor: P(41.25, F4, 6.25, HP), salonGuard: P(40.2, F4, 3.6, -HP),
       salon: P(50, F4, 0), gilded: P(50, F4, 0), salonBar: P(40.1, F4, -2.6, -HP),
-      prescottSeat: P(53.5, F4, 2.25, PI), salonDealer: P(53.5, F4, -0.325, 0), serve: P(54.6, F4, 3.1, Math.atan2(-1.1, -0.85)),
+      prescottSeat: P(53.5, F4, 2.25, PI), salonDealer: P(53.5, F4, -0.425, 0), serve: P(54.6, F4, 3.1, Math.atan2(-1.1, -0.85)),
       sun: P(-14, F4, -5.5), sunStair: P(-17, F3, -13.5), promenade: P(-20, F3, -12), bridge: P(57.5, F5, 0, HP), bow: P(80, F3, 0), aft: P(-80, F3, 0),
       southDoor: P(-84, F, 14.5), launch: P(-84, -0.5, 22.5, PI), launchBoat: P(-84, WY - 0.35, 26.6, HP), tender: { x: -230, y: -0.5, z: 273, yaw: 0 },
     });
     s.detectivePath = [[43, F4, -8.6], [58.5, F4, -8.6], [58.5, F4, 8.6], [43, F4, 8.6]].map(([u, y, v]) => [CX + u, y, CZ + v]);
     s.stewardPath = [[-82, F, 11.6], [58.2, F, 11.6], [58.8, F, -12], [59.4, F, -12], [59, F, 13], [-82, F, 13]].map(([u, y, v]) => [CX + u, y, CZ + v]);
+    // every playable table's free player place + its dealer spot (world), for the casino / heist / tests
+    s.casinoSeats = LN.tables.filter((t) => t.seats && !t.noPlay).map((t) => ({ kind: t.kind, room: t.room, seat: t.playerSeat, dealer: t.dealer }));
   };
 
   // ---------------------------------------------------------------- people: gamblers, dealers, the band, dancers, strollers, crew (path walkers)
@@ -535,12 +552,11 @@ try {
     for (const t of LN.tables) {
       if (t.kind === 'slot' || t.prescott) continue;
       const grp = t.room === 'gilded' ? 'salon' : 'hall', u = t.x - CX, v = t.z - CZ;
-      one('liner dealer', t.kind === 'craps' ? u + t.w / 2 + 0.45 : u, t.y, t.kind === 'craps' ? v : v - t.d / 2 - 0.45, look('marshal', t.kind === 'craps' ? -HP : 0, 'dealer'), grp);
+      const D = t.dealer; one('liner dealer', D.x - CX, D.y, D.z - CZ, look('marshal', D.yaw, 'dealer'), grp);
+      // ambient gamblers take the outer places; the middle place (t.seats[1] / t.playerSeat) is always left free for a player
       const g = t.kind === 'roulette' || t.kind === 'craps' ? (grp === 'salon' ? 1 : 2) : 1;
-      for (let i = 0; i < g; i++) {
-        if (t.kind === 'craps') { one('liner gambler', u - t.w / 2 - 0.5, t.y, v - 0.9 + i * 1.8, look('stand', HP), grp); continue; }
-        one('liner gambler', u - t.w / 2 + (i + (g > 1 ? 0.6 : 1.1)) * t.w / 2.2, t.y, v + t.d / 2 + 0.45, look('stand', PI), grp);
-      }
+      const take = [0, 2];
+      for (let i = 0; i < g; i++) { const s = t.seats[take[i]]; one('liner gambler', s.x - CX, s.y, s.z - CZ, look('stand', s.yaw), grp); }
     }
     const slots = LN.tables.filter((t) => t.kind === 'slot');
     for (let i = 3; i < slots.length; i += 15) { const s = slots[i]; one('liner slots', s.x - CX, s.y, s.z - CZ + s.face * 0.75, look('stand', s.face > 0 ? PI : 0), 'hall'); }

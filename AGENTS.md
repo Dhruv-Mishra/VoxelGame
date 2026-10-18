@@ -17,9 +17,10 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Sounds = `assets/sfx/*.mp3` + `CREDITS.txt`, built by `node tools/sfx-build.mjs [--list] [--only=a,b] [--force] [--reencode]` (Freesound CC0
   picks, Kenney packs, flite TTS for PA / radio lines; needs ffmpeg + flite; caches in `tools/tmp-sfx/`; `--reencode` rebuilds every
   file from the cached sources after an encoder / level change). Ids are wired in 75's `LIB`.
-- Heist voices = `assets/vo/<id>.mp3` + `index.json`, every line of `AF.VO` (`src/81-heist-lines.js`) spoken by Kokoro TTS:
-  `node tools/vo-build.mjs [--list] [--only=a,b] [--force] [--reencode]` (needs python `pip install kokoro-onnx soundfile` + ffmpeg;
-  model + raw WAVs cached in `tools/tmp-vo/`; only changed lines re-render). Music = `assets/music/<id>.mp3` + `CREDITS.txt`
+- Heist voices = `assets/vo/<id>.mp3` + `index.json` + `fish-manifest.json`, generated from `AF.VO` with Fish Audio Drama 3's web UI.
+  `node tools/vo-build.mjs --fish-export [--only=a,b] --fish-export-dir=folder`, save matching `<id>.mp3` / `.wav` downloads there,
+  then `--fish-import=folder` (ffmpeg + ffprobe). Originals stay in `tools/vo-originals/`; stale recordings are subtitle-only.
+  See `PERF.md` for cache, radio and lossless-source rules. Music = `assets/music/<id>.mp3` + `CREDITS.txt`
   (Kevin MacLeod, CC BY 4.0 — keep the credit), `node tools/music-build.mjs [--only=a,b] [--force]` (cache `tools/tmp-music/`).
 - Co-op signaling = Cloudflare Worker + Durable Object in `signal/` (`npx wrangler@4 deploy` from `signal/`). Its URL is `SIGNAL` in
   `79-net.js`; game origins must match `ALLOWED_ORIGINS` in `signal/wrangler.toml`. Optional TURN: `wrangler secret put
@@ -93,8 +94,10 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   mid-heist; `AF.forget.touch(obj)` stamps a use, `AF.forget.register(name, { list, busy, away, home, reset })` adds a system.
 - Peds stay bare crowd instances until touched: `w.agg` (77 `engage`) makes 55's crowd tick call `AF.combat.stepPed`;
   `CB.release` returns them. Cops = 8 pooled walkers in the `cop` look; the mob = 8 pooled `goon` walkers (`CB.spawnGoon/goons/
-  clearGoons`: hostile without a wanted level, no heat). Kids / wheelchair users only ever flee. The player starts with bare fists
-  (weapon slot 0); a friend's signature melee and bought guns follow.
+  clearGoons`: hostile without a wanted level, no heat). Kids / wheelchair users only ever flee. Everyone starts with a baton
+  (slot 0, held id `fists`); guns are bought or lent. Police jurisdiction is geographic (`CB.mainIsland`): bank/getaway crimes still
+  count, Serena/Corsair/liner crimes bring thugs instead. High heat adds pooled jets and evadable missiles. Typing GODMODE within
+  five seconds toggles local, unsaved invulnerability, local one-hit kills and temporary guns; it does not bypass co-op hit authority.
 - Vehicles: `car.hp` → `car.dmg` (instanced `carDmg` attribute in the car paint shader); impacts arrive via `VV.onImpact`.
   The player always sits in the vehicle (`AF.Vehicle.seat`, `VV.seatLocal`). Camera distance is `AF.view` (V cycles
   first person / near / far) for walk, chase cams and planes — no wheel zoom.
@@ -115,8 +118,10 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Missions (81): steps with checkpoints; `AF.respawnAt()` (76) lets a mission wake a knocked-out player at its checkpoint.
   The heist is host-authoritative (`heist` net ops; guests send `done`/`fail`/`retry`); it needs a crew of two to start but every
   step has a solo way through if a partner drops. No teleports mid-heist: `AF.noTravel()` makes map travel, go-to-friend and skip-crossing
-  refuse; only cutscenes and checkpoint retries move the crew. `AF.quiet` (heist on) binds 60 % of the crowd. `node tools/coop-heist.js` (server running, playwright resolvable, optional
-  `CHROME=`) plays it end to end with two real clients: lockstep, the two-key step, fail → shared checkpoint, retry, payout.
+  refuse; only cutscenes and checkpoint retries move the crew. `AF.quiet` (heist on) binds 60 % of the crowd. `node tools/coop-heist.js [port] [--four]` (server running, playwright resolvable, optional
+  `CHROME=`) plays it end to end with two or four real clients: lockstep, getaway car, two keys, shared checkpoint/retry, exit and payout.
+  Bank alarms keep replenishing a bounded guard pool; the vault lends guns/armour and the hacker opens the physical getaway exit.
+  Guards use `WK.kill/sleep/revive` and `S.spawn`; ordinary ticks never revive bodies (lifecycle/network rules in `PERF.md`).
   Crew of 2–4: per-player tasks (`H.mg`: a padlock each on Kovac's grille, a uniform each off the rail, a licence each from Ezra; the
   shared fact lands when every crew slot is done, `mg` op) — the arms cache (one cracker, `crack`/`crackp`) and the night's roles are the
   exceptions. Act II: the stash maze (44-island fills chamber B with a 4 m-grid maze + rock; `AF.island.heist.nav/maze/racks/waveSpawns/holds`;

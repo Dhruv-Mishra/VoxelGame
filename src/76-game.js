@@ -33,6 +33,16 @@ try {
     npcGun: { pistol: [7, 0.42, 1, 3, 0.28, 1.3], smg: [5, 0.32, 3, 6, 0.1, 1.5], lmg: [8, 0.3, 6, 11, 0.08, 2.2] },
     heat: { assault: 22, ko: 30, kill: 60, shots: 8, copHit: 50, copKill: 120, runOver: 45, carBoom: 40, trespass: 25 },
     stars: [20, 70, 150, 260, 400], evadeS: [0, 10, 14, 18, 24, 30], cops: [0, 2, 3, 4, 6, 8], squad: [0, 0, 1, 2, 3, 3],
+    // the default melee everyone carries (77): [dmg, reach m, s between swings]; armour (missions lend it, never saved) soaks a share
+    batonDmg: 12, batonReach: 1.9, batonCd: 0.5, armorMax: 100, armorAbsorb: 0.7,
+    // the wanted level only exists on the main island: z below mainZ (the islands, the liner and the open sea lie past it)
+    mainZ: 1000,
+    // 4+ stars: up to jetN pooled strike jets (m/s, rad/s, cruise height) loose seeker missiles after a jetWarnS lock-on warning,
+    // then wait jetCdS; a missile flies missileSpeed, turns missileTurn rad/s, burns out after missileLife s, blasts missileR m
+    jetStars: 4, jetN: 2, jetSpeed: 70, jetTurn: 0.6, jetAlt: 70, jetWarnS: 2.5, jetCdS: 9, jetRange: 260,
+    missileN: 6, missileSpeed: 38, missileTurn: 1.6, missileLife: 6, missileDmg: 45, missileR: 5,
+    // the GODMODE code: typed within cheatWindow s; one-hit damage while it is on
+    cheatWindow: 5, cheatDmg: 9999,
     price: { ride: 2, game: 1, ticket: 40, repairBase: 25, repairK: 4, repaint: 120, sellK: 0.3, sellCooldown: 300 },
     pay: { taxiBase: 12, taxiPerM: 0.05, busStop: 9, deliver: 16, deliverPerM: 0.04, courier: 10, courierPerM: 0.06, fire: 90, early: 0.4 },
   };
@@ -138,13 +148,16 @@ try {
   const HURT_MODES = new Set(['walk', 'drive', 'jetski', 'passenger']);
   H.hurt = (n, src) => {
     if (H.dead || !(n > 0) || !AF.ready || !HURT_MODES.has(AF.mode) || (UI.state && UI.state.title)) return;
+    const CB = AF.combat;
+    if (CB && CB.cheat && CB.cheat.god) return;
+    if (CB && CB.absorb) { n = CB.absorb(n, src); if (!(n > 0)) { H.last = AF.clock.t; return; } }
     H.v = Math.max(0, H.v - n); H.last = AF.clock.t; HUD.hurt(n); SFX.play('hurt');
     AF.emit('hurt', n, src);
     if (H.v <= 0) die(src);
   };
   H.heal = (n) => { H.v = Math.min(H.max, H.v + n); };
   // certain death (a plane flown into the ground or the sea), whatever the mode
-  H.kill = (src) => { if (H.dead || !AF.ready) return; H.v = 0; H.last = AF.clock.t; HUD.hurt(H.max); AF.emit('hurt', H.max, src); die(src); };
+  H.kill = (src) => { if (H.dead || !AF.ready || (AF.combat && AF.combat.cheat && AF.combat.cheat.god)) return; H.v = 0; H.last = AF.clock.t; HUD.hurt(H.max); AF.emit('hurt', H.max, src); die(src); };
   AF.on('land', (v) => { if (v > G.fallSafe) H.hurt((v - G.fallSafe) * G.fallK, 'fall'); });
   const DEAD = { t: 0, cam: new THREE.Vector3(), look: new THREE.Vector3() };
   const die = (src) => {

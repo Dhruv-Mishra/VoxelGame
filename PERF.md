@@ -140,12 +140,18 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
   zone in a 4 Hz tick and each weight eases (~1.3 s) so zones crossfade; one master compressor glues the mix. Per frame only the
   player's own vehicle / wind / footsteps; nearby cars, sirens, flights at 15 Hz; water + farm machines + tram at 4 Hz. Nothing
   allocates per frame.
-- Heist voices + music (`75`, block "spoken lines + heist music"): lines = `assets/vo/<id>.mp3` (Kokoro TTS, `tools/vo-build.mjs`;
+- Heist voices + music (`75`, block "spoken lines + heist music"): lines = `assets/vo/<id>.mp3` (`tools/vo-build.mjs`;
   mono 24 kHz / 32 kbps CBR, -16 LUFS, silence-trimmed; ~4 KB a second) + `assets/vo/index.json` (durations, fetched at unlock).
   Decoded on demand, ≤ 32 cached (16 phones), reaped after 90 s unused; they share the ≤ 32 voice cap at high priority; one radio and
   one plain line at a time, ≤ 3 positional barks. Music = `assets/music/<id>.mp3` (`tools/music-build.mjs`; mono 32 kHz / 48 kbps,
   -22 LUFS, 60–96 s loops, ~4.5 MB for 9) fetched only when first asked for; ≤ 2 tracks stay decoded (~18 MB each at 48 kHz). Speech
   ducks music (×0.4) and the ambience bus (×0.67) from a 15 Hz tick; nothing new per frame.
+  New dialogue uses Fish Audio Drama 3 through its web UI: `--fish-export [--only=id,id] [--fish-export-dir=folder]`, save the
+  matching downloads beside the exported manifest, then `--fish-import=folder`. The runtime manifest hashes the script and voice
+  direction; stale recordings never play against rewritten subtitles. Keep downloaded originals unchanged; WAV originals can
+  additionally become lossless FLAC masters. MP3 downloads are already lossy and must never be described as lossless masters.
+  Radio speech shares filtered speech/noise processing in the existing AudioContext; retain the same voice/cache limits.
+  Revalidate the small audio manifests at unlock; voice URLs use the imported file hash so CDN/browser caches cannot replay old takes.
 
 ## 8. Content rules (locked)
 1. Static → voxels (`W.fill`) or `AF.placeStatic`; outland → `AF.outland.addProp`.
@@ -161,7 +167,7 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
 - One binary snapshot per client on the unordered, no-retransmit `fast` channel, rate by activity: `N.rate` (20 Hz, 15 on phones)
   while driving, flying, fighting, aiming or falling, half on foot, 2 Hz standing still (each held 0.3 s after it ends). Header 8 B,
   player 26 B + 11 B of joints only while they change (and 3 snapshots after, and every 8th), positions as 3-byte centimetres,
-  4 B of counts, 25 B per vehicle (driven + squad cars within 400 m), 12 B per engaged ped within 150 m (only while a peer is within 320 m), shots.
+  4 B of counts, 25 B per vehicle (driven + squad cars within 400 m), 11 B per engaged ped within 150 m (only while a peer is within 320 m), shots.
   Standing ≈ 80 B/s, walking ≈ 0.5 KB/s per direction per peer. Players > 250 m apart get 1/2 rate, > 500 m 1/4. The host bundles
   what it sends each guest (its snapshot + the newest relay per origin, ≤ 35 ms wait) into one datagram (type 2). A link skips
   `fast` sends while `bufferedAmount` > 32 KB. Reliable JSON (`rel`) is for rare events only (hits, seats, looks, time changes,
@@ -171,6 +177,10 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
   `C.build` / `C.ingest` reuse one writer and scratch arrays (no per-frame garbage).
 - Remote players: ≤ 3 avatars (`AF.avatar.build`), hidden beyond 500 m; remote peds reuse 55's 16 `net` walkers (same instanced draws);
   remote cars are the local copies (or one runtime car each). Co-op adds no draws and no tick work while offline.
+  Mission guards remain host-authoritative, including when viewed through CCTV. Reliable guard rows retain their existing
+  12-field shape, encode alive/unconscious/dead separately, and skip unchanged rows. Ordinary ticks never revive a corpse;
+  intentional spawning uses the lifecycle helpers. Expired reserve corpses are cleaned up, then stay hidden for at least one second
+  before a new life enters at a reinforcement point; ordinary state updates never turn a visible corpse back into a guard.
 
 ## 8c. World clock (locked) — 01-core, everything ambient
 - W = `AF.clock.w` = seconds since `AF.world.epoch` (UTC midnight of the session day) on the host's clock (`AF.world.off`, refined

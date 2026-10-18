@@ -27,82 +27,82 @@ try {
   // ---------------------------------------------------------------- what they say. {you} = whoever you are playing
   const LINES = {
     dhruv: {
-      greet: ['Yo {you}! Welcome in.', 'Hey {you}, mind the cables.', 'Leg day was brutal, not gonna lie.', 'Server rack says hi, {you}.'],
+      greet: ['Hey {you}, welcome in.', 'Careful around the cables, {you}.', 'Good timing, {you}; I just finished a new build.', 'The server rack says hello, {you}.'],
       talk: [
-        ['Oh hey {you}! Perfect timing \u2014 I just pushed to prod.', '\u2026on a Friday. Don\u2019t tell anyone.', 'If the lights flicker, that\u2019s the server rack. Totally normal.'],
-        ['Built this rig myself. Three monitors: one for code, one for docs, one for gym playlists.', 'Hit a new PR today. A code PR AND a bench PR. Double merge.'],
-        ['Want the tour? Desk, rack, bench. That\u2019s basically my whole personality.', 'Tanishk keeps telling me to put my savings into some coin. I told him I\u2019m invested in RAM.'],
-        ['Protein shake? There\u2019s a whole shelf in the kitchen.', 'Don\u2019t touch the chocolate one. That one\u2019s load-bearing.'],
+        ['Hey {you}, perfect timing. I just deployed a new build.', 'On a Friday, I know. Please do not tell anyone.', 'If the lights flicker, the server rack is probably working too hard.'],
+        ['I built this computer myself. One screen for code, one for notes, and one for music.', 'I set a new gym record and finished a big code change today. Good day.'],
+        ['Want a tour? There is my desk, the server rack, and the weight bench.', 'Tanishk keeps asking me to invest in a digital coin. I told him I already spend enough on memory upgrades.'],
+        ['Want a protein shake? There is more in the kitchen.', 'Leave the chocolate one for me. It is holding this shelf together.'],
       ],
     },
     hunar: {
-      greet: ['{you}! Oh my god, hi!!', 'Love the fit today, {you}.', 'Welcome to the Dreamhouse!', 'Is that a new look, {you}?'],
+      greet: ['{you}! I am so glad you are here!', 'I love your outfit today, {you}.', 'Welcome to the Dreamhouse!', 'Is that a new look, {you}?'],
       talk: [
-        ['Welcome to the Dreamhouse, {you}! Everything is pink. Yes, everything.', 'Even the car in the garage. ESPECIALLY the car in the garage.'],
-        ['I\u2019m planning outfits for the week. It\u2019s Tuesday and I\u2019m on outfit fourteen.', 'Life in plastic \u2014 it\u2019s fantastic!'],
-        ['Diksha and I are doing a Barbie movie night. You\u2019re invited.', 'Dress code is pink. Non-negotiable, by the way.'],
-        ['These specs? Designer. Fashion AND vision.', 'Iconic, I know.'],
+        ['Welcome to the Dreamhouse, {you}! Everything is pink. Yes, everything.', 'Even the car in the garage. Especially the car.'],
+        ['I am planning outfits for the week. It is only Tuesday, and I have already picked fourteen.', 'Choosing the right colours makes every day more fun.'],
+        ['Diksha and I are planning a movie night. You should join us.', 'We are picking a pink outfit theme, so start planning.'],
+        ['These glasses are designer. They look good and help me see.', 'I know. They suit me perfectly.'],
       ],
     },
     tanishk: {
-      greet: ['{you}! WAGMI, bro.', 'gm gm, {you}.', 'Charts are green today!', 'You lifting later, {you}?'],
+      greet: ['Hey {you}, good to see you.', 'Morning, {you}.', 'The charts are up today!', 'Are you going to the gym later, {you}?'],
       talk: [
-        ['gm {you}! Check the screens \u2014 all green. Mostly. Don\u2019t look at that red one.', 'Buy the dip, lift the weights. That\u2019s the whole strategy.'],
-        ['HODL isn\u2019t just a sign, it\u2019s a lifestyle.', 'It\u2019s also how I hold the bar on deadlifts.'],
-        ['Dhruv says my coins aren\u2019t real money.', 'I bought a gold car with them. So.'],
-        ['Squat rack, trading desk, vault. Everything a man needs.', 'Want a tip? Hydrate. Also diversify. Mostly hydrate.'],
+        ['Morning, {you}! Most of the charts are up today. Let us ignore the one that is down.', 'My plan is simple: be patient with investments and keep training.'],
+        ['I put up a sign to remind myself to hold on to good investments.', 'It also reminds me to keep a steady grip during deadlifts.'],
+        ['Dhruv says my digital coins are not real money.', 'I bought a gold car with them, so I think they count.'],
+        ['A weight bench, a trading desk, and a safe. That is everything I need.', 'One tip: drink water and spread your investments around. Mostly, drink water.'],
       ],
     },
     diksha: {
-      greet: ['Hi {you}! Are you ready for it?', '{you}! It\u2019s been a long time coming.', 'Welcome, welcome!', 'Shake it off, {you}!'],
+      greet: ['Hi {you}! I made you a new playlist.', '{you}! It has been too long.', 'Welcome, welcome!', 'Come in, {you}; let us find you a good song.'],
       talk: [
-        ['{you}! You made it! Sit, sit \u2014 I\u2019m making a playlist.', 'It\u2019s all Taylor. Every era. In order. Obviously.'],
-        ['Thirteen is my lucky number \u2014 same as Taylor\u2019s.', 'That\u2019s why it\u2019s on the wall. In neon. Tastefully.'],
-        ['Hunar and I are doing Barbie night. I\u2019m bringing the friendship bracelets.', 'I made you one too, {you}. It has your name on it. Wear it.'],
-        ['Whatever\u2019s bothering you, {you}\u2026 just shake it off.', 'And if that doesn\u2019t work, piano. Piano always works.'],
+        ['{you}, you made it! Sit down; I am putting together a playlist.', 'It is all pop music, sorted by album and mood. Obviously.'],
+        ['Thirteen is my lucky number.', 'That is why I put it on the wall in neon. It looks good there.'],
+        ['Hunar and I are planning a movie night. I am bringing friendship bracelets.', 'I made one for you too, {you}. It has your name on it.'],
+        ['If something is bothering you, {you}, take a breath and give yourself a minute.', 'If that does not help, come play the piano with me.'],
       ],
     },
     kush: {
-      greet: ['Ayy {you}! Grab a controller.', '{you}, you\u2019re player two.', 'Welcome to the base.', 'Snacks are on the counter, {you}.'],
+      greet: ['Hey {you}! Grab a controller.', '{you}, you can be player two.', 'Welcome to the game room.', 'There are snacks on the counter, {you}.'],
       talk: [
-        ['{you}! Perfect, we need a third for the co-op run.', 'Div\u2019s carrying, as usual. I\u2019m the tank. Emotionally too.'],
-        ['That safe? Cash. Real cash. I like to SEE my money.', 'Div says I should use a bank like a normal person. Banks don\u2019t have RGB though.'],
-        ['The arcade cabinet\u2019s got every classic. High score is mine.', 'Well, Div\u2019s. Well\u2026 ours. We\u2019re a team.'],
-        ['If Kaybee challenges you to chess, just say no.', 'Save yourself, {you}.'],
+        ['{you}, perfect timing. We need one more player for our co-op run.', 'Div usually leads the team. I handle the heavy work, including morale.'],
+        ['That safe is full of cash. I like being able to see my savings.', 'Div says I should use a bank. Banks do not have colourful lights, though.'],
+        ['The arcade cabinet has all the classics. I used to have the high score.', 'Then Div beat it. I am counting our team score.'],
+        ['If Kaybee challenges you to chess, be ready for a serious game.', 'You might want to practise first, {you}.'],
       ],
     },
     divyangana: {
-      greet: ['Hi {you}!', '{you}! Come in, come in.', 'Kush, look who\u2019s here!', 'Hey {you}! Want some chai?'],
+      greet: ['Hi {you}!', '{you}, come on in.', 'Kush, look who is here!', 'Hey {you}! Would you like some chai?'],
       talk: [
-        ['Hi {you}! Ignore the mess \u2014 Kush \u201creorganised\u201d the cash safe again.', 'By reorganised I mean he counted it. Twice.'],
-        ['Just so you know, I\u2019m the actual gamer here.', 'He\u2019s the snacks guy. Very important role.'],
-        ['We built this place together. The neon was my idea.', 'He wanted it to say KUSH & DIV & CASH. Compromise is key.'],
-        ['Stay for dinner, {you}? He\u2019s cooking.', 'Well. Ordering. Same thing.'],
+        ['Hi {you}! Ignore the mess; Kush reorganised the cash safe again.', 'By reorganised, I mean he counted all the money twice.'],
+        ['Just so you know, I am the better gamer here.', 'Kush handles the snacks. That is an important job.'],
+        ['We built this place together. I chose the neon sign.', 'Kush wanted it to say “Kush, Div, and Cash.” We settled on something simpler.'],
+        ['Would you like to stay for dinner, {you}? Kush is cooking.', 'Well, he is ordering food. That counts.'],
       ],
     },
     kaybee: {
-      greet: ['{you}! Nakama!', 'Yo {you}, fancy a game?', 'Welcome aboard!', 'Check or mate, {you}?'],
+      greet: ['{you}! Good to see you, mate.', 'Hey {you}, want to play a game?', 'Welcome aboard!', 'Ready for a chess match, {you}?'],
       talk: [
-        ['{you}! Welcome aboard the Thousand Sunny. Well \u2014 my living room.', 'The chessboard floor is regulation size. For giants.'],
-        ['The One Piece is real! And I\u2019m pretty sure it\u2019s in that chest.', '\u2026it\u2019s gold coins. From Tanishk. Don\u2019t tell him.'],
-        ['Chess? Best of three? I\u2019ll give you a head start \u2014 I\u2019ll only use my king.', 'Kidding. I never go easy.'],
-        ['I\u2019m gonna be King of the Pirates.', 'Or at least king of this colony. Kush disagrees. Kush is wrong.'],
+        ['{you}, welcome aboard! This is my living room, but I have given it a pirate-ship theme.', 'The chessboard floor is large enough for a crew of giants.'],
+        ['Every pirate needs a hidden treasure chest. I think mine is right over there.', 'It is full of gold coins from Tanishk. Do not tell him I found them.'],
+        ['Want to play chess? Best of three. I will even give you a head start.', 'Just kidding. I never go easy on a worthy opponent.'],
+        ['One day, I will captain the greatest pirate crew around.', 'For now, I am happy ruling this little colony. Kush may disagree.'],
       ],
     },
   };
   // the lovebirds see each other differently
   LINES.niranjan = {
-    greet: ['{you}! Perfect timing, I just tuned up.', 'Hey {you} — want to hear something new?', 'Sit anywhere, {you}. Mind the cables.', 'Golden hour soon, {you}. Porch session?'],
+    greet: ['{you}, perfect timing. I just tuned my guitar.', 'Hey {you}, want to hear something new?', 'Sit anywhere, {you}; just mind the cables.', 'Golden hour is coming, {you}. Want to play on the porch?'],
     talk: [
-      ['{you}! I wrote a riff this morning and I can’t stop playing it.', 'It’s eight bars. I’ve played it four hundred times. It’s still good.'],
-      ['Three guitars, one piano, zero neighbours complaining.', 'Yet. The stage out back is for Friday nights. You’re on the list.'],
-      ['Every house in the colony has a sound, {you}.', 'Kush’s is button-mashing. Diksha’s is a chorus. Mine is feedback, mostly.'],
-      ['The trick to a good song is leaving space.', 'Same with rooms. That’s why the amp is in the corner. Mostly.'],
+      ['{you}, I wrote a short guitar riff this morning and cannot stop playing it.', 'It is only eight bars. I have played it four hundred times, and I still like it.'],
+      ['I have three guitars, a piano, and neighbours who have not complained yet.', 'There is a small stage out back for Friday nights. You are on the guest list.'],
+      ['Every house in the colony has its own sound, {you}.', 'Kush has game sounds, Diksha has music, and I have a little too much guitar feedback.'],
+      ['A good song needs a little space between the notes.', 'A room does too. That is why I keep the amplifier in the corner.'],
     ],
   };
   const SPECIAL = {
-    'kush>divyangana': { greet: ['Babe! You\u2019re home!', 'Saved you a controller, Div.'], talk: [['There she is! I kept your seat warm.', 'And I only ate HALF the snacks. Growth.']] },
-    'divyangana>kush': { greet: ['Hey you. Missed you.', 'Kush! Where have you been?'], talk: [['Finally! The co-op run isn\u2019t the same without you.', 'Also you owe me a rematch.']] },
+    'kush>divyangana': { greet: ['Hey, you are home!', 'I saved you a controller, Div.'], talk: [['There you are! I kept your seat warm.', 'And I only ate half the snacks. I am improving.']] },
+    'divyangana>kush': { greet: ['Hey, I missed you.', 'Kush, where have you been?'], talk: [['You are back! Our co-op run is better with you here.', 'You still owe me a rematch.']] },
   };
 
   // ---------------------------------------------------------------- AF.npc: static people who stand or sit, look at you, greet you and talk

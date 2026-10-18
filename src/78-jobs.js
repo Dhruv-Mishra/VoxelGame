@@ -257,7 +257,7 @@ try {
     pay() { if (AF.hud.meterOn() || !AF.money.spend(this.price, 'a go')) return; SFX.play('click'); this.play(); }
     win(n, msg) { if (n) AF.money.add(n); SFX.play(n ? 'ding' : 'deny'); toast(msg); }
   }
-  const FORTUNES = ['A stranger will hand you a nickel. Spend it on taffy.', 'Fortune favours the bold \u2014 and the well-dressed.', 'Beware of seagulls bearing grudges.', 'Your lucky number is 13. Diksha already knew that.', 'A long journey by air is in your future. Buy the ticket.', 'You will find a star where you least expect it.', 'Romance blooms on the Big Wheel. Or nausea. Hard to say.'];
+  const FORTUNES = ['A stranger will give you a nickel. Spend it on taffy.', 'Good luck follows the bold and the well-dressed.', 'Watch out for seagulls. They remember who took their snacks.', 'Your lucky number is 13. Diksha already knew that.', 'A long flight is in your future. You should buy a ticket.', 'You will find a Solace Star somewhere you do not expect.', 'You might find romance on the Big Wheel. If not, you may feel a little dizzy.'];
   const LOVE = ['Clammy', 'Harmless', 'Mild', 'Warm', 'Sweet', 'Hot stuff', 'Passionate', 'UNCONTROLLABLE!'];
   AF.onBuild('jobs-carnival', 890, () => {
     if (L.striker) new Game({ name: 'High striker', x: L.striker.x, z: L.striker.z + 1.8, price: G.price.game,
@@ -272,7 +272,7 @@ try {
     new Game({ name: 'Claw machine', x: -283.2, y: 0.5, z: 193.3, price: G.price.game, play() { const a = 0.15 + Math.random() * 0.7; AF.hud.meter({ label: 'Drop the claw!', speed: 2.1, zone: [a, a + 0.07] }, (v, ok) => this.win(ok ? 6 : 0, ok ? 'You snagged a plush gull! The attendant swaps it for $6.' : 'The claw slips. Of course it does.')); } });
     new Game({ name: 'Love tester', x: -284.2, y: 0.5, z: 189.5, price: G.price.game, play() { const r = LOVE[(Math.random() * LOVE.length) | 0]; SFX.play('ding'); toast('The bulbs climb\u2026 \u201c' + r + '\u201d'); } });
     new Game({ name: 'Madame Zenobia', x: -268.5, y: 0.5, z: 180.4, price: G.price.game, play() { toast('Madame Zenobia whirrs: \u201c' + FORTUNES[(Math.random() * FORTUNES.length) | 0] + '\u201d'); } });
-    new Game({ name: 'Fortune teller', x: -245, z: 202.6, price: G.price.game * 2, play() { AF.emit('dialogue', { name: 'Madame Esmeralda', role: 'Fortune teller', lines: ['Cross my palm with silver\u2026 ah.', FORTUNES[(Math.random() * FORTUNES.length) | 0]] }); } });
+    new Game({ name: 'Fortune teller', x: -245, z: 202.6, price: G.price.game * 2, play() { AF.emit('dialogue', { name: 'Madame Esmeralda', role: 'Fortune teller', lines: ['Thank you. Let me see what your fortune holds\u2026', FORTUNES[(Math.random() * FORTUNES.length) | 0]] }); } });
     new Game({ name: 'Photo booth', x: -151.2, z: 186, price: G.price.game, play() { const f = document.createElement('div'); f.style.cssText = 'position:absolute;inset:0;background:#fff;opacity:.9;transition:opacity .6s;pointer-events:none'; document.getElementById('ui').appendChild(f); requestAnimationFrame(() => { f.style.opacity = '0'; }); setTimeout(() => f.remove(), 700); if (AF.photo && AF.photo.capture) AF.photo.capture(); } });
     // shooting gallery: 10 shots at the tin ducks, 25 s, aim with the mouse; the counter barker pays out
     if (L.gallery && L.ducks) {
@@ -336,7 +336,7 @@ try {
     }
     // the wardrobe in every friend's front room
     for (const c of AF.friends.cast) { const h = AF.friends.homeOf(c.id); if (h) counter(h.spawn.x + Math.cos(h.spawn.yaw) * 1.4, h.spawn.y, h.spawn.z - Math.sin(h.spawn.yaw) * 1.4, 'Wardrobe', wardrobe, { kind: 'home', can: () => AF.friends.current === c, prio: 0.6 }); }
-    counter(-534, 0.5, 47.6, 'Westgate check-in', () => AF.emit('dialogue', { name: 'Mabel', role: 'Check-in agent', lines: ['No bags? Then you are all set, dear.', 'The planes on the apron are crew only now \u2014 a pilot in uniform walks straight through the crew gate by the hangars.'] }), { kind: 'ticket' });
+    counter(-534, 0.5, 47.6, 'Westgate check-in', () => AF.emit('dialogue', { name: 'Mabel', role: 'Check-in agent', lines: ['Travelling light? You are all set, dear.', 'The planes on the apron are for crew only. A pilot in uniform can use the crew gate beside the hangars.'] }), { kind: 'ticket' });
     if (AF.ui.map) {
       const map = AF.ui.map, ICON = { food: '#e9a35a', guns: '#e05a4a', wear: '#b68ae0', game: '#f3c84b', ticket: '#7ab8e8', paint: '#f2c24a', sell: '#7cd6a8' };
       const draw = (g, to, mini) => {
@@ -353,7 +353,7 @@ try {
   const airport = (dt) => {
     const p = AF.player; if (AF.mode !== 'walk' || p.x > -350 || p.x < -620 || p.z < 20 || p.z > 140) return;
     if (p.x > -494 && p.x < -479 && p.z > 56.5 && p.z < 61.5 && AF.combat.gun()) {
-      p.teleport(p.x, p.y, 55.2, PI); if ((secT -= dt) <= 0) { secT = 3; toast('Security: \u201cNo firearms past this point. Holster it.\u201d'); }
+      p.teleport(p.x, p.y, 55.2, PI); if ((secT -= dt) <= 0) { secT = 3; toast('Security: \u201cPlease holster your weapon before entering the airfield.\u201d'); }
     } else secT -= dt;
   };
 

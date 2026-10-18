@@ -17,18 +17,72 @@ function sign(site,text,dx,dz,y=site.y+3,rot=0){const geo=AF.hbLib.sign(text,tea
 function furniture(site,dx,dz){prop(site,AF.hbLib.benchGeo(),dx,dz);}
 function canopy(key,col){return geometry(key,12,7,10,model=>{for(const x of [0,11])for(const z of [0,9])model.box(x,0,z,x+1,6,z+1,wood);model.box(0,6,0,12,7,10,col);model.box(1,1,8,11,2,10,white);});}
 function openCanopy(site,geo,dx,dz){prop(site,geo,dx,dz,{collide:false});for(const offset of [-2.75,2.75])AF.addCollider(site.x+dx+offset-0.25,site.y,site.z+dz-2.5,site.x+dx+offset+0.25,site.y+3,site.z+dz-2,'island:'+site.name);}
-function cottage(col){return geometry('cottage-'+col,14,12,12,model=>{model.box(1,0,1,13,1,11,rock);model.box(1,1,1,13,8,11,col);for(let layer=0;layer<4;layer++)model.box(0,8+layer,layer,14,9+layer,12-layer,teal);model.box(6,1,10,9,6,11,wood);for(const x of [2,10]){model.box(x,3,10,x+2,6,11,win);model.box(x,6,11,x+2,7,12,white);}return model;});}
+// cottage: same 14x12x12 footprint as before (Corsair Key reuses it) - shutters, side + rear windows, a porch step and chimney, corner quoins
+function cottage(col){return geometry('cottage-'+col,14,12,12,model=>{model.box(1,0,1,13,1,11,rock);model.box(1,1,1,13,8,11,col);for(const x of [1,12])for(const z of [1,10])model.box(x,1,z,x+1,8,z+1,white);for(let layer=0;layer<4;layer++)model.box(0,8+layer,layer,14,9+layer,12-layer,teal);model.box(0,8,0,14,9,1,white);model.box(0,8,11,14,9,12,white);model.box(10,8,3,12,12,5,rock);model.box(6,1,10,9,6,11,wood);model.box(5,0,11,10,1,12,wood);model.box(5,6,11,10,7,12,teal);for(const x of [2,10]){model.box(x,3,10,x+2,6,11,win);model.box(x,6,11,x+2,7,12,white);model.box(x-1,3,11,x,6,12,teal);model.box(x+2,3,11,x+3,6,12,teal);model.box(x,3,1,x+2,6,2,win);}for(const x of [1,12])model.box(x,3,5,x+1,6,7,win);return model;});}
+// hero broadleaf (zoo Treetop-Trail style): flared trunk, limbs and a lumpy multi-lobe crown - one cached merged mesh per variant
+function heroTree(variant){const bark=AF.col(0x5e4632,{jitter:0.45,edge:0.1}),greens=[[0x3f7a3a,0x4f8c40,0x2f5f2e],[0x4a8a3a,0x5c9c46,0x376a2c],[0x3a6e40,0x4c8450,0x2a5632]][variant%3].map(hex=>AF.col(hex,{jitter:0.35,edge:0.08}));return geometry('hero-tree-'+variant,28,34,28,model=>{const h=(a,b,c)=>AF.hash2(a*131+b*7+variant*977,c*53+b);for(let y=0;y<16;y++){const r=2.1-y*0.07+(y<3?(3-y)*0.55:0);for(let x=0;x<28;x++)for(let z=0;z<28;z++)if(Math.hypot(x-13.5,z-13.5)<r)model.set(x,y,z,bark);}const lobes=[[13.5,25,13.5,7]];for(let k=0;k<5;k++){const a=k*1.2566+variant*0.7+h(k,1,2)*0.5,d=5.5+h(k,3,4)*2,cx=13.5+Math.cos(a)*d,cz=13.5+Math.sin(a)*d,cy=20+h(k,5,6)*5;lobes.push([cx,cy,cz,4.6+h(k,7,8)*1.2]);for(let t=0;t<1;t+=0.08){const bx=13.5+(cx-13.5)*t,by=12+(cy-12)*t,bz=13.5+(cz-13.5)*t;model.box(Math.floor(bx),Math.floor(by),Math.floor(bz),Math.floor(bx)+1,Math.floor(by)+1,Math.floor(bz)+1,bark);}}for(let x=0;x<28;x++)for(let y=12;y<34;y++)for(let z=0;z<28;z++){if(model.get(x,y,z))continue;let best=9;for(const [cx,cy,cz,r] of lobes){const q=Math.hypot(x+0.5-cx,(y+0.5-cy)*1.25,z+0.5-cz)/r;if(q<best)best=q;}const n=h(x,y,z);if(best<0.82||best<1&&n>0.35+best*0.25)model.set(x,y,z,greens[y<20?2:n>0.66?1:0]);}return model;});}
 function waterRect(points,indices,x,z,width,depth,y){const start=points.length/3;points.push(x-width/2,y,z-depth/2,x-width/2,y,z+depth/2,x+width/2,y,z+depth/2,x+width/2,y,z-depth/2);indices.push(start,start+1,start+2,start,start+2,start+3);}
 // no trees or palms on the smugglers' tube, in its cleft, or on the cove's ledge and dock (44-flora asks)
 S.noFlora=(x,z)=>{const k=O.tunnelAt?O.tunnelAt(x,z):0,t=O.tunnelInfo;if(k&&(t.end?t.s<0&&t.s>-10:t.d<t.hw+3))return true;const c=I.cove;return !!c&&x>c.ledge.x0-3&&x<c.dock.x1+3&&z>c.ledge.z0-3&&z<c.ledge.z1+3;};
 AF.onBuild('island-sites',496.4,()=>{
  const hotel=site('Hotel Serena',-170,Z(631),22,14,3),village=site("Fisher's Landing",-20,Z(486),20,18,2),light=site('Serena Point Light',-256,Z(610),6,6,7),air=site('Serena Airstrip',-182,Z(561),19,8,2),look=site('Crater Lookout',-10,Z(643),4,3,Math.round(O.h(-10,Z(643))*4)/4),bar=site('Palm Beach Bar',-226,Z(665),7,7);
  S.hotel=hotel;S.village=village;S.light=light;S.lookout=look;
- prop(hotel,geometry('hotel',84,36,48,model=>{
-  for(let level=0;level<4;level++){const inset=level===3?8:level===2?3:0,y=level*8;model.box(2+inset,y,2+inset,82-inset,y+8,44-inset,white);model.box(inset,y+7,inset,84-inset,y+8,46-inset,mint);for(let x=6+inset;x<78-inset;x+=7)for(const z of [2+inset,43-inset]){model.box(x,y+2,z,x+4,y+6,z+1,win);model.box(x-1,y+1,z,x+5,y+2,z+1,gold);}for(let z=7+inset;z<39-inset;z+=7)for(const x of [2+inset,81-inset])model.box(x,y+2,z,x+1,y+6,z+4,win);}
-  for(let x=0;x<12;x++)for(let z=34;z<48;z++)if(Math.hypot(x-12,z-34)>12)model.box(x,0,z,x+1,32,z+1,0);
-  model.box(36,0,43,49,5,45,teal);model.box(33,6,42,52,7,48,mint);model.box(38,32,12,46,36,27,coral);for(const x of [10,72])model.box(x,0,43,x+2,27,45,mint);
- }));sign(hotel,'HOTEL SERENA',0,12,hotel.y+14);
+ // Grand Hotel Serena: stone plinth, hollow walk-in lobby (desk, columns, chandeliers), columned portico + pediment, domed crown.
+ // One merged prop (collide:false) + explicit colliders so the lobby stays enterable; the terrace in front is where Kit waits.
+ const PORTICO=[28,32,50,54],LOBBY_COLS=[[14,14],[26,14],[56,14],[68,14],[14,30],[26,30],[56,30],[68,30]],SOFAS=[10,66];
+ const hotelProp=prop(hotel,geometry('hotel',84,36,48,model=>{
+  model.box(1,0,1,83,1,47,rock);model.box(24,0,47,60,1,48,rock);model.box(2,1,2,82,9,46,white);model.box(4,1,4,80,9,44,0);model.box(4,0,4,80,1,44,white);model.box(40,0,10,44,1,47,coral);
+  model.box(36,1,44,48,7,46,0);model.box(35,7,44,49,8,46,gold);model.box(35,1,44,36,7,46,gold);model.box(48,1,44,49,7,46,gold);
+  for(const x of [8,14,20,26,56,62,68,74]){model.box(x,2,45,x+3,7,46,win);model.box(x,2,2,x+3,7,3,win);}
+  for(let z=8;z<40;z+=8){model.box(2,2,z,3,7,z+3,win);model.box(81,2,z,82,7,z+3,win);}
+  for(const [x,z] of LOBBY_COLS){model.box(x,1,z,x+2,9,z+2,white);model.box(x-1,8,z-1,x+3,9,z+3,gold);model.box(x-1,1,z-1,x+3,2,z+3,gold);}
+  model.box(30,1,6,54,3,9,wood);model.box(29,3,5,55,4,10,gold);model.box(28,2,4,56,8,5,teal);model.box(34,6,4,50,7,5,gold);
+  for(const x of SOFAS){model.box(x,1,20,x+8,2,25,mint);model.box(x,2,20,x+8,3,21,mint);}
+  for(const [x,z] of [[42,24],[20,22],[62,22]]){model.box(x-2,7,z-2,x+2,8,z+2,glow);model.box(x,8,z,x+1,9,z+1,gold);}
+  model.box(1,9,1,83,10,47,gold);
+  for(let level=1;level<4;level++){const inset=[0,3,8][level-1],y=9+(level-1)*8;model.box(2+inset,y+1,2+inset,82-inset,y+8,46-inset,white);model.box(1+inset,y+7,1+inset,83-inset,y+8,47-inset,mint);for(let x=6+inset;x<78-inset;x+=7)for(const z of [2+inset,45-inset]){model.box(x,y+2,z,x+4,y+6,z+1,win);model.box(x-1,y+1,z,x+5,y+2,z+1,gold);}for(let z=7+inset;z<39-inset;z+=7)for(const x of [2+inset,81-inset])model.box(x,y+2,z,x+1,y+6,z+4,win);}
+  // first-floor Sky Lounge (east end): carpeted room, bar, sofa, lamps; a glazed door opens onto the Sky Terrace
+  model.box(66,10,6,80,16,42,0);model.box(80,10,18,82,15,24,0);model.box(67,9,7,79,10,41,coral);model.box(80,10,17,83,15,18,gold);model.box(80,10,24,83,15,25,gold);model.box(79,15,17,83,16,25,gold);
+  model.box(67,10,10,69,12,30,wood);model.box(67,11,10,70,12,30,gold);model.box(66,12,10,67,15,30,teal);for(let z=12;z<30;z+=4)model.box(66,13,z,67,14,z+2,glow);
+  model.box(72,10,34,78,11,38,mint);model.box(72,11,37,78,12,38,mint);model.box(74,10,30,76,11,32,wood);for(const z of [12,24,36])model.box(73,15,z,75,16,z+2,glow);
+  model.box(10,33,10,74,34,38,gold);model.box(11,33,11,73,34,37,0);for(let i=0;i<3;i++)model.box(34+i*2,33+i,16+i*2,50-i*2,34+i,32-i*2,i===2?gold:mint);
+  for(const x of PORTICO){model.box(x,1,46,x+2,12,48,white);model.box(x,1,46,x+2,2,48,gold);model.box(x,11,46,x+2,12,48,gold);}
+  model.box(26,12,44,58,14,48,white);model.box(25,14,43,59,15,48,gold);for(let i=0;i<5;i++)model.box(27+i*3,15+i,44,57-i*3,16+i,48,i===4?gold:white);
+ }),0,0,{collide:false});
+ {const hx=hotel.x-21,hz=hotel.z-12,cols=[],c=(x0,y0,z0,x1,y1,z1)=>cols.push(AF.addCollider(hx+x0*0.5,hotel.y+y0*0.5,hz+z0*0.5,hx+x1*0.5,hotel.y+y1*0.5,hz+z1*0.5,'island:'+hotel.name));
+  c(1,0,1,83,1,47);c(24,0,47,60,1,48);c(2,1,2,82,9,4);c(2,1,4,4,9,44);c(80,1,4,82,9,44);c(2,1,44,36,9,46);c(48,1,44,82,9,46);c(36,7,44,48,9,46);c(1,9,1,83,10,47);c(1,10,1,66,36,47);c(66,10,1,83,36,6);c(66,10,42,83,36,47);c(80,10,6,83,16,18);c(80,10,24,83,16,42);c(80,15,18,83,16,24);c(66,16,6,83,36,42);c(67,10,10,70,12,30);c(72,10,34,78,12,38);
+  for(const x of PORTICO)c(x,1,46,x+2,12,48);c(25,12,43,59,21,48);for(const [x,z] of LOBBY_COLS)c(x,1,z,x+2,9,z+2);c(29,1,5,55,4,10);for(const x of SOFAS)c(x,1,20,x+8,3,25);hotelProp.col=cols[0];}
+ sign(hotel,'HOTEL SERENA',0,12.1,hotel.y+6.6);
+ // The terrace: a raised stone deck before the portico (floor 0.5 m, the lobby's level), balustrade, planters, café tables; open to the east (the pier walk)
+ const TABLES=[6,14,22];S.hotelTerraceY=hotel.y+0.5;
+ prop(hotel,geometry('hotel-terrace',68,4,13,model=>{
+  model.box(0,0,0,68,1,13,white);model.box(0,0,12,68,1,13,gold);for(let x=2;x<66;x+=4)model.box(x,0,5,x+2,1,7,mint);
+  for(const [a,b] of [[0,30],[38,62]]){for(let x=a;x<b;x+=2)model.box(x,1,12,x+1,2,13,white);model.box(a,2,12,b,3,13,gold);}
+  for(let z=0;z<12;z+=2)model.box(0,1,z,1,2,z+1,white);model.box(0,2,0,1,3,12,gold);
+  for(const a of [26,38]){model.box(a,1,9,a+4,2,12,rock);model.box(a,2,9,a+4,3,12,mint);model.box(a+1,3,10,a+3,4,11,mint);}
+  for(const x of TABLES){model.box(x,1,5,x+1,2,6,dark);model.box(x-1,2,4,x+2,3,7,white);model.box(x-3,1,5,x-2,2,6,wood);model.box(x+3,1,5,x+4,2,6,wood);}
+ }),1,15.25,{collide:false});
+ {const tx=hotel.x-16,tz=hotel.z+12,c=(x0,y0,z0,x1,y1,z1)=>AF.addCollider(tx+x0*0.5,hotel.y+y0*0.5,tz+z0*0.5,tx+x1*0.5,hotel.y+y1*0.5,tz+z1*0.5,'island:'+hotel.name);
+  c(0,0,0,68,1,13);c(0,1,12,30,3,13);c(38,1,12,62,3,13);c(0,1,0,1,3,12);for(const a of [26,38])c(a,1,9,a+4,4,12);for(const x of TABLES)c(x-3,1,4,x+4,3,7);}
+ // The Sky Terrace: a colonnaded deck one floor up on the hotel's east side, level with the Sky Lounge (its glazed door opens onto it),
+ // reached by a balustraded stair down to the front lawn. Model origin (-149.5, 3, hotel.z-8), 0.5 m voxels; the pier walk (x -145) passes beneath.
+ S.hotelSkyTerraceY=hotel.y+5;
+ {const STEPS=10,SKY_TABLES=[[9,6],[9,12]];
+  prop(hotel,geometry('hotel-sky-terrace',19,13,42,model=>{
+   for(const [x,z] of [[17,0],[17,15],[17,30],[0,0],[0,30]]){model.box(x,0,z,x+2,1,z+2,rock);model.box(x,1,z,x+2,8,z+2,white);model.box(x,8,z,x+2,9,z+2,gold);}
+   model.box(0,9,0,19,10,32,white);model.box(1,8,0,19,9,1,gold);model.box(18,8,0,19,9,32,gold);model.box(7,8,31,19,9,32,gold);
+   for(let x=2;x<18;x+=4)for(let z=2;z<30;z+=4)model.box(x,9,z,x+2,10,z+2,mint);
+   for(let z=0;z<32;z+=2)model.box(18,10,z,19,12,z+1,white);model.box(18,12,0,19,13,32,gold);
+   for(let x=1;x<18;x+=2){model.box(x,10,0,x+1,12,1,white);if(x>6)model.box(x,10,31,x+1,12,32,white);}model.box(1,12,0,19,13,1,gold);model.box(6,12,31,19,13,32,gold);
+   for(const [x,z] of [[15,2],[15,27]]){model.box(x,10,z,x+3,11,z+3,rock);model.box(x,11,z,x+3,12,z+3,mint);model.box(x+1,12,z+1,x+2,13,z+2,mint);}
+   for(const [x,z] of SKY_TABLES){model.box(x,10,z,x+1,11,z+1,dark);model.box(x-1,11,z-1,x+2,12,z+2,white);model.box(x-3,10,z,x-2,11,z+1,wood);model.box(x+3,10,z,x+4,11,z+1,wood);}
+   for(let i=0;i<STEPS;i++){const z=32+(STEPS-1-i);if(i)model.box(2,0,z,6,i,z+1,white);model.box(2,i,z,6,i+1,z+1,wood);for(const x of [1,6]){model.box(x,0,z,x+1,i+2,z+1,white);model.box(x,i+2,z,x+1,i+3,z+1,gold);}}
+  }),25.25,2.5,{y:hotel.y,collide:false});
+  const sx=-149.5,sz=hotel.z-8,c=(x0,y0,z0,x1,y1,z1)=>AF.addCollider(sx+x0*0.5,hotel.y+y0*0.5,sz+z0*0.5,sx+x1*0.5,hotel.y+y1*0.5,sz+z1*0.5,'island:'+hotel.name);
+  c(0,9,0,19,10,32);for(const [x,z] of [[17,0],[17,15],[17,30],[0,0],[0,30]])c(x,0,z,x+2,9,z+2);
+  c(18,10,0,19,13,32);c(1,10,0,18,13,1);c(6,10,31,18,13,32);for(const [x,z] of [[15,2],[15,27]])c(x,10,z,x+3,12,z+3);for(const [x,z] of SKY_TABLES)c(x-3,10,z-1,x+4,12,z+2);
+  for(let i=0;i<STEPS;i++){const z=32+(STEPS-1-i);c(2,0,z,6,i+1,z+1);for(const x of [1,6])c(x,0,z,x+1,i+3,z+1);}
+  sign(hotel,'SKY TERRACE',25.5,8.1,hotel.y+4.1);}
  const poolSite={...hotel,name:'Hotel Serena Pool',x:-170,z:Z(663),props:[]};S.sites.push(poolSite);
  for(const dz of [-6,6])prop(poolSite,block('pool-edge-long',44,1,3,white),0,dz);for(const dx of [-10.5,10.5])prop(poolSite,block('pool-edge-short',3,1,22,white),dx,0);
  prop(poolSite,block('pool-floor',40,1,20,teal),0,0,{y:2.4,collide:false});
@@ -36,7 +90,7 @@ AF.onBuild('island-sites',496.4,()=>{
  for(let index=0;index<8;index++){const dx=-14+(index%4)*9,dz=index<4?10:-10;prop(poolSite,lounger,dx,dz);if(index%2===0)prop(poolSite,umbrella,dx+2,dz+1,{collide:false});}
  const cabana=canopy('cabana',mint);for(let index=0;index<5;index++){const beach=site('Serena Cabana '+(index+1),-205+index*17,Z(690),4,4);openCanopy(beach,cabana,0,0);}
  openCanopy(bar,geometry('bar',24,9,14,model=>{model.box(0,0,8,24,3,12,coral);model.box(0,3,7,24,4,13,wood);for(const x of [0,23])model.box(x,0,0,x+1,8,14,wood);model.box(0,8,0,24,9,14,teal);for(let x=2;x<23;x+=3)model.box(x,7,0,x+1,8,1,glow);}),0,0);sign(bar,'BEACH BAR',0,3.6,bar.y+4.6);AF.addLight({x:bar.x,y:bar.y+3,z:bar.z,color:0xffc878,intensity:1.3,range:15,kind:'street'});
- const board=block('boardwalk',12,1,8,wood);for(let x=-214;x<=-112;x+=6)O.addProp(board,x,Math.round(O.h(x,Z(679))*4)/4+0.05,Z(679),0,{tag:'island:boardwalk'});
+ const board=block('boardwalk',12,1,8,wood),post=geometry('boardwalk-post',1,4,1,model=>{model.box(0,0,0,1,3,1,wood);model.box(0,3,0,1,4,1,white);});for(let x=-214;x<=-112;x+=6){const by=Math.round(O.h(x,Z(679))*4)/4+0.05;O.addProp(board,x,by,Z(679),0,{tag:'island:boardwalk'});if((x+214)%12===0)O.addProp(post,x,by+0.5,Z(679)+1.75,0,{collide:false});}
  for(const [x,z,index]of [[-37,477,0],[-4,477,1],[-38,491,2],[-3,491,3],[-36,503,4],[-4,503,5],[-50,491,6]]){const house=site('Landing Cottage '+(index+1),x,Z(z),4,4,2);prop(house,cottage(index%2?mint:coral));}
  const market=canopy('market',coral);for(const dx of [-11,11])openCanopy(village,market,dx,3);sign(village,"FISHER'S LANDING",0,-3,4.5);
  const net=geometry('fishing-net',12,5,1,model=>{for(let x=0;x<12;x++)for(let y=0;y<5;y++)if((x+y)%2===0)model.set(x,y,0,wood);model.box(0,0,0,1,5,1,wood);model.box(11,0,0,12,5,1,wood);});prop(village,net,17,-12,{collide:false});
@@ -44,17 +98,23 @@ AF.onBuild('island-sites',496.4,()=>{
  const pier=I.landing.pier,deck=block('island-jetty-deck',16,1,16,wood);for(let z=pier.z0;z<pier.z1;z+=8){O.addProp(deck,-20,1.75,z+4,0,{tag:'island:jetty'});for(const x of [-23.5,-16.5]){O.addProp(block('jetty-pile',1,9,1,wood),x,-2,z+1,0,{collide:false});O.addProp(block('jetty-rail',1,1,15,white),x,3,z+4,0,{tag:'island:jetty-rail'});}}
  furniture(village,17,-7);sign(village,'SOLACE BELLE',0,-60,3.5);
  prop(light,geometry('lighthouse',16,46,16,model=>{for(let y=0;y<36;y++)for(let x=2;x<14;x++)for(let z=2;z<14;z++)if(Math.hypot(x-8,z-8)<5.7-y*0.045)model.set(x,y,z,Math.floor(y/7)%2?coral:white);model.box(0,36,0,16,37,16,dark);model.box(5,37,5,11,43,11,win);model.box(7,38,7,9,42,9,glow);model.box(3,43,3,13,44,13,coral);model.box(5,44,5,11,46,11,coral);model.box(7,0,13,10,5,14,teal);}));prop(light,cottage(white),0,-11);AF.addLight({x:light.x,y:light.y+20,z:light.z,color:0xffe2ae,intensity:2,range:18,kind:'street'});
- prop(air,geometry('hangar',48,18,28,model=>{model.box(0,0,0,48,14,28,teal);model.box(2,0,26,46,12,28,dark);for(let layer=0;layer<5;layer++)model.box(layer*3,14+layer,0,48-layer*3,15+layer,28,white);}),0,0,{rot:2});sign(air,'SERENA AIR',0,-7.1,8,2);
+ prop(air,geometry('hangar',48,18,28,model=>{model.box(0,0,0,48,14,28,teal);model.box(0,0,0,48,1,28,rock);for(let x=0;x<48;x+=6)model.box(x,1,0,x+1,14,28,white);model.box(2,0,26,46,12,28,dark);for(let x=2;x<46;x+=4)model.box(x,0,27,x+1,12,28,teal);model.box(2,12,26,46,13,28,coral);for(let x=3;x<45;x+=6)model.box(x,9,0,x+4,11,1,win);for(const x of [0,47])for(let z=4;z<24;z+=6)model.box(x,9,z,x+1,11,z+3,win);for(let layer=0;layer<5;layer++)model.box(layer*3,14+layer,0,48-layer*3,15+layer,28,white);model.box(15,19,0,33,20,28,coral);}),0,0,{rot:2});sign(air,'SERENA AIR',0,-7.1,8,2);
  // the strip is asphalt in the terrain colours (07-outland); markings are 6 cm paint props 3 cm above it (no coplanar faces)
  const runway=I.airstrip,mark=(key,w,d,col,h=1)=>{if(cache.has(key))return cache.get(key);const m=new AF.Model(w,h,d);m.box(0,0,0,w,h,d,col);const geo=AF.meshModel(m,{vs:1/16,flat:true});geo.userData.lod=geo;geo.userData.small=h>1;cache.set(key,geo);return geo;};
  const stripe=AF.col(0xf2f0e6,{jitter:0.08,edge:0,pat:'none'}),lamp=AF.col(0xfff0c8,{emit:0xffe2a0,emitK:3,mode:'night',jitter:0,edge:0}),lampG=AF.col(0x9cffb0,{emit:0x60ff90,emitK:3,mode:'night',jitter:0,edge:0}),ry=runway.y+0.03;
  for(let x=runway.x0+40;x<runway.x1-40;x+=24)O.addProp(mark('rw-dash',192,10,stripe),x,ry,runway.z,0,{collide:false});
  for(const x of [runway.x0+9,runway.x1-9])for(const dz of [-8.4,-6.6,-4.8,-3,3,4.8,6.6,8.4])O.addProp(mark('rw-key',160,14,stripe),x,ry,runway.z+dz,0,{collide:false});
  for(const [x,text,rot] of [[runway.x0+24,'09',0],[runway.x1-24,'27',2]]){const t=AF.textModel(text,stripe,{pad:0}),k=12,m=new AF.Model(t.h*k,1,t.w*k);for(let tx=0;tx<t.w;tx++)for(let ty=0;ty<t.h;ty++)if(t.get(tx,ty,0))m.box(ty*k,0,tx*k,ty*k+k,1,tx*k+k,stripe);const geo=AF.meshModel(m,{vs:1/16,flat:true});geo.userData.lod=geo;O.addProp(geo,x,ry,runway.z,rot,{collide:false});}
+ for(let x=runway.x0+12;x<=runway.x1-12;x+=12)for(const dz of [-10.3,10.3])O.addProp(mark('rw-edge',192,12,stripe),x,ry,runway.z+dz,0,{collide:false});
  for(let x=runway.x0+2;x<=runway.x1-2;x+=20)for(const dz of [-11.7,11.7]){const end=x<runway.x0+6||x>runway.x1-6;O.addProp(mark(end?'rw-end-light':'rw-light',4,4,end?lampG:lamp,4),x,runway.y,runway.z+dz,0,{collide:false});}
  const apron=site('Serena Apron',-150,Z(556),22,5,2);apron.face=[0,-1];
  prop(air,geometry('windsock',14,15,3,model=>{model.box(1,0,1,2,14,2,dark);for(let x=2;x<14;x++)model.box(x,11,0,x+1,14-Math.floor(x/5),3,x%4<2?coral:white);}),25,0);
- for(let index=0;index<=240;index++){const progress=index/240,angle=Math.PI-progress*Math.PI/2+Math.sin(progress*Math.PI*6)*0.18,radius=85-67*progress,x=I.cone.x+Math.cos(angle)*radius,z=I.cone.z+Math.sin(angle)*radius,y=Math.round(O.h(x,z)*4)/4;S.trail.push([x,y+0.25,z]);O.addProp(block('trail-step',6,1,6,gold),x,y+0.04,z,0,{tag:'island:trail'});if(index%9===0)O.addProp(block('lava-rock',3,2,3,rock),x+3,y,z+2,0,{collide:false});}
+ for(let index=0;index<=240;index++){const progress=index/240,angle=Math.PI-progress*Math.PI/2+Math.sin(progress*Math.PI*6)*0.18,radius=85-67*progress,x=I.cone.x+Math.cos(angle)*radius,z=I.cone.z+Math.sin(angle)*radius,y=Math.round(O.h(x,z)*8)/8;S.trail.push([x,y+0.25,z]);O.addProp(block('trail-step',6,1,6,gold),x,y+0.04,z,0,{tag:'island:trail'});
+  // stone kerbs on both edges of every other step (radial offset 1.9 m), lava rock every 9 steps
+  if(index%2===0)for(const side of [-1,1]){const kx=x+Math.cos(angle)*1.9*side,kz=z+Math.sin(angle)*1.9*side;O.addProp(block('trail-kerb',1,1,1,rock),kx,Math.round(O.h(kx,kz)*8)/8+0.1,kz,0,{collide:false});}
+  if(index%9===0)O.addProp(block('lava-rock',3,2,3,rock),x+3,y,z+2,0,{collide:false});}
+ // hero broadleaves (cached merged meshes, 3 variants): deterministic inner-ring spots clear of sites, trail, runway, boardwalk and the cone
+ S.heroTrees=[];for(let index=0;index<48&&S.heroTrees.length<12;index++){const angle=index/48*Math.PI*2+AF.hash2(index,311)*0.08,radius=0.6+AF.hash2(index,312)*0.12,x=I.cx+Math.cos(angle)*I.rx*radius,z=I.cz+Math.sin(angle)*I.rz*radius,gy=O.h(x,z);if(!(gy>2.5&&gy<22)||Math.abs(z-runway.z)<26||Math.abs(z-Z(679))<12||Math.hypot(x-light.x,z-light.z)<20||Math.hypot(x-I.cone.x,z-I.cone.z)<60||S.noFlora(x,z)||S.sites.some(site=>Math.abs(x-site.x)<site.rx+9&&Math.abs(z-site.z)<site.rz+9)||S.trail.some(p=>Math.abs(p[0]-x)<9&&Math.abs(p[2]-z)<9)||S.heroTrees.some(t=>Math.hypot(t.x-x,t.z-z)<24))continue;const variant=index%3,ty=Math.round(gy*8)/8-0.4;O.addProp(heroTree(variant),x,ty,z,index&3,{tag:'island:tree',collide:false});AF.addCollider(x-0.9,ty,z-0.9,x+0.9,ty+6,z+0.9,'island:tree');S.heroTrees.push({x,y:ty,z,variant});}
  furniture(look,-2,0);prop(look,block('lookout-deck',16,1,12,wood),0,0,{y:look.y-0.5});
  const points=[],indices=[];waterRect(points,indices,-170,Z(663),20,10,3.16);const start=points.length/3;
  // the crater lake fills the bowl's floor: its rim tucks just under the bank where the ground rises through 41.5 (07-outland's bowl)
@@ -296,9 +356,10 @@ AF.onBuild('island-tunnel',496.42,()=>{
  if(CV){H.guardPosts.push({x:CV.dock.x0+3,y:CV.dock.y,z:CV.dock.z,yaw:-Math.PI/2});H.guardRoutes.push([[CV.dock.x0+1.5,CV.dock.y,CV.dock.z],[CV.dock.x1-1.2,CV.dock.y,CV.dock.z]]);}
  // Kit waits on the Hotel Serena terrace, between the hotel and the pool (the nearest free standing spot)
  const free=(x,z,y0)=>{for(let r=0;r<8;r+=0.5)for(let a=0;a<16;a++){const px=x+Math.cos(a/16*Math.PI*2)*r,pz=z+Math.sin(a/16*Math.PI*2)*r,py=AF.surfaceBelow(px,pz,y0+3,8);if(!AF.boxBlocked(px,py+0.05,pz,0.45,1.9))return{x:+px.toFixed(2),y:py,z:+pz.toFixed(2)};if(!r)break;}return{x,y:y0,z};};
- const kit=free(-150,Z(648),I.resort.y);kit.yaw=Math.PI;H.kit=kit;
+ // Kit waits on the Sky Terrace (one floor up), facing the stair head / lounge door; the meet point 2.2 m ahead stays on the deck.
+ const kit=free(-143.5,Z(631)+3,S.hotelSkyTerraceY);kit.yaw=-Math.PI/4;H.kit=kit;
  S.spots.strip={x:(I.airstrip.x0+I.airstrip.x1)/2,y:I.airstrip.y,z:I.airstrip.z};
- S.spots.tunnel=H.tunnelEntry;S.spots.cove=H.cove;S.spots.kit=kit;
+ S.spots.tunnel=H.tunnelEntry;S.spots.cove=H.cove;S.spots.kit=kit;S.spots.kitTerrace=kit;S.spots.kitUpperTerrace=kit;S.spots.skyTerraceStair={x:-147.5,y:S.hotelSkyTerraceY-5,z:Z(631)+13};
 });
 // ---------------------------------------------------------------- Serena fun: a sunset beach party, bonfire, beach volleyball, umbrellas,
 // a swim raft with a slide, tiki torches, hammocks and the jet-ski hire. Static parts are merged outland props (built before the

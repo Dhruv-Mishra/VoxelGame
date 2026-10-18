@@ -389,7 +389,7 @@ const shopInterior = (H, S, o, dc, spot) => {
   if (kind === 'hardware') { H.place(T.paintCans, W / 2 - 0.3, fy, mid, 0, { collide: true }); H.place(T.barrel, W - 1.0, fy, v0 + 1.4, 0, { collide: true }); H.place(T.sacks, W - 1.3, fy, mid + 1.5, 3, { collide: true }); }
   if (kind === 'doctor') { H.place(G.sofa[3], W - 0.95, fy, (v0 + v1) / 2 + 0.6, 3, { collide: true }); H.place(T.exam, W - 1.5, fy, v1 - 1.2, 1, { collide: true }); H.place(T.eyeChart, W - 0.5, fy + 1.3, mid - 1.2, 3); spot('bed', W - 1.5, fy + 0.9, v1 - 1.2, 1, 'up'); }
   if (kind === 'laundry') H.place(G.armchair[2], W - 1.0, fy, v0 + 1.2, 3, { collide: true });
-  H.place(lamp, W / 2, fy + 3.25, (v0 + v1) / 2 - 1.5, 0); H.place(lamp, W / 2, fy + 3.25, (v0 + v1) / 2 + 2, 0);
+  if (kind !== 'tailor') { H.place(lamp, W / 2, fy + 3.25, (v0 + v1) / 2 - 1.5, 0); H.place(lamp, W / 2, fy + 3.25, (v0 + v1) / 2 + 2, 0); }
   // v3: a centre island per trade, goods on the counter, a turning ceiling fan
   const SK = RK.shopKit && RK.shopKit();
   if (SK) {
@@ -405,7 +405,7 @@ const shopInterior = (H, S, o, dc, spot) => {
     if (kind !== 'bar' && kind !== 'deli') H.place(SK.register, cu + (kind === 'candy' ? -0.6 : 0.6), ctop, cv, 2);
     const fp = H.w(W / 2, (v0 + v1) / 2 + 0.25); AF.res.fans.push({ x: fp[0], y: fy + 3.25, z: fp[1], ph: S.seed });
   }
-  const p = H.w(W / 2, (v0 + v1) / 2); AF.addLight({ x: p[0], y: fy + 2.6, z: p[1], color: kind === 'bar' ? 0xffb060 : 0xffd090, intensity: 1.2, range: 10, kind: 'interior' });
+  if (kind !== 'tailor') { const p = H.w(W / 2, (v0 + v1) / 2); AF.addLight({ x: p[0], y: fy + 2.6, z: p[1], color: kind === 'bar' ? 0xffb060 : 0xffd090, intensity: 1.2, range: 10, kind: 'interior' }); }
 };
 
 // ============================================================ BLOCKS
@@ -1149,4 +1149,3 @@ AF.test('residential: stoop sitters + laundry + chimneys', () => {
 }
 
 } catch (e) { AF.partError('41-homes-2.js', e); }
-

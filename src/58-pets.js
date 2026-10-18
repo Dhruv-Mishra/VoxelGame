@@ -178,7 +178,7 @@ try {
     AF.addInteract({ x: SHOP.counter.x, y: 1.3, z: SHOP.counter.z, r: 2.4, prio: 1.4, label: 'Paws & Claws \u00b7 pets & treats', can: () => AF.mode === 'walk', act: sheet });
     if (AF.npc) AF.npc.spawn({ id: 'pets-keeper', name: 'Polly', role: 'Paws & Claws', x: -341.4, y: 0.25, z: -244, yaw: -PI / 2, r: 0.1,
       look: { female: true, skin: 0xe8b894, hair: 0x7a3a1a, hairStyle: 'pony', top: { col: 0x2f9a8a, col2: 0xffffff, style: 'tee' }, bottom: { col: 0x3a4a6a, style: 'jeans' }, shoe: 0x2a2a2a, height: 0.97 },
-      greet: ['Hello! Looking for a new best friend?', 'Treats are by the till!'], lines: [['Every pet here is house-trained and adventure-ready.', 'They follow you anywhere \u2014 buy one at the counter.']] });
+      greet: ['Hello! Looking for a little company?', 'You can pick up treats at the counter.'], lines: [['Come over to the counter to meet our dogs and cats. Choose a companion there, and they will follow you while you explore.', 'You can give them treats from your bag. If you want to switch companions or leave one at home, come back to the counter and open the Yours tab.']] });
     if (AF.mission) AF.mission.blip('pets', { x: -350, z: -244, kind: 'pet', label: 'Paws & Claws' });
     // display pets in the shop (static: a poodle in the pen, two cats on the shelves' end)
     const show = (spec, x, y, z, yaw) => { const k = kitOf(spec); if (!k) return; const g = new THREE.Group(), VS = AF.animalsKit.VS; const b = new THREE.Mesh(k.A, AF.mat.voxel), hd = new THREE.Mesh(k.H, AF.mat.voxel); hd.position.set(0, (k.S.lh + k.S.bh - 2) * VS, (k.S.len / 2 - 1) * VS); g.add(b, hd); g.position.set(x, y, z); g.rotation.y = yaw; g.traverse((m) => { m.castShadow = false; }); AF.scene.add(g); };

@@ -459,7 +459,7 @@ function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
     if (height < 0.25) return 50;
     // every band below steps into the next through a ramp of close tones (the sloped mesher blends them per vertex; a faint
     // per-cell dither keeps the seams organic where the terraced mesher draws them)
-    const dz = (AF.hash2(Math.floor(x * 2 + 1e-3) + 7919, Math.floor(z * 2 + 1e-3) - 104729) - 0.5) * 0.4, fine = noise(x * 0.06 + 3, z * 0.06 - 7), lowN = noise(x * 0.012 + 70, z * 0.012 - 30);
+    const dz = step > 0.5 ? 0 : (AF.hash2(Math.floor(x * 2 + 1e-3) + 7919, Math.floor(z * 2 + 1e-3) - 104729) - 0.5) * 0.4, fine = noise(x * 0.06 + 3, z * 0.06 - 7), lowN = noise(x * 0.012 + 70, z * 0.012 - 30);
     if (height < 1.2 && fine * 0.6 + dz < 0.2 + (1.2 - height) * 0.7) return 54;
     // sand: the beach band and anything near the waterline; dune grass and sandy tufts between it and the lawns
     const sandK = height < 5.4 ? Math.max(smooth(3.1, 2.0, height), smooth(0.86, 0.935, islandE(x, z) + (fine - 0.5) * 0.05) * smooth(5.4, 3.8, height)) + dz * 0.3 : 0;
@@ -1041,8 +1041,20 @@ function tubeCells(entry, step) {
 }
 function* meshSlopedG(entry, rim, step) {
   const buf = terrainBuf, C = cornerC, E = cornerE, tube = tubeCells(entry, step), M = tubeMask, fade = fadeCells(step);
+  // coarse tiles over the cone prefilter their interior corners (a 3 x 3 tent over +-step/2): the crater lip (~2.6 m), the bench
+  // edge and the lava knolls are narrower than a 1-8 m cell, and point samples turned them into spikes and slabs on the far
+  // silhouette. Render-only: edge corners keep the shared rim profile, level-0 tiles and physics (isleTop) sample exactly.
+  const cn = ISLE.cone, filt = step >= 1 && entry.x < cn.x + cn.r && entry.x + entry.size > cn.x - cn.r && entry.z < cn.z + cn.r && entry.z + entry.size > cn.z - cn.r, hs = step * 0.5;
   for (let iz = 0; iz <= 64; iz++) {
-    for (let ix = 0; ix <= 64; ix++) E[iz * 65 + ix] = O.hNat(entry.x + ix * step, entry.z + iz * step);
+    for (let ix = 0; ix <= 64; ix++) {
+      const x = entry.x + ix * step, z = entry.z + iz * step;
+      let h = O.hNat(x, z);
+      if (filt && ix > 0 && ix < 64 && iz > 0 && iz < 64 && Math.hypot(x - cn.x, z - cn.z) < cn.r) {
+        const w = O.hNat(x - hs, z), e = O.hNat(x + hs, z), n = O.hNat(x, z - hs), s = O.hNat(x, z + hs);
+        h = (h * 4 + (w + e + n + s) * 2 + O.hNat(x - hs, z - hs) + O.hNat(x + hs, z - hs) + O.hNat(x - hs, z + hs) + O.hNat(x + hs, z + hs)) / 16;
+      }
+      E[iz * 65 + ix] = h;
+    }
     if ((iz & 3) === 3) yield;
   }
   const dTL = rim[0] - E[0], dBL = rim[64] - E[64 * 65], dTR = rim[65] - E[64], dBR = rim[129] - E[64 * 65 + 64];
@@ -1073,7 +1085,10 @@ function* meshSlopedG(entry, rim, step) {
       let occl = smooth(0.55, 1.6, slope) * 0.9 + smooth(0.03, 0.3, hollow) * 0.9;
       const cd = Math.hypot(x - cone.x, z - cone.z);
       if (cd < cone.r && cd > cone.craterR + 6) occl += Math.max(0, -(ribLast < 2 ? ribLast : isleRib(x, z, Math.atan2(z - cone.z, x - cone.x)))) * 0.35 * smooth(cone.r, cone.r * 0.7, cd);
-      AO[at] = clamp(Math.floor(3 - occl * 1.2 + AF.hash2(Math.round(x * 2) + 311, Math.round(z * 2) - 977)), 1, 3);
+      // fine tiles dither per corner; coarse tiles (corners metres apart) round on a smooth field so the far cone reads as soft
+      // bands, not a speckle of single dark corners
+      const aoT = step <= 0.5 ? AF.hash2(Math.round(x * 2) + 311, Math.round(z * 2) - 977) : 0.3 + noise(x * 0.045 + 11, z * 0.045 - 5) * 0.4;
+      AO[at] = clamp(Math.floor(3 - occl * 1.2 + aoT), 1, 3);
     }
     if ((iz & 3) === 3) yield;
   }

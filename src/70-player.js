@@ -219,12 +219,35 @@ try {
   // crouch: the folded crouch legs (knee up front, foot under the hip, sole 0.5 m below the hip pivot)
   const bentLegs = (P, on) => { if (P.bent === on || P.sitting || !P.gCrouch) return; P.bent = on; P.legL.geometry = on ? P.gCrouch : P.gLeg[0]; P.legR.geometry = on ? P.gCrouch : P.gLeg[1]; };
   AV.crouchLegs = bentLegs;
+  // blend the arms (already posed unarmed) toward the held-weapon carry: guns = both hands on it with a small planted bob,
+  // melee = the right hand low on the baton with a short swing; k = swing amount (0..1)
+  const holdArms = (P, hk, hw, sw, k) => {
+    if (!(hw > 0.001) || !hk) return;
+    const R = P.armR.rotation, L = P.armL.rotation;
+    if (hk === 3) { R.x = AF.lerp(R.x, HOLD_R[3] - sw * 0.25 * k, hw); R.z = AF.lerp(R.z, HOLD_RZ[3], hw); return; }
+    const b = Math.abs(sw) * 0.06 * k;
+    R.x = AF.lerp(R.x, HOLD_R[hk] - b, hw); R.z = AF.lerp(R.z, HOLD_RZ[hk], hw);
+    L.x = AF.lerp(L.x, HOLD_L[hk] - b, hw); L.z = AF.lerp(L.z, HOLD_LZ[hk], hw);
+  };
+  // armed carry targets [right x, right z, left x, left z] — mirror 77's CARRY (pistol / long gun) so the hand-off to combat's overlay
+  // (which owns gun arms after this) doesn't pop; melee = the baton low in the right hand, left arm free
+  const HOLD_R = [0, -0.72, -0.45, -0.35], HOLD_RZ = [0, -0.1, -0.38, 0.12], HOLD_L = [0, -0.68, -1.05, 0], HOLD_LZ = [0, 0.42, 0.72, 0];
   // idle / walk / sit / crouch animation shared by the player and the friends. st = { phase, speed, air, t, land, crouch (0..1) }
+  // optional: hold (0 none, 1 pistol, 2 long gun, 3 melee), aimK (0..1), fwd (-1..1 = heading · travel; < 0 walks backwards)
   AV.animate = (P, st, dt, hs, onGround) => {
     st.t += dt; st.speed = AF.lerp(st.speed, hs, 1 - Math.exp(-dt * 10));
     const s = st.speed, amp = AF.clamp(s / 5, 0, 1.25);
     const cr = P.sitting ? 0 : st.crouch || 0;
-    st.phase += dt * (s > 0.2 ? (cr > 0.5 ? 4.2 + s * 1.6 : 2.1 + s * 1.05) : 0);
+    const hold = st.hold | 0, fwd = st.fwd == null || !isFinite(st.fwd) ? 1 : AF.clamp(st.fwd, -1, 1);
+    const ek = 1 - Math.exp(-dt * 10);
+    st.holdW = (st.holdW || 0) + ((hold > 0 ? 1 : 0) - (st.holdW || 0)) * ek;
+    st.aimW = (st.aimW || 0) + ((hold > 0 && hold < 3 ? AF.clamp(st.aimK || 0, 0, 1) : 0) - (st.aimW || 0)) * ek;
+    if (hold > 0) st.holdK = hold;
+    const hk = hold || st.holdK || 0, hw = hk ? st.holdW : 0, gw = hk === 1 || hk === 2 ? hw : 0, aw = st.aimW;
+    // backwards: the cycle runs in reverse (no moonwalk); sideways: a shorter, quicker step; aiming / armed: a planted, shorter stride
+    st.dirS = AF.lerp(st.dirS == null ? 1 : st.dirS, fwd < -0.25 ? -1 : 1, ek);
+    const strafe = 0.55 + 0.45 * Math.abs(fwd), stride = strafe * (1 - 0.35 * aw) * (1 - 0.1 * gw);
+    st.phase += dt * (s > 0.2 ? (cr > 0.5 ? 4.2 + s * 1.6 : 2.1 + s * 1.05) * (st.dirS < 0 ? -1 : 1) * (1.15 - 0.15 * strafe) : 0);
     const sw = Math.sin(st.phase);
     st.air = AF.lerp(st.air, onGround ? 0 : 1, 1 - Math.exp(-dt * 12));
     const a = st.air, idle = Math.max(0, 1 - s / 1.5);
@@ -237,25 +260,29 @@ try {
     bentLegs(P, cr > 0.5);
     if (P.bent) {
       // crouch / crouch-walk: hips low, feet planted, the stepping leg swings its knee forward and up, chest over the knees
-      const ca = AF.clamp(s / 2.6, 0, 1), H = AF.lerp(0.75, 0.5, cr) + Math.abs(Math.cos(st.phase)) * 0.025 * ca;
+      const ca = AF.clamp(s / 2.6, 0, 1) * stride, H = AF.lerp(0.75, 0.5, cr) + Math.abs(Math.cos(st.phase)) * 0.025 * ca;
       P.legL.rotation.x = -Math.max(0, sw) * 0.35 * ca + Math.max(0, -sw) * 0.1 * ca; P.legR.rotation.x = -Math.max(0, -sw) * 0.35 * ca + Math.max(0, sw) * 0.1 * ca; P.legL.rotation.z = -0.05; P.legR.rotation.z = 0.05;
       P.hips.position.y = H + breathe * 0.5;
       P.armL.rotation.x = AF.lerp(sw * 0.35 * ca, -0.55, 0.6 * cr); P.armR.rotation.x = AF.lerp(-sw * 0.35 * ca, -0.55, 0.6 * cr);
       P.armL.rotation.z = -0.12; P.armR.rotation.z = 0.12;
-      P.chest.rotation.x = 0.45 * cr + breathe * 2; P.chest.rotation.y = sw * 0.05 * ca;
+      holdArms(P, hk, hw, sw, ca * 0.6);
+      P.chest.rotation.x = (0.45 - 0.1 * aw) * cr + breathe * 2; P.chest.rotation.y = sw * 0.05 * ca * (1 - 0.7 * gw);
       P.head.rotation.x = -0.32 * cr; P.head.rotation.y = st.lookYaw != null ? st.lookYaw : Math.sin(st.t * 0.37) * 0.3 * idle * idle;
       st.land = Math.max(0, (st.land || 0) - dt * 5);
       return;
     }
-    P.legL.rotation.x = AF.lerp(-sw * 0.75 * Math.min(amp, 1), -0.55, a);
-    P.legR.rotation.x = AF.lerp(sw * 0.75 * Math.min(amp, 1), 0.35, a);
-    P.armL.rotation.x = AF.lerp(sw * 0.7 * Math.min(amp, 1.1), -2.3, a * 0.8);
-    P.armR.rotation.x = AF.lerp(-sw * 0.7 * Math.min(amp, 1.1), -0.4, a * 0.8);
+    const ls = Math.min(amp, 1) * stride, ab = Math.min(amp, 1.1) * (1 - 0.3 * aw);
+    P.legL.rotation.x = AF.lerp(-sw * 0.75 * ls, -0.55, a);
+    P.legR.rotation.x = AF.lerp(sw * 0.75 * ls, 0.35, a);
+    P.armL.rotation.x = AF.lerp(sw * 0.7 * ab, -2.3, a * 0.8);
+    P.armR.rotation.x = AF.lerp(-sw * 0.7 * ab, -0.4, a * 0.8);
     P.armL.rotation.z = -0.06 - idle * 0.02 - a * 0.15; P.armR.rotation.z = 0.06 + idle * 0.02 + a * 0.15;
+    // armed: the carry holds through jumps too (only a little of the arms-up air pose)
+    holdArms(P, hk, hw * (1 - 0.35 * a), sw, Math.min(amp, 1.1));
     P.legL.rotation.z = P.legR.rotation.z = 0;
-    P.hips.position.y = 0.75 + Math.abs(Math.cos(st.phase)) * 0.045 * Math.min(amp, 1) + breathe - (st.land || 0) * 0.08 - 0.25 * cr;
-    P.chest.rotation.x = Math.min(amp, 1.2) * 0.12 + breathe * 2 + 0.45 * cr;
-    P.chest.rotation.y = sw * 0.08 * Math.min(amp, 1);
+    P.hips.position.y = 0.75 + Math.abs(Math.cos(st.phase)) * 0.045 * ls * (1 - 0.35 * aw) + breathe - (st.land || 0) * 0.08 - 0.25 * cr;
+    P.chest.rotation.x = Math.min(amp, 1.2) * (0.12 - 0.05 * aw) + 0.05 * gw + breathe * 2 + 0.45 * cr;
+    P.chest.rotation.y = sw * 0.08 * Math.min(amp, 1) * (1 - 0.7 * gw);
     P.head.rotation.x = -Math.min(amp, 1.2) * 0.08 + Math.sin(st.t * 0.7) * 0.03 * idle;
     P.head.rotation.y = (st.lookYaw != null ? st.lookYaw : Math.sin(st.t * 0.37) * 0.25 * idle * idle);
     st.land = Math.max(0, (st.land || 0) - dt * 5);
@@ -287,7 +314,7 @@ try {
       body.x = x; body.z = z; body.y = isFinite(s) ? (isFinite(y) ? Math.max(s, y - 0.6) : s) : yy; body.vy = 0; body.onGround = true;
       if (isFinite(yaw)) { player.yaw = yaw; WK.camYaw = yaw + PI; }
       player.x = body.x; player.y = body.y; player.z = body.z;
-      WK.boom = 0.5; WK.blend = 1;
+      WK.boom = 0.5; WK.blend = 1; LS.ok = false;
       if (player.mesh) { player.mesh.position.set(body.x, body.y, body.z); player.mesh.rotation.y = player.yaw; }
     },
     setLook(look) {
@@ -580,7 +607,7 @@ try {
       TMP.set(cx, cy, cz);
       LOOK.set(px - dx * 8, py - dy * 8 + 0.55, pz - dz * 8);
       if (WK.blend < 1) {
-        WK.blend = Math.min(1, WK.blend + dt / 1.5);
+        WK.blend = Math.min(1, WK.blend + dt / 0.45);
         const e = 1 - Math.pow(1 - WK.blend, 4);
         c.position.lerpVectors(WK.from, TMP, e);
         c.lookAt(LOOK); QT.copy(c.quaternion); c.quaternion.slerpQuaternions(WK.fromQ, QT, e);
@@ -642,6 +669,51 @@ try {
   const SW = PL.swim = { on: false, wy: -Infinity, floor: 0, vy: 0, w: 0, crawl: 0, pb: 0, pc: 0, t: 0, bob: 0, push: 0, wall: false, busy: false, hid: null, posed: false, sT: 0 };
   const CL = PL.climb = { on: false, t: 0, dur: 0.7, x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0, water: false };
   const MB_WALK = { step: 0.55 }, MB_SWIM = { step: 0.55, fly: true }, SND = { vol: 1, rate: 1 };
+  // Depenetration. moveBody's landing samples the footprint at 9 points (0.29 m apart, voxels are 0.25 m) and falls without a box
+  // test, so a jump can come down around a post / thin collider and end up inside it. Resolve the overlap: lift onto it first
+  // (the missed surface), else slide out sideways along a clear line (never through a wall), else back to the last safe spot.
+  const LS = { x: 0, y: 0, z: 0, ok: false };
+  const RING_X = [1, 0.7071, 0, -0.7071, -1, -0.7071, 0, 0.7071], RING_Z = [0, 0.7071, 1, 0.7071, 0, -0.7071, -1, -0.7071];
+  // order: a small lift (the missed landing surface), a short sideways slide along a clear line, a taller lift (spawns only),
+  // then the last safe spot along a clear line
+  // segClear from a point that may sit INSIDE the solid being escaped: rayHit counts a start inside a box / voxel as a hit at 0,
+  // so walk out of that solid first (≤ maxIn metres, 0.05 m steps), then the rest of the line must be clear (a second wall blocks)
+  const exitClear = (x0, y0, z0, x1, y1, z1, maxIn) => {
+    const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0, L = Math.hypot(dx, dy, dz);
+    if (L < 1e-6) return !AF.solidAt(x0, y0, z0);
+    const ux = dx / L, uy = dy / L, uz = dz / L, lim = Math.min(maxIn, L);
+    let s = 0;
+    while (s <= lim && AF.solidAt(x0 + ux * s, y0 + uy * s, z0 + uz * s)) s += 0.05;
+    if (s > lim) return false;
+    // the walk stops ON the exit face (solidAt is half-open, rayHit's slab test counts a start on a face as a hit): step past it
+    if (s > 0) { s = Math.min(s + 0.02, L); if (s >= L) return true; }
+    return AF.segClear(x0 + ux * s, y0 + uy * s, z0 + uz * s, x1, y1, z1);
+  };
+  const freeSpot = (maxLift) => {
+    const B = AF.boxBlocked, x = body.x, y = body.y, z = body.z, r = body.r, h = body.h, lo = Math.min(maxLift, 0.6);
+    for (let up = 0.05; up <= lo + 1e-6; up += 0.05) if (!B(x, y + up, z, r, h)) { body.y = y + up; return true; }
+    // sideways: the nearest ring first = the shallowest way out (minimum translation), out to 1.2 m for a centre inside a wide object
+    const my = y + Math.min(1, h * 0.6);
+    for (let rad = 0.15; rad <= 1.21; rad += 0.15) for (let i = 0; i < 8; i++) {
+      const cx = x + RING_X[i] * rad, cz = z + RING_Z[i] * rad;
+      if (!B(cx, y, cz, r, h) && exitClear(x, my, z, cx, my, cz, rad)) { body.x = cx; body.z = cz; return true; }
+    }
+    for (let up = lo + 0.05; up <= maxLift + 1e-6; up += 0.05) if (!B(x, y + up, z, r, h)) { body.y = y + up; return true; }
+    // last safe spot: only when near AND the line back is open at knee and chest height past the solid we are in (never through
+    // a second wall / floor)
+    if (LS.ok && Math.abs(LS.x - x) + Math.abs(LS.z - z) + Math.abs(LS.y - y) < 3 && !B(LS.x, LS.y, LS.z, r, h)) {
+      const k = Math.min(0.5, h * 0.3), c = Math.min(1.2, h * 0.7);
+      if (exitClear(x, y + k, z, LS.x, LS.y + k, LS.z, 1.2) && exitClear(x, y + c, z, LS.x, LS.y + c, LS.z, 1.2)) { body.x = LS.x; body.y = LS.y; body.z = LS.z; return true; }
+    }
+    return false;
+  };
+  const depenetrate = () => {
+    if (!AF.boxBlocked) return;
+    if (AF.boxBlocked(body.x, body.y, body.z, body.r, body.h)) {
+      const y0 = body.y;
+      if (freeSpot(0.6) && body.y > y0) { body.vy = Math.min(body.vy, 0); body.onGround = true; }
+    } else if (body.onGround) { LS.x = body.x; LS.y = body.y; LS.z = body.z; LS.ok = true; }
+  };
   const sfx = (id, vol, rate) => { if (!AF.audio || !AF.audio.play) return; SND.vol = vol; SND.rate = rate; AF.audio.play(id, SND); };
   // deep enough to swim at (x, z) with the feet at y? Leaves the surface in SW.wy, the bottom under it in SW.floor
   const deepAt = (x, z, y, need) => {
@@ -825,9 +897,18 @@ try {
       if (!isFinite(x) || !isFinite(z)) { x = s.x; z = s.z; y = s.y; if (!isFinite(yaw)) yaw = s.yaw; }
       if (!isFinite(yaw)) yaw = player.yaw;
       player.teleport(x, isFinite(y) ? y : undefined, z, yaw);
-      let k = 0; while (k++ < 16 && AF.boxBlocked && AF.boxBlocked(body.x, body.y, body.z, body.r, body.h)) body.y += 0.25;
-      WK.camYaw = yaw + PI; WK.camPitch = 0.2; WK.boom = 0.6;
-      const c = cam(); WK.from.copy(c.position); WK.fromQ.copy(c.quaternion); WK.blend = (opts.snap || from == null) ? 1 : 0;
+      if (AF.boxBlocked && AF.boxBlocked(body.x, body.y, body.z, body.r, body.h)) freeSpot(4);   // on failure stay put: moveBody walks out
+      // camera: snap behind the player on spawn / title / map travel / far cameras (a long sweep from the title point streams
+      // the whole path in and out); a nearby vehicle / seat exit keeps the current view direction and settles in quickly
+      const c = cam(), far = c.position.distanceToSquared(TMP.set(body.x, body.y, body.z)) > 625;
+      const snap = !!opts.snap || from == null || from === 'cine' || from === 'aerial' || from === 'dead' || far;
+      WK.boom = 0.6;
+      if (snap) { WK.camYaw = yaw + PI; WK.camPitch = 0.2; }
+      else {
+        c.getWorldDirection(TMP);
+        WK.camYaw = Math.atan2(-TMP.x, -TMP.z); WK.camPitch = AF.clamp(Math.asin(AF.clamp(-TMP.y, -1, 1)), -0.75, 1.25);
+      }
+      WK.from.copy(c.position); WK.fromQ.copy(c.quaternion); WK.blend = snap ? 1 : 0;
       vel.x = vel.z = 0;
       player.crouch = false; body.h = STAND_H; AN.crouch = 0; player.eyeH = EYE_STAND; player.noise = 0; NZ.land = 0;
       // started in deep water (off a jet ski, a boat, a checkpoint at sea): float straight away, never sink to the bottom
@@ -886,6 +967,7 @@ try {
       else if (swim) swimMove(dt, wl > 0, dirX, dirZ);
       else {
         AF.moveBody(body, vel.x * dt, vel.z * dt, dt, MB_WALK);
+        depenetrate();
         landed = wasAir && body.onGround;
         // out of your depth (walked off a pier, fell or jumped in, waded too far): swim; the water breaks the fall
         if (deepAt(body.x, body.z, body.y, SWIM_IN)) { startSwim(wasAir ? vy0 : 0, false); landed = false; }
@@ -910,6 +992,12 @@ try {
       player.x = body.x; player.y = body.y; player.z = body.z;
       if (player.mesh) { player.mesh.position.set(body.x, body.y, body.z); player.mesh.rotation.y = player.yaw; }
       // swimming / climbing poses are set after combat's overlay (player-water-pose)
+      // what's in hand (77) + how the travel lines up with the facing, for the carry / strafe / backpedal poses
+      const cb = AF.combat;
+      let hold = 0;
+      if (cb) { const g = cb.gallery ? 'g' : cb.gun ? cb.gun() : null; if (g) { const d = g !== 'g' && cb.GUNS && cb.GUNS[g]; hold = d && d.cls === 'pistol' ? 1 : 2; } else if (cb.held) hold = 3; }
+      AN.hold = hold; AN.aimK = PL.aim ? 1 : 0;
+      AN.fwd = hs > 0.2 ? AF.clamp(((body.x - ox) * Math.sin(player.yaw) + (body.z - oz) * Math.cos(player.yaw)) / (hs * Math.max(dt, 1e-4)), -1, 1) : 1;
       if (player.parts && !SW.on && !CL.on) AV.animate(player.parts, AN, dt, hs, body.onGround);
       // interactions
       const it = modal || CL.on ? null : findInteract();
