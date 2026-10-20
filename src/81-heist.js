@@ -12,8 +12,10 @@ try {
 //       cove -> jet skis 1.5 km to the Solace Queen
 //   III The Queen (evening): knock out a waiter + a dealer for their uniforms -> the salon -> the sting: the dealer deals Prescott a
 //       rotten hand while the waiter serves his drink and lifts the key -> Silas (cutscene) -> his launch runs the crew ashore
-//   IV  Midnight. Moretti's armoured car: any car out to Southfield Farm, sneak past six armed men, load the launcher crate, drive it
-//       out -> Moretti limousines give chase -> a respray at Body Works -> park it on Charter Street. Then the roof watch: up City Hall's
+//   IV  Midnight. Seekers first: a car east to the army stash on the Ochre Flats (cutscene), sneak in, drive a car up to the crate ->
+//       west to the drop outside Southfield Farm (cutscene) -> on foot into Moretti's yard, into the armoured car: the yard opens fire and
+//       a dozen limousines, roadblocks and then helicopters come after it (back doors open, mounted LMGs; no police) -> the last helicopter
+//       down -> Dusty's Respray on the desert road (cutscene) -> park it on Charter Street (cutscene). Then the roof watch: up City Hall's
 //       service ladder with a silenced sniper rifle, four guards on the bank's podium roof (a patrol finding a body ends it) -> a plane
 //       from Westgate, a skydive onto the zoo's Great Banyan, snipe the paths from the treehouse, Kestrel's guards to the lion house, the
 //       den, the bunker, the Kestrel terminal -> the drain stair to Westgate -> a plane, a skydive onto the bank's steel sky deck -> the
@@ -167,6 +169,7 @@ try {
     }
     c.onEnd = fin; if (!c.end) c.end = null;
     leaveFlight(); if (AF.mode === 'cctv' && AF.cctv) AF.cctv.close();
+    if (AF.mode === 'drive' && VV && VV.exitCar) VV.exitCar();
     if (AF.audio && AF.audio.voicePreload) AF.audio.voicePreload(c.shots.map((sh) => sh.vo).filter(Boolean));
     hushVoices();
     if (!MI.cut.play(c)) fin(); else H.cutOn = true;
@@ -284,6 +287,39 @@ try {
       { cam: [s.x - 6, s.y + 3, s.z - 10], cam2: [s.x - 26, s.y + 34, s.z - 44], look: [s.x + 4, s.y + 3, s.z + 10], d: 5 },
     ] };
   }, { always: true });
+  // ---- Act IV: the army stash, the farm, the respray, midnight on Charter Street
+  const cutArmy = () => cutscene(A.army || me(), (at) => {
+    const a = at, c = A.armyCrate || a, g = A.armyGate || a;
+    return { title: 'The Ochre Flats', sub: 'Act IV \u00b7 The army stash', shots: [
+      shot([a.x - 42, a.y + 18, a.z + 58], [a.x, a.y + 2, a.z], 'vera.army2', 5.5, { cam2: [a.x - 26, a.y + 12, a.z + 42] }),
+      shot([c.x + 4.5, c.y + 2.2, c.z + 5], [c.x, c.y + 0.7, c.z], 'vera.army3', 5, { cam2: [c.x + 3, c.y + 1.6, c.z + 3.6] }),
+      shot([g.x + 7, g.y + 1.8, g.z + 2], [a.x, a.y + 1.4, a.z + 8], null, 3, { cam2: [g.x + 4, g.y + 1.7, g.z - 2] }),
+    ] };
+  }, { always: true });
+  const cutFarm = () => cutscene(A.farmDrop || A.farm, (at) => {
+    const d = at, f = A.farm || at, car = A.armor || f;
+    return { title: 'Southfield Farm', sub: 'Act IV \u00b7 Moretti\u2019s armoured car', shots: [
+      shot([d.x - 3, d.y + 2.2, d.z + 4], [f.x, f.y + 2, f.z + 10], 'vera.army5', 4.5, { act: () => { if (HS.props.dropCrate) HS.props.dropCrate.visible = true; } }),
+      shot(rel(car, car.yaw || 0, 6.5, 4.5, 2.2), [car.x, car.y + 1.2, car.z], 'vera.farm2', 5, { cam2: rel(car, car.yaw || 0, 5, 3.4, 1.8) }),
+      shot([f.x + 9, f.y + 1.7, f.z + 34], [f.x + 6, f.y + 1.3, f.z + 14], 'vera.farm5', 5),
+    ] };
+  }, { always: true });
+  const cutGarage = () => cutscene(A.garage || me(), (at) => {
+    const g = at, out = A.garageDoor || g;
+    const turn = () => { const c = H.car; if (!c || c.dead || c.net != null || !inGarage(c)) return; c.yaw += PI; c.x = g.x; c.z = g.z; c.v = c.vx = c.vz = 0; VV.placeMesh(c); };
+    return { title: 'Dusty\u2019s Respray', sub: 'Act IV \u00b7 New paint', shots: [
+      shot([g.x - 9, g.y + 5, g.z - 24], [g.x, g.y + 2, g.z - 5], null, 3, { cam2: [g.x - 6, g.y + 4, g.z - 18], act: () => sfx('latch') }),
+      shot([g.x + 2.8, g.y + 2.9, g.z + 6], [g.x, g.y + 1, g.z], 'vera.garage2', 6, { cam2: [g.x - 2.6, g.y + 2.4, g.z + 5.4], act: () => { if (AF.fx) for (let k = 0; k < 3; k++) AF.fx.burst('steam', g.x + (k - 1) * 1.2, g.y + 1.4, g.z, 8, { spread: 2.5 }); } }),
+      shot([out.x + 6, out.y + 2.2, out.z - 3], [g.x, g.y + 1.2, g.z], 'vera.paint2', 5.5, { act: turn }),
+    ] };
+  }, { always: true });
+  const cutNight = () => cutscene(HB && HB.spots && HB.spots.ladder ? HB.spots.ladder : me(), () => {
+    const L = HB && HB.spots && HB.spots.ladder ? HB.spots.ladder : { x: -20, y: 0.5, z: -110 };
+    return { title: 'Midnight', sub: 'Act IV \u00b7 The roof watch', shots: [
+      shot([-62, 30, -58], [30, 40, -125], 'vera.n1', 7.5, { cam2: [-44, 36, -80] }),
+      shot([L.x + 4, (L.y || 0.5) + 2.5, L.z + 4], [L.x, (L.y || 0.5) + 6, L.z], null, 3),
+    ] };
+  }, { always: true });
 
   // ---------------------------------------------------------------- the story, step by step
   // cp: reaching this step saves checkpoint cp · cut: a cutscene step · tag: the marker's label · mark(): the objective position ·
@@ -305,7 +341,7 @@ try {
     { id: 'secret', tag: 'Bookcase', line: 'Through the {bookcase door} and down the stairs', mark: () => (SEC() ? SEC().stairTop : A.tunnelEntry), enter: (r) => secretOpen(r), done: () => !SEC() || inPassage(), mu: 'mu_tension' },
     { id: 'passage', tag: 'Way out', line: 'Follow the secret passage under the island to {its way out}', mark: () => passMark(), enter: () => { const s = SEC(); if (s && s.open) s.open(true); }, done: () => !SEC() || near(SEC().exit, 7, 6) || near(A.tunnelEntry, 9, 6), mu: 'mu_tension' },
     { id: 'tunnel', tag: 'Tunnel', line: 'The {smugglers\u2019 tunnel} is just along the slope \u2014 get in', mark: () => A.tunnelEntry, enter: () => { scene('tunnel'); H.got.kitkey = true; }, done: () => near(A.tunnelEntry, 6, 6), mu: 'mu_tension' },
-    { id: 'cache', cp: 4, tag: 'Cache', line: () => (H.got.cache ? 'The cache is open' : H.siege ? (H.crackOn && H.cracker !== mySlot() ? 'Hold them off while your crew cracks the {arms cache} \u2014 grab a loud gun off the {rack}' : 'Crack the {arms cache} \u2014 lock ' + Math.min(CRACK_N, H.crack + 1) + ' of ' + CRACK_N + (crewN() > 1 ? ', your crew covers you' : '')) : 'Sneak through the {stash maze} to the arms cache \u2014 crouch (C), stay out of sight'),
+    { id: 'cache', cp: 4, tag: 'Cache', line: () => (H.got.cache ? 'The cache is open' : H.siege ? (H.crackOn && H.cracker !== mySlot() ? 'Hold them off while your crew cracks the {arms cache} \u2014 grab a loud gun off the {rack}' : 'Crack the {arms cache} \u2014 lock ' + Math.min(CRACK_N, H.crack + 1) + ' of ' + CRACK_N + (crewN() > 1 ? ', your crew covers you' : '')) : 'Sneak through the {stash maze} to the arms cache \u2014 stay low and out of sight'),
       mark: () => A.cache, enter: (r) => { scene('tunnel'); if (!r) { radio('vera.tunnel'); radio('vera.maze'); radio('vera.tough'); } }, done: () => !!H.got.cache, mu: 'mu_tension' },
     { id: 'cave', tag: 'Sea cave', line: 'Slip out through the {sea cave}', mark: () => A.caveExit, enter: (r) => { scene('tunnel'); if (!r) radio('vera.gear'); }, done: () => near(A.caveExit, 7, 6) || near(A.cove, 10, 6), mu: 'mu_tension' },
     { id: 'ambush', tag: 'Jet skis', line: 'Moretti\u2019s men! Fight your way to {the jet skis}', mark: () => nearestSki(), enter: (r) => ambush(r), done: () => ambushOver(), mu: 'mu_action' },
@@ -320,16 +356,24 @@ try {
     { id: 'sting', tag: 'Prescott', line: () => stingLine(), mark: () => stingMark(), enter: (r) => { scene('queen'); if (!r) { radio('vera.q4'); radio('vera.q5'); if (crewN() > 2) radio('vera.q4b'); } H.anger = 0; H.strikes = 0; H.tray = false; }, done: () => !!H.got.key, mu: 'mu_casino' },
     { id: 'silas', tag: 'Silas', line: 'See {Silas Crane} in his office behind the purser\u2019s cage', mark: () => A.silas, enter: (r) => { scene('queen'); if (!r) radio('vera.got'); if (LN() && LN().openStaff) LN().openStaff(true); }, done: () => near(A.silas, 3.6, 3), mu: 'mu_casino' },
     { id: 'silascut', line: 'Silas Crane', cut: () => cutSilas(), enter: () => scene('queen'), mu: 'mu_casino' },
-    { id: 'wheels', cp: 6, act: 'Act IV \u00b7 Midnight', tag: () => (anyCar() ? A.farmName || 'Farm' : 'Car'), line: () => (anyCar() ? 'Drive out to {' + (A.farmName || 'Southfield Farm') + '}, west of the city \u2014 Moretti keeps an armoured car there' : 'Get a car \u2014 Vera left one at {the Motor Exchange} (or take any car) \u2014 and head for ' + (A.farmName || 'Southfield Farm')),
-      mark: () => (anyCar() ? A.farmGate : H.ride && !H.ride.dead ? H.ride : A.wheelsSpot), enter: (r) => wheels(r), done: () => dist(me(), A.farm) < 75, mu: 'mu_stealth', time: 0.2 },
-    { id: 'farm', tag: () => (!H.got.launchers ? 'Launchers' : inHeistCar() ? 'Drive' : 'Armoured car'), line: () => farmLine(),
-      mark: () => (!H.got.launchers ? A.farmCrate : inHeistCar() ? A.farmGate : H.car && !H.car.dead ? H.car : A.armor), enter: (r) => { scene('farm'); armoredSpawn(); if (!r) { radio('vera.farm2'); radio('vera.farm3'); } }, done: () => farmDone(), mu: 'mu_stealth', hostOnly: true },
-    { id: 'carchase', tag: 'Chasers', line: () => ccLine(), mark: () => ccMark(), enter: (r) => { scene('none'); if (host()) ccStart(); if (!r) { radio('tony.farm', true); radio('vera.cc1', true); } }, done: () => ccOver(), mu: 'mu_chase', hostOnly: true },
-    { id: 'paint', tag: 'Body Works', line: () => (inHeistCar() ? 'Every Moretti knows that car \u2014 get it {resprayed at Body Works}: drive in and stop' : 'Get back in the {armoured car}'), mark: () => (inHeistCar() ? bodyWorks() : H.car && !H.car.dead ? H.car : bodyWorks()), enter: (r) => { if (!r) radio('vera.paint'); }, done: () => !!H.got.paint, mu: 'mu_stealth' },
+    { id: 'wheels', cp: 6, act: 'Act IV \u00b7 Midnight', tag: () => (anyCar() ? 'Army stash' : 'Car'), line: () => (anyCar() ? 'Drive east into the desert to the {army stash} on the Ochre Flats \u2014 leave the car outside and go in on foot' : 'Pick up the car Vera left at {the Motor Exchange} (or take any car) and head east for the desert'),
+      mark: () => (anyCar() ? A.armyGate : H.ride && !H.ride.dead ? H.ride : A.wheelsSpot), enter: (r) => wheels(r), done: () => !A.army || dist(me(), A.army) < (AF.mode === 'walk' ? 75 : 40), mu: 'mu_plan', time: 0.2 },
+    { id: 'armycut', line: 'The army stash', cut: () => cutArmy(), enter: () => scene('army'), vo: ['vera.army2', 'vera.army3'], mu: 'mu_stealth' },
+    { id: 'army', cp: 14, tag: () => (H.got.crate ? 'Car' : 'Launchers'), line: () => armyLine(), mark: () => (A.armyCrate || null), enter: (r) => { scene('army'); if (r) armyRide(); }, done: () => !!H.got.crate, mu: 'mu_stealth' },
+    { id: 'haul', tag: () => (anyCar() ? 'Drop' : 'Car'), line: () => (anyCar() ? 'Get the crate west to the {drop} beside ' + (A.farmName || 'Southfield Farm') + ' and park there' : 'Back in the {car} with the crate'),
+      mark: () => (anyCar() || !H.ride || H.ride.dead ? A.farmDrop : H.ride), enter: (r) => { scene('none'); if (!r) radio('vera.army4', true); }, done: () => !!H.got.drop, mu: 'mu_plan' },
+    { id: 'farmcut', line: 'Southfield Farm', cut: () => cutFarm(), enter: () => { scene('farm'); armoredSpawn(); }, vo: ['vera.army5', 'vera.farm2', 'vera.farm5'], mu: 'mu_stealth' },
+    { id: 'farm', cp: 15, tag: () => (inHeistCar() ? 'Drive' : 'Armoured car'), line: () => farmLine(),
+      mark: () => (H.car && !H.car.dead ? H.car : A.armor), enter: (r) => { scene('farm'); armoredSpawn(!!r); }, done: () => inHeistCar(), mu: 'mu_stealth' },
+    { id: 'carchase', tag: () => (CC.helis ? 'Helicopters \u00b7 ' + helisLeft() : 'Chasers'), line: () => ccLine(), mark: () => ccMark(), enter: (r) => ccEnter(r), done: () => ccOver(), mu: 'mu_chase', hostOnly: true },
+    { id: 'paint', tag: () => (inHeistCar() ? 'Garage' : 'Armoured car'), line: () => (inHeistCar() ? 'Every Moretti knows that car \u2014 drive it into {' + (A.garageName || 'the respray garage') + '} on the desert road and stop inside' : 'Get back in the {armoured car}'),
+      mark: () => (inHeistCar() || !H.car || H.car.dead ? A.garageDoor : H.car), enter: (r) => { scene('none'); if (!r) radio('vera.garage1', true); }, done: () => !!H.got.paint, mu: 'mu_plan' },
+    { id: 'paintcut', line: 'Dusty\u2019s Respray', cut: () => cutGarage(), enter: () => scene('none'), vo: ['vera.garage2', 'vera.paint2'], mu: 'mu_brief' },
     { id: 'park', tag: 'Charter St', line: () => (inHeistCar() ? 'Park the armoured car on {Charter Street}, beside the bank' : 'Get back in the {armoured car}'),
-      mark: () => (H.got.wheels ? null : inHeistCar() ? A.carSpot : H.car && !H.car.dead ? H.car : A.carSpot), enter: (r) => { if (!r) radio('vera.paint2'); }, done: () => !!H.got.wheels, mu: 'mu_stealth' },
+      mark: () => (H.got.wheels ? null : inHeistCar() ? A.carSpot : H.car && !H.car.dead ? H.car : A.carSpot), done: () => !!H.got.wheels, mu: 'mu_plan' },
+    { id: 'nightcut', line: 'Midnight', cut: () => cutNight(), enter: () => scene('none'), vo: ['vera.n1'], mu: 'mu_stealth' },
     { id: 'vantage', cp: 7, tag: () => (onCityRoof() ? 'Roof edge' : 'Ladder'), line: () => (onCityRoof() ? 'Find a spot at the {roof edge} facing the bank' : 'Climb the {service ladder} on City Hall\u2019s wall \u2014 Vera left a rifle case at its foot'),
-      mark: () => (onCityRoof() ? HB.spots.vantage : HB.spots.ladder), enter: (r) => { scene('roof'); parkCar(); lendSniper(); if (!r) radio('vera.n1'); }, done: () => onCityRoof() && dist(AF.player, HB.spots.vantage) < 10, mu: 'mu_stealth' },
+      mark: () => (onCityRoof() ? HB.spots.vantage : HB.spots.ladder), enter: () => { scene('roof'); parkCar(); lendSniper(); }, done: () => onCityRoof() && dist(AF.player, HB.spots.vantage) < 10, mu: 'mu_stealth' },
     { id: 'snipe', tag: () => 'Roof watch \u00b7 ' + vantageLeft(), line: () => 'Take out the {roof watch} on the Harbour Trust (' + vantageLeft() + ' left) \u2014 if a patrol finds a body, it\u2019s over', mark: () => nextGuard(HB.roofGuards(true)),
       enter: (r) => { scene('roof'); lendSniper(); if (!r) radio('vera.n2'); }, done: () => vantageLeft() === 0, mu: 'mu_stealth', hostOnly: true },
     { id: 'zooplane', cp: 8, tag: 'Plane', line: 'Get to {Westgate Airfield} and take a plane \u2014 the zoo\u2019s locked down, you go in from the sky', mark: () => planeAt(),
@@ -349,13 +393,13 @@ try {
       mark: () => HB.spots.skyDeck, enter: () => scene('roof'), done: () => !!H.flag.chuted && onBankTop(), mu: 'mu_tension' },
     { id: 'roofclear', cp: 11, tag: () => (roofLeft() ? 'Guards \u00b7 ' + roofLeft() : 'Roof door'), line: () => (roofLeft() ? 'Clear the roof \u2014 ' + roofLeft() + (roofLeft() > 1 ? ' guards' : ' guard') + ' the rifle couldn\u2019t see' : 'Down the {steel stairs} and round to the {roof door}'),
       mark: () => (roofLeft() ? nextGuard(HB.roofGuards(false)) : AF.player.y > 15.5 ? HB.spots.stairTop : HB.spots.bulkhead), enter: (r) => { scene('roof'); if (!r) radio('vera.n9'); }, done: () => roofLeft() === 0 && near(HB.spots.bulkhead, 5, 2.5), mu: 'mu_stealth' },
-    { id: 'door', tag: 'Roof door', line: () => (H.got.hatch ? 'Through the {roof door} and down the stairs' : 'The {roof door} has a Kestrel keypad \u2014 open it with the tablet (T) or the keypad'), mark: () => HB.spots.bulkhead, enter: (r) => { scene('bank'); if (!r) radio(H.got.hatch ? 'vera.hatch2' : 'vera.n12'); }, done: () => inStair() || inBank(), mu: 'mu_stealth' },
+    { id: 'door', tag: 'Roof door', line: () => (H.got.hatch ? 'Through the {roof door} and down the stairs' : 'The {roof door} has a Kestrel keypad \u2014 open it with the Kestrel tablet or the keypad'), mark: () => HB.spots.bulkhead, enter: (r) => { scene('bank'); if (!r) radio(H.got.hatch ? 'vera.hatch2' : 'vera.n12'); }, done: () => inStair() || inBank(), mu: 'mu_stealth' },
     { id: 'vault', tag: 'Vault', line: 'Reach the {vault door} \u2014 guards and cameras everywhere (the tablet loops cameras and kills lights)', mark: () => HB.spots.gate, enter: (r) => { scene('bank'); if (!r) { radio('vera.tip'); radio('vera.cams'); } }, done: () => near(HB.spots.gate, 2.8, 2), mu: 'mu_stealth' },
-    { id: 'keys', tag: 'Vault keys', line: () => (H.lockT > 0 ? 'Turn {both keys} \u2014 ' + Math.ceil(H.lockT) + ' s left on the override' : 'Time lock engaged \u2014 override it with the tablet (T)'), mark: () => HB.spots.keys[H.grip[0] > 0 ? 1 : 0], enter: (r) => { scene('bank'); if (!r) radio('vera.keys'); }, done: () => !!H.got.gate, mu: 'mu_stealth' },
+    { id: 'keys', tag: 'Vault keys', line: () => (H.lockT > 0 ? 'Turn {both keys} \u2014 ' + Math.ceil(H.lockT) + ' s left on the override' : 'Time lock engaged \u2014 override it with the Kestrel tablet'), mark: () => HB.spots.keys[H.grip[0] > 0 ? 1 : 0], enter: (r) => { scene('bank'); if (!r) radio('vera.keys'); }, done: () => !!H.got.gate, mu: 'mu_stealth' },
     { id: 'lasers', tag: 'Cage', line: () => (H.got.lasersOff ? 'The grid is dead \u2014 walk to the {deposit cage}' : 'Through the {laser grid} to the deposit cage \u2014 crouch under, time the sweepers, or kill it from the tablet'), mark: () => HB.spots.cage, enter: (r) => { scene('bank'); if (!r) radio('vera.laser'); }, done: () => inVaultFar() || !!H.got.cage, mu: 'mu_stealth' },
     { id: 'drill', tag: 'Drill', line: 'Drill the {deposit cage} \u2014 keep the bit cool', mark: () => HB.spots.cage, enter: (r) => { scene('bank'); if (!r) radio('vera.drill'); }, done: () => !!H.got.cage, mu: 'mu_stealth' },
     { id: 'cash', tag: 'Cash', line: 'Grab the {cash bags}', mark: () => nextBag(), enter: (r) => { scene('bank'); if (!r) radio('vera.cash'); }, done: () => H.bags.every(Boolean), mu: 'mu_stealth' },
-    { id: 'escape', cp: 12, act: 'Act V \u00b7 The Getaway', tag: () => (H.got.exit ? 'Car' : 'Exit'), line: () => (H.got.exit ? 'Out through the {fire exit} to the armoured car on Charter Street' : 'Open the {fire exit} \u2014 the tablet (T) or the keypad beside it'),
+    { id: 'escape', cp: 12, act: 'Act V \u00b7 The Getaway', tag: () => (H.got.exit ? 'Car' : 'Exit'), line: () => (H.got.exit ? 'Out through the {fire exit} to the armoured car on Charter Street' : 'Open the {fire exit} \u2014 the Kestrel tablet or the keypad beside it'),
       mark: () => (!H.got.exit ? HB.spots.exitPad : H.car && !H.car.dead ? H.car : A.car), enter: (r) => getaway(r), done: () => inCar() || flying(), mu: 'mu_chase' },
     { id: 'jets', tag: () => 'Jets \u00b7 ' + jetsLeft() + ' left', line: () => jetsLine(), mark: () => jetMark(), enter: (r) => jetsStart(r), done: () => jetsOver(), mu: 'mu_chase', hostOnly: true },
     { id: 'run', tag: 'Plane', line: 'Lose the police on the way to {Westgate Airfield} \u2014 a plane is waiting', mark: () => planeAt(), enter: () => run(), done: () => flying(), mu: 'mu_chase' },
@@ -368,37 +412,38 @@ try {
     { id: 'finale', line: 'Corsair Key', cut: () => cutFinale(), enter: () => { scene('key'); HS.showNpc('vera2', true); }, mu: 'mu_brief' },
   ];
   const IDX = {}; ST.forEach((s, i) => { IDX[s.id] = i; });
-  // explicit how-to for the steps that need a new control ([Key] = a key cap on desktop; touch shows the words in a toast)
-  const SKY = 'Skydive: over the target [F] bails out (above 35 m) \u00b7 [Space] opens the chute \u00b7 [A]/[D] steer \u00b7 hold [S] to flare before touchdown.';
+  // general guidance for the steps that need a new skill (no key names: the same words on a keyboard, a pad or a phone)
+  const SKY = 'Skydive: bail out high over the target, open the chute in good time, steer for the landing spot and flare just before touchdown.';
   const TIPS = {
     maproom: 'Follow the gold marker into the depot \u2014 Vera is waiting at the map table.',
-    uniform: 'Sneak: [C] crouch \u00b7 stay out of the watchmen\u2019s torchlight \u00b7 [E] at the grille starts the lock-pick (match the pins).',
-    plane: 'Flying: [Space] throttle up \u00b7 [W]/[S] nose \u00b7 [A]/[D] bank \u00b7 [F] get out on the ground. Follow the gold marker.',
+    uniform: 'Sneak: stay low and out of the watchmen\u2019s torchlight. At the grille, pick the lock by matching the pins.',
+    plane: 'Flying: open the throttle down the runway, ease the nose up, bank to turn. Follow the gold marker.',
     follow: 'Kit leads the way \u2014 the gold marker follows him. Keep up.',
-    cache: 'Stealth: [C] crouch \u00b7 hit a guard from BEHIND for a silent takedown \u00b7 [E] carries a body \u00b7 [E] at the cache cracks it.',
-    chase: 'Jet ski: right mouse (or [Z]) aims \u00b7 left mouse (or [Q]) fires from the saddle \u00b7 [R] reload.',
-    uniforms: 'Guns away: [1] = fists. Knock out a waiter / dealer from behind, then [E] takes the uniform. [E] carries a body to hide it.',
-    wheels: 'Any car will do: walk up to it and press [E] to drive. The blue line under the objective gives turn-by-turn directions.',
-    farm: 'The yard: [C] crouch \u00b7 attack from BEHIND = silent takedown \u00b7 [E] at the crate loads the launchers \u00b7 [E] at the armoured car drives it.',
-    carchase: 'Drive-by: right mouse (or [Z]) aims, left mouse (or [Q]) fires from the seat. Passengers shoot all round, the driver to the front and sides.',
-    paint: 'Drive into a Body Works bay (gold marker) and stop \u2014 the respray is free tonight and loses the police.',
-    vantage: 'The ladder: walk up to it and press [E] \u2014 it climbs on its own, [S] climbs back down.',
-    snipe: 'Sniper: [X] / mouse wheel picks the SILENCED SNIPER \u00b7 hold right mouse (or [Z]) to scope \u00b7 left mouse (or [Q]) fires. Shoot when no other guard can see the one you drop.',
-    zooplane: 'Flying: [Space] throttle up \u00b7 [W]/[S] nose \u00b7 [A]/[D] bank. Climb above 35 m before you reach the zoo.',
+    cache: 'Stealth: stay crouched, take guards down from behind for a silent kill, and hide the bodies.',
+    chase: 'Jet ski: keep riding and shoot from the saddle \u2014 aim for the riders, reload between bursts.',
+    uniforms: 'Put your gun away. Knock out a waiter or a dealer from behind, take the uniform, hide the body.',
+    wheels: 'Any car will do. The blue line under the objective gives turn-by-turn directions.',
+    army: 'Soldiers have torches and sharp eyes. Take them from behind \u2014 or bring a car right up to the crate and grab it fast.',
+    farm: 'Sneak up to the armoured car. The moment anyone climbs in, the whole yard opens fire \u2014 so be ready to drive.',
+    carchase: 'Driver: keep moving and swing round roadblocks. At the open back doors: the mounted machine guns never run dry \u2014 just reload. Bring the helicopters down.',
+    paint: 'Drive straight into the respray garage and stop inside.',
+    vantage: 'The ladder climbs on its own once you start up it.',
+    snipe: 'Switch to the silenced sniper rifle and look through the scope. Shoot when no other guard can see the one you drop.',
+    zooplane: 'Flying: climb above 35 m before you reach the zoo.',
     zoojump: SKY,
-    zoosnipe: 'Nobody on the ground can see you up in the tree. Scope in (right mouse / [Z]) and fire (left mouse / [Q]). Seen in the zoo = five stars.',
+    zoosnipe: 'Nobody on the ground can see you up in the tree. Scope in and pick them off. Seen in the zoo = five stars.',
     bankjump: SKY,
     roofclear: 'Behind a guard: a melee hit or a quiet shot drops him. Seen up here = five stars.',
-    door: 'Kestrel tablet: [T] (or the TABLET button) \u2014 cameras, lights and locks. Use it on the roof door.',
-    jets: 'Launchers: [X] / mouse wheel picks the SEEKER \u2014 keep a jet in the box until the tone holds and the box turns GREEN, then fire. The BAZOOKA flies straight: lead the jet.',
-    fight: 'Fight: the LMG is in Silas\u2019s crate (gold marker, [E]). [R] reloads, [X] switches weapon.',
+    door: 'Open the Kestrel tablet \u2014 cameras, lights and locks. Use it on the roof door.',
+    jets: 'Switch to the seeker launcher and keep a jet in the box until the tone holds and it turns GREEN, then fire. The bazooka flies straight: lead the jet.',
+    fight: 'The LMG is in Silas\u2019s crate (gold marker). Reload behind cover.',
   };
   for (const s of ST) if (TIPS[s.id]) s.tip = TIPS[s.id];
   // the bank's own steps (inside, with the tablet) and the night's zoo steps
   const BANK = new Set(['door', 'vault', 'keys', 'lasers', 'drill', 'cash']), ZOO = new Set(['zoojump', 'zoosnipe', 'lions', 'den', 'bunker', 'hack']);
   const ROOF = new Set(['vantage', 'snipe', 'bankjump', 'roofclear']);
   // checkpoints: the step, where, the facts already earned (index = the cp a step saves)
-  const G0 = ['uniform', 'papers', 'cleared'], G1 = G0.concat(['kitkey']), G2 = G1.concat(['cache']), G3 = G2.concat(['key']), G4 = G3.concat(['wheels', 'launchers', 'paint']);
+  const G0 = ['uniform', 'papers', 'cleared'], G1 = G0.concat(['kitkey']), G2 = G1.concat(['cache']), G3 = G2.concat(['key']), G4 = G3.concat(['crate', 'drop', 'launchers', 'wheels', 'paint']);
   const CPS = [
     { step: 'maproom', label: 'the depot', at: () => (HO() ? HO().door : A.vera), got: [] },
     { step: 'uniform', label: 'Kovac\u2019s tailor shop', at: () => A.shopDoor, got: [] },
@@ -414,6 +459,8 @@ try {
     { step: 'roofclear', label: 'the Harbour Trust roof', at: () => HB.spots.podium || HB.spots.skyDeck, got: G4.concat(['sniped', 'hacked']) },
     { step: 'escape', label: 'the Harbour Trust', at: () => HB.spots.fire, got: G4.concat(['sniped', 'hacked', 'hatch', 'gate', 'cage']), cash: true },
     { step: 'stash', label: 'Corsair Key', at: () => A.c8, got: G4.concat(['sniped', 'hacked', 'hatch', 'gate', 'cage', 'exit']), cash: true },
+    { step: 'army', label: 'the army stash', at: () => A.armyGate || A.army || A.wheelsSpot, got: G3 },
+    { step: 'farm', label: 'Southfield Farm', at: () => A.farmDrop || A.farmGate, got: G3.concat(['crate', 'drop', 'launchers']) },
   ];
   const is = (id) => H.on && H.i === IDX[id];
   const lineOf = (s) => (typeof s.line === 'function' ? s.line() : s.line);
@@ -441,7 +488,7 @@ try {
   };
   const gotList = () => Object.keys(H.got).filter((k) => H.got[k]);
   // Vera's silenced sniper rifle: lent for the roof watch and the zoo, kept (a loan) until the job ends
-  const lendSniper = () => { const C = CB(); if (C && C.lend && !(C.has && C.has('sniper'))) { C.lend('sniper', 25); note('A silenced sniper rifle \u2014 hold right mouse (or Z) to look through the scope.', 'ok'); } };
+  const lendSniper = () => { const C = CB(); if (C && C.lend && !(C.has && C.has('sniper'))) { C.lend('sniper', 25); note('A silenced sniper rifle \u2014 aim to look through the scope.', 'ok'); } };
   // the roof watch the rifle took down stays down whatever later checkpoint the crew comes back to
   const killVantage = () => { if (!S || !HB || !HB.roofGuards) return; for (const g of HB.roofGuards(true)) if (!g.down) S.knockOut(g, 0, 1, 'dead'); };
   // seen at the zoo or on the bank roof: every cop in the city (five stars); the job waits until they lose you, or a retry
@@ -523,7 +570,9 @@ try {
     for (const k of ['steward', 'waiter', 'dealer', 'detective', 'sec0', 'sec1', 'sec2', 'sec3', 'sec4', 'sec5']) HS.show(k, on('queen'));
     for (const k of ['door', 'prescott', 'celeste', 'pit']) HS.showNpc(k, on('queen'));
     for (let k = 0; k < 6; k++) HS.show('farm' + k, on('farm'));
-    if (HS.props.farmCrate) HS.props.farmCrate.visible = on('farm') && !H.got.launchers;
+    for (let k = 0; k < 6; k++) HS.show('army' + k, on('army'));
+    if (HS.props.armyCrate) HS.props.armyCrate.visible = on('army') && !H.got.crate;
+    if (HS.props.dropCrate) HS.props.dropCrate.visible = H.on && !!H.got.drop && H.i <= IDX.farm;
     for (const k of ['vera2', 'silas2', 'kit2', 'tony']) HS.showNpc(k, on('key') && H.i <= IDX.betray);
     if (HS.props.crate) HS.props.crate.visible = on('key');
     // the night: the zoo's Kestrel guards, the bank's roof watch (the sniper and the jump), the bank itself once the crew is on its roof
@@ -532,7 +581,7 @@ try {
     if (HB && HB.ready) { if (HB.on !== armed) HB.night(armed); if (HB.roof && HB.roofOn !== (on('roof') || on('bank'))) HB.roof(on('roof') || on('bank')); }
     if (!on('zoo') && AF.den && AF.den.setActive) AF.den.setActive(false);
     // zones are reset by resetWorld (a checkpoint); moving between scenes never revives anyone
-    const zone = on('shop') ? 'shop' : on('tunnel') ? 'tunnel' : on('queen') ? 'queen' : on('farm') ? 'farm' : on('zoo') ? 'zoo' : on('roof') ? 'roof' : on('bank') ? 'bank' : null;
+    const zone = on('shop') ? 'shop' : on('tunnel') ? 'tunnel' : on('queen') ? 'queen' : on('farm') ? 'farm' : on('army') ? 'army' : on('zoo') ? 'zoo' : on('roof') ? 'roof' : on('bank') ? 'bank' : null;
     if (S && (!S.zone || S.zone.id !== zone)) S.activate(zone);
     H.scene = name;
   };
@@ -540,7 +589,7 @@ try {
   let muCur = null;
   const music = () => {
     let id = null;
-    if (H.on) { const s = ST[H.i]; id = s ? s.mu || null : null; if ((S && S.zone && S.zone.alarm && S.zone.mode === 'fight') || (is('ambush') && H.goonsN)) id = 'mu_action'; }
+    if (H.on) { const s = ST[H.i]; id = s ? s.mu || null : null; if ((S && S.zone && S.zone.alarm && S.zone.mode === 'fight') || (is('ambush') && H.goonsN)) id = 'mu_action'; if (is('carchase')) id = HE.on && helisLeft() ? 'mu_finale' : 'mu_chase'; }
     if (id !== muCur) { muCur = id; if (AF.audio && AF.audio.music) AF.audio.music(id, { fade: 2.5 }); }
   };
   // ---------------------------------------------------------------- markers + HUD
@@ -558,7 +607,7 @@ try {
 
   // ---------------------------------------------------------------- no progress while wanted: the job waits until the police lose you
   // (the getaway and the Key's gunfight are the exceptions — the heat is the story there)
-  const HEAT_OK = new Set(['farm', 'carchase', 'escape', 'jets', 'run', 'away', 'fight']);
+  const HEAT_OK = new Set(['army', 'haul', 'farm', 'carchase', 'escape', 'jets', 'run', 'away', 'fight']);
   const wanted = () => { const C = CB(); return !!C && C.stars > 0; };
   const wantedHold = () => { if (!H.on || !wanted()) return false; const s = ST[H.i]; return !!s && !s.cut && !HEAT_OK.has(s.id); };
   let nagT = -1e9;
@@ -614,14 +663,14 @@ try {
     const C = CB(); if (C) { C.clearWanted(); C.clearGoons(); if (C.unlend) C.unlend(); }
     H.grip[0] = H.grip[1] = 0; H.lockT = 0; H.anger = 0; H.strikes = 0; H.tray = false; H.goonsN = 0; H.waves = 0; H.bosses = [];
     if (HB && HB.ready) { HB.reset(); }
-    if (S) for (const z of ['shop', 'tunnel', 'queen', 'farm', 'zoo', 'roof', 'bank']) if (S.zones.get(z)) S.reset(z);
+    if (S) for (const z of ['shop', 'tunnel', 'queen', 'farm', 'army', 'zoo', 'roof', 'bank']) if (S.zones.get(z)) S.reset(z);
     if (AF.den && AF.den.reset) AF.den.reset();
     if (AF.den && AF.den.setHatch) AF.den.setHatch(false);
     kitReset();
     H.took = {}; H.tray = false; H.busy = false; H.drilling = false; H.dealing = false; H.drillR = false; AF.PL.still = false;
     H.mg = {}; H.crack = 0; H.cracker = -1; H.crackOn = false; H.siege = null; H.detHold = 0; H.pitHold = 0; chaseClear();
     H.bankWave = null; H.tookBy = {}; H.loadout = false; H.exitT = 0; H.ccLeft = null;
-    ccClear(); { const C0 = CB(); if (C0 && C0.jetMission) C0.jetMission(null); }
+    ccClear(); heliClear(); { const C0 = CB(); if (C0 && C0.jetMission) C0.jetMission(null); }
     if (S && S.carrying) S.carrying = null;
     if (LN() && LN().openStaff) LN().openStaff(i === IDX.silas || i === IDX.silascut);
     if (H.roadblock) { for (const c of H.roadblock.cars) c.temp = true; H.roadblock = null; }
@@ -688,7 +737,7 @@ try {
     if (LN() && LN().openStaff) LN().openStaff(false);
     if (H.car) { H.car.temp = true; H.car.mission = false; H.car = null; }
     if (H.ride) { H.ride.temp = true; H.ride.mission = false; H.ride = null; }
-    ccClear(); { const C1 = CB(); if (C1 && C1.jetMission) C1.jetMission(null); }
+    ccClear(); heliClear(); act4Tick(0); { const C1 = CB(); if (C1 && C1.jetMission) C1.jetMission(null); }
     if (H.roadblock) { for (const c of H.roadblock.cars) c.temp = true; H.roadblock = null; }
     chaseClear(); H.siege = null; if (S && S.carrying) S.carrying = null;
     MI.unblip('heist-obj'); MI.unblip('heist-2'); MI.clearBars('heist'); if (AF.hud.job === H.hud) AF.hud.job = null;
@@ -731,12 +780,14 @@ try {
     if (k === 'uniform') dress('pilot');
     if (k === 'cache') { const C = CB(); if (C && C.lend) C.lend('spistol', 60); note('Silenced pistols and a diamond-core drill. Headshots are quiet and final.', 'ok'); }
     if (k === 'key') { H.lifting = false; note('Prescott\u2019s key is yours.', 'ok'); }
-    if (k === 'hacked') { radio('kestrel.in'); note('Kestrel tablet unlocked for the whole crew \u2014 press T (or the TABLET button) for the bank\u2019s cameras, lights and locks.', 'ok'); }
+    if (k === 'hacked') { radio('kestrel.in'); note('Kestrel tablet unlocked for the whole crew \u2014 open it for the bank\u2019s cameras, lights and locks.', 'ok'); }
     if (k === 'hatch') { radio('kestrel.hatch'); if (HB) HB.door('bulkhead', true); }
     if (k === 'exit') { radio('kestrel.exit'); if (HB && HB.exit) HB.exit(true); }
     if (k === 'lasersOff' && HB && HB.killLasers) HB.killLasers();
     if (k === 'wheels') radio('vera.drop');
-    if (k === 'launchers') { sfx('zip_bag'); if (HS.props.farmCrate) HS.props.farmCrate.visible = false; note('Launchers in the boot. Now take the armoured car.', 'ok'); radio('vera.farm4', true); }
+    if (k === 'crate') { sfx('zip_bag'); if (HS.props.armyCrate) HS.props.armyCrate.visible = false; note('The crate of seeker launchers is in the car.', 'ok'); }
+    if (k === 'drop') { sfx('zip_bag'); H.got.launchers = true; if (HS.props.dropCrate) HS.props.dropCrate.visible = true; note('Crate stashed by the fence. Now for Moretti\u2019s armoured car.', 'ok'); }
+    if (k === 'paint' && H.car) respray(H.car);
     if (k === 'gate') { sfx('vault'); note('Both keys turn \u2014 the time lock lets go.', 'ok'); if (HB) HB.door('gate', true); }
     if (k === 'cage') { sfx('latch'); if (HB) HB.cage(true); }
     applyNight();
@@ -1103,7 +1154,7 @@ try {
   const KEYN = ['north', 'south'];
   const grip = (k, remote) => {
     if (!is('keys') || H.grip[k] > 0) return;
-    if (!(H.lockT > 0)) { if (!remote) note('The time lock is engaged. Override it with the Kestrel tablet (T).', 'warn'); return; }
+    if (!(H.lockT > 0)) { if (!remote) note('The time lock is engaged. Override it with the Kestrel tablet.', 'warn'); return; }
     H.grip[k] = GRIP; sfx('click_metal');
     if (!remote) { send({ op: 'grip', k }); if (!(H.grip[1 - k] > 0)) note('You turn the ' + KEYN[k] + ' key. ' + GRIP + ' seconds to turn the ' + KEYN[1 - k] + ' one!', 'ok'); }
     if (H.grip[0] > 0 && H.grip[1] > 0 && host()) setGot('gate');
@@ -1137,13 +1188,16 @@ try {
     // the armoured car from the farm (repainted), launchers in the boot; every client spawns its copy here (netKey-matched in co-op)
     H.car = armoredMake(K.x, K.z, K.yaw, 1); if (H.car) A.car = { x: H.car.x, y: H.car.y, z: H.car.z };
   };
-      // Act IV prologue: the crew collects a four-seat car at the Motor Exchange and parks it at the bank's exit (host spawns + checks)
-      // Act IV prologue: Moretti's armoured car. wheels: any car out to Southfield Farm (Vera leaves one at the Motor Exchange); farm: sneak
-      // in, load the launcher crate into the armoured car, drive it out; carchase: Moretti's limousines come after it (the host drives them,
-      // netOwned so the crew sees them; passengers shoot from the windows, a driver to the front and sides); paint: a respray at Body
-      // Works; park: Charter Street. The armoured car (VV type 'armored', car.armor = G.armorCarK) is spawned by every client at the same
-      // spot so co-op matches the copies by netKey; it soaks most of every hit and carries the launchers the getaway's jets step lends.
-      const ARMOR_HP = 260, CC_TYPE = 'wagon';
+      // Act IV prologue (midnight). wheels: Vera's car at the Motor Exchange (or any car) east into the desert; armycut + army: the army
+      // stash on the Ochre Flats (stealth zone 'army'): a car brought right up to the crate loads the seeker launchers; haul: west across
+      // the city to the drop outside Southfield Farm; farmcut + farm: on foot into Moretti's yard, and the moment anyone sits in the
+      // armoured car the yard opens fire; carchase: Moretti throws everything at it — a dozen limousines with gunmen at the windows,
+      // roadblocks with men on the road, then helicopters. The armoured car's back doors stand open on two mounted machine guns (endless
+      // belts, they still reload); no police tonight (CB.noCops); the chase ends when the last helicopter is down. paint: Dusty's Respray on
+      // the desert road (paintcut), park: Charter Street (nightcut). The armoured car (VV 'armored') is spawned by every client at the same
+      // spot so co-op matches the copies by netKey; its hit points live with its driver's client ('chp' tells the crew, 'cdm' sends damage).
+      const ARMOR_HP = 300, CC_TYPE = 'wagon', HELI_HP = 520;
+      const NOCOP = new Set(['wheels', 'armycut', 'army', 'haul', 'farmcut', 'farm', 'carchase', 'paint', 'paintcut', 'park']);
       const wheelsType = () => { const T = VV.TYPES; const f = (id) => T.find((t) => t.id === id && t.kind === 'car'); return (f('duesy') || f('sport') || f('coupe') || T.find((t) => t.kind === 'car')).id; };
       const armoredMake = (x, z, yaw, paint) => {
         try { const car = VV.makeCar('armored', paint | 0, x, z, yaw, { y: AF.W.groundY(x, z) }); car.temp = false; car.parked = true; car.mission = true; car.armor = AF.G.armorCarK || 0.12; car.hp = ARMOR_HP; return car; }
@@ -1160,31 +1214,45 @@ try {
         if (H.car) { H.car.temp = true; H.car.mission = false; H.car = null; }
         H.car = armoredMake(A.armor.x, A.armor.z, A.armor.yaw, 0);
       };
-      const wheels = (restored) => {
-        scene('farm');
-        if (!restored) radio('vera.farm1');
-        if (!VV || !VV.makeCar) return;
-        const K = A.wheelsSpot;
-        if (K && (!H.ride || H.ride.dead || H.ride.active === false || (restored && dist(H.ride, K) > 10))) {
-          if (H.ride) { H.ride.temp = true; H.ride.mission = false; }
-          try { const car = VV.makeCar(wheelsType(), 0, K.x, K.z, K.yaw); car.temp = false; car.parked = true; car.mission = true; H.ride = car; } catch (e) { AF.warnOnce('heist wheels', e); }
-        }
-        armoredSpawn(!!restored);
+      const rideSpawn = (K, dx = 0, dz = 0) => {
+        if (!K || !VV || !VV.makeCar) return;
+        if (H.ride) { H.ride.temp = true; H.ride.mission = false; }
+        try { const car = VV.makeCar(wheelsType(), 0, K.x + dx, K.z + dz, K.yaw || 0, K.y != null ? { y: K.y } : undefined); car.temp = false; car.parked = true; car.mission = true; H.ride = car; } catch (e) { AF.warnOnce('heist wheels', e); }
       };
-      const farmLine = () => (!H.got.launchers ? (S && S.zone && S.zone.id === 'farm' && S.zone.alarm ? 'They know you\u2019re here! Fight your way to the {launcher crate} and load it into the armoured car'
-        : 'Sneak into the yard \u2014 crouch (C), hit guards from behind to drop them silently, then load the {launcher crate} into the armoured car (E)')
-        : inHeistCar() ? 'Drive the armoured car off the farm \u2014 out through the {driveway}' : 'Get in the {armoured car} (E to drive; crewmates ride along)');
-      const farmDone = () => !!H.got.launchers && !!H.car && !H.car.dead && dist(H.car, A.farmYard) > 65;
-      // the chase (host)
-      const CC = { list: [], on: false, t: 0, left: 0 };
+      const wheels = (restored) => {
+        scene('none');
+        const C = CB(); if (C) C.clearWanted();
+        if (!restored) radio('vera.army1');
+        const K = A.wheelsSpot;
+        if (K && (!H.ride || H.ride.dead || H.ride.active === false || (restored && dist(H.ride, K) > 10))) rideSpawn(K);
+      };
+      // a retry at the stash: Vera's car waits by the camp's gate
+      const armyRide = () => { const K = A.armyGate; if (K && !(H.ride && !H.ride.dead && dist(H.ride, K) < 40)) rideSpawn(K, 7, 6); };
+      const carNear = (p, r) => { if (!p) return null; for (const c of VV.cars) if (!c.dead && c.active !== false && !c.static && c.type && (c.type.kind === 'car' || c.type.kind === 'van') && dist(c, p) < r) return c; return null; };
+      const loadCrate = () => {
+        if (H.got.crate) return;
+        if (!carNear(A.armyCrate, 9)) { note('It\u2019s far too heavy to carry \u2014 bring a car right up to the crate.', 'warn'); return; }
+        setGot('crate');
+      };
+      const armyLine = () => {
+        const z = S && S.zone && S.zone.id === 'army' ? S.zone : null;
+        return z && z.alarm ? 'The soldiers are onto you! Get a car up to the {launcher crate} and load it' : 'Slip into the {army stash}, then bring a car right up to the {launcher crate} and load it';
+      };
+      const farmLine = () => (S && S.zone && S.zone.id === 'farm' && S.zone.alarm ? 'They know you\u2019re here! Get to the {armoured car} and get in' : 'Sneak into the yard and get into the {armoured car} \u2014 stay out of the guards\u2019 sight');
+
+      // ---- the chase (host): limousines, roadblocks; helicopters run on every client (kills shared by index, 'hk')
+      const CC = { list: [], on: false, t: 0, left: 0, helis: 0, spawnT: 0, blockT: 0, fleeT: 0, k: 0 };
+      const ccMax = () => Math.min(14, 9 + 2 * crewN());
+      const heliN = () => Math.min(5, 2 + crewN());
+      const isChaser = (c) => !!c && !c.dead && c.type && c.type.id === CC_TYPE && (host() ? !!c.chaser : c.net === 0 && isAny(CHASE));
       const ccClear = () => {
         for (const c of CC.list) { c.chaser = null; c.netOwned = false; c.mission = false; c.hostile = false; c.temp = true; if (!c.dead) { c.parked = true; c.v = c.vx = c.vz = 0; } }
-        CC.list.length = 0; CC.on = false; CC.left = 0;
+        CC.list.length = 0; CC.on = false; CC.left = 0; CC.fleeT = 0; rbClear();
       };
       const ccPlace = (c, T, k, n, tries) => {
         const hy = T.yaw || 0;
         for (let t = 0; t < tries; t++) {
-          const a = hy + PI + (k - (n - 1) / 2) * 0.32 + (t % 2 ? 1 : -1) * Math.ceil(t / 2) * 0.22, r = 60 + (t % 3) * 15 + k * 5;
+          const a = hy + PI + (k % 5 - 2) * 0.3 + (t % 2 ? 1 : -1) * Math.ceil(t / 2) * 0.22, r = 70 + (t % 3) * 15 + (k % 4) * 6;
           const x = T.x + Math.sin(a) * r, z = T.z + Math.cos(a) * r, y = AF.W.groundY(x, z);
           if (!Number.isFinite(y) || (AF.PL.waterAt && AF.PL.waterAt(x, z) > y + 0.3)) continue;
           if (VV.carBlocked({ halfL: 2.9, halfW: 1, height: 1.6, y }, x, z, a + PI)) continue;
@@ -1193,98 +1261,302 @@ try {
         }
         return null;
       };
+      const ccSpawn = (T) => {
+        const k = CC.k++, p = ccPlace(null, T, k, 1, 14); if (!p) return null;
+        try {
+          const c = VV.makeCar(CC_TYPE, 0, p.x, p.z, p.yaw, { y: p.y });
+          c.temp = false; c.mission = true; c.netOwned = true; c.hostile = true; c.parked = false; c.vx = c.vz = 0; c.hp = 150;
+          c.chaser = { k, stuck: 0, rev: 0, fireT: 1.5 + (k % 5) * 0.6, burst: 0, side: k % 2 ? 1 : -1, farT: 0, back: 2.5 + (k % 4) * 5, cut: false };
+          CC.list.push(c); return c;
+        } catch (e) { AF.warnOnce('heist chaser', e); return null; }
+      };
       const ccStart = () => {
-        ccClear(); CC.on = true; CC.t = 0;
-        const T = H.car && !H.car.dead ? H.car : me(), n = Math.min(4, 1 + crewN());
-        for (let k = 0; k < n; k++) {
-          const p = ccPlace(null, T, k, n, 18); if (!p) continue;
-          try {
-            const c = VV.makeCar(CC_TYPE, 0, p.x, p.z, p.yaw, { y: p.y });
-            c.temp = false; c.mission = true; c.netOwned = true; c.hostile = true; c.parked = false; c.vx = c.vz = 0; c.hp = 150;
-            c.chaser = { k, stuck: 0, rev: 0, fireT: 1.5 + k * 0.7, burst: 0, side: k % 2 ? 1 : -1, farT: 0 };
-            CC.list.push(c);
-          } catch (e) { AF.warnOnce('heist chaser', e); }
-        }
+        ccClear(); CC.on = true; CC.t = 0; CC.spawnT = 0; CC.blockT = 22; CC.k = 0;
+        const T = H.car && !H.car.dead ? H.car : me();
+        for (let k = 0; k < 6; k++) ccSpawn(T);
         CC.left = CC.list.length; send({ op: 'cc', n: CC.left });
       };
-      // a hit on the armoured car lands on the client that drives it (that one simulates the car): locally, or a 'cdm' to the crew
-      const armorHurt = (n) => { const C = CB(), c = H.car; if (!C || !c) return; if (c.net == null) C.dmgCar(c, n, false); else send({ op: 'cdm', d: n }); };
+      // damage the armoured car by n real hit points: on the client that drives it (that one simulates the car), else a 'cdm' to the crew
+      const armorHurt = (n) => { const C = CB(), c = H.car; if (!C || !c || c.dead) return; if (c.net == null) C.dmgCar(c, n / (c.armor || 1), false); else send({ op: 'cdm', d: n }); };
+      const riding = () => { const v = rideVeh(); return AF.mode === 'passenger' && !!v && (v === H.car || !!v.armor); };
+      // the crew at the open back doors catch some of it (the cab is armoured: drivers don't); never too much
+      const crewHit = (p, n, remote) => {
+        if (!remote) send({ op: 'cph', p, n });
+        if (riding() && Math.random() < p && AF.health) { AF.health.hurt(n, 'shot'); if (AF.camfx) AF.camfx.shake(0.02, 0.2); }
+      };
+      const gunPos = (c, T, out) => {
+        const s = Math.sin(c.yaw), co = Math.cos(c.yaw), lx = (T.x - c.x) * co - (T.z - c.z) * s, side = lx >= 0 ? 1 : -1, sz = side > 0 ? -0.95 : 0.15;
+        out.x = c.x + co * 1.25 * side + s * sz; out.y = c.y + 1.35; out.z = c.z - s * 1.25 * side + co * sz; return out;
+      };
+      const GP = { x: 0, y: 0, z: 0 };
       const ccShot = (c, T, d, real) => {
-        const C = CB(), hit = Math.random() < (d < 20 ? 0.5 : 0.3), sc = hit ? 0.8 : 4;
+        const C = CB(), hit = Math.random() < (d < 20 ? 0.18 : d < 40 ? 0.12 : 0.07), sc = hit ? 0.8 : 4;
         const ex = T.x + (Math.random() - 0.5) * sc, ey = T.y + 1 + (Math.random() - 0.5) * (hit ? 0.5 : 2), ez = T.z + (Math.random() - 0.5) * sc;
-        const hx = Math.sin(c.yaw), hz = Math.cos(c.yaw), sd = c.chaser ? c.chaser.side : 1;
-        if (C && C.tracer) C.tracer(c.x + hz * 0.9 * sd, c.y + 1.4, c.z - hx * 0.9 * sd, ex, ey, ez, 1);
+        gunPos(c, T, GP);
+        if (C && C.tracer) C.tracer(GP.x, GP.y, GP.z, ex, ey, ez, 1);
+        if (AF.fx && Math.random() < 0.6) AF.fx.burst('flash', GP.x, GP.y, GP.z, 1, { size: 0.3 });
         if (AF.audio && Math.random() < 0.5) AF.audio.play('smg', { x: c.x, y: c.y + 1.3, z: c.z, vol: 0.8 });
-        if (hit) { if (AF.fx) AF.fx.burst('spark', ex, ey, ez, 2, { spread: 4 }); if (real) armorHurt(3); }
+        if (hit) { if (AF.fx) AF.fx.burst('spark', ex, ey, ez, 2, { spread: 4 }); if (real) { armorHurt(1.2); crewHit(0.12, 3); } }
       };
       const CC_IN = { up: false, down: false, left: 0, right: 0, brake: false, thr: 1 };
       const ccTick = (dt) => {
-        if (!CC.list.length) return;
-        if (!is('carchase')) { ccClear(); return; }
+        if (!CC.list.length && !CC.on) return;
+        const flee = !is('carchase');
+        if (flee) { if ((CC.fleeT += dt) > 12 || !(is('paint') || is('paintcut'))) { ccClear(); return; } }
         CC.t += dt;
         const T = H.car; let left = 0;
+        // keep the pressure on: fresh limousines roll in (out of the crew's sight) until the helicopters are down
+        if (!flee && T && !T.dead && (CC.spawnT -= dt) <= 0) {
+          CC.spawnT = 1.6; let alive = 0; for (const c of CC.list) if (c.chaser && !c.dead && !(c.burnT > 0)) alive++;
+          if (alive < ccMax()) ccSpawn(T);
+          for (let i = CC.list.length - 1; i >= 0; i--) { const c = CC.list[i]; if (c.dead && AF.clock.t - (c.deadT || 0) > 25) { c.chaser = null; c.netOwned = false; c.mission = false; c.temp = true; CC.list.splice(i, 1); } }
+        }
         for (const c of CC.list) {
-          const Q = c.chaser; if (!Q || c.dead || c.burnT > 0 || c.active === false || !(c.hp > 0)) continue;
+          const Q = c.chaser; if (!Q || c.dead || c.active === false) continue;
+          if (c.burnT > 0) { if (!Q.cut) { Q.cut = true; c.burnT = Math.min(c.burnT, 0.35); } continue; }
+          if (!(c.hp > 0)) continue;
           left++;
           if (!T || T.dead) continue;
-          // alongside the armoured car (alternate sides, a little back) when close; at range, a point ahead of it
-          const tv = T.v || 0, hx = Math.sin(T.yaw), hz = Math.cos(T.yaw), d = Math.hypot(T.x - c.x, T.z - c.z), close = d < 24, lead = Math.min(14, Math.abs(tv) * 0.5);
-          const px = close ? T.x + hz * 3.6 * Q.side - hx * 2.5 : T.x + hx * lead, pz = close ? T.z - hx * 3.6 * Q.side - hz * 2.5 : T.z + hz * lead;
+          const tv = T.v || 0, hx = Math.sin(T.yaw), hz = Math.cos(T.yaw), d = Math.hypot(T.x - c.x, T.z - c.z), close = d < 26, lead = Math.min(16, Math.abs(tv) * 0.5);
+          let px, pz;
+          if (flee) { const k = 60 / (d || 1); px = c.x + (c.x - T.x) * k; pz = c.z + (c.z - T.z) * k; }
+          else { px = close ? T.x + hz * 3.6 * Q.side - hx * Q.back : T.x + hx * lead; pz = close ? T.z - hx * 3.6 * Q.side - hz * Q.back : T.z + hz * lead; }
           let diff = AF.angDiff(c.yaw, Math.atan2(px - c.x, pz - c.z));
           if (Q.rev > 0) { Q.rev -= dt; diff = -diff; }
           CC_IN.left = diff > 0.04 ? Math.min(1, diff * 2.2) : 0; CC_IN.right = diff < -0.04 ? Math.min(1, -diff * 2.2) : 0;
-          const want = close ? Math.abs(tv) + (Math.hypot(px - c.x, pz - c.z) > 3 ? 4 : 0) : 99;
+          const want = flee ? 30 : close ? Math.abs(tv) + (Math.hypot(px - c.x, pz - c.z) > 3 ? 4 : 0) : 99;
           CC_IN.up = Q.rev <= 0 && c.v < want; CC_IN.down = Q.rev > 0; CC_IN.brake = Q.rev <= 0 && c.v > want + 2.5;
           if (CC_IN.up && Math.abs(c.v) < 0.6) { if ((Q.stuck += dt) > 1.4) { Q.stuck = 0; Q.rev = 1.1; } } else Q.stuck = 0;
-          const n = Math.min(4, Math.ceil(dt * 60 - 0.01)) || 1; for (let i = 0; i < n; i++) VV.physics(c, dt / n, CC_IN);
+          const n = d < 90 ? Math.min(3, Math.ceil(dt * 60 - 0.01)) || 1 : 1; for (let i = 0; i < n; i++) VV.physics(c, dt / n, CC_IN);
           VV.placeMesh(c); if (c.interact) c.sync();
           // fell far behind and out of sight: they always find the car again (out of view of the crew)
-          if (d > 230) { if ((Q.farT += dt) > 5 && AF.camera.position.distanceTo(c) > 120) { Q.farT = 0; ccPlace(c, T, Q.k, CC.list.length, 10); } } else Q.farT = 0;
+          if (!flee && d > 230) { if ((Q.farT += dt) > 5 && AF.camera.position.distanceTo(c) > 120) { Q.farT = 0; ccPlace(c, T, Q.k, CC.list.length, 10); } } else Q.farT = 0;
           // the gunmen lean out of the windows: bursts at the armoured car with a clear line
-          if ((Q.fireT -= dt) <= 0) {
+          if (!flee && (Q.fireT -= dt) <= 0) {
             if (d < 60 && AF.segClear(c.x, c.y + 1.4, c.z, T.x, T.y + 1.1, T.z)) {
-              if (Q.burst <= 0) Q.burst = 4 + ((Math.random() * 5) | 0);
-              Q.burst--; Q.fireT = Q.burst > 0 ? 0.12 : 1.2 + Math.random() * 1.4;
+              if (Q.burst <= 0) Q.burst = 4 + ((Math.random() * 4) | 0);
+              Q.burst--; Q.fireT = Q.burst > 0 ? 0.12 : 1.6 + Math.random() * 1.4;
               ccShot(c, T, d, true);
             } else Q.fireT = 0.4;
           }
         }
-        if (left !== CC.left) { const was = CC.left; CC.left = left; send({ op: 'cc', n: left }); if (left < was) ccDown(left); }
+        if (!flee && left !== CC.left) { CC.left = left; send({ op: 'cc', n: left }); }
+        if (!flee) rbTick(dt);
       };
-      const ccDown = (left) => { note(left ? 'Chaser down \u2014 ' + left + ' to go.' : 'That\u2019s the last of them!', 'ok'); if (!left) radio('vera.cc2', true); };
-      // a crewmate's view of the chase: the host's limousines arrive as remote cars; their gunfire is drawn here too (no damage: the host deals it)
+      // a crewmate's view: the host's limousines arrive as remote cars; their gunfire is drawn here too (damage comes from the host)
       let ccFxT = 0;
       const ccGuestFx = (dt) => {
         if (host() || !is('carchase') || (ccFxT -= dt) > 0) return; ccFxT = 0.16;
         const me0 = curCar() || H.car; if (!me0) return;
-        for (const c of VV.cars) if (c.net === 0 && c.type && c.type.id === CC_TYPE && !c.dead && Math.random() < 0.35) { const d = Math.hypot(c.x - me0.x, c.z - me0.z); if (d < 60) ccShot(c, me0, d, false); }
+        for (const c of VV.cars) if (isChaser(c) && !(c.burnT > 0) && Math.random() < 0.3) { const d = Math.hypot(c.x - me0.x, c.z - me0.z); if (d < 60) ccShot(c, me0, d, false); }
       };
-      const ccLeftN = () => (host() ? CC.left : H.ccLeft == null ? Math.min(4, 1 + crewN()) : H.ccLeft);
-      const ccLine = () => 'Moretti\u2019s men are after the armoured car! ' + (crewN() > 1 ? 'Passengers: aim (right mouse / Z) and fire (left mouse / Q) from the windows. Driver: keep moving' : 'Shoot from the driver\u2019s seat (aim right mouse / Z, fire left mouse / Q) to the front and sides, or ram them') + ' \u2014 ' + ccLeftN() + ' left';
+      const ccLeftN = () => (host() ? CC.left : H.ccLeft == null ? 6 : H.ccLeft);
+      // ---- roadblocks: two limousines across the road ahead of the armoured car and three men on the tarmac (host)
+      const RB = { cars: [], at: null, t: 0 };
+      const rbClear = () => { for (const c of RB.cars) { c.netOwned = false; c.mission = false; c.temp = true; c.rb = false; } RB.cars.length = 0; RB.at = null; const C = CB(); if (C) C.clearGoons(); };
+      const rbStart = (T) => {
+        if (!T || Math.abs(T.v || 0) < 8 || !VV || !VV.makeCar) return false;
+        const hx = Math.sin(T.yaw), hz = Math.cos(T.yaw), d = 150 + Math.min(80, Math.abs(T.v) * 2);
+        let px = T.x + hx * d, pz = T.z + hz * d, yaw = T.yaw;
+        const k = kerbAt(px, pz); if (k && Math.hypot(k.cx - px, k.cz - pz) < 25) { px = k.cx; pz = k.cz; yaw = Math.abs(AF.angDiff(k.yaw, T.yaw)) < PI / 2 ? k.yaw : k.yaw + PI; }
+        const y = AF.W.groundY(px, pz); if (!Number.isFinite(y) || (AF.PL.waterAt && AF.PL.waterAt(px, pz) > y + 0.3)) return false;
+        const nx = Math.cos(yaw), nz = -Math.sin(yaw), fx = Math.sin(yaw), fz = Math.cos(yaw);
+        rbClear();
+        for (const [o, a] of [[-2.4, 0], [2.8, 7]]) {
+          try { const c = VV.makeCar(CC_TYPE, 1, px + nx * o + fx * a, pz + nz * o + fz * a, yaw + PI / 2, { y }); c.temp = false; c.mission = true; c.parked = true; c.netOwned = true; c.rb = true; c.hp = 120; RB.cars.push(c); } catch (e) { AF.warnOnce('heist roadblock', e); }
+        }
+        const C = CB(); if (C && C.spawnGoon) for (let i = 0; i < 3; i++) { const gx = px + nx * (i - 1) * 4.5 - fx * 3, gz = pz + nz * (i - 1) * 4.5 - fz * 3, gy = AF.W.groundY(gx, gz); if (Number.isFinite(gy)) C.spawnGoon(gx, gy, gz, { weapon: i === 1 ? 'tommy' : 'smg', hp: 90, name: 'Moretti', role: 'hold' }); }
+        RB.at = { x: px, z: pz }; RB.t = 0; radio('vera.block', true);
+        return true;
+      };
+      const rbTick = (dt) => {
+        const T = H.car; if (!T || T.dead) return;
+        if (RB.at) { RB.t += dt; const fx = Math.sin(T.yaw), fz = Math.cos(T.yaw), ahead = (RB.at.x - T.x) * fx + (RB.at.z - T.z) * fz; if (RB.t > 45 || (ahead < -90 && Math.hypot(RB.at.x - T.x, RB.at.z - T.z) > 90)) rbClear(); }
+        else if ((CC.blockT -= dt) <= 0) CC.blockT = rbStart(T) ? 32 : 4;
+      };
+      // ---- Moretti's helicopters (every client runs its own copies; kills are shared by index)
+      const HE = { list: [], on: false };
+      const helisLeft = () => { let n = 0; for (const h of HE.list) if (h.on && !h.fall) n++; return n; };
+      const heliTarget = () => (H.car && !H.car.dead ? H.car : me());
+      const heliClear = () => { for (const h of HE.list) { h.on = false; h.xt.on = false; if (h.v) h.v.grp.visible = false; } HE.list.length = 0; HE.on = false; CC.helis = 0; const C = CB(); if (C && C.xt) C.xt.length = 0; };
+      const heliDown = (h, remote) => {
+        if (!h.on || h.fall) return;
+        h.fall = true; h.vy = 0; h.xt.on = false; if (AF.fx) AF.fx.boom(h.x, h.y + 1, h.z, 1.4);
+        if (!remote) send({ op: 'hk', k: h.k });
+        const n = helisLeft(); radio(n ? 'vera.heli2' : 'vera.cc2', true); note(n ? 'Helicopter down \u2014 ' + n + ' to go.' : 'The sky is clear!', 'ok');
+      };
+      const heliStart = () => {
+        heliClear(); const X4 = AF.act4; if (!X4 || !X4.heli) return;
+        const n = heliN(), T = heliTarget(), C = CB();
+        for (let k = 0; k < n; k++) {
+          const v = X4.heli(k), a = k / n * PI * 2 + 0.6;
+          const h = { k, v, on: true, fall: false, hp: HELI_HP, x: T.x + Math.sin(a) * 240, y: T.y + 70, z: T.z + Math.cos(a) * 240, yaw: 0, vx: 0, vz: 0, vy: 0, a, dir: k % 2 ? 1 : -1, cd: 4 + k * 1.3, burst: 0, xt: null };
+          h.xt = { on: true, x: h.x, y: h.y + 1.6, z: h.z, r: 3.4, hit: (dmg) => { if (!h.on || h.fall) return; h.hp -= dmg; if (AF.fx) AF.fx.burst('smoke', h.x, h.y + 1.5, h.z, 1); if (h.hp <= 0) heliDown(h, false); } };
+          if (C && C.xt) C.xt.push(h.xt);
+          v.grp.visible = true; HE.list.push(h);
+        }
+        HE.on = true; CC.helis = n; radio('vera.heli1', true); sfx('jg_spot');
+      };
+      const HT = { x: 0, y: 0, z: 0 };
+      const heliTick = (dt) => {
+        if (!HE.list.length) return;
+        const T = heliTarget(), own = !!H.car && H.car.net == null && (VV.player === H.car || host()), C = CB();
+        for (const h of HE.list) {
+          if (!h.on) continue;
+          const gy = AF.W.groundY(h.x, h.z);
+          if (h.fall) {
+            h.vy -= 9.8 * dt; h.y += h.vy * dt; h.x += h.vx * dt; h.z += h.vz * dt; h.yaw += dt * 5; if (AF.fx && Math.random() < 0.5) AF.fx.burst('smoke', h.x, h.y + 1, h.z, 1, { size: 1.6 });
+            if (h.y <= (Number.isFinite(gy) ? gy : 0) + 0.5) { if (AF.fx) AF.fx.boom(h.x, h.y, h.z, 2.2); h.on = false; h.v.grp.visible = false; }
+          } else {
+            h.a += dt * 0.3 * h.dir;
+            const R = 38 + (h.k % 3) * 8, tx = T.x + Math.sin(h.a) * R, tz = T.z + Math.cos(h.a) * R, ty = Math.max(T.y, Number.isFinite(gy) ? gy : 0) + 20 + (h.k % 2) * 6;
+            const dx = tx - h.x, dz = tz - h.z, d = Math.hypot(dx, dz) || 1, sp = Math.min(46, d * 0.9);
+            h.vx += (dx / d * sp - h.vx) * Math.min(1, dt * 1.4); h.vz += (dz / d * sp - h.vz) * Math.min(1, dt * 1.4);
+            h.x += h.vx * dt; h.z += h.vz * dt; h.y += (ty - h.y) * Math.min(1, dt * 0.9);
+            h.yaw += AF.angDiff(h.yaw, Math.atan2(T.x - h.x, T.z - h.z)) * Math.min(1, dt * 1.5);
+            // the door gunner: bursts at the armoured car with a clear line
+            if ((h.cd -= dt) <= 0) {
+              const d3 = Math.hypot(T.x - h.x, T.y - h.y, T.z - h.z);
+              if (d3 < 120 && AF.segClear(h.x, h.y + 0.6, h.z, T.x, T.y + 1.4, T.z)) {
+                if (h.burst <= 0) h.burst = 6;
+                h.burst--; h.cd = h.burst > 0 ? 0.11 : 2.6 + Math.random() * 1.6;
+                const hit = Math.random() < 0.15, sc = hit ? 0.6 : 5, ex = T.x + (Math.random() - 0.5) * sc, ey = T.y + 1.2 + (hit ? 0 : (Math.random() - 0.5) * 2), ez = T.z + (Math.random() - 0.5) * sc;
+                const gx = h.x + Math.cos(h.yaw) * 1.4, gz = h.z - Math.sin(h.yaw) * 1.4;
+                if (C && C.tracer) C.tracer(gx, h.y + 1.2, gz, ex, ey, ez, 2);
+                if (AF.fx) { AF.fx.burst('flash', gx, h.y + 1.2, gz, 1, { size: 0.4 }); if (hit) AF.fx.burst('spark', ex, ey, ez, 2, { spread: 4 }); }
+                if (AF.audio && h.burst % 2 === 0) AF.audio.play('lmg', { x: h.x, y: h.y, z: h.z, vol: 0.7 });
+                if (hit) { if (own) armorHurt(1.5); if (riding() && Math.random() < 0.25 && AF.health) { AF.health.hurt(3, 'shot'); if (AF.camfx) AF.camfx.shake(0.02, 0.2); } }
+              } else h.cd = 0.5;
+            }
+          }
+          h.xt.x = h.x; h.xt.y = h.y + 1.6; h.xt.z = h.z;
+          const g = h.v.grp; g.position.set(h.x, h.y, h.z);
+          const fwd = h.vx * Math.sin(h.yaw) + h.vz * Math.cos(h.yaw), side = h.vx * Math.cos(h.yaw) - h.vz * Math.sin(h.yaw);
+          g.rotation.set(h.fall ? 0.4 : AF.clamp(fwd * 0.012, -0.3, 0.3), h.yaw, h.fall ? 0.5 : AF.clamp(-side * 0.015, -0.4, 0.4));
+          h.v.rotor.rotation.y += dt * 26; h.v.tail.rotation.x += dt * 30;
+        }
+        if (AF.audio) { let best = null, bd = 1e9; for (const h of HE.list) if (h.on) { const d = dist(me(), h); if (d < bd) { bd = d; best = h; } } AF.audio.hold('heist-heli', 'heli_loop', best ? 1 : 0, 1, best && best.x, best && best.y, best && best.z); }
+      };
+      const ccEnter = (restored) => {
+        if (S && S.zone && S.zone.id === 'farm' && !S.zone.alarm && S.requestAlarm) S.requestAlarm('Somebody is stealing the boss\u2019s car!');
+        heliClear(); CC.t = 0; H.carHp = null;
+        if (host()) ccStart();
+        if (!restored) { radio('tony.farm', true); radio('tony.cc', true); radio('vera.cc1'); }
+      };
+      const ccLine = () => {
+        const hl = helisLeft();
+        if (HE.on && hl) return 'Moretti\u2019s helicopters! Shoot them down with the mounted guns \u2014 ' + hl + ' left' + (crewN() > 1 ? ', driver keeps moving' : '');
+        return 'Moretti\u2019s whole crew is after the armoured car \u2014 ' + (crewN() > 1 ? 'driver, keep moving; everyone else on the guns at the back doors' : 'keep moving and shoot back') + ' (' + ccLeftN() + ' cars)';
+      };
       const ccMark = () => {
         let b = null, bd = 1e9; const p = me();
-        if (host()) { for (const c of CC.list) if (c.chaser && !c.dead && !(c.burnT > 0)) { const d = dist(p, c); if (d < bd) { bd = d; b = c; } } }
-        else for (const c of VV.cars) if (c.net === 0 && c.type && c.type.id === CC_TYPE && !c.dead) { const d = dist(p, c); if (d < bd) { bd = d; b = c; } }
+        for (const h of HE.list) if (h.on && !h.fall) { const d = dist(p, h); if (d < bd) { bd = d; b = h; } }
+        if (b) { SC.x = b.x; SC.y = b.y + 2; SC.z = b.z; return SC; }
+        for (const c of host() ? CC.list : VV.cars) if (isChaser(c) && !(c.burnT > 0)) { const d = dist(p, c); if (d < bd) { bd = d; b = c; } }
         if (b) { SC.x = b.x; SC.y = b.y + 1.6; SC.z = b.z; return SC; }
         return null;
       };
-      const ccOver = () => CC.on && CC.t > 3 && CC.list.length > 0 && CC.left === 0;
-      // the respray: driving the armoured car into a Body Works bay repaints + patches it (the job pays) and loses any police heat
-      const bodyWorks = () => {
-        const J = AF.jobs, p = me(); let b = null, bd = 1e9;
-        if (J && J.zones) for (const Z of J.zones) if (Z.kind === 'paint') { const d = dist(p, Z); if (d < bd) { bd = d; b = Z; } }
-        if (b) { SC.x = b.x; SC.y = b.y ?? AF.W.groundY(b.x, b.z); SC.z = b.z; return SC; }
-        return null;
+      const ccOver = () => CC.on && CC.t > 25 && HE.on && helisLeft() === 0;
+      // hip fire from a seat finds the limousines and the helicopters (77 CB.seatTargets)
+      const seatTargets = () => {
+        if (!H.on || !isAny(CHASE)) return null;
+        const out = [];
+        for (const h of HE.list) if (h.on && !h.fall) out.push(h.xt);
+        for (const c of host() ? CC.list : VV.cars) if (isChaser(c) && !(c.burnT > 0)) out.push({ x: c.x, y: c.y + 1.0, z: c.z });
+        return out;
       };
+      // a limousine (or a roadblock car) going up: a violent blast that throws the wreck over
+      const onBoom = (car) => {
+        if (!H.on || !(car.chaser || car.rb || (car.type && car.type.id === CC_TYPE && isAny(CHASE)))) return;
+        car.roll = (Math.random() < 0.5 ? -1 : 1) * (1.3 + Math.random() * 1.5); car.pitch = (Math.random() - 0.5) * 0.9; car.y += 0.5; VV.placeMesh(car);
+        if (AF.fx) { AF.fx.boom(car.x, car.y + 0.6, car.z, 1.3); AF.fx.burst('spark', car.x, car.y + 1.2, car.z, 30, { spread: 18 }); }
+      };
+      // the respray (on every client: the crew's copies all change colour) — new paint, patched plating
       const respray = (car) => {
         const T = car.type, n = T.paints.length, pi = ((+String(car.key).split(':')[1] || 0) + 1) % n;
-        car.key = VV.getGeo(T, pi).key; car.hp = Math.max(car.hp || 0, ARMOR_HP); car.dmg = 0;
-        if (AF.fx) AF.fx.burst('steam', car.x, car.y + 1.2, car.z, 6, { spread: 2 });
+        car.key = VV.getGeo(T, pi).key; car.hp = Math.max(car.hp || 0, ARMOR_HP); car.dmg = 0; H.carHp = null;
+        if (AF.fx) AF.fx.burst('steam', car.x, car.y + 1.2, car.z, 10, { spread: 2.5 });
         sfx('ui_check'); note('Fresh paint and patched plating \u2014 nobody will know it.', 'ok');
-        const C = CB(); if (C && C.stars) C.clearWanted('Fresh paint \u2014 the police are looking for a different car now.');
-        setGot('paint');
+        const C = CB(); if (C && C.stars) C.clearWanted();
       };
-      if (AF.jobs) AF.jobs.driveIn = (Z, car) => { if (!H.on || !is('paint') || Z.kind !== 'paint' || !(car === H.car || car.armor || (car.type && car.type.id === 'armored'))) return false; respray(car); return true; };
+      const inGarage = (c) => { const b = A.garageBox; return !!b && c.x > b[0] && c.x < b[2] && c.z > b[1] && c.z < b[3]; };
+      // the gunmen in the limousines (one instanced draw per pose), the armoured car's open back with its guns, the HP bar, the crew's guns
+      const GM = new THREE.Matrix4(), GV3 = new THREE.Vector3();
+      const menTick = () => {
+        const X4 = AF.act4, K = X4 && X4.gunmen ? X4.gunmen() : null; if (!K) return;
+        let nd = 0, ng = 0;
+        if (isAny(CHASE)) {
+          const T = heliTarget();
+          for (const c of host() ? CC.list : VV.cars) {
+            if (!isChaser(c) || c.burnT > 0 || c.rb) continue;
+            const s = Math.sin(c.yaw), co = Math.cos(c.yaw), y = c.y + (c.bob || 0);
+            if (nd < 24) { const L = K.wheel; GM.makeRotationY(c.yaw).setPosition(c.x + co * L[0] + s * L[2], y + L[1], c.z - s * L[0] + co * L[2]); K.driver.setMatrixAt(nd++, GM); }
+            for (const L of K.seats) {
+              if (ng >= 48) break;
+              const wx = c.x + co * L[0] + s * L[2], wz = c.z - s * L[0] + co * L[2];
+              GM.makeRotationY(Math.atan2(T.x - wx, T.z - wz)).setPosition(wx, y + L[1], wz); K.gun.setMatrixAt(ng++, GM);
+            }
+          }
+        }
+        if (K.driver.count !== nd || nd) { K.driver.count = nd; K.driver.instanceMatrix.needsUpdate = true; }
+        if (K.gun.count !== ng || ng) { K.gun.count = ng; K.gun.instanceMatrix.needsUpdate = true; }
+        void GV3;
+      };
+      const rearTick = () => {
+        const X4 = AF.act4; if (!X4 || !X4.rear) return;
+        const on = is('carchase') && !!H.car && !H.car.dead && H.car.active !== false;
+        if (!on && !X4.rearMade) return;
+        const g = X4.rear(); X4.rearMade = true; g.visible = on; if (!on) return;
+        const c = H.car, m = c.mesh;
+        if (m) { g.position.copy(m.position); g.rotation.copy(m.rotation); } else { g.position.set(c.x, c.y, c.z); g.rotation.set(c.pitch || 0, c.yaw, c.roll || 0); }
+      };
+      const HPB = document.createElement('div'); HPB.id = 'heist-armor';
+      HPB.style.cssText = 'position:fixed;left:50%;top:max(10px,env(safe-area-inset-top));transform:translateX(-50%);width:min(320px,56vw);pointer-events:none;z-index:4;display:none;font:700 11px var(--font,system-ui);letter-spacing:2px;color:#fff;text-shadow:0 1px 2px #000;text-align:center';
+      HPB.innerHTML = '<div>ARMOURED CAR</div><div style="height:8px;margin-top:4px;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.35);border-radius:3px;overflow:hidden"><i style="display:block;height:100%;width:100%;background:#5fd36a;transition:width .2s"></i></div>';
+      (document.getElementById('ui') || document.body).appendChild(HPB);
+      const HPBI = HPB.querySelector('i'); let hpShown = -1;
+      const carHp = () => { const c = H.car; if (!c) return 0; return c.net == null || H.carHp == null ? Math.max(0, c.hp ?? ARMOR_HP) : H.carHp; };
+      const hpBar = () => {
+        const on = H.on && isAny(HPSTEPS) && !!H.car && !(MI.cut && MI.cut.on);
+        const v = on ? Math.round(AF.clamp(carHp() / ARMOR_HP, 0, 1) * 100) : -1;
+        if (v === hpShown) return; hpShown = v;
+        HPB.style.display = on ? '' : 'none'; if (!on) return;
+        HPBI.style.width = v + '%'; HPBI.style.background = v > 55 ? '#5fd36a' : v > 28 ? '#e8b440' : '#e4483a';
+      };
+      let hpSendT = 0, hpSent = -1, lent = false, warned = false;
+      const act4Tick = (dt) => {
+        const C = CB(), s = ST[H.i], id = s ? s.id : '';
+        if (C) { C.noCops = H.on && NOCOP.has(id); C.freeArc = H.on && is('carchase') && inHeistCar(); C.seatTargets = seatTargets; C.onBoom = onBoom; }
+        if (C && C.noCops && C.stars) C.clearWanted();
+        heliTick(dt); menTick(); rearTick(); hpBar();
+        if (!H.on) { lent = false; warned = false; return; }
+        const v = curCar();
+        // the stash: drive a car up to the crate and stop = loaded; the drop: park beside it; the garage: drive in and stop
+        if (is('army') && !H.got.crate && v && A.armyCrate && dist(v, A.armyCrate) < 7 && Math.abs(v.v || 0) < 2.5) setGot('crate');
+        if (is('haul') && !H.got.drop && v && A.farmDrop && dist(v, A.farmDrop) < 10 && Math.abs(v.v || 0) < 2.5) setGot('drop');
+        if (is('paint') && !H.got.paint && v && (v === H.car || v.armor) && inGarage(v) && Math.abs(v.v || 0) < 2) setGot('paint');
+        // the chase: the guns at the back doors, the camera, the helicopters' cue, the farm's guards left behind, the car's hit points
+        if (is('carchase')) {
+          if (H.t > 20 && !HE.on) heliStart();
+          if (inHeistCar()) {
+            if (!lent && C && C.lend) { lent = true; C.lend('lmg', 99999); note('Mounted machine gun \u2014 the belt never runs out, but it still needs reloading.', 'ok'); }
+            if (C && C.resOf && C.has('lmg') && C.resOf('lmg') < 5000) C.lend('lmg', 99999);
+            const sp = Math.abs(v ? v.v || 0 : 0);
+            if (AF.camfx) { AF.camfx.rumble('heist-cc', 0.003 + Math.min(0.006, sp * 0.00018), 9); if (sp > 22) AF.camfx.wind(Math.min(1, (sp - 22) / 20)); }
+            if (riding() && AF.health && AF.clock.t - AF.health.last > 3) AF.health.heal(dt * 2.5);
+          }
+          if (H.scene === 'farm' && H.car && dist(H.car, A.farm) > 160) scene('none');
+          const c = H.car;
+          if (c && c.net == null) {
+            if ((hpSendT -= dt) <= 0) { hpSendT = 0.5; const r = Math.round(Math.max(0, c.hp ?? 0)); if (r !== hpSent) { hpSent = r; send({ op: 'chp', h: r }); } }
+            if (!warned && c.hp < ARMOR_HP * 0.3) { warned = true; radio('vera.armor', true); }
+          }
+        } else if (lent) { lent = false; warned = false; if (C && C.unlend) C.unlend('lmg'); }
+        // the armoured car wrecked = the job's over (its driver's client decides; Moretti's men or a crash)
+        const c = H.car;
+        if (isAny(HPSTEPS) && c && c.net == null && (c.dead || c.burnT > 0 || c.hp <= 0) && !H.failing) fail('Moretti\u2019s men wrecked the armoured car.');
+      };
+      const CHASE = new Set(['carchase', 'paint', 'paintcut']), HPSTEPS = new Set(['carchase', 'paint']);
       const wheelsTick = () => {
         if (!is('park') || H.got.wheels) return;
         const c = H.car; if (!c || c.dead || !A.carSpot) return;
@@ -1301,7 +1573,7 @@ try {
         C.jetMission({ n: jetsN(), onKill: (k) => { send({ op: 'jk', k }); jetKilled(k); }, owner: () => { const c = curCar(); return !c || c.net == null; } });
         H.flag.jetsOn = true;
         if (C.lend) { C.lend('bazooka', 6); C.lend('seeker', 10); }
-        note('Launchers out of the boot: the SEEKER locks on (keep a jet near the crosshair until LOCKED), the BAZOOKA fires straight. X / mouse wheel switches, right mouse aims, left mouse fires.', 'ok');
+        note('Launchers out of the boot: the SEEKER locks on (keep a jet near the crosshair until LOCKED), the BAZOOKA fires straight. Switch weapons to pick one.', 'ok');
         if (!restored) radio('vera.jets1', true);
       };
       const jetsOver = () => !!H.flag.jetsOn && H.t > 3 && jetsLeft() === 0;
@@ -1419,7 +1691,7 @@ try {
     if (HS.npc.prescott) { const pi = HS.npc.prescott.interact; pi.r = 2.2; pi.prio = 2.6; const t0 = pi.act; pi.act = () => { if (is('sting') && myStingRole() === 'waiter' && H.tray) serve(); else t0(); }; }
     if (HS.npc.silas) { const si = HS.npc.silas.interact; const t0 = si.act; si.act = () => { if (!is('silas')) t0(); }; }
     // act IV
-    if (A.farmCrate) add({ x: A.farmCrate.x, y: A.farmCrate.y + 1, z: A.farmCrate.z, r: 2.0, label: 'Load the launcher crate into the armoured car', prio: 2.6, can: () => walkOk() && is('farm') && !H.got.launchers, act: () => setGot('launchers') });
+    if (A.armyCrate) add({ x: A.armyCrate.x, y: A.armyCrate.y + 1, z: A.armyCrate.z, r: 2.2, label: 'Load the launcher crate into the car', prio: 2.6, can: () => walkOk() && is('army') && !H.got.crate, act: loadCrate });
     add({ x: A.server.x, y: A.server.y + 1, z: A.server.z, r: 2.0, label: 'Jack into the Kestrel terminal', prio: 2.6, can: () => walkOk() && (is('hack') || is('bunker')) && !H.busy && !H.got.hacked, act: hackTerminal });
     add({ x: HB.spots.ladder.x, y: 1.3, z: HB.spots.ladder.z, r: 1.6, label: 'Climb the service ladder to City Hall\u2019s roof', can: () => walkOk() && (is('vantage') || is('snipe')), act: climbLadder });
     add({ x: HB.spots.bulkhead.x, y: HB.spots.bulkhead.y + 1.2, z: HB.spots.bulkhead.z, r: 1.6, label: 'Roof door keypad', can: () => walkOk() && (is('door') || is('roofclear')) && !H.got.hatch, act: keypad });
@@ -1555,9 +1827,9 @@ try {
     return out;
   });
   // ---------------------------------------------------------------- co-op
-  const OPS = new Set(['go', 'st', 'done', 'fail', 'end', 'quit', 'retry', 'rs', 'got', 'roles', 'role', 'tr', 'tdone', 'wear', 'took', 'anger', 'strike', 'table', 'lock', 'laser', 'grip', 'bag', 'drill', 'mg', 'crack', 'crackp', 'ch', 'chit', 'chshot', 'hold', 'cc', 'cdm', 'jk']);
+  const OPS = new Set(['go', 'st', 'done', 'fail', 'end', 'quit', 'retry', 'rs', 'got', 'roles', 'role', 'tr', 'tdone', 'wear', 'took', 'anger', 'strike', 'table', 'lock', 'laser', 'grip', 'bag', 'drill', 'mg', 'crack', 'crackp', 'ch', 'chit', 'chshot', 'hold', 'cc', 'cdm', 'jk', 'hk', 'chp', 'cph']);
   const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
-  const GOT = new Set(['grille', 'uniform', 'papers', 'cleared', 'kitkey', 'cache', 'key', 'keeper', 'hacked', 'hatch', 'gate', 'cage', 'exit', 'lasersOff', 'wheels', 'launchers', 'paint']);
+  const GOT = new Set(['grille', 'uniform', 'papers', 'cleared', 'kitkey', 'cache', 'key', 'keeper', 'hacked', 'hatch', 'gate', 'cage', 'exit', 'lasersOff', 'crate', 'drop', 'wheels', 'launchers', 'paint']);
   const adoptGot = (g) => { if (!Array.isArray(g)) return; for (const k of g) if (GOT.has(k) && !H.got[k]) setGot(k, true); };
   if (N && N.on) {
     N.on('heist', (m, from) => {
@@ -1601,8 +1873,11 @@ try {
         case 'grip': if (int(m.k, 0, 1)) grip(m.k, true); break;
         case 'bag': if (int(m.k, 0, 3) && (is('cash') || is('escape'))) bag(m.k, true); break;
         case 'drill': H.drillR = m.on === 1; break;
-        case 'cc': if (fromHost && !host() && int(m.n, 0, 8)) { const was = H.ccLeft; H.ccLeft = m.n; if (was != null && m.n < was && is('carchase')) ccDown(m.n); } break;
-        case 'cdm': { const v = AF.mode === 'drive' ? VV.player : null; if (H.on && v && (v === H.car || v.armor) && typeof m.d === 'number' && m.d > 0 && m.d <= 20) { const C = CB(); if (C) C.dmgCar(v, m.d, false); } break; }
+        case 'cc': if (fromHost && !host() && int(m.n, 0, 30)) H.ccLeft = m.n; break;
+        case 'hk': if (H.on && is('carchase') && int(m.k, 0, 7)) { const h = HE.list[m.k]; if (h) heliDown(h, true); } break;
+        case 'chp': if (H.on && int(m.h, 0, 400)) H.carHp = m.h; break;
+        case 'cph': if (fromHost && H.on && typeof m.p === 'number' && m.p > 0 && m.p <= 0.5 && typeof m.n === 'number' && m.n > 0 && m.n <= 6) crewHit(m.p, m.n, true); break;
+        case 'cdm': { const v = AF.mode === 'drive' ? VV.player : null; if (H.on && v && (v === H.car || v.armor) && typeof m.d === 'number' && m.d > 0 && m.d <= 20) { const C = CB(); if (C) C.dmgCar(v, m.d / (v.armor || 1), false); } break; }
         case 'jk': if (H.on && int(m.k, 0, 3)) { const C = CB(); if (C && C.jetKill) { const n0 = jetsLeft(); C.jetKill(m.k); if (jetsLeft() < n0) jetKilled(m.k); } } break;
       }
     });
@@ -1655,6 +1930,8 @@ try {
     MI.bar('heist-radar', RADAR.on ? { label: 'Radar lock', value: 'Fly ' + Math.round(RADAR.lo) + '\u2013' + Math.round(RADAR.hi) + ' m', pct: RADAR.k, hot: RADAR.off > 0, ok: !RADAR.off } : null);
     MI.bar('heist-crack', is('cache') && (H.siege || H.crack > 0) && !H.got.cache ? { label: 'Cache locks', value: H.crack + ' / ' + CRACK_N, pct: H.crack / CRACK_N, ok: false, hot: !!H.siege } : null);
     MI.bar('heist-chase', is('chase') && CH.list.length ? { label: 'Moretti skis', value: chaseLeft() + ' left', hot: chaseLeft() > 0 } : null);
+    MI.bar('heist-cc', is('carchase') ? { label: 'Moretti cars', value: String(ccLeftN()), hot: true } : null);
+    MI.bar('heist-heli', is('carchase') && HE.on ? { label: 'Helicopters', value: helisLeft() + ' left', hot: helisLeft() > 0, ok: !helisLeft() } : null);
     MI.bar('heist-hold', is('sting') && (H.detHold > 0 || H.pitHold > 0) ? { label: H.detHold > 0 ? 'Detective distracted' : 'Pit boss distracted', value: Math.ceil(Math.max(H.detHold, H.pitHold)) + ' s', ok: true } : null);
   };
   // first person inside the smugglers' tunnel and its maze (a chase camera fights the tight walls); the player's own setting is
@@ -1663,7 +1940,7 @@ try {
   const caveView = () => {
     const p = AF.player, b = A.tunnelBox, O = AF.outland, V = AF.view;
     const inside = H.on && AF.mode === 'walk' && !!b && !!p && p.x > b[0] && p.x < b[3] && p.z > b[2] && p.z < b[5] && O.tunnelAt(p.x, p.z) === 2 && p.y < O.tunnelInfo.ceil;
-    if (inside && caveV < 0) { caveV = V.i; if (V.i !== 0) { V.i = 0; note('First person in the tunnel \u2014 V changes the camera.'); } }
+    if (inside && caveV < 0) { caveV = V.i; if (V.i !== 0) { V.i = 0; note('First person in the tunnel \u2014 change the camera view any time.'); } }
     else if (!inside && caveV >= 0) { if (V.i === 0) V.i = caveV; caveV = -1; }
   };
   let natT = 0, laserT = 0, drillNT = 0, warnT = 0, mgT = 0;
@@ -1691,6 +1968,7 @@ try {
     if (H.pitHold > 0) H.pitHold -= dt;
     if (host() && (mgT -= dt) <= 0) { mgT = 0.5; mgCheck(); }
     if (host()) { siegeTick(dt); bankWaveTick(dt); wheelsTick(); ccTick(dt); }
+    act4Tick(dt);
     ccGuestFx(dt);
     chaseTick(dt, tw);
     if (H.anger > 0 && (H.anger -= dt) <= 0) { H.anger = 0; const n = HS.npc.prescott; if (n) n.yaw = A.prescott.yaw || 0; }
@@ -1763,7 +2041,8 @@ try {
       H.solo = true; begin();
       for (let n = 0; n < 140 && H.on; n++) {
         if (ST[H.i].cut && cutDone()) cuts++;
-        if (H.i === IDX.wheels) { wheelsCar = !!(H.car && !H.car.dead); setGot('wheels'); }
+        if (H.i === IDX.farm) wheelsCar = !!(H.car && !H.car.dead);
+        if (H.i === IDX.park) setGot('wheels');
         if (H.i === IDX.snipe) { for (const g of HB.roofGuards(true)) S.knockOut(g, 0, 1, 'dead'); sniped = vantageLeft() === 0 && ST[H.i].done(); }
         if (H.i === IDX.zoosnipe) { for (const g of HS.zooG || []) if (g.vantage) S.knockOut(g, 0, 1, 'dead'); zooOk = (HS.zooG || []).length >= 6 && ST[H.i].done(); }
         if (H.i === IDX.hack) setGot('hacked');
@@ -1785,29 +2064,21 @@ try {
     return { ok: refused && !bad.length && walked >= ST.length && cuts === nCuts && keysLocked && keysOk && restored && wheelsCar && exitShut && exitOpen && sniped && zooOk && tablet && zones.length === 6 && !H.on && role === (N ? N.role : 'off'),
       info: `refused solo ${refused}, ${ST.length} steps walked ${walked}, cutscenes ${cuts}/${nCuts}, bad checkpoints ${bad.join(',') || 'none'}, keys locked ${keysLocked} ok ${keysOk}, roof restore ${restored}, wheels car ${wheelsCar}, exit shut ${exitShut} opens ${exitOpen}, sniped ${sniped}, zoo ${zooOk}, tablet ${tablet}, zones ${zones.join('/')}` };
   });
-  AF.test('heist: armoured car job \u2014 the mark stays on the armoured car from any other car; chasers, respray, jets + launchers; checkpoint guns come back', () => {
-    const C = CB(); if (!C || !C.snapLent || !A.armor || !S || !S.zones.get('farm')) return { ok: false, info: 'combat / farm zone missing' };
+  AF.test('heist: Act IV \u2014 army stash + garage exist, the farm checkpoint spawns the armoured car, the chase fields a dozen cars + helicopters, no police, the respray heals', () => {
+    const C = CB(); if (!C || !A.army || !A.garage || !A.farmDrop || !S || !S.zones.get('army')) return { ok: false, info: 'army / garage / drop missing' };
     const solo0 = H.solo, mode = AF.mode, p = AF.player, keep = { x: p.x, y: p.y, z: p.z, yaw: p.yaw };
-    let markOk = false, guns = false, chasers = 0, painted = false, jets = 0, launchers = false, other = null, farmGuards = S.zones.get('farm').guards.length;
+    let car = false, cars = 0, helis = 0, over = false, painted = false, cops = false, soldiers = S.zones.get('army').guards.length;
     try {
-      H.solo = true; begin();
-      C.lend('tommy', 77); enter(IDX.wheels, false); C.unlend(); restore(H.cp);
-      guns = C.has('tommy') && C.magOf('tommy') + C.resOf('tommy') === 77;
-      enter(IDX.wheels, true); enter(IDX.farm, true); setGot('launchers');
-      other = VV.makeCar('sedan', 0, A.armor.x + 30, A.armor.z, 0, { y: A.armor.y });
-      const vp = VV.player; AF.mode = 'drive'; VV.player = other;
-      const m = ST[IDX.farm].mark(); markOk = !!H.car && !!m && Math.hypot(m.x - H.car.x, m.z - H.car.z) < 1 && !inHeistCar();
-      VV.player = H.car; markOk = markOk && inHeistCar(); VV.player = vp; AF.mode = mode;
-      enter(IDX.carchase, false); chasers = CC.list.length; ccTick(0.1);
-      enter(IDX.paint, true); if (AF.jobs.driveIn) AF.jobs.driveIn({ kind: 'paint' }, H.car); painted = !!H.got.paint && H.car.hp >= ARMOR_HP;
-      enter(IDX.jets, true); jets = jetsLeft(); launchers = C.has('seeker') && C.has('bazooka');
+      H.solo = true; begin(); restore(15); car = !!H.car && !H.car.dead && H.i === IDX.farm;
+      enter(IDX.carchase, false); for (let k = 0; k < 6; k++) ccTick(2);
+      cars = CC.list.filter((c) => c.chaser && !c.dead).length; act4Tick(0); cops = !!C.noCops; C.crime(500); cops = cops && !C.stars;
+      heliStart(); helis = helisLeft(); for (const h of HE.list.slice()) heliDown(h, true); CC.t = 30; over = ccOver();
+      enter(IDX.paint, true); H.car.hp = 40; setGot('paint'); painted = H.car.hp >= ARMOR_HP;
     } finally {
-      if (other && VV.removeCar) VV.removeCar(other);
       if (H.on) end(false, true);
       H.solo = solo0; AF.setMode(mode === 'walk' ? 'walk' : 'aerial', keep);
     }
-    const n = Math.min(4, 1 + crewN());
-    return { ok: guns && markOk && chasers === n && painted && jets === n && launchers && farmGuards >= 6 && !C.jets.mission, info: `guns back ${guns}, mark ${markOk}, chasers ${chasers}, painted ${painted}, jets ${jets}, launchers ${launchers}, farm guards ${farmGuards}` };
+    return { ok: car && cars >= 9 && helis === heliN() && over && painted && cops && soldiers >= 6 && !C.noCops, info: `car ${car}, chasers ${cars}, helis ${helis}, over ${over}, painted ${painted}, no cops ${cops}, soldiers ${soldiers}` };
   });
 }
 } catch (e) { AF.partError('81-heist.js', e); }

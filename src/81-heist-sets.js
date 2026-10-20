@@ -340,7 +340,43 @@ try {
       const m = new AF.Model(14, 7, 7), wood = col(0x5a4a2e, { pat: 'plank' }), olive = col(0x46522c), stencil = col(0xe8d070);
       m.box(0, 0, 0, 14, 6, 7, wood); m.box(0, 6, 0, 14, 7, 7, olive); m.box(3, 2, 7, 11, 4, 7, stencil); m.box(0, 0, 3, 14, 6, 4, olive);
       HS.props.farmCrate = mesh(m, 1 / 8, [0.5, 0, 0.5], A.farmCrate.x, A.farmCrate.y, A.farmCrate.z, A.farmCrate.yaw); HS.props.farmCrate.visible = false;
+      // the drop: a dark corner outside the fence, south-west of the yard, where the crew leaves the army's crate (81-heist 'haul')
+      const dp = free(sx - 34, sz + 30, sy + 4, 8); A.farmDrop = { x: dp.x, y: dp.y, z: dp.z, yaw: 0 };
+      HS.props.dropCrate = mesh(m, 1 / 8, [0.5, 0, 0.5], dp.x + 2.2, dp.y, dp.z + 1.4, 0.4); HS.props.dropCrate.visible = false;
+      // the farm's own way out for the chase: the far end of the driveway
+      A.farmOut = at(6, 60);
     } catch (e) { AF.warnOnce('heist farm', e); }
+    // ---------------------------------------------------------------- the army stash on the Ochre Flats (Act IV, 81-heist-act4 builds the camp): six
+    // soldiers on rounds, floodlights, a crate of seeker launchers on a pallet in the middle (stealth zone 'army', alarm = a gunfight)
+    try {
+      const AR = AF.act4 && AF.act4.army;
+      if (AR) {
+        const f = AR.f || 1, at = (dx, dz, yaw = 0) => ({ x: AR.x + f * dx, y: AR.y, z: AR.z + f * dz, yaw });
+        A.army = at(0, 0); A.armyCrate = at(0, 4, PI / 2); A.armyGate = at(0, 24, PI); A.armyName = 'the army stash';
+        A.armyBox = [AR.x - 42, AR.y - 4, AR.z - 42, AR.x + 42, AR.y + 22, AR.z + 42];
+        const FP = (pts) => pts.map(([dx, dz]) => [AR.x + f * dx, AR.y, AR.z + f * dz]);
+        const ROUTES = [
+          { pts: [[-4, 0], [4, 0], [4, 9], [-4, 9]], mode: 'loop', speed: 0.8, dwell: [{ i: 0, t: 5 }, { i: 2, t: 5 }] },       // round the crate
+          { pts: [[-6, 18], [6, 18]], mode: 'pingpong', speed: 0.7, dwell: [{ i: 0, t: 6 }, { i: 1, t: 6 }] },                   // the gate
+          { pts: [[-14, -13], [14, -13]], mode: 'pingpong', speed: 0.75, dwell: [{ i: 0, t: 4 }, { i: 1, t: 4 }] },               // behind the tents
+          { pts: [[20, -12], [20, 12]], mode: 'pingpong', speed: 0.8, dwell: [{ i: 0, t: 5 }, { i: 1, t: 3 }] },                  // the east wall
+          { pts: [[-20, -12], [-20, 12]], mode: 'pingpong', speed: 0.7, dwell: [{ i: 0, t: 6 }, { i: 1, t: 4 }] },                // the west wall
+          { pts: [[2.6, 2.5], [3.4, 2.5]], mode: 'pingpong', speed: 0.4, dwell: [{ i: 0, t: 14 }, { i: 1, t: 9 }] },              // the crate's sentry
+        ];
+        HS.zones.army = S.define('army', { box: A.armyBox, mode: 'fight', voice: 'g1', reflexS: 2.0, radius: 110, hunters: 3 });
+        HS.armyG = [];
+        const soldier = (i) => { const L = crowdLook('worker', 'm', rng, 0x4e5a34, 0x3e4a2a); L.hat = 'cap'; L.hatCol = 0x39432a; L.shoe = 0x2a2420; void i; return L; };
+        ROUTES.forEach((r, i) => {
+          const p = walker('army' + i, 'Soldier', FP(r.pts), { speed: r.speed, mode: r.mode, dwell: r.dwell, activeRadius: 140 }, soldier(i));
+          if (p) { const g = S.guard('army', { path: p, voice: i % 2 ? 'g2' : 'g1', name: 'Soldier', range: 16, torch: i < 3 ? { range: 12, cone: 0.75, eye: 1.4 } : null }); if (g) HS.armyG.push(g); }
+        });
+        const m = new AF.Model(14, 9, 9), olive = col(0x46522c), stencil = col(0xe8d070), wood = col(0x5a4a2e, { pat: 'plank' });
+        m.box(0, 0, 0, 14, 1, 9, wood); m.box(0, 1, 1, 14, 8, 8, olive); m.box(0, 8, 1, 14, 9, 8, col(0x39432a)); m.box(2, 3, 8, 12, 5, 9, stencil); m.box(2, 3, 0, 12, 5, 1, stencil);
+        HS.props.armyCrate = mesh(m, 1 / 8, [0.5, 0, 0.5], A.armyCrate.x, A.armyCrate.y, A.armyCrate.z, A.armyCrate.yaw); HS.props.armyCrate.visible = false;
+      }
+    } catch (e) { AF.warnOnce('heist army stash', e); }
+    // Dusty's Respray (81-heist-act4): where the armoured car gets its new paint
+    { const R = AF.act4 && AF.act4.garage; if (R && R.in) { A.garage = R.in; A.garageDoor = R.door; A.garageBox = R.box; A.garageOut = R.out; A.garageSide = R.side; A.garageName = R.name; } }
     HS.ready = true;
   });
   // the watchman + the guards only walk while their scene is on (81-heist toggles them)

@@ -284,8 +284,10 @@ try {
   };
   FX.line = (x0, y0, z0, x1, y1, z1) => { const n = Math.min(14, 2 + Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2 | 0); for (let i = 1; i <= n; i++) { const u = i / n; FX.glow.spawn(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, z0 + (z1 - z0) * u, 0, 0, 0, 0.05, 0.09, 0, 0, 2.6, 2.1, 1.4); } };
   FX.boom = (x, y, z, k = 1) => {
-    FX.burst('flash', x, y + 1, z, 2, { size: 5 * k }); FX.burst('fire', x, y + 0.8, z, 26 * k, { spread: 6 * k, size: 1.6 * k }); FX.burst('spark', x, y + 1, z, 24 * k, { spread: 12 });
-    FX.burst('smoke', x, y + 1.5, z, 18 * k, { spread: 3, size: 2 * k }); SFX.play('boom', x, z); AF.shake(0.9 * k, x, z);
+    FX.burst('flash', x, y + 1, z, 3, { size: 7.5 * k }); FX.burst('fire', x, y + 0.8, z, 40 * k, { spread: 8.5 * k, size: 2.3 * k }); FX.burst('spark', x, y + 1, z, 36 * k, { spread: 16 });
+    FX.burst('fire', x, y + 2.2, z, 14 * k, { spread: 4 * k, size: 3.2 * k });
+    FX.burst('smoke', x, y + 1.5, z, 28 * k, { spread: 4, size: 2.9 * k }); SFX.play('boom', x, z); AF.shake(1.2 * k, x, z);
+    if (AF.camfx && AF.camfx.shake) { const p = AF.camera.position, d = Math.hypot(x - p.x, z - p.z); if (d < 120) AF.camfx.shake(0.05 * k / (1 + d * 0.04), 0.7); }
   };
   // camera shake (explosions, crashes): applied after every camera owner, fades with distance
   const SHK = { a: 0 };

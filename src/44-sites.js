@@ -52,7 +52,7 @@ function* picnic(site){
 function* farm(site){
  prop(site,yield* house('farmhouse',22,16,11));yield;prop(site,yield* house('barn',26,18,12,red,dark),18,-3,1);yield;
  prop(site,yield* geometry('silo',()=>{const m=new AF.Model(10,24,10);for(let y=0;y<21;y++)for(let x=0;x<10;x++)for(let z=0;z<10;z++)if(Math.hypot(x-4.5,z-4.5)<4.8)m.set(x,y,z,y%4?stone:trim);for(let layer=0;layer<3;layer++)m.box(layer,21+layer,layer,10-layer,22+layer,10-layer,slate);return m;}),26,-12);yield;
- const hay=yield* box('hay',5,3,4,gold);for(let index=0;index<6;index++){prop(site,hay,14+(index%3)*3,12+Math.floor(index/3)*2.5,0,{y:site.y+(index>3?0.5:0)});yield;}
+ const hay=yield* box('hay',5,3,4,gold);for(let index=0;index<6;index++){prop(site,hay,14+(index%3)*3,12+Math.floor(index/3)*2.5);yield;}
  // sheds, bins, machines, coop, well, hives (44-farms)
  if(AF.farms)yield* AF.farms.farmstead(site);yield;
  for(const dz of [-22,22])for(const dx of [-22,-6,18]){yield* fence(site,dx,dz);yield;}yield* fence(site,-30,0,1);yield;

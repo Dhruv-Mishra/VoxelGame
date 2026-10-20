@@ -453,7 +453,7 @@ try {
     if (w) { w.thug = true; say(w, 'You picked the wrong island, pal!'); }
   };
   CB.crime = (n, src) => {
-    if (CB.gallery || H.dead || !(n > 0)) return;
+    if (CB.gallery || H.dead || !(n > 0) || CB.noCops) return;
     if (!CB.inJurisdiction()) { thugs(n); return; }
     if (src !== 'heist' && stealthOwns()) return;
     CB.heat = Math.min(600, CB.heat + n); CB.seenT = 0;
@@ -750,12 +750,22 @@ try {
     }
     if (HELI.on && !CB.gallery) { const t = raySphere(ox, oy, oz, dx, dy, dz, HELI.x, HELI.y + 1, HELI.z, 3); if (t < HIT.t) { HIT.t = t; HIT.kind = 'heli'; HIT.head = false; } }
     if (JET.on && !CB.gallery) for (const j of JET.jets) { if (!j.on || j.dead) continue; const t = raySphere(ox, oy, oz, dx, dy, dz, j.x, j.y, j.z, 4); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'jet'; HIT.obj = j; HIT.head = false; } }
+    // mission targets (81-heist's helicopters): { on, x, y, z, r, hit(dmg, gun) }
+    if (CB.xt.length && !CB.gallery) for (const o of CB.xt) { if (!o.on) continue; const t = raySphere(ox, oy, oz, dx, dy, dz, o.x, o.y, o.z, o.r); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'xt'; HIT.obj = o; HIT.head = false; } }
     if (CB.gallery) for (const d of CB.gallery.targets()) { const t = raySphere(ox, oy, oz, dx, dy, dz, d.x, d.y, d.z, 0.24); if (t < HIT.t) { HIT.t = t; HIT.kind = 'duck'; HIT.obj = d; } }
     if (CB.rayPeers && !CB.gallery) { const k = HIT.kind; CB.rayPeers(ox, oy, oz, dx, dy, dz, t0, HIT, rayCapsule, raySphere); if (HIT.kind !== k) HIT.head = false; }
     HIT.x = ox + dx * HIT.t; HIT.y = oy + dy * HIT.t; HIT.z = oz + dz * HIT.t;
     return HIT;
   };
   CB.ray = ray;
+  CB.xt = [];
+  // seated hip fire: when no person is in the cone, the nearest-to-heading mission target or hostile vehicle (CB.seatTargets() -> [{ x, y, z }])
+  const seatAuto = (ox, oy, oz, fx, fz, range) => {
+    const L = CB.seatTargets ? CB.seatTargets() : null; if (!L || !L.length) return null;
+    let best = null, bc = 0.9;
+    for (const o of L) { const dx = o.x - ox, dz = o.z - oz, d = Math.hypot(dx, dz); if (d < 1.5 || Math.hypot(d, o.y - oy) > range) continue; const c = (dx * fx + dz * fz) / d; if (c > bc) { bc = c; best = o; } }
+    return best && los(ox, oy, oz, best.x, best.y, best.z) ? best : null;
+  };
   // hip fire picks the nearest ped / walker inside a 25 degree cone (aim assist, the only aiming on a phone without AIM); oy = eye height
   const autoTarget = (ox, oz, fx, fz, range, oy = AF.player.y + 1.4) => {
     const C = CR(); let best = null, bd = range;
@@ -851,7 +861,7 @@ try {
       TMP.set(DIR.x + PU.x * cu + PV.x * cv, DIR.y + PU.y * cu + PV.y * cv, DIR.z + PU.z * cu + PV.z * cv).normalize();
       const h = ray(ox, oy, oz, TMP.x, TMP.y, TMP.z, W.range, t0);
       if (!gal) tracerShot(MZ.x, MZ.y, MZ.z, h.x, h.y, h.z, W);
-      if (!gal && CB.onShot) CB.onShot(GUN_IDS.indexOf(g) + 1, MZ.x, MZ.y, MZ.z, h.x, h.y, h.z, h.kind === 'world' ? 1 : h.kind === 'car' || h.kind === 'heli' || h.kind === 'jet' || (h.kind === 'peer' && h.obj.heli) ? 3 : h.kind ? 2 : 0);
+      if (!gal && CB.onShot) CB.onShot(GUN_IDS.indexOf(g) + 1, MZ.x, MZ.y, MZ.z, h.x, h.y, h.z,       h.kind === 'world' ? 1 : h.kind === 'car' || h.kind === 'heli' || h.kind === 'jet' || h.kind === 'xt' || (h.kind === 'peer' && h.obj.heli) ? 3 : h.kind ? 2 : 0);
       const dmg = godDmg(h.obj, W.dmg * (h.head ? G.headK : 1));
       if ((h.kind === 'ped' || h.kind === 'walker') && sil && unseen === null) unseen = !witnessed(p.x, p.y, p.z, h.obj);
       if (h.kind === 'ped') { const r2 = hitPed(h.obj, dmg, 'gun', TMP.x, TMP.z, !!unseen, h.head); if (r2) { res = Math.max(res, r2 - 1); head = head || h.head; impact(h.x, h.y, h.z, 1, 1); } }
@@ -859,6 +869,7 @@ try {
       else if (h.kind === 'car') { dmgCar(h.obj, godDmg(h.obj, W.dmg * 0.35), true); impact(h.x, h.y, h.z, 2, 0); res = Math.max(res, 0); }
       else if (h.kind === 'heli') { heliHit(godDmg(HELI, W.dmg)); impact(h.x, h.y, h.z, 2, 0); res = Math.max(res, 0); }
       else if (h.kind === 'jet') { jetHit(h.obj, godDmg(null, W.dmg * 0.5), false); impact(h.x, h.y, h.z, 2, 0); res = Math.max(res, h.obj.dead ? 1 : 0); }
+      else if (h.kind === 'xt') { h.obj.hit(godDmg(null, W.dmg), g); impact(h.x, h.y, h.z, 2, 0); res = Math.max(res, h.obj.on ? 0 : 1); }
       else if (h.kind === 'peer') { if (CB.hitPeer) CB.hitPeer(h.obj, W.dmg, 'gun', TMP.x, TMP.z); if (h.obj.heli) impact(h.x, h.y, h.z, 2, 0); else FX.burst('hit', h.x, h.y, h.z, 1); res = Math.max(res, 0); }
       else if (h.kind === 'duck') { gal.hit(h.obj); res = Math.max(res, 0); }
       else if (h.kind === 'world') { impact(h.x - TMP.x * 0.08, h.y - TMP.y * 0.08, h.z - TMP.z * 0.08, 0, W.heavy ? 3 : 2); if (k === 0) AU(Math.random() < 0.3 ? 'ricochet' : 'bullet_hit', { x: h.x, y: h.y, z: h.z }); }
@@ -912,7 +923,8 @@ try {
     let ox, oy, oz, t0 = 0;
     if (!VF.aim) {   // hip fire: level along the camera's heading, onto the nearest person in the cone
       const h = Math.hypot(DIR.x, DIR.z) || 1, fx = DIR.x / h, fz = DIR.z / h, w = autoTarget(S.x, S.z, fx, fz, W.range, S.y + 1.3);
-      if (w) DIR.set(w.x - S.x, w.y + 1.25 * (w.s || 1) - S.y - 1.3, w.z - S.z).normalize(); else DIR.set(fx, 0, fz);
+      if (w) DIR.set(w.x - S.x, w.y + 1.25 * (w.s || 1) - S.y - 1.3, w.z - S.z).normalize();
+      else { const q = seatAuto(S.x, S.y + 1.3, S.z, fx, fz, W.range); if (q) DIR.set(q.x - S.x, q.y - S.y - 1.3, q.z - S.z).normalize(); else DIR.set(fx, 0, fz); }
     }
     VF.dir.copy(DIR);
     p.mesh.position.set(S.x, S.y, S.z); p.mesh.rotation.set(S.pitch || 0, S.yaw, S.roll || 0, 'YXZ'); seatAimPose();
@@ -1870,7 +1882,7 @@ try {
     else if (AF.clock.t - VF.t > 0.6) { const h = Math.hypot(c.x, c.z) || 1; VF.dir.set(c.x / h, 0, c.z / h); }
     // a driver shoots to the front and the sides only (about 110 degrees either way of the heading); a jet-ski rider all round
     const hy = v ? v.yaw : S.yaw;
-    VF.arc = !VF.driver || AF.mode === 'jetski' || Math.abs(AF.angDiff(hy, Math.atan2(c.x, c.z))) < 1.95;
+    VF.arc = !VF.driver || CB.freeArc || AF.mode === 'jetski' || Math.abs(AF.angDiff(hy, Math.atan2(c.x, c.z))) < 1.95;
     if (VF.want && VF.arc && CB.cd <= 0 && CB.reloadT <= 0 && (GUNS[g].auto || VF.edge)) { fireSeat(g); firedT = 0; }
     VF.edge = false;
     VF.firing = AF.clock.t - VF.t < 0.6;

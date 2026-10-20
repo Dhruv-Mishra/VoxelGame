@@ -1231,7 +1231,7 @@ AF.onBuild('vehicles-parking', 480, () => {
   VV.unpark = (s) => {
     if (!s.outland) AF.removeStatic(s.pr);
     else if (AF.outland.removeProp) AF.outland.removeProp(s.pr);
-    else { const props = AF.outland.props; props.splice(props.indexOf(s.pr), 1); if (s.pr.col) AF.removeCollider(s.pr.col); AF.outland.addProp(s.pr.geo, s.x, s.y, s.z, s.pr.rot, { collide: false }); props.pop(); }
+    else { const props = AF.outland.props; props.splice(props.indexOf(s.pr), 1); for (const b of s.pr.cols || (s.pr.col ? [s.pr.col] : [])) AF.removeCollider(b); AF.outland.addProp(s.pr.geo, s.x, s.y, s.z, s.pr.rot, { collide: false }); props.pop(); }
     const i = VV.parkedStatic.indexOf(s); if (i >= 0) VV.parkedStatic.splice(i, 1);
     const j = VV.parked.indexOf(s); if (j >= 0) VV.parked.splice(j, 1);
     if (proxy.target === s) { proxy.target = null; proxy.y = -999; }

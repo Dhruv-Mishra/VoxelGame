@@ -150,12 +150,15 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   cracking starts a siege (waves of reserve guards, `S.spawn`, sized by crew; in combat only `zone.hunters` (2) close in, the rest wait at
   `zone.holds` past the maze's way out), then a jet-ski chase (`chase` step, 1 + 2 per player, riders need line of sight + miss fast / off-screen targets, host-steered riders =
   'heist chase riders' path walkers with `actor.chase`, hulls in `AF.island.jetski.extra`; `ch`/`chit`/`chshot` ops). Act III: crews of
-  3–4 take ship's-security uniforms (`sec0..5`) and distract the detective / pit boss (`hold`). Act IV opens with Moretti's armoured
-  car (`wheels` → `farm` → `carchase` → `paint` → `park`): Southfield Farm stealth zone `farm` (6 guards, 81-heist-sets), the launcher
-  crate (`launchers`), host-driven chaser limousines (`netOwned`, `cc`/`cdm` ops), a Body Works respray via `AF.jobs.driveIn`; every client
-  spawns the armoured car at the same spot (netKey-matched). The getaway's `jets` step lends the launchers and runs `CB.jetMission`
+  3–4 take ship's-security uniforms (`sec0..5`) and distract the detective / pit boss (`hold`). Act IV (`wheels` → `armycut`/`army` → `haul` →
+  `farmcut`/`farm` → `carchase` → `paint`/`paintcut` → `park`/`nightcut`; places in 81-heist-act4: the desert army stash (stealth zone `army`, a car
+  driven up to the crate loads the seekers), the drop outside Southfield Farm, Dusty's Respray at the east edge): sitting in the armoured car
+  starts the chase — host-driven limousines (`netOwned`, ≤ 14, gunmen drawn by 81-heist-act4's kit), roadblocks (2 cars + goons), then
+  per-client helicopters (`CB.xt` ray targets, `hk` kills) shot down with the LMG lent at the open back doors (`CB.freeArc`); no police
+  (`CB.noCops`); the car's hit points live with its driver's client (`chp`/`cdm`/`cph` ops, top HP bar), a wreck fails the job. Every
+  client spawns the armoured car at the same spot (netKey-matched). The getaway's `jets` step lends the launchers and runs `CB.jetMission`
   (`jk` op). Checkpoint retries give back the lent guns held when the checkpoint was reached (`H.cpGuns`, `CB.snapLent/relend`).
-  Steps may carry a `tip` (controls how-to shown on entry). Conditional radio lines:
+  Steps may carry a `tip` (general guidance shown on entry — never key names: players may be on touch). Conditional radio lines:
   `radio(id, urgent, when)` re-checks `when()` at play time.
   Stealth (80-stealth): every guard is killable (armed 240 hp); one hit only from behind (melee or a headshot on a guard not yet fighting);
   guards steered off their path stay hittable (54 `WK.near` tests `ctl` actors outside the path bounds); `zone.strict` (the liner): a
@@ -191,4 +194,6 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - World matrices update once per frame for visible subtrees only (03 `updWorld`); a hidden object whose `matrixWorld` is read
   sets `userData.liveMatrix = true` (or call `updateWorldMatrix` yourself).
 - One module script only (the original export ran the game twice).
+- Ship lean: validate a change once — `build --check`, one `?test` run (and `tools/coop-heist.js` only when co-op / heist net code
+  changed). Never re-run a suite whose inputs didn't change, and don't add tests for things a self-test already covers.
 - `create_file` cannot overwrite; terminal tools may strip `cd` (use absolute paths). Playwright screenshot paths must be absolute.

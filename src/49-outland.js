@@ -347,15 +347,51 @@ R.diagnose = () => {
   }
   return { overlaps, edgePairs: pairs, maxGap, holes, coverSamples: samples, speculativeSkirts: 0 };
 };
+// solid boxes that follow a prop's shape (0.5 m columns of the source model, runs merged across gaps under 1 m, equal columns merged
+// into rectangles), cached per geometry; null = no model kept (or too many boxes) -> the bounding box
+const propCols = (geo) => {
+  if (geo.userData.cols !== undefined) return geo.userData.cols;
+  const src = geo.userData.src, m = src && src.m; geo.userData.cols = null;
+  if (!m || !m.v) return null;
+  const vs = src.vs, an = src.anchor, f = Math.max(1, Math.round(0.5 / vs)), cw = Math.ceil(m.w / f), ch = Math.ceil(m.h / f), cd = Math.ceil(m.d / f);
+  const occ = new Uint8Array(cw * ch * cd);
+  for (let x = 0; x < m.w; x++) for (let y = 0; y < m.h; y++) { const row = (x * m.h + y) * m.d, o = ((x / f | 0) * ch + (y / f | 0)) * cd; for (let z = 0; z < m.d; z++) if (m.v[row + z]) occ[o + (z / f | 0)] = 1; }
+  const gap = Math.max(1, Math.round(1 / (f * vs))), sig = new Array(cw * cd);
+  for (let cx = 0; cx < cw; cx++) for (let cz = 0; cz < cd; cz++) {
+    const runs = []; let s = -1;
+    for (let cy = 0; cy <= ch; cy++) { const on = cy < ch && occ[(cx * ch + cy) * cd + cz]; if (on && s < 0) s = cy; else if (!on && s >= 0) { if (runs.length && s - runs[runs.length - 1][1] < gap) runs[runs.length - 1][1] = cy; else runs.push([s, cy]); s = -1; } }
+    sig[cx * cd + cz] = runs.length ? runs.map((r) => r[0] + '-' + r[1]).join(',') : '';
+  }
+  const used = new Uint8Array(cw * cd), out = [], cell = f * vs, ox = -m.w * vs * an[0], oy = -m.h * vs * an[1], oz = -m.d * vs * an[2];
+  for (let cx = 0; cx < cw; cx++) for (let cz = 0; cz < cd; cz++) {
+    const k = sig[cx * cd + cz]; if (!k || used[cx * cd + cz]) continue;
+    let ez = cz + 1; while (ez < cd && !used[cx * cd + ez] && sig[cx * cd + ez] === k) ez++;
+    let ex = cx + 1; grow: while (ex < cw) { for (let z = cz; z < ez; z++) if (used[ex * cd + z] || sig[ex * cd + z] !== k) break grow; ex++; }
+    for (let a = cx; a < ex; a++) for (let b = cz; b < ez; b++) used[a * cd + b] = 1;
+    for (const r of k.split(',')) { const [y0, y1] = r.split('-').map(Number); out.push([ox + cx * cell, oy + y0 * cell, oz + cz * cell, ox + Math.min(m.w * vs, ex * cell), oy + Math.min(m.h * vs, y1 * cell), oz + Math.min(m.d * vs, ez * cell)]); }
+    if (out.length > 40) return null;
+  }
+  return (geo.userData.cols = out);
+};
 O.addProp = (geo, x, y, z, rot = 0, opts = {}) => {
   if (!geo || !geo.attributes.aPal || !geo.index || !geo.attributes.position.array) throw new Error('outland props need retained voxel geometry');
   const prop = { geo, x, y, z, rot: ((rot % 4) + 4) % 4 }; O.props.push(prop);
   const box = geo.boundingBox || (geo.computeBoundingBox(), geo.boundingBox);
   prop.top = y + box.max.y;
   if (opts.collide !== false) {
-    const transform = new THREE.Matrix4().makeRotationY(prop.rot * Math.PI / 2);
-    const bounds = box.clone().applyMatrix4(transform);
-    prop.col = AF.addCollider(x + bounds.min.x, y + bounds.min.y, z + bounds.min.z, x + bounds.max.x, y + bounds.max.y, z + bounds.max.z, opts.tag);
+    const cols = propCols(geo);
+    if (cols && cols.length) {
+      const c = [1, 0, -1, 0][prop.rot], s = [0, 1, 0, -1][prop.rot];
+      prop.cols = cols.map((b) => {
+        const ax = b[0] * c + b[2] * s, az = -b[0] * s + b[2] * c, bx = b[3] * c + b[5] * s, bz = -b[3] * s + b[5] * c;
+        return AF.addCollider(x + Math.min(ax, bx), y + b[1], z + Math.min(az, bz), x + Math.max(ax, bx), y + b[4], z + Math.max(az, bz), opts.tag);
+      });
+      prop.col = prop.cols[0];
+    } else {
+      const transform = new THREE.Matrix4().makeRotationY(prop.rot * Math.PI / 2);
+      const bounds = box.clone().applyMatrix4(transform);
+      prop.col = AF.addCollider(x + bounds.min.x, y + bounds.min.y, z + bounds.min.z, x + bounds.max.x, y + bounds.max.y, z + bounds.max.z, opts.tag);
+    }
   }
   for (const entry of nodes) if (x >= entry.x && x < entry.x + entry.size && z >= entry.z && z < entry.z + entry.size) { entry.propRevision = (entry.propRevision ?? 0) + 1; if (entry.ready) entry.dirty = true; }
   return prop;

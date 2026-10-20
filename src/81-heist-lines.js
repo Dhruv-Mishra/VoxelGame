@@ -68,7 +68,10 @@ try {
   setTone('surprise', 'prescott.angry1 prescott.angry2 prescott.angry3 prescott.caught ezra.fail mabel.sus mabel.spot');
   setTone('betrayal', 'kit.t2 silas.k3 vera.k2');
   setTone('urgency', 'vera.cove vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.reflex vera.siege vera.siege2 vera.chase vera.chase2 vera.go vera.loud vera.exit vera.wave vera.k3 vera.k4 vera.loadout vera.bodies vera.spotted kit.boss tony.cove tony.chase tony.k1 tony.k2 vera.farm4 vera.cc1 vera.jets1 vera.jets2 tony.farm');
-  setTone('whisper', 'vera.farm2 vera.farm3');
+  setTone('whisper', 'vera.farm2 vera.farm3 vera.army2 vera.army3 vera.farm5');
+  setTone('urgency', 'vera.army4 vera.heli1 vera.heli2 vera.block vera.armor tony.cc');
+  setTone('persuasion', 'vera.army1 vera.garage1 vera.garage2');
+  setTone('relief', 'vera.army5');
   setTone('persuasion', 'vera.d1 vera.d2 vera.d3 vera.w1 vera.w2 vera.w3 vera.w4 vera.w5 vera.w6');
   setTone('whisper', 'vera.n1 vera.n2 vera.n3 vera.n4 vera.n5 vera.n6 vera.n7 vera.n8 vera.n9 vera.n12 kit.f1 kit.f2 kit.f3');
   setTone('urgency', 'vera.n10');
@@ -97,7 +100,7 @@ try {
       direction: 'Keep Vera’s voice low to protect the crew’s cover, but let the urgency cut through. Whisper this quickly; do not shout.',
     },
   };
-  const RADIO = new Set(('vera.plane vera.island vera.kit vera.ski vera.ski2 vera.got vera.m1 vera.m2 vera.msolo vera.roof vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.k1 vera.k2 vera.k3 vera.k4 vera.f1 vera.f2 vera.f3 vera.a1 vera.a2 vera.fail vera.fail2 vera.spotted vera.reflex vera.maze vera.tough vera.siege vera.siege2 vera.chase vera.chase2 vera.q2b vera.qsec vera.q4b vera.bodies vera.nice vera.loud vera.dark vera.hold vera.go vera.wheels vera.drop vera.exit vera.wave vera.loadout vera.lasersoff vera.roles3 vera.roles4 kestrel.exit vera.farm1 vera.farm2 vera.farm3 vera.farm4 vera.cc1 vera.cc2 vera.paint vera.paint2 vera.jets1 vera.jets2 vera.jets3 tony.farm vera.n1 vera.n2 vera.n3 vera.n4 vera.n5 vera.n6 vera.n7 vera.n8 vera.n9 vera.n10 vera.n12').split(/\s+/));
+  const RADIO = new Set(('vera.plane vera.island vera.kit vera.ski vera.ski2 vera.got vera.m1 vera.m2 vera.msolo vera.roof vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.k1 vera.k2 vera.k3 vera.k4 vera.f1 vera.f2 vera.f3 vera.a1 vera.a2 vera.fail vera.fail2 vera.spotted vera.reflex vera.maze vera.tough vera.siege vera.siege2 vera.chase vera.chase2 vera.q2b vera.qsec vera.q4b vera.bodies vera.nice vera.loud vera.dark vera.hold vera.go vera.wheels vera.drop vera.exit vera.wave vera.loadout vera.lasersoff vera.roles3 vera.roles4 kestrel.exit vera.farm1 vera.farm2 vera.farm3 vera.farm4 vera.cc1 vera.cc2 vera.paint vera.paint2 vera.jets1 vera.jets2 vera.jets3 tony.farm vera.army1 vera.army4 vera.army5 vera.heli1 vera.heli2 vera.block vera.armor vera.garage1 vera.garage2 vera.army2 vera.army3 vera.farm5 tony.cc vera.n1 vera.n2 vera.n3 vera.n4 vera.n5 vera.n6 vera.n7 vera.n8 vera.n9 vera.n10 vera.n12').split(/\s+/));
   const toneOf = (id, who, key) => TONE[id] || (who === 'kestrel' ? 'machine' : who === 'tower' ? 'announcement' :
     /^sus/.test(key) ? (who === 'zw' ? 'cautious' : 'surprise') : /^check/.test(key) ? 'cautious' :
     /^clear/.test(key) ? 'relief' : /^spot/.test(key) || key === 'alarm' || key === 'body' || /^fight/.test(key) ? 'urgency' :
@@ -208,6 +211,19 @@ try {
     jets1: 'Jets on your tail! Get the launchers out of the boot. The seeker locks on by itself!',
     jets2: 'One down! Keep firing!',
     jets3: 'The sky is clear. Get to Westgate and get that plane up!',
+    // Act IV: the army stash, the drop, the chase, the respray
+    army1: 'Change of plan. Before we touch Moretti\u2019s armoured car, we need real firepower. The army keeps a weapons stash out on the Ochre Flats. Take my car from the Motor Exchange and head east.',
+    army2: 'There it is. Floodlights, sandbags, six soldiers, and right in the middle, a crate of seeker launchers.',
+    army3: 'Leave the car outside and go in quiet. When it\u2019s time, bring a car right up to the crate and load it. Quietly if you can. Loudly if you must.',
+    army4: 'The crate is in! Now drive. Take it west to Southfield Farm and leave it by the fence. Moretti\u2019s men are just over the wall.',
+    army5: 'Good. The crate stays hidden here until we need it. Now for Moretti\u2019s armoured car.',
+    farm5: 'The keys are in it. But the moment you sit in that car, every one of them will open fire. So be ready to drive.',
+    heli1: 'Helicopters! Moretti has put birds in the air. Whoever is at the back doors, bring them down with the machine guns!',
+    heli2: 'One bird down! Keep shooting!',
+    block: 'Roadblock ahead! Men on the road. Swing around them!',
+    armor: 'That car can\u2019t take much more. Shake them off and kill those gunmen!',
+    garage1: 'Now get that car out of sight. Dusty\u2019s Respray, on the desert road at the east edge of town. Drive straight in.',
+    garage2: 'Dusty owes me a favour. New paint, new plates, and my people will move the launchers into the back.',
     // the pitch: the drive out to the depot and the map-room briefing
     d1: 'Get in, all of you. We don\u2019t talk business anywhere the Morettis drink. It\u2019s a long drive.',
     d2: 'Port Solace thinks the Harbour Trust is just a bank. It\u2019s where every crook on the coast keeps his money. Including the Morettis.',
@@ -297,6 +313,7 @@ try {
     cove: 'Nobody steals from the Morettis! Open fire!',
     chase: 'After them! Do not let them reach the ship!',
     farm: 'Somebody is stealing my car! Get after them, all of you!',
+    cc: 'Every car we have, every man! And get the helicopters up!',
     k1: 'Nothing personal. The Morettis always collect. Men, move!',
     k2: 'Take them down! Nobody leaves this island!',
     down: 'Tell my brother... I tried...',

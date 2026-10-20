@@ -3,7 +3,7 @@
   "model": "Fish Audio Drama 3 Newest",
   "generatedBy": "Fish Audio web UI",
   "complete": true,
-  "lineCount": 300,
+  "lineCount": 313,
   "voiceConfigSlots": {
     "vera": {
       "speakerId": "vera",
@@ -6432,6 +6432,279 @@
       "inputHash": "1170827b4b0606de048bbb5e611737e39a169bfd77e5b305346d497005a8df35",
       "assetHash": "fdfd7f234a7e0af51790fe12cf88e86b60c089d1b8777471df31879d167a1e81",
       "duration": 5.85,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.army1": {
+      "id": "vera.army1",
+      "fileId": "vera.army1",
+      "filename": "vera.army1.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Change of plan. Before we touch Moretti’s armoured car, we need real firepower. The army keeps a weapons stash out on the Ochre Flats. Take my car from the Motor Exchange and head east.",
+      "generationText": "[confident] Change of plan. Before we touch Moretti’s armoured car, we need real firepower. The army keeps a weapons stash out on the Ochre Flats. Take my car from the Motor Exchange and head east.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound confident and inviting, with a little dry wit; do not oversell the line.",
+      "fishTags": [
+        "confident"
+      ],
+      "inputHash": "524ae85668e8b741570014228ecdb079757d1edfa66a101bd97e19cf9b12f34a",
+      "assetHash": "72ab36ad8c4a9195284e392cfab2e2cb662af259ddfdf5e6bd78a51c69410323",
+      "duration": 13.32,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.army2": {
+      "id": "vera.army2",
+      "fileId": "vera.army2",
+      "filename": "vera.army2.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "There it is. Floodlights, sandbags, six soldiers, and right in the middle, a crate of seeker launchers.",
+      "generationText": "[whispering] There it is. Floodlights, sandbags, six soldiers, and right in the middle, a crate of seeker launchers.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "fc3ff6c73ce33d64dd364436f8f6b0ceff9b52ba2a5846d8baacf08b0b8c4714",
+      "assetHash": "aa18752660b5befc1f8fbb379354eb127073a616d22cb696b7eeec527858398f",
+      "duration": 9.12,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.army3": {
+      "id": "vera.army3",
+      "fileId": "vera.army3",
+      "filename": "vera.army3.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Leave the car outside and go in quiet. When it’s time, bring a car right up to the crate and load it. Quietly if you can. Loudly if you must.",
+      "generationText": "[whispering] Leave the car outside and go in quiet. When it’s time, bring a car right up to the crate and load it. Quietly if you can. Loudly if you must.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "c75ec4e32a07531fc5efca212885e2fa98793471fbce5e8f6f00994c5512e446",
+      "assetHash": "235cf762ce7948c121e17a83658210e2e9c8eb62d6111883d0cccea14ff9d50a",
+      "duration": 12.85,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.army4": {
+      "id": "vera.army4",
+      "fileId": "vera.army4",
+      "filename": "vera.army4.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "The crate is in! Now drive. Take it west to Southfield Farm and leave it by the fence. Moretti’s men are just over the wall.",
+      "generationText": "[urgent] The crate is in! Now drive. Take it west to Southfield Farm and leave it by the fence. Moretti’s men are just over the wall.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "27bfbd7392d5c92d23e1daeead26968fd8de1076767cda0c9a90709b5647ae83",
+      "assetHash": "96f5be757ea96c56de40869a6efd27333543c98a1060159e260bde345ceb2e94",
+      "duration": 7.8,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.army5": {
+      "id": "vera.army5",
+      "fileId": "vera.army5",
+      "filename": "vera.army5.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Good. The crate stays hidden here until we need it. Now for Moretti’s armoured car.",
+      "generationText": "[calm] Good. The crate stays hidden here until we need it. Now for Moretti’s armoured car.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Ease into a dry, relieved delivery; let the tension drop without becoming sentimental.",
+      "fishTags": [
+        "calm"
+      ],
+      "inputHash": "e425cddbaa2b68a4290ed42663e17df49be8b5b877781e9383e34925c3737fc0",
+      "assetHash": "1a90e53b0f5191e28cec5bc5af5332f01e208636a24d00f67dfbbf1f2d59b0b4",
+      "duration": 6.29,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.farm5": {
+      "id": "vera.farm5",
+      "fileId": "vera.farm5",
+      "filename": "vera.farm5.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "The keys are in it. But the moment you sit in that car, every one of them will open fire. So be ready to drive.",
+      "generationText": "[whispering] The keys are in it. But the moment you sit in that car, every one of them will open fire. So be ready to drive.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "31195b7afff4453b727572d401681a823fa551c98fb48be483f790286790d597",
+      "assetHash": "2d40484153cb1c06f20c1d5d37f300ea505f10f64c3dd77940a0b49a813df895",
+      "duration": 8.12,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.heli1": {
+      "id": "vera.heli1",
+      "fileId": "vera.heli1",
+      "filename": "vera.heli1.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Helicopters! Moretti has put birds in the air. Whoever is at the back doors, bring them down with the machine guns!",
+      "generationText": "[urgent] Helicopters! Moretti has put birds in the air. Whoever is at the back doors, bring them down with the machine guns!",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "219f362ee177b4a3acba58df93e852daa3f3c10867fffa71d1e1b84c14a61092",
+      "assetHash": "39dcfeefc7843194234130d110f379b07ba6385135766740e42de95a761e1328",
+      "duration": 7.19,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.heli2": {
+      "id": "vera.heli2",
+      "fileId": "vera.heli2",
+      "filename": "vera.heli2.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "One bird down! Keep shooting!",
+      "generationText": "[urgent] One bird down! Keep shooting!",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "4b41c00227dc79a9cab371a5334b218b6e757fee9b3ca441f285680eb6124ae7",
+      "assetHash": "bf990a76ac4ec517c36e403fd3118cb71a230c1f740373590d87b4d047732b75",
+      "duration": 2.35,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.block": {
+      "id": "vera.block",
+      "fileId": "vera.block",
+      "filename": "vera.block.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Roadblock ahead! Men on the road. Swing around them!",
+      "generationText": "[urgent] Roadblock ahead! Men on the road. Swing around them!",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "8e03438476bc07f218aa74907557abc792272bba28797acb66dea86ad78ea7ba",
+      "assetHash": "982440c8dae438b6d31c74a525dc49ea097db0722a331186dfc686cc583e8f5f",
+      "duration": 3.26,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.armor": {
+      "id": "vera.armor",
+      "fileId": "vera.armor",
+      "filename": "vera.armor.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "That car can’t take much more. Shake them off and kill those gunmen!",
+      "generationText": "[urgent] That car can’t take much more. Shake them off and kill those gunmen!",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "a8d4f0fabf4becc77f2f4cf4f2ed85ab8aa30346b42bad18377883411c6a11c6",
+      "assetHash": "37859722584911214a7878a4bda050630204d91e5c19bb394b54a600acb54708",
+      "duration": 4.19,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.garage1": {
+      "id": "vera.garage1",
+      "fileId": "vera.garage1",
+      "filename": "vera.garage1.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Now get that car out of sight. Dusty’s Respray, on the desert road at the east edge of town. Drive straight in.",
+      "generationText": "[confident] Now get that car out of sight. Dusty’s Respray, on the desert road at the east edge of town. Drive straight in.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound confident and inviting, with a little dry wit; do not oversell the line.",
+      "fishTags": [
+        "confident"
+      ],
+      "inputHash": "d46c0a03c9bf0560febb65c688a606a3374e762d477c10411d477d8ce80f3c8c",
+      "assetHash": "63edb1fff27a0d7007af3804540c0dc3189571060d788cd45c014a2a5ceb7ea8",
+      "duration": 8.51,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.garage2": {
+      "id": "vera.garage2",
+      "fileId": "vera.garage2",
+      "filename": "vera.garage2.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Dusty owes me a favour. New paint, new plates, and my people will move the launchers into the back.",
+      "generationText": "[confident] Dusty owes me a favour. New paint, new plates, and my people will move the launchers into the back.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound confident and inviting, with a little dry wit; do not oversell the line.",
+      "fishTags": [
+        "confident"
+      ],
+      "inputHash": "793e8fda62b38aaa8dcdae8c362df666ec8c563b53307bb8e5473462f7c0bf02",
+      "assetHash": "d4e2d85d7132f16215c552c6487d968e8f200fb81f2617fd93f04719967d57dd",
+      "duration": 6.84,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "tony.cc": {
+      "id": "tony.cc",
+      "fileId": "tony.cc",
+      "filename": "tony.cc.mp3",
+      "speakerId": "tony",
+      "speaker": "Tony Moretti",
+      "legacyVoice": "am_onyx",
+      "voiceSlot": "tony",
+      "fishVoiceName": "Jordan",
+      "displayText": "Every car we have, every man! And get the helicopters up!",
+      "generationText": "[urgent] Every car we have, every man! And get the helicopters up!",
+      "expressionText": "Tony Moretti is a hard, impatient mob boss. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "52c4021e43907cf6cb0dd13364b398ff6729d6aac9badafb4bb2fb979b2ff57b",
+      "assetHash": "919869c95b4338ffe28fde8d29a347bd24617891d49262ae181dfef7433ba3d5",
+      "duration": 4.21,
       "sourceFormat": "mp3",
       "losslessMaster": null
     }
