@@ -18,9 +18,9 @@ try {
   const MODES = ['walk', 'drive', 'fly', 'jetski', 'carousel', 'funride', 'ride', 'ferry-ride', 'row', 'skydive', 'dead', 'passenger', 'photo', 'aerial', 'cine', 'other', 'cctv'];
   const MODE_I = new Map(MODES.map((m, i) => [m, i])), M = Object.fromEntries(MODES.map((m, i) => [m, i]));
   const JP = ['legL', 'legR', 'armL', 'armL', 'armR', 'armR', 'armR', 'chest', 'chest', 'head', 'head'], JA = ['x', 'x', 'x', 'z', 'x', 'y', 'z', 'x', 'y', 'x', 'y'], NJ = JP.length;
-  const HELD = [null, 'keyboard', 'bag', 'dumbbell', 'mic', 'bat', 'pan', 'cutlass', 'guitar', 'revolver', 'shotgun', 'tommy', 'rifle', 'spistol', 'ssmg', 'lmg', 'bazooka', 'seeker'];
+  const HELD = [null, 'keyboard', 'bag', 'dumbbell', 'mic', 'bat', 'pan', 'cutlass', 'guitar', 'revolver', 'shotgun', 'tommy', 'rifle', 'spistol', 'ssmg', 'lmg', 'bazooka', 'seeker', 'sniper'];
   const FRAMES = ['a', 'p', 'b', 'sit', 'work', 'phone', 'chat', 'look', 'hail', 'runA', 'runB'], WF = ['a', 'p', 'b', 'p'];
-  const SND = [null, 'shot', 'shotgun', 'smg', 'rifle', 'sil', 'sil', 'lmg', 'rocket', 'rocket'];
+  const SND = [null, 'shot', 'shotgun', 'smg', 'rifle', 'sil', 'sil', 'lmg', 'rocket', 'rocket', 'sil'];
   const VK_CAR = 1, VK_PLANE = 2, VK_SKI = 3;
   const AK = { carousel: 1, wheel: 2, coaster: 3, train: 4, ferry: 5 };
   const COLORS = ['#ffd24a', '#5ad1ff', '#ff7ab8', '#9dff7a'];

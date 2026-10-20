@@ -50,8 +50,8 @@ try {
   // every program the scene can use, compiled while nothing is on screen (r160 compile() walks invisible objects too), for both
   // light variants (the night light pool shown / hidden changes every program) and against the post chain's scene target (a
   // linear, untoned target is a different program from the canvas); the shadow pass has its own depth programs: one throw-away
-  // caster per custom depth material is drawn into the next shadow map
-  const warmed = new WeakSet();
+  // caster per depth-program variant is drawn into the next shadow map
+  const warmed = new Set();
   ST.warm = async () => {
     const R = AF.renderer, t0 = performance.now(), pool = (AF.atmos && AF.atmos.pool) || [], P = AF.post;
     // compileAsync: the driver links in parallel (KHR_parallel_shader_compile) while the loader keeps animating
@@ -63,21 +63,39 @@ try {
       return Promise.resolve();
     };
     const jobs = [compile()];
+    if (P && P.enabled && P.warmJobs) { const prev = R.getRenderTarget(); try { jobs.push(...P.warmJobs(AF.camera)); } catch (e) { AF.warnOnce('post warm', e); } finally { R.setRenderTarget(prev); } }
     if (pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; jobs.push(compile()); for (const l of pool) l.visible = v; }
+    const fd = (() => { try { return collect(AF.scene, []); } catch (e) { AF.warnOnce('first draws', e); return []; } })();
     // nothing renders while the driver links (behind the veil): a frame drawn now would block on every unfinished program,
     // turning the parallel compile back into one long synchronous stall. Capped in case a driver never reports completion.
     ST.hold++;
     try { await Promise.race([Promise.all(jobs), new Promise((resolve) => setTimeout(resolve, AF.MOBILE ? 15000 : 10000))]); }
     finally { ST.hold--; }
+    try { firstUse(); if (fd.length) drawProxies(fd); } catch (e) { AF.warnOnce('first draws', e); }
+    if (fd.length) await ST.nextFrame();
     await ST.nextFrame();
-    const proxies = [], tri = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)), seen = new Set();
+    const proxies = [], tri = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
+    // one caster per depth-program variant: custom depth material or three's own (per instancing / instance colour, alpha-tested
+    // map, side), including small casters the distance cull (03 dyn-cull) has switched off for now (userData.afCast)
     AF.scene.traverse((o) => {
-      const d = o.customDepthMaterial; if (!d || warmed.has(d)) return;
-      const key = d.uuid + (o.isInstancedMesh ? 'i' : ''); if (seen.has(key)) return; seen.add(key); warmed.add(d);
-      const mat = Array.isArray(o.material) ? o.material[0] : o.material, m = o.isInstancedMesh ? new THREE.InstancedMesh(tri, mat, 1) : new THREE.Mesh(tri, mat);
-      m.customDepthMaterial = d; m.castShadow = true; m.frustumCulled = false; m.position.copy(AF.shadowFocus); m.position.y += 2; AF.scene.add(m); proxies.push(m);
+      if (!o.isMesh || o.isSkinnedMesh || !(o.castShadow || o.userData.afCast)) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material], d = o.customDepthMaterial;
+      for (const mat of mats) {
+        if (!mat) continue;
+        const alpha = !d && mat.alphaTest > 0 && (mat.map || mat.alphaMap) ? mat.uuid : '';
+        const key = (d ? d.uuid : 'def') + (o.isInstancedMesh ? (o.instanceColor ? 'c' : 'i') : 'm') + alpha + mat.side + '/' + mat.shadowSide + (mat.displacementMap ? 'd' + mat.uuid : '');
+        if (warmed.has(key)) continue; warmed.add(key);
+        const m = o.isInstancedMesh ? new THREE.InstancedMesh(tri, mat, 1) : new THREE.Mesh(tri, mat);
+        if (o.isInstancedMesh && o.instanceColor) m.setColorAt(0, WHITE);
+        if (d) m.customDepthMaterial = d;
+        m.castShadow = true; m.frustumCulled = false; m.position.copy(AF.shadowFocus); m.position.y += 2; AF.scene.add(m); proxies.push(m);
+        if (d) break;
+      }
     });
+    ST.stats.depthWarm = (ST.stats.depthWarm || 0) + proxies.length;
     if (proxies.length) { AF.shadowDirty = true; await ST.nextFrame(); await ST.nextFrame(); for (const m of proxies) { AF.scene.remove(m); if (m.dispose) m.dispose(); } }
+    tri.dispose();
+    if (fd.length) await ST.gpuIdle(3000);
     ST.stats.warmMs = Math.round(performance.now() - t0);
   };
 
@@ -98,7 +116,137 @@ try {
       if (pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; try { once(); } finally { for (const l of pool) l.visible = v; } }
     } catch (e) { AF.warnOnce('compile ahead', e); }
     finally { R.setRenderTarget(prev); }
-    return Promise.all(jobs);
+    let fd = []; try { fd = collect(root, fd); } catch (e) { AF.warnOnce('first draws', e); }
+    const all = Promise.all(jobs);
+    if (!R.compileAsync) return all;
+    FD.pending++;
+    return all.then(() => new Promise((resolve) => {
+      const job = { fd, i: 0, alt: false, resolve, done: false }; FD.queue.push(job);
+      // the tick only runs while the loop does (paused boot stages, hidden tabs): never leave a caller waiting
+      setTimeout(() => { if (job.done) return; const i = FD.queue.indexOf(job); if (i >= 0) FD.queue.splice(i, 1); runJob(job, true); }, 4000);
+    })).finally(() => { FD.pending--; });
+  };
+
+  // ---- first draws (PERF.md §3b, locked). On ANGLE / D3D11 (Chrome / Edge on Windows) a linked program is not finished: its first
+  // draw with unnormalized integer vertex formats (the voxel aPal / aAN / aBU) compiles a vertex-input variant in the GPU process
+  // (15-25 ms each, measured), and a first point-sprite draw a geometry-shader variant. The next synchronous GL call - three's
+  // first-use program-log query - waits for all of them: the 100-450 ms "getProgramInfoLog" frames at the first title cut, at start,
+  // after travels and at the first shot. compileAsync only links, so every (program, vertex layout) compiled is also drawn once,
+  // ahead: a degenerate 3-vertex proxy with the same attribute formats on a layer of its own, rendered alone (the lights join that
+  // layer meanwhile, so the light state and the program are the frame's), with the night pool shown and hidden. Every ready program
+  // first passes its first use (the synchronous queries) before the proxies queue any GPU work. Warm: all at once behind the veil;
+  // compileAhead: one batch a frame from a tick, its promise resolving once drawn.
+  const FD = ST.firstDraws = { queue: [], keys: new Set(), drawn: 0, newProgs: 0, pending: 0, burst: false, layer: 31 };
+  const layouts = new WeakMap(), INTS = /^(Int|Uint)/;
+  const layoutOf = (g) => {
+    let L = layouts.get(g); if (L && L.n === g.attributes) return L;
+    let s = '', int = false; const d = [];
+    for (const k in g.attributes) {
+      const a = g.attributes[k], arr = a && (a.isInterleavedBufferAttribute ? a.data.array : a.array); if (!arr) return null;
+      const t = arr.constructor.name; if (INTS.test(t)) int = true;
+      s += k + ':' + t + a.itemSize + (a.normalized ? 'n' : '') + ','; d.push([k, arr.constructor, a.itemSize, a.normalized]);
+    }
+    L = { n: g.attributes, s, int, d }; layouts.set(g, L); return L;
+  };
+  // (program, layout) pairs under root not drawn yet; called right after a compile so every material's currentProgram is set
+  const collect = (root, out) => {
+    const props = AF.renderer.properties;
+    root.traverse((o) => {
+      if (!(o.isMesh || o.isPoints) || o.isSkinnedMesh || o.isBatchedMesh) return;
+      const g = o.geometry; if (!g || !g.attributes || !g.attributes.position) return;
+      const ma = g.morphAttributes; if (ma && (ma.position || ma.normal || ma.color)) return;
+      const L = layoutOf(g); if (!L || !(L.int || o.isPoints)) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (!m || !m.visible) continue;
+        const pr = props.get(m).currentProgram; if (!pr) continue;
+        const kind = o.isPoints ? 'p' : o.isInstancedMesh ? (o.instanceColor ? 'c' : 'i') : 'm';
+        const key = pr.id + kind + (o.receiveShadow ? 'r' : '') + L.s;
+        if (FD.keys.has(key)) continue;
+        FD.keys.add(key); out.push({ L, m, kind, recv: o.receiveShadow });
+      }
+    });
+    return out;
+  };
+  const WHITE = new THREE.Color(1, 1, 1);
+  const firstUse = () => { for (const pr of AF.renderer.info.programs) if (pr.isReady()) pr.getUniforms(); };
+  const drawProxies = (fd, which = 0) => {
+    const R = AF.renderer, S = AF.scene, cam = AF.camera, P = AF.post, pool = (AF.atmos && AF.atmos.pool) || [], np = R.info.programs.length;
+    firstUse();
+    if (which === 2 && !pool.length) return;
+    const geos = new Map(), made = [], lights = [], mask = cam.layers.mask, prevRT = R.getRenderTarget(), SM = R.shadowMap, su = SM.needsUpdate, sa = SM.autoUpdate, ac = R.autoClear;
+    try {
+      for (const e of fd) {
+        let pg = geos.get(e.L.s);
+        if (!pg) { pg = new THREE.BufferGeometry(); for (const [k, C, n, nm] of e.L.d) pg.setAttribute(k, new THREE.BufferAttribute(new C(3 * n), n, nm)); geos.set(e.L.s, pg); }
+        const p = e.kind === 'p' ? new THREE.Points(pg, e.m) : e.kind === 'm' ? new THREE.Mesh(pg, e.m) : new THREE.InstancedMesh(pg, e.m, 1);
+        if (e.kind === 'c') p.setColorAt(0, WHITE);
+        p.frustumCulled = false; p.receiveShadow = e.recv; p.castShadow = false; p.layers.set(FD.layer); p.name = 'af-first-draw';
+        S.add(p); made.push(p);
+      }
+      S.traverse((o) => { if (o.isLight && o.layers.test(cam.layers) && !o.layers.isEnabled(FD.layer)) { o.layers.enable(FD.layer); lights.push(o); } });
+      cam.layers.set(FD.layer); R.autoClear = false; SM.needsUpdate = false; SM.autoUpdate = false;
+      R.setRenderTarget(P && P.enabled && P.sceneRT ? P.sceneRT : null);
+      if (which !== 2) R.render(S, cam);
+      if (which !== 1 && pool.length) { const v = pool[0].visible; for (const l of pool) l.visible = !v; try { R.render(S, cam); } finally { for (const l of pool) l.visible = v; } }
+    } finally {
+      cam.layers.mask = mask; R.autoClear = ac; SM.needsUpdate = su; SM.autoUpdate = sa; R.setRenderTarget(prevRT);
+      for (const l of lights) l.layers.disable(FD.layer);
+      for (const p of made) { S.remove(p); if (p.isInstancedMesh) p.dispose(); }
+      for (const g of geos.values()) g.dispose();
+    }
+    FD.drawn += which === 2 ? 0 : fd.length; FD.newProgs += R.info.programs.length - np;
+  };
+  // in play one (entry, light variant) a frame, and only once the GPU finished the last one (a fence: never a synchronous wait), so
+  // a variant compile costs its GPU-process time in one frame instead of piling up behind the next first-use query
+  let fence = null;
+  const gpuDone = () => {
+    if (!fence) return true;
+    const gl = AF.renderer.getContext();
+    if (gl.getSyncParameter(fence, gl.SYNC_STATUS) !== gl.SIGNALED) return false;
+    gl.deleteSync(fence); fence = null; return true;
+  };
+  const runJob = (job, all) => {
+    job.done = true;
+    try { if (job.fd.length) drawProxies(job.i ? job.fd.slice(job.i) : job.fd, 0); else firstUse(); } catch (e) { AF.warnOnce('first draws', e); }
+    job.resolve();
+  };
+  AF.onTick('first-draws', 990, () => {
+    if (!FD.queue.length || ST.hold) return;
+    // behind the veil (boot drain, travels): everything at once (one first-use pass, then every proxy)
+    if (ST.loading > 0 || ST.traveling || FD.burst) {
+      const jobs = FD.queue.splice(0), all = [];
+      for (const j of jobs) for (let i = j.i; i < j.fd.length; i++) all.push(j.fd[i]);
+      try { if (all.length) drawProxies(all, 0); else firstUse(); } catch (e) { AF.warnOnce('first draws', e); }
+      for (const j of jobs) { j.done = true; j.resolve(); }
+      return;
+    }
+    if (!gpuDone()) return;
+    const job = FD.queue[0];
+    if (!job.fd.length) { FD.queue.shift(); runJob(job, true); return; }
+    const pool = (AF.atmos && AF.atmos.pool) || [];
+    try {
+      drawProxies([job.fd[job.i]], job.alt ? 2 : 1);
+      const gl = AF.renderer.getContext(); if (gl.fenceSync) fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    } catch (e) { AF.warnOnce('first draws', e); }
+    if (!job.alt && pool.length) job.alt = true; else { job.alt = false; job.i++; }
+    if (job.i >= job.fd.length) { FD.queue.shift(); job.done = true; job.resolve(); }
+  });
+  // boot: the 'preloaded' listeners compile late objects (FX, tracers, jets, fades, markers); their first draws finish behind the loader
+  ST.drainFirstDraws = async (maxMs = 5000) => {
+    const t0 = performance.now(); FD.burst = true;
+    try { while ((FD.pending > 0 || FD.queue.length) && performance.now() - t0 < maxMs) await ST.nextFrame(); }
+    finally { FD.burst = false; }
+    await ST.gpuIdle(3000);
+  };
+  // resolves once the GPU process finished everything queued so far (a fence polled once a frame, never a blocking wait): a veil
+  // lifted while it still compiled proxy variants showed a 100-140 ms first frame
+  ST.gpuIdle = async (maxMs = 3000) => {
+    const gl = AF.renderer.getContext(); if (!gl.fenceSync) return;
+    const f = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
+    const t0 = performance.now();
+    try { while (gl.getSyncParameter(f, gl.SYNC_STATUS) !== gl.SIGNALED && performance.now() - t0 < maxMs) await ST.nextFrame(); }
+    finally { gl.deleteSync(f); }
   };
 
   // wait until no system misses anything near the view (3 calm frames), at most maxMs

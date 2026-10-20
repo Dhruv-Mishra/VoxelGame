@@ -229,6 +229,13 @@ AF.PLAN = (() => {
       // Moretti stash hall: a wide flat cavern that 44-island fills with a maze of crate stacks and rock walls around the arms cache.
       tunnel: { pts: [[26, 3086], [18, 3092], [12, 3102], [16, 3114], [30, 3118], [44, 3112], [58, 3114], [68, 3124], [66, 3138], [74, 3150], [86, 3148], [90, 3138], [94, 3146], [103, 3150]],
         hw: 1.8, h: 3.5, exitY: 1, chambers: [[3, 4.6, 5.5], [6, 13, 7, 14, 1], [11, 5.2, 5.5]] },
+      // the secret passage (07-outland cuts it, 44-island lines it and builds the study over its stair): from a landing behind a
+      // swinging bookcase in Hotel Serena's study (an annex on the hotel's north-east corner, floor `top`) a straight stair
+      // (`landing` m flat, then 0.5 m steps every `run` m) down to `base`, under the lawns and the cone's north flank, to a rocky
+      // cleft on the hillside 23 m west of the smugglers' tunnel mouth (the last point; level for its last `level` m). The study
+      // covers every opened cell of its end (s < openA). hw / h = half-width / nominal height.
+      secret: { pts: [[-158.25, 3119.5], [-158.25, 3101], [-153, 3095], [-140, 3091], [-115, 3088], [-90, 3086], [-65, 3084], [-40, 3083], [-15, 3084], [3, 3086], [6, 3074]],
+        hw: 1.2, h: 2.75, band: 1, top: 3.5, base: -1, landing: 2, run: 1, openA: 13.5, level: 12, k: 0.4 },
       // Moretti's cove: a cliff-ringed basin on the east coast, a dog-leg channel out to sea, the cave ledge + a wooden dock
       cove: { x: 120, z: 3150, r: 16, rim: 11, channel: [[136, 3150], [146, 3142], [168, 3136]], channelHW: 6,
         ledge: { x0: 102, x1: 106, z0: 3145, z1: 3155, y: 1 }, dock: { x0: 105.5, x1: 116, z: 3150, w: 2.5, y: 1.5 } },

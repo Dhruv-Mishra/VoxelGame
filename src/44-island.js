@@ -22,8 +22,9 @@ function cottage(col){return geometry('cottage-'+col,14,12,12,model=>{model.box(
 // hero broadleaf (zoo Treetop-Trail style): flared trunk, limbs and a lumpy multi-lobe crown - one cached merged mesh per variant
 function heroTree(variant){const bark=AF.col(0x5e4632,{jitter:0.45,edge:0.1}),greens=[[0x3f7a3a,0x4f8c40,0x2f5f2e],[0x4a8a3a,0x5c9c46,0x376a2c],[0x3a6e40,0x4c8450,0x2a5632]][variant%3].map(hex=>AF.col(hex,{jitter:0.35,edge:0.08}));return geometry('hero-tree-'+variant,28,34,28,model=>{const h=(a,b,c)=>AF.hash2(a*131+b*7+variant*977,c*53+b);for(let y=0;y<16;y++){const r=2.1-y*0.07+(y<3?(3-y)*0.55:0);for(let x=0;x<28;x++)for(let z=0;z<28;z++)if(Math.hypot(x-13.5,z-13.5)<r)model.set(x,y,z,bark);}const lobes=[[13.5,25,13.5,7]];for(let k=0;k<5;k++){const a=k*1.2566+variant*0.7+h(k,1,2)*0.5,d=5.5+h(k,3,4)*2,cx=13.5+Math.cos(a)*d,cz=13.5+Math.sin(a)*d,cy=20+h(k,5,6)*5;lobes.push([cx,cy,cz,4.6+h(k,7,8)*1.2]);for(let t=0;t<1;t+=0.08){const bx=13.5+(cx-13.5)*t,by=12+(cy-12)*t,bz=13.5+(cz-13.5)*t;model.box(Math.floor(bx),Math.floor(by),Math.floor(bz),Math.floor(bx)+1,Math.floor(by)+1,Math.floor(bz)+1,bark);}}for(let x=0;x<28;x++)for(let y=12;y<34;y++)for(let z=0;z<28;z++){if(model.get(x,y,z))continue;let best=9;for(const [cx,cy,cz,r] of lobes){const q=Math.hypot(x+0.5-cx,(y+0.5-cy)*1.25,z+0.5-cz)/r;if(q<best)best=q;}const n=h(x,y,z);if(best<0.82||best<1&&n>0.35+best*0.25)model.set(x,y,z,greens[y<20?2:n>0.66?1:0]);}return model;});}
 function waterRect(points,indices,x,z,width,depth,y){const start=points.length/3;points.push(x-width/2,y,z-depth/2,x-width/2,y,z+depth/2,x+width/2,y,z+depth/2,x+width/2,y,z-depth/2);indices.push(start,start+1,start+2,start,start+2,start+3);}
-// no trees or palms on the smugglers' tube, in its cleft, or on the cove's ledge and dock (44-flora asks)
-S.noFlora=(x,z)=>{const k=O.tunnelAt?O.tunnelAt(x,z):0,t=O.tunnelInfo;if(k&&(t.end?t.s<0&&t.s>-10:t.d<t.hw+3))return true;const c=I.cove;return !!c&&x>c.ledge.x0-3&&x<c.dock.x1+3&&z>c.ledge.z0-3&&z<c.ledge.z1+3;};
+// no trees or palms on the smugglers' tube, in its cleft, over the secret passage (O.h there is its floor) or round its two ends, or on
+// the cove's ledge and dock (44-flora asks)
+S.noFlora=(x,z)=>{const k=O.tunnelAt?O.tunnelAt(x,z):0,t=O.tunnelInfo;if(k&&(t.k===1?t.d<t.hw+1||t.open&&t.d<t.hw+4:t.end?t.s<0&&t.s>-10:t.d<t.hw+3))return true;const c=I.cove;return !!c&&x>c.ledge.x0-3&&x<c.dock.x1+3&&z>c.ledge.z0-3&&z<c.ledge.z1+3;};
 AF.onBuild('island-sites',496.4,()=>{
  const hotel=site('Hotel Serena',-170,Z(631),22,14,3),village=site("Fisher's Landing",-20,Z(486),20,18,2),light=site('Serena Point Light',-256,Z(610),6,6,7),air=site('Serena Airstrip',-182,Z(561),19,8,2),look=site('Crater Lookout',-10,Z(643),4,3,Math.round(O.h(-10,Z(643))*4)/4),bar=site('Palm Beach Bar',-226,Z(665),7,7);
  S.hotel=hotel;S.village=village;S.light=light;S.lookout=look;
@@ -136,7 +137,7 @@ AF.onBuild('island-sites',496.4,()=>{
 // lights), crates, nets, an old mine track, the arms cache, boulders hiding the cleft, and the cove's dock with its moored skis.
 const TUN=S.tunnelStats={chunks:0,cells:0,colliders:0,triangles:0,lights:0};
 AF.onBuild('island-tunnel',496.42,()=>{
- const T=O.tunnel;if(!T)return;
+ const T=O.tunnel,tAt=O.tunnelMain;if(!T)return;
  const stone=(hex,k)=>AF.col(hex,{pat:'stone',jitter:k,edge:0.12});
  const wallC=[stone(0x3a3531,0.7),stone(0x2c2826,0.6),stone(0x47403a,0.7),stone(0x35302c,0.8)],floorC=[AF.col(0x52473c,{jitter:0.6,edge:0.04}),AF.col(0x463c33,{jitter:0.6,edge:0.04})];
  const lampC=AF.col(0xffb24d,{emit:0xff9b30,emitK:3.2,mode:'always',jitter:0.2,edge:0}),mossC=stone(0x4a5636,0.6),iron=AF.col(0x3b3d40,{metal:0.6,rough:0.5,jitter:0.2}),rust=AF.col(0x7a4a32,{jitter:0.5}),olive=AF.col(0x4d5a35,{jitter:0.3,edge:0.2}),rope=AF.col(0xb9a27a,{jitter:0.3,edge:0});
@@ -145,10 +146,10 @@ AF.onBuild('island-tunnel',496.42,()=>{
  x0=Math.floor(x0-9);x1=Math.ceil(x1+9);z0=Math.floor(z0-9);z1=Math.ceil(z1+9);
  const NI=(x1-x0)*2,NK=(z1-z0)*2,N=NI*NK,kind=new Uint8Array(N),fl=new Float32Array(N),ce=new Float32Array(N),na=new Float32Array(N),ss=new Float32Array(N),lamp=new Map();
  const cx=i=>x0+i*0.5+0.25,cz=k=>z0+k*0.5+0.25,mouth=s=>s<T.MZ||s>T.L-T.MZ;
- for(let i=0;i<NI;i++)for(let k=0;k<NK;k++){const t=O.tunnelAt(cx(i),cz(k));if(!t||ti.end||t===1&&ti.d>=ti.hw+BAND)continue;const n=i*NK+k;kind[n]=t;fl[n]=ti.floor;ce[n]=ti.ceil;ss[n]=ti.s;}
+ for(let i=0;i<NI;i++)for(let k=0;k<NK;k++){const t=tAt(cx(i),cz(k));if(!t||ti.end||t===1&&ti.d>=ti.hw+BAND)continue;const n=i*NK+k;kind[n]=t;fl[n]=ti.floor;ce[n]=ti.ceil;ss[n]=ti.s;}
  for(let n=0;n<N;n++)if(kind[n])na[n]=Math.round(O.hNat(cx(Math.floor(n/NK)),cz(n%NK))*4)/4;
  // centre-line samples: point, tangent, floor at s
- const along=s=>{s=AF.clamp(s,0,T.L);let i=1;while(i<T.cs.length-1&&T.cs[i]<s)i++;const a=T.pts[i-1],b=T.pts[i],len=T.cs[i]-T.cs[i-1],u=(s-T.cs[i-1])/len,dx=(b[0]-a[0])/len,dz=(b[1]-a[1])/len,x=a[0]+(b[0]-a[0])*u,z=a[1]+(b[1]-a[1])*u;O.tunnelAt(x,z);return{x,z,dx,dz,y:ti.floor,hw:ti.hw,ceil:ti.ceil};};
+ const along=s=>{s=AF.clamp(s,0,T.L);let i=1;while(i<T.cs.length-1&&T.cs[i]<s)i++;const a=T.pts[i-1],b=T.pts[i],len=T.cs[i]-T.cs[i-1],u=(s-T.cs[i-1])/len,dx=(b[0]-a[0])/len,dz=(b[1]-a[1])/len,x=a[0]+(b[0]-a[0])*u,z=a[1]+(b[1]-a[1])*u;tAt(x,z);return{x,z,dx,dz,y:ti.floor,hw:ti.hw,ceil:ti.ceil};};
  const cellOf=(x,z)=>{const i=Math.floor((x-x0)*2),k=Math.floor((z-z0)*2);return i<0||k<0||i>=NI||k>=NK?-1:i*NK+k;};
  // lanterns: every 12 m, alternate walls, an emissive block 2 m up the first wall cell, each with a pooled light
  const lights=[],sMaze=T.chambers[1]?T.chambers[1].s:-1e9;
@@ -199,15 +200,15 @@ AF.onBuild('island-tunnel',496.42,()=>{
  const cart=geometry('t-mine-track',32,8,14,m=>{for(let x=0;x<32;x+=6)m.box(x,0,0,x+2,1,14,wood);for(const z of [3,10])m.box(0,1,z,32,2,z+1,iron);m.box(8,2,1,24,3,13,iron);m.box(8,3,1,24,8,2,rust);m.box(8,3,12,24,8,13,rust);m.box(8,3,1,9,8,13,rust);m.box(23,3,1,24,8,13,rust);for(let x=10;x<22;x++)for(let z=2;z<12;z++)if(AF.hash2(x,z)<0.6)m.set(x,4+((x*z)%3),z,wallC[1]);},1/8);
  const table=geometry('t-cache-table',12,4,6,m=>{m.box(0,3,0,12,4,6,wood);for(const x of [0,11])for(const z of [0,5])m.box(x,0,z,x+1,3,z+1,wood);},0.25);
  const cacheBox=geometry('t-cache-crate',20,10,12,m=>{m.box(0,0,0,20,10,12,olive);for(const x of [0,19])m.box(x,0,0,x+1,10,12,dark);m.box(0,9,0,20,10,12,dark);for(let x=3;x<17;x+=4)m.box(x,6,0,x+2,7,1,white);m.box(8,3,0,12,6,1,dark);m.box(9,3,0,11,5,0,gold);m.set(9,4,0,gold);m.set(10,4,0,gold);m.box(9,1,0,11,3,1,gold);},1/8);
- const place=(geo,x,z,rot=0,collide=true)=>{O.tunnelAt(x,z);return O.addProp(geo,x,ti.floor,z,rot,{tag:'island:tunnel',collide});};
+ const place=(geo,x,z,rot=0,collide=true)=>{tAt(x,z);return O.addProp(geo,x,ti.floor,z,rot,{tag:'island:tunnel',collide});};
  const chamber=j=>{const c=T.chambers[j],p=along(c.s),nx=-p.dz,nz=p.dx;return{...p,nx,nz,s:c.s,r:c.hw};};
  const A=chamber(0),B=chamber(1),C=chamber(2);
  // props stand in a chamber's side pockets: every footprint corner inside the hollow and out of the 3.2 m walking lane round the
  // centre-line (where the guards walk); pocket() takes the free spot farthest from the lane
  const taken=[];
- const fits=(x,z,hx,hz)=>{for(const [ox,oz] of [[0,0],[-hx,-hz],[hx,-hz],[-hx,hz],[hx,hz]])if(O.tunnelAt(x+ox,z+oz)!==2||ti.end||ti.d<1.6||ti.d>ti.hw-0.25)return false;return true;};
- const pocket=(ch,hx,hz)=>{let best=null,bd=-1;for(let a=0;a<32;a++)for(let r=1.6;r<=ch.r+1;r+=0.25){const x=ch.x+Math.cos(a/32*Math.PI*2)*r,z=ch.z+Math.sin(a/32*Math.PI*2)*r;if(taken.some(t=>Math.abs(t[0]-x)<t[2]+hx+0.3&&Math.abs(t[1]-z)<t[3]+hz+0.3)||!fits(x,z,hx,hz))continue;O.tunnelAt(x,z);if(ti.d>bd){bd=ti.d;best=[x,z];}}if(best)taken.push([best[0],best[1],hx,hz]);return best;};
- const face=(x,z)=>{O.tunnelAt(x,z);const p=along(ti.s),fx=p.x-x,fz=p.z-z,l=Math.hypot(fx,fz)||1;return{fx:fx/l,fz:fz/l,rot:Math.abs(fz)>=Math.abs(fx)?(fz<0?0:2):(fx<0?1:3)};};
+ const fits=(x,z,hx,hz)=>{for(const [ox,oz] of [[0,0],[-hx,-hz],[hx,-hz],[-hx,hz],[hx,hz]])if(tAt(x+ox,z+oz)!==2||ti.end||ti.d<1.6||ti.d>ti.hw-0.25)return false;return true;};
+ const pocket=(ch,hx,hz)=>{let best=null,bd=-1;for(let a=0;a<32;a++)for(let r=1.6;r<=ch.r+1;r+=0.25){const x=ch.x+Math.cos(a/32*Math.PI*2)*r,z=ch.z+Math.sin(a/32*Math.PI*2)*r;if(taken.some(t=>Math.abs(t[0]-x)<t[2]+hx+0.3&&Math.abs(t[1]-z)<t[3]+hz+0.3)||!fits(x,z,hx,hz))continue;tAt(x,z);if(ti.d>bd){bd=ti.d;best=[x,z];}}if(best)taken.push([best[0],best[1],hx,hz]);return best;};
+ const face=(x,z)=>{tAt(x,z);const p=along(ti.s),fx=p.x-x,fz=p.z-z,l=Math.hypot(fx,fz)||1;return{fx:fx/l,fz:fz/l,rot:Math.abs(fz)>=Math.abs(fx)?(fz<0?0:2):(fx<0?1:3)};};
  const put=(ch,geo,hx,hz,rot=0,collide=true)=>{const p=pocket(ch,rot%2?hz:hx,rot%2?hx:hz);if(p)place(geo,p[0],p[1],rot,collide);return p;};
  // A: the guard room behind the cleft: crates, a barrel, a lamp post
  put(A,crate,1,0.75);put(A,crate,1,0.75,1);put(A,crateS,0.65,0.65);put(A,barrel,0.5,0.5);put(A,pole,0.25,0.25,0,false);
@@ -222,7 +223,7 @@ AF.onBuild('island-tunnel',496.42,()=>{
  const MZ=(()=>{
   const CS=4,NG=7,half=CS*NG/2,sIn=B.s-17,sOut=B.s+17,gx0=Math.round((B.x-half)*2)/2,gz0=Math.round((B.z-half)*2)/2,rng=AF.rng(7311),m=CS/2-0.1;
   const id=(i,k)=>i*NG+k,cc=n=>[gx0+(((n/NG)|0)+0.5)*CS,gz0+(n%NG+0.5)*CS];
-  const okCell=n=>{const [x,z]=cc(n);for(const [ox,oz] of [[0,0],[-m,-m],[m,-m],[-m,m],[m,m],[0,-m],[0,m],[-m,0],[m,0]])if(O.tunnelAt(x+ox,z+oz)!==2||ti.end||ti.d>ti.hw-0.5||ti.s<sIn+1.5||ti.s>sOut-1.5)return false;return true;};
+  const okCell=n=>{const [x,z]=cc(n);for(const [ox,oz] of [[0,0],[-m,-m],[m,-m],[-m,m],[m,m],[0,-m],[0,m],[-m,0],[m,0]])if(tAt(x+ox,z+oz)!==2||ti.end||ti.d>ti.hw-0.5||ti.s<sIn+1.5||ti.s>sOut-1.5)return false;return true;};
   const on=new Uint8Array(NG*NG);for(let n=0;n<NG*NG;n++)on[n]=okCell(n)?1:0;
   const nb=n=>{const i=(n/NG)|0,k=n%NG,o=[];if(i>0&&on[id(i-1,k)])o.push(id(i-1,k));if(i<NG-1&&on[id(i+1,k)])o.push(id(i+1,k));if(k>0&&on[id(i,k-1)])o.push(id(i,k-1));if(k<NG-1&&on[id(i,k+1)])o.push(id(i,k+1));return o;};
   // keep the largest 4-connected group of cells
@@ -243,7 +244,7 @@ AF.onBuild('island-tunnel',496.42,()=>{
   let far=-1,fd=-1;{const Dc=bfs(cache).dd;for(const n of cells){const sc=Math.min(Dc[n],D0[n]);if(n!==exit&&sc>fd){fd=sc;far=n;}}}
   return{CS,NG,gx0,gz0,sIn,sOut,on,cells,isOpen,nb,cc,id,entry,exit,cache,far,pIn,pOut,path};
  })();
- const mzFloor=(x,z)=>{O.tunnelAt(x,z);return ti.floor;};
+ const mzFloor=(x,z)=>{tAt(x,z);return ti.floor;};
  const segD=(x,z,a,b)=>{const dx=b[0]-a[0],dz=b[1]-a[1],l2=dx*dx+dz*dz||1,t=AF.clamp(((x-a[0])*dx+(z-a[1])*dz)/l2,0,1);return Math.hypot(x-a[0]-dx*t,z-a[1]-dz*t);};
  const corIn=[[MZ.pIn.x,MZ.pIn.z],MZ.cc(MZ.entry)],corOut=[MZ.cc(MZ.exit),[MZ.pOut.x,MZ.pOut.z]];
  const inMaze=(x,z)=>{const i=Math.floor((x-MZ.gx0)/MZ.CS),k=Math.floor((z-MZ.gz0)/MZ.CS);return i>=0&&k>=0&&i<MZ.NG&&k<MZ.NG&&!!MZ.on[MZ.id(i,k)];};
@@ -338,11 +339,11 @@ AF.onBuild('island-tunnel',496.42,()=>{
   cache:{x:+(cacheX+cf.fx*cb).toFixed(2),y:cacheY+1,z:+(cacheZ+cf.fz*cb).toFixed(2),yaw:cacheYaw},
   cacheStand:{x:+(cacheX+cf.fx*0.8).toFixed(2),y:cacheY,z:+(cacheZ+cf.fz*0.8).toFixed(2),yaw:Math.atan2(-cf.fx,-cf.fz)},
   // where the Moretti men hold once the alarm is up (80-stealth zone.holds): the tube past the way out first, then the way in
-  holds:[2,4,6,-2,-4].flatMap(ds=>[-0.9,0.9].map(o=>{const p=along(ds>0?MZ.sOut+ds:MZ.sIn+ds),x=p.x-p.dz*o,z=p.z+p.dx*o;O.tunnelAt(x,z);return[+x.toFixed(2),ti.floor,+z.toFixed(2)];})),
+  holds:[2,4,6,-2,-4].flatMap(ds=>[-0.9,0.9].map(o=>{const p=along(ds>0?MZ.sOut+ds:MZ.sIn+ds),x=p.x-p.dz*o,z=p.z+p.dx*o;tAt(x,z);return[+x.toFixed(2),ti.floor,+z.toFixed(2)];})),
   racks,maze:{cells:MZ.cells.length,walls:MZ.walls,entry:cellP(MZ.entry),exit:cellP(MZ.exit),cache:cellP(MZ.cache),far:cellP(MZ.far)},
   // the Moretti reinforcements pour in from both ends of the tube
   waveSpawns:[line(MZ.sIn-9,MZ.sIn-9)[0],line(MZ.sIn-5,MZ.sIn-5)[0],post[Math.min(post.length-1,3)],post[Math.min(post.length-1,5)]],
-  guardPosts:[A,C].map(ch=>{const p=pocket(ch,0.35,0.35)||[ch.x,ch.z],f=face(p[0],p[1]);O.tunnelAt(p[0],p[1]);return{x:+p[0].toFixed(2),y:ti.floor,z:+p[1].toFixed(2),yaw:Math.atan2(f.fx,f.fz)};}),
+  guardPosts:[A,C].map(ch=>{const p=pocket(ch,0.35,0.35)||[ch.x,ch.z],f=face(p[0],p[1]);tAt(p[0],p[1]);return{x:+p[0].toFixed(2),y:ti.floor,z:+p[1].toFixed(2),yaw:Math.atan2(f.fx,f.fz)};}),
   // every guard patrols: the tube legs, three beats through the maze, the depot, the dock
   guardRoutes:[line(3,A.s+3),line(A.s+6,MZ.sIn-1),MZ.path(MZ.entry,MZ.cache).map(cellP),MZ.path(MZ.cache,MZ.far).map(cellP),MZ.path(MZ.far,MZ.exit).map(cellP),line(MZ.sOut+1,C.s-2),line(C.s+2,T.L-3)],
   caveExit:{x:+exit.x.toFixed(2),y:exit.y,z:+exit.z.toFixed(2),yaw:Math.atan2(exit.dx,exit.dz)},
@@ -358,6 +359,151 @@ AF.onBuild('island-tunnel',496.42,()=>{
  const kit=free(-143.5,Z(631)+3,S.hotelSkyTerraceY);kit.yaw=-Math.PI/4;H.kit=kit;
  S.spots.strip={x:(I.airstrip.x0+I.airstrip.x1)/2,y:I.airstrip.y,z:I.airstrip.z};
  S.spots.tunnel=H.tunnelEntry;S.spots.cove=H.cove;S.spots.kit=kit;S.spots.kitTerrace=kit;S.spots.kitUpperTerrace=kit;S.spots.skyTerraceStair={x:-147.5,y:S.hotelSkyTerraceY-5,z:Z(631)+13};
+});
+// ---------------------------------------------------------------- the secret passage (heist): Hotel Serena's study (an annex on the
+// hotel's north-east corner, its door on the lawn under the Sky Terrace), a swinging bookcase in its partition, the stair behind it and a
+// rough-hewn passage under the lawns and the cone's north flank to a rocky cleft 23 m west of the smugglers' tunnel mouth. 07-outland
+// cuts it out of the ground (O.secretAt: O.h = its floor) and leaves only its two ends undrawn; this lines it as the tunnel is lined (a
+// 0.5 m rock shell per 32 m outland tile merged into the tile meshes, roof colliders up to the hillside, lanterns = pooled lights) and
+// builds the study over the stair (merged props + colliders). The one mover is the bookcase: a single mesh (1 draw, drawn only within
+// 90 m) swung on its hinge by open(on); its collider moves with it. Spots + open/isOpen: S.heist.secret (81-heist).
+const SECS=S.secretStats={chunks:0,cells:0,colliders:0,triangles:0,lights:0};
+const BK=S.bookcase={on:false,a:0,mesh:null,col:null,hinge:[-156.5,3.5,3119.5],closed:[-157,3.5,3117.5,-156.5,6,3119.5],opened:[-156.5,3.5,3119,-154.5,6,3119.5]};
+AF.onBuild('island-secret',496.43,()=>{
+ const T=O.secret,SP=I.secret;if(!T||!SP||!S.hotel)return;
+ const ti=O.secretInfo,q2=v=>Math.round(v*2)/2,f2=v=>Math.floor(v*2)/2,BAND=T.band,tag='island:secret';
+ const stone=(hex,k)=>AF.col(hex,{pat:'stone',jitter:k,edge:0.12});
+ const wallC=[stone(0x4a423a,0.7),stone(0x3d3631,0.6),stone(0x564c42,0.7),stone(0x443c35,0.8)],floorC=[AF.col(0x5a4d3f,{jitter:0.6,edge:0.04}),AF.col(0x4d4236,{jitter:0.6,edge:0.04})];
+ const stepC=AF.col(0x8a8178,{pat:'stone',jitter:0.35,edge:0.15}),beamC=AF.col(0x6b4e30,{pat:'plank',jitter:0.4,edge:0.2}),mossC=stone(0x4a5636,0.6);
+ const lampC=AF.col(0xffb24d,{emit:0xff9b30,emitK:3.2,mode:'always',jitter:0.2,edge:0}),iron=AF.col(0x3b3d40,{metal:0.6,rough:0.5,jitter:0.2});
+ const light=(x,y,z,intensity=1.5,range=11)=>{AF.addLight({x,y,z,color:0xffb060,intensity,range,kind:'street',night:false});SECS.lights++;};
+ // ---- the shell: every cell of the hollow (2) and of its walls (1, a 1 m band round it)
+ let x0=Infinity,x1=-Infinity,z0=Infinity,z1=-Infinity;for(const [x,z] of T.pts){x0=Math.min(x0,x);x1=Math.max(x1,x);z0=Math.min(z0,z);z1=Math.max(z1,z);}
+ const R=SP.hw+BAND+1;x0=Math.floor(x0-R);x1=Math.ceil(x1+R);z0=Math.floor(z0-R);z1=Math.ceil(z1+R);
+ const NI=(x1-x0)*2,NK=(z1-z0)*2,N=NI*NK,kind=new Uint8Array(N),fl=new Float32Array(N),ce=new Float32Array(N),na=new Float32Array(N),ss=new Float32Array(N),lamp=new Map();
+ const cx=i=>x0+i*0.5+0.25,cz=k=>z0+k*0.5+0.25,cellOf=(x,z)=>{const i=Math.floor((x-x0)*2),k=Math.floor((z-z0)*2);return i<0||k<0||i>=NI||k>=NK?-1:i*NK+k;};
+ for(let i=0;i<NI;i++)for(let k=0;k<NK;k++){const x=cx(i),z=cz(k),t=O.secretAt(x,z);if(!t||ti.end||t===1&&ti.d>=ti.hw+BAND)continue;const n=i*NK+k;kind[n]=t;fl[n]=ti.floor;ce[n]=ti.ceil;ss[n]=ti.s;na[n]=Math.round(O.hNat(x,z)*4)/4;}
+ // 1 = the study end (open to the stairwell), 2 = its lintel (under the study's north wall), 3 = the cleft, 0 = buried
+ const zone=s=>s<T.openA-0.5?1:s<T.openA?2:s>T.mouthS?3:0;
+ const roofTop=n=>Math.max(ce[n]+0.5,Math.min(ce[n]+1,f2(na[n]-0.25)));
+ const along=s=>{const p=T.at(s);O.secretAt(p[0],p[1]);return{x:p[0],z:p[1],dx:p[2],dz:p[3],y:ti.floor,hw:ti.hw,ceil:ti.ceil};};
+ // lanterns: every 15 m along the buried stretch, alternate walls, an emissive block 2 m up the first wall cell + a pooled light
+ for(let s=T.openA+5,side=1;s<T.mouthS-3;s+=15,side=-side){const c=along(s);for(let d=c.hw-0.75;d<c.hw+2;d+=0.25){const x=c.x-c.dz*side*d,z=c.z+c.dx*side*d,n=cellOf(x,z);if(n>=0&&kind[n]===1){lamp.set(n,fl[n]+2);light(c.x-c.dz*side*(c.hw-0.6),c.y+2,c.z+c.dx*side*(c.hw-0.6));break;}}}
+ {const c=along(T.mouthS-2.5);light(c.x,c.y+2.1,c.z,1.3,10);}
+ const RX=-1484,RZ=-1708;
+ for(let tx=RX+Math.floor((x0-RX)/32)*32;tx<x1;tx+=32)for(let tz=RZ+Math.floor((z0-RZ)/32)*32;tz<z1;tz+=32){
+  let lo=Infinity,hi=-Infinity,deep=-1;const cells=[];
+  for(let i=Math.max(0,(tx-x0)*2);i<Math.min(NI,(tx+32-x0)*2);i++)for(let k=Math.max(0,(tz-z0)*2);k<Math.min(NK,(tz+32-z0)*2);k++){
+   const n=i*NK+k,t=kind[n];if(!t)continue;const zn=zone(ss[n]),a=fl[n]-1;
+   const b=t===2?(zn===1?fl[n]:zn?Math.max(fl[n],q2(na[n])):roofTop(n)):(zn?q2(na[n]):roofTop(n));
+   if(b<=a)continue;cells.push(n,a,b);lo=Math.min(lo,a);hi=Math.max(hi,b);if(t===2&&!zn&&(deep<0||na[n]-fl[n]>na[deep]-fl[deep]))deep=n;
+  }
+  if(!cells.length)continue;
+  const model=new AF.Model(64,Math.round((hi-lo)*2),64);
+  for(let c=0;c<cells.length;c+=3){
+   const n=cells[c],i=Math.floor(n/NK),k=n%NK,mx=Math.round((x0+i*0.5-tx)*2),mz=Math.round((z0+k*0.5-tz)*2),ya=Math.round((cells[c+1]-lo)*2),yb=Math.round((cells[c+2]-lo)*2),x=cx(i),z=cz(k),h=AF.hash2(i*7+5,k*3+2),zn=zone(ss[n]);
+   const skin=zn===3?O.colTop(x,z,na[n],0,1):0,beam=!zn&&Math.abs(((ss[n]+4.5)%9)-4.5)<0.26;
+   if(kind[n]===2){
+    const floorY=Math.round((fl[n]-lo)*2),ceilY=Math.round((ce[n]-lo)*2);
+    for(let y=ya;y<floorY;y++)model.set(mx,y,mz,zn===1?stepC:floorC[h<0.5?0:1]);
+    for(let y=Math.max(ceilY,floorY);y<yb;y++)model.set(mx,y,mz,y===yb-1&&skin?skin:beam&&y===ceilY?beamC:wallC[(h*4)|0]);
+   }else{
+    const lit=lamp.get(n),floorY=Math.round((fl[n]-lo)*2),ceilY=Math.round((ce[n]-lo)*2);
+    for(let y=ya;y<yb;y++)model.set(mx,y,mz,lit!==undefined&&Math.abs(y/2+lo-lit)<0.3?lampC:y===yb-1&&skin?skin:beam&&y>=floorY&&y<=ceilY?beamC:y===ya+2&&AF.hash2(i+y,k)<0.2?mossC:wallC[(AF.hash2(i*3+y,k*3-y)*4)|0]);
+   }
+  }
+  const geo=AF.meshModel(model,{vs:0.5,anchor:[0,0,0],flat:true});delete geo.userData.src;
+  // far LOD (level >= 1 tiles draw the hillside whole): one voxel buried under the deepest stretch of floor
+  const dn=deep>=0?deep:cells[0],di=Math.floor(dn/NK),dk=dn%NK,lodM=new AF.Model(1,1,1).set(0,0,0,wallC[0]);
+  const lod=AF.meshModel(lodM,{vs:0.5,anchor:[-Math.round((x0+di*0.5-tx)*2),-Math.round((fl[dn]-1-lo)*2),-Math.round((z0+dk*0.5-tz)*2)],flat:true});delete lod.userData.src;
+  geo.userData.lod=lod;geo.userData.lod2=lod;geo.userData.small=true;
+  O.addProp(geo,tx,lo,tz,0,{collide:false});SECS.chunks++;SECS.cells+=cells.length/3;SECS.triangles+=geo.index.count/3;
+ }
+ // roof colliders over the hollow, from the ceiling up to the hillside (0.5 m steps: the drawn surface carries bodies the rest of the
+ // way, 07 isleTop), merged into runs along x, then across z
+ {const open=new Map(),put=r=>{AF.addCollider(x0+r.i*0.5,r.y0,z0+r.k0*0.5,x0+r.j*0.5,r.y1,z0+r.k1*0.5,tag+'-roof');SECS.colliders++;};
+  const top=n=>{const zn=zone(ss[n]);return zn===1?-Infinity:zn?q2(na[n]):Math.max(ce[n]+1,f2(na[n]));};
+  for(let k=0;k<NK;k++){const row=new Map();let i=0;
+   while(i<NI){const n=i*NK+k,y1=kind[n]===2?top(n):-Infinity;if(!(y1>ce[n])){i++;continue;}let j=i+1;while(j<NI&&kind[j*NK+k]===2&&ce[j*NK+k]===ce[n]&&top(j*NK+k)===y1)j++;row.set(i+','+j+','+ce[n]+','+y1,{i,j,k0:k,k1:k+1,y0:ce[n],y1});i=j;}
+   for(const [key,r] of open){if(row.has(key)){r.k1=k+1;row.delete(key);}else{put(r);open.delete(key);}}
+   for(const [key,r] of row)open.set(key,r);}
+  for(const r of open.values())put(r);}
+ // ---- the study: 10 x 14 m over the stair, floor 3.5 (the hotel's), its stairwell left open; walls, partition, roof at 0.5 m
+ const AX=-160,AZ=3106,AY=3,paint=hex=>AF.col(hex,{jitter:0.25,edge:0.15}),cream=paint(0xece3cc),gold=paint(0xd6b96f),teal=paint(0x326e75),mint=paint(0x75b8a5);
+ const oak=AF.col(0x7a5434,{pat:'plank',jitter:0.35,edge:0.2}),rug=AF.col(0x7c2f2a,{jitter:0.3,edge:0.05}),rugB=AF.col(0xc9a24e,{jitter:0.2,edge:0.05}),win=AF.col(0x536f77,{win:'hotel',emit:0xffd4a0,emitK:1.3,mode:'night',edge:0.1}),glow=AF.col(0xffe2ab,{emit:0xffce80,emitK:2.4,mode:'night'});
+ const hollowAt=(X,Z)=>O.secretAt(AX+X*0.5+0.25,AZ+Z*0.5+0.25)===2;
+ O.addProp(geometry('hotel-study',20,10,28,m=>{
+  for(let X=0;X<20;X++)for(let Z=0;Z<28;Z++)if(!hollowAt(X,Z))m.set(X,0,Z,X>=9&&X<17&&Z>=8&&Z<20?(X===9||X===16||Z===8||Z===19?rugB:rug):oak);
+  m.box(0,0,0,1,8,28,cream);m.box(19,0,0,20,8,28,cream);m.box(0,0,0,20,8,1,cream);m.box(0,0,27,20,8,28,cream);m.box(6,0,1,7,8,27,cream);
+  m.box(19,1,11,20,6,14,0);for(const Z of [10,14])m.box(19,1,Z,20,6,Z+1,gold);m.box(19,6,10,20,7,15,gold);   // the lawn door + its frame
+  for(const Z of [3,18,22])m.box(19,3,Z,20,6,Z+3,win);
+  m.box(6,1,7,7,6,19,0);m.box(6,1,23,7,6,27,0);m.box(6,6,7,7,7,27,oak);   // shelf bays + the bookcase door in the partition
+  m.box(1,7,1,19,8,27,cream);m.box(0,8,0,20,9,28,teal);for(let X=0;X<20;X++)for(let Z=0;Z<28;Z++)if(X===0||X===19||Z===0||Z===27)m.set(X,9,Z,gold);
+  m.box(0,7,0,20,8,1,gold);m.box(19,7,0,20,8,28,gold);m.box(12,7,12,14,8,15,glow);
+ }),AX+5,AY,AZ+7,0,{tag,collide:false});
+ {const c=(xa,ya,za,xb,yb,zb)=>{AF.addCollider(xa,ya,za,xb,yb,zb,tag);SECS.colliders++;};
+  c(-157,3,3106,-150,3.5,3120);c(-160,3,3106,-159.5,7,3120);c(-160,3,3106,-150,7,3106.5);c(-160,3,3119.5,-150,7,3120);c(-160,6.5,3106,-150,8,3120);
+  c(-150.5,3,3106,-150,7,3111.5);c(-150.5,3,3113,-150,7,3120);c(-150.5,6,3111.5,-150,7,3113);
+  c(-157,3,3106.5,-156.5,7,3117.5);c(-157,6,3117.5,-156.5,7,3119.5);}
+ // furniture (1/8 m merged props): book bays, the desk + chair, two armchairs, a side table, a standard lamp, a painting, the doorstep
+ const books=[0x7a2e2a,0x2f4f6b,0x3d5a35,0x8a6a2e,0x5a3a5e,0x9a8a70,0x2e2e36,0xa0522d].map(hex=>AF.col(hex,{jitter:0.3,edge:0.1}));
+ const shelfModel=(seed,facing)=>{const m=facing?new AF.Model(16,20,4):new AF.Model(4,20,16),put=(u,y,v,col)=>facing?m.set(u,y,v,col):m.set(v,y,u,col);
+  for(let u=0;u<16;u++)for(let y=0;y<20;y++){put(u,y,0,oak);if(u===0||u===15||y===0||y===19||y%5===0)for(let v=1;v<4;v++)put(u,y,v,oak);}
+  for(const y0 of [1,6,11,16])for(let u=1;u<15;u++){const r=AF.hash2(u*7+seed,y0*3+seed*11);if(r<0.12)continue;const hgt=2+((r*997)|0)%3,col=books[((r*7919)|0)%books.length];for(let y=y0;y<y0+Math.min(4,hgt+(r>0.8?1:0));y++)for(let v=1;v<3+(r>0.5?1:0);v++)put(u,y,v,col);}
+  return m;};
+ const shelf=(key,seed,facing)=>geometry(key,facing?16:4,20,facing?4:16,m=>{const s=shelfModel(seed,facing);for(let x=0;x<m.w;x++)for(let y=0;y<m.h;y++)for(let z=0;z<m.d;z++){const v=s.get(x,y,z);if(v)m.set(x,y,z,v);}},1/8);
+ for(const [z,seed] of [[3110.5,3],[3112.5,5],[3114.5,8]])O.addProp(shelf('study-shelf-'+seed,seed,0),-156.75,3.5,z,0,{tag,collide:false});
+ for(const [x,seed] of [[-155,11],[-151.75,13]]){O.addProp(shelf('study-shelf-n'+seed,seed,1),x,3.5,3106.75,0,{tag,collide:false});AF.addCollider(x-1,3.5,3106.5,x+1,6,3107,tag);}
+ const desk=geometry('study-desk',16,9,8,m=>{m.box(0,5,0,16,6,8,oak);for(const x of [0,12])m.box(x,0,0,x+4,5,8,oak);m.box(4,3,7,12,5,8,oak);m.box(5,6,2,8,7,5,AF.col(0xe8e2cf,{jitter:0.1,edge:0}));m.box(11,6,2,12,8,3,gold);m.box(10,8,1,14,9,4,AF.col(0x2f6b4a,{emit:0xffd890,emitK:1.6,mode:'night',jitter:0.1,edge:0}));},1/8);
+ const chair=geometry('study-chair',4,8,4,m=>{m.box(0,3,0,4,4,4,oak);for(const x of [0,3])for(const z of [0,3])m.box(x,0,z,x+1,3,z+1,oak);m.box(0,4,0,4,8,1,rug);},1/8);
+ const arm=geometry('study-armchair',8,7,8,m=>{m.box(0,0,0,8,3,8,rug);m.box(0,3,0,8,5,1,rug);m.box(0,3,7,8,5,8,rug);m.box(7,3,0,8,7,8,rug);m.box(0,3,1,7,4,7,rugB);},1/8);
+ const sideT=geometry('study-side-table',4,6,4,m=>{m.box(0,4,0,4,5,4,oak);m.box(1,0,1,3,4,3,oak);m.box(1,5,1,2,6,2,gold);},1/8);
+ const stdLamp=geometry('study-lamp',3,15,3,m=>{m.box(1,0,1,2,12,2,iron);m.box(0,0,0,3,1,3,iron);m.box(0,12,0,3,15,3,glow);},1/8);
+ const picture=geometry('study-painting',12,9,1,m=>{m.box(0,0,0,12,9,1,gold);m.box(1,1,0,11,8,1,AF.col(0x4f7a8a,{jitter:0.4,edge:0}));m.box(1,1,0,11,3,1,AF.col(0x3f6a3a,{jitter:0.4,edge:0}));m.box(7,3,0,9,6,1,AF.col(0xd8d0b8,{jitter:0.2,edge:0}));},1/8);
+ const doorstep=geometry('study-step',2,1,6,m=>m.box(0,0,0,2,1,6,stepC),0.25);
+ const fit=(geo,x,y,z,hx,hz,hh,rot=0,box=true)=>{O.addProp(geo,x,y,z,rot,{tag,collide:false});if(box)AF.addCollider(x-hx,y,z-hz,x+hx,y+hh,z+hz,tag);};
+ fit(desk,-153.25,3.5,3109.25,1,0.5,0.9);fit(chair,-153.25,3.5,3108.2,0.25,0.25,1);
+ fit(arm,-151.5,3.5,3117.9,0.5,0.5,0.9);fit(arm,-151.5,3.5,3115.3,0.5,0.5,0.9);fit(sideT,-151.5,3.5,3116.6,0.25,0.25,0.65);fit(stdLamp,-151,3.5,3119.05,0.2,0.2,1.9);
+ const lantern=geometry('secret-lantern',3,6,3,m=>{m.box(0,5,0,3,6,3,iron);m.box(0,1,0,3,5,3,lampC);for(const x of [0,2])for(const z of [0,2])m.box(x,1,z,x+1,5,z+1,iron);m.box(1,0,1,2,1,2,iron);},1/8);
+ fit(picture,-153.75,4.6,3119.44,0,0,0,0,false);fit(doorstep,-149.75,3,3112.25,0,0,0,0,false);AF.addCollider(-150,3,3111.5,-149.5,3.25,3113,tag);
+ for(const z of [3112.25,3116.25])fit(lantern,-159.31,4.8,z,0,0,0,0,false);
+ light(-153.5,5.7,3113.2,1,11);light(-158.4,5.2,3112.4,1.5,12);
+ // ---- the bookcase door: one mesh hinged at its south-east corner, closed in the partition, swung 90 degrees into the study when open
+ {const geo=AF.meshModel(shelfModel(17,0),{vs:1/8,anchor:[1,0,1],flat:true});delete geo.userData.src;
+  const mesh=BK.mesh=AF.modelMesh(geo);mesh.name='secret-bookcase';mesh.castShadow=false;mesh.position.set(BK.hinge[0],BK.hinge[1],BK.hinge[2]);mesh.rotation.y=0;mesh.visible=false;AF.scene.add(mesh);
+  const b=BK.closed;BK.col=AF.addCollider(b[0],b[1],b[2],b[3],b[4],b[5],tag+'-bookcase');
+  AF.on('preloaded',()=>{if(!AF.stream||!AF.stream.compileAhead)return;const v=mesh.visible;mesh.visible=true;try{AF.stream.compileAhead(mesh);}finally{mesh.visible=v;}});}
+ // ---- spots for the heist (81): Kit's way from the Sky Terrace down its stair, under the deck and in at the study's lawn door to the
+ // bookcase; where she waits once it is open; the stair and the passage centre-line to the cleft
+ const r2=v=>+v.toFixed(2),feet=(x,z,y)=>AF.surfaceBelow(x,z,y+0.6,2.5);
+ const kit=S.spots.kit,corners=[[kit.x,kit.y,kit.z],[-145.6,8,3136.4],[-147.5,8,3138.1],[-147.5,8,3139.25]];
+ for(let z=3139.75;z<3144;z+=0.5)corners.push([-147.5,Math.max(3,8-(z-3139.25)*1),z]);
+ corners.push([-147.5,3,3144.6],[-146,3,3145.4],[-144.3,3,3145],[-144.3,3,3143],[-144.3,3,3113.1],[-145.2,3,3112.25],[-149.2,3,3112.25],[-149.75,3.25,3112.25],[-151,3.5,3112.25],[-152.4,3.5,3113.4],[-154,3.5,3115.8],[-155,3.5,3117.4]);
+ const kitPath=[];for(let c=0;c<corners.length;c++){const p=corners[c];if(c){const q=corners[c-1],n=Math.ceil(Math.hypot(p[0]-q[0],p[2]-q[2])/1.5);for(let u=1;u<n;u++){const x=AF.lerp(q[0],p[0],u/n),z=AF.lerp(q[2],p[2],u/n);kitPath.push([r2(x),feet(x,z,AF.lerp(q[1],p[1],u/n)),r2(z)]);}}kitPath.push([r2(p[0]),feet(p[0],p[2],p[1]),r2(p[2])]);}
+ const at=s=>{const c=along(s);return[r2(c.x),c.y,r2(c.z)];},path=[at(1)];
+ for(let s=2.5;s<T.openA;s+=1)path.push(at(s));for(let s=T.openA+0.5;s<T.L-1;s+=2)path.push(at(s));path.push(at(T.L-0.5));
+ const end=along(T.L-0.5),inside=along(T.openA+0.5),face=(x,z,tx,tz)=>Math.atan2(tx-x,tz-z);
+ const H=S.heist||(S.heist={});
+ H.secret={
+  room:{x:-153.5,y:3.5,z:3113},
+  door:{x:-155,y:3.5,z:3117.4,yaw:face(-155,3117.4,-156.75,3118.5)},
+  kitPath,
+  kitWait:{x:-154.4,y:3.5,z:3116,yaw:face(-154.4,3116,-157,3118.5)},
+  stairTop:{x:-158.25,y:SP.top,z:3118.5},
+  tunnelIn:{x:r2(inside.x),y:inside.y,z:r2(inside.z)},
+  exit:{x:r2(end.x),y:end.y,z:r2(end.z),yaw:Math.atan2(end.dx,end.dz)},
+  path,length:T.L,
+  open:(on)=>{on=!!on;if(BK.on===on)return;BK.on=on;const b=on?BK.opened:BK.closed,c=BK.col;c.x0=b[0];c.y0=b[1];c.z0=b[2];c.x1=b[3];c.y1=b[4];c.z1=b[5];},
+  isOpen:()=>BK.on,
+ };
+ S.spots.secretDoor=H.secret.door;S.spots.secretExit=H.secret.exit;
+});
+// the bookcase swings over 1.4 s (eased) and is drawn only within 90 m of the camera
+AF.onTick('island-bookcase',420,(dt)=>{
+ const m=BK.mesh;if(!m)return;
+ const c=AF.camera.position,near=(c.x-BK.hinge[0])**2+(c.z-BK.hinge[2])**2<8100;if(m.visible!==near)m.visible=near;
+ const goal=BK.on?1:0;if(BK.a===goal)return;
+ BK.a=goal>BK.a?Math.min(1,BK.a+dt/1.4):Math.max(0,BK.a-dt/1.4);const e=BK.a*BK.a*(3-2*BK.a);m.rotation.y=-Math.PI/2*e;
 });
 // ---------------------------------------------------------------- Serena fun: a sunset beach party, bonfire, beach volleyball, umbrellas,
 // a swim raft with a slide, tiki torches, hammocks and the jet-ski hire. Static parts are merged outland props (built before the
@@ -663,6 +809,32 @@ AF.test('island: smugglers\u2019 tunnel walks end to end under a roof; posts, ro
  return{ok:!stuck&&roofed===H.tunnel.length-4&&!posts&&!routes&&stand&&skis>=2&&len>=150&&len<=250&&!!H.kit&&!!S.spots.strip,info:Math.round(len)+' m, stuck '+stuck+', roofed '+roofed+'/'+(H.tunnel.length-4)+', blocked posts '+posts+' / route points '+routes+', cache stand '+stand+', wet skis '+skis};
 });
 S.kit={geometry,block,site,prop,sign,cottage,canopy,openCanopy,paint,cache,col:{white,mint,coral,teal,wood,rock,gold,dark,win,glow}};
+AF.test('island: secret passage walks from the study to the cleft; the bookcase blocks when shut; no scar over it',()=>{
+ const X=S.heist&&S.heist.secret,T=O.secret;if(!X||!T)return{ok:false,info:'no secret passage'};
+ const was=X.isOpen(),P3=p=>Array.isArray(p)?p:[p.x,p.y,p.z];
+ // a walker body (0.3 m radius, 1.7 m tall, 0.55 m steps) heads for each waypoint in turn
+ const walk=(from,pts)=>{const b={x:from[0],y:from[1],z:from[2],vy:0,r:0.3,h:1.7,onGround:true};let bad=0,first=null;for(const p of pts){for(let k=0;k<400;k++){const dx=p[0]-b.x,dz=p[2]-b.z,d=Math.hypot(dx,dz);if(d<0.3)break;const sp=Math.min(d,0.15);AF.moveBody(b,dx/d*sp,dz/d*sp,1/30,{step:0.55});}if(Math.hypot(p[0]-b.x,p[2]-b.z)>0.6){bad++;if(!first)first=[p,[+b.x.toFixed(2),+b.y.toFixed(2),+b.z.toFixed(2)]];}}for(let k=0;k<30;k++)AF.moveBody(b,0,0,1/30,{step:0.55});return{bad,first,b};};
+ let kit,shut,through,clear,pass,midN=0,roofed=0,buried=0,opened=0,trench=0,sink=0,cover=Infinity,samples=0;const scars=[];
+ try{
+  X.open(false);
+  kit=walk(P3(X.kitPath[0]),X.kitPath);
+  shut=AF.boxBlocked(-156.75,3.55,3118.5,0.3,1.7);through=walk(P3(X.door),[P3(X.stairTop)]).bad===0;
+  X.open(true);clear=!AF.boxBlocked(-156.75,3.55,3118.5,0.3,1.7);
+  pass=walk(P3(X.door),[P3(X.stairTop),...X.path]);
+  // under a roof all the way between its two open ends
+  const mid=X.path.filter(p=>{O.secretAt(p[0],p[2]);const s=O.secretInfo.s;return s>T.openA+1&&s<T.mouthS-1;});
+  midN=mid.length;for(const p of mid)if([2.2,2.7,3.2,3.7,4.2].some(h=>AF.solidAt(p[0],p[1]+h,p[2])))roofed++;
+  // the hillside over it: drawn whole (no open cell), no trench or ridge across it, the roof under the surface, bodies stay on top
+  for(let s=T.openA+1;s<T.mouthS-1;s+=1){const [x,z,dx,dz]=T.at(s);for(const o of [-(T.hw+T.band),0,T.hw+T.band]){const px=x-dz*o,pz=z+dx*o,g=O.hNat(px,pz);samples++;
+   if(O.colTop(px,pz,g,0,0.5)===0){opened++;if(scars.length<4)scars.push(['open',+px.toFixed(1),+pz.toFixed(1)]);}
+   if(O.secretAt(px,pz)===2){cover=Math.min(cover,g-O.secretInfo.floor);if(O.secretInfo.ceil+1>g-0.2){buried++;if(scars.length<4)scars.push(['thin',+px.toFixed(1),+pz.toFixed(1)]);}}
+   if(AF.surfaceBelow(px,pz,g+0.3,3)<g-0.3){sink++;if(scars.length<4)scars.push(['sink',+px.toFixed(1),+pz.toFixed(1)]);}}
+   const l=O.hNat(x-dz*5,z+dx*5),r=O.hNat(x+dz*5,z-dx*5),c=O.hNat(x,z);if(Math.abs(c-(l+r)/2)>0.75){trench++;if(scars.length<4)scars.push(['trench',+x.toFixed(1),+z.toFixed(1)]);}}
+ }finally{X.open(was);}
+ const ex=X.exit,arrived=Math.hypot(pass.b.x-ex.x,pass.b.z-ex.z)<0.8&&Math.abs(pass.b.y-ex.y)<0.6;
+ return{ok:!kit.bad&&shut&&!through&&clear&&!pass.bad&&arrived&&midN>20&&roofed===midN&&!opened&&!buried&&!trench&&!sink&&cover>=3.9&&S.secretStats.lights>=10&&T.L>150,
+  info:Math.round(T.L)+' m, kit path stuck '+kit.bad+(kit.first?' '+JSON.stringify(kit.first):'')+', shut '+shut+' (walked through '+through+'), open clear '+clear+', passage stuck '+pass.bad+(pass.first?' '+JSON.stringify(pass.first):'')+', at exit '+arrived+', roofed '+roofed+'/'+midN+', surface samples '+samples+': opened '+opened+', thin '+buried+', trench '+trench+', sink '+sink+', min cover '+cover.toFixed(2)+' m, lights '+S.secretStats.lights+' '+JSON.stringify(scars)};
+});
 AF.test('island: ferry round trip and safe pier height',()=>{
  const saved={mode:AF.mode,x:AF.player.x,y:AF.player.y,z:AF.player.z,yaw:AF.player.yaw},rows=[];
  try{for(const dock of [0,1]){F.reset(dock);const point=dock?route.islandPier:route.cityPier;AF.setMode('walk',{x:point[0],y:dockY(dock),z:point[1],snap:true});F.board(dock);let t=AF.clock.w,steps=0;while(AF.mode==='ferry-ride'&&steps++<Math.ceil((route.dwell+route.crossing)*2)+20){t+=0.5;F.update(0.5,t);}const end=dock?route.cityPier:route.islandPier;rows.push(AF.mode==='walk'&&Math.hypot(AF.player.x-end[0],AF.player.z-end[1])<0.5&&Math.abs(AF.player.y-dockY(1-dock))<0.1&&!AF.boxBlocked(AF.player.x,AF.player.y+0.05,AF.player.z,0.3,1.7));}return{ok:rows.every(Boolean),info:'outbound/return '+rows.join('/')};}

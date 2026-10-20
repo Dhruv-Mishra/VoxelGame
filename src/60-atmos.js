@@ -1076,31 +1076,10 @@ try {
     return { ok, info: `9h ${m.toArray().map((v) => v.toFixed(2))} 12h ${e.toArray().map((v) => v.toFixed(2))} 16.5h ${w.toArray().map((v) => v.toFixed(2))}` };
   });
 
-  // ============================================================ PORT SOLACE extras: manhole steam, night searchlights, the SOLACE blimp
-  const PX = AF.portSolaceFX = { steam: null, beams: [], blimp: null };
+  // ============================================================ PORT SOLACE extras: night searchlights, the SOLACE blimp
+  const PX = AF.portSolaceFX = { beams: [], blimp: null };
   AF.onBuild('atmos-extras', 710, () => {
     const t0 = performance.now(), S = AF.scene;
-    // ---- manhole steam: additive soft puffs rising from ~15 manholes spread over the city
-    {
-      const all = (AF.manholes || []).filter((m) => Number.isFinite(m.x) && Number.isFinite(m.z));
-      let src = [];
-      if (all.length) { const step = Math.max(1, Math.floor(all.length / 8)); for (let i = 3; i < all.length && src.length < 8; i += step) src.push(all[i]); }
-      else for (const [x, z] of [[20, 0], [-60, 0], [120, 0], [0, 40], [0, -60], [-80, 80], [80, -80], [-120, -80]]) src.push({ x, z });
-      const PER = 8, N = src.length * PER;
-      const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
-      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      const mat = new THREE.PointsMaterial({ size: 2.2, map: A.softTex || null, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, fog: true });
-      const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; pts.renderOrder = 5; pts.name = 'manhole-steam'; S.add(pts);
-      const parts = [];
-      for (let i = 0; i < N; i++) parts.push({ e: src[Math.floor(i / PER)], age: Math.random() * 4, life: 3 + Math.random() * 2.5, x: 0, y: -99, z: 0, vx: 0, vz: 0 });
-      // R2: each vent remembers its nearest street light so the steam glows warm under it at night
-      for (const e of src) {
-        let best = null, bd = 14;
-        for (const l of AF.lights) { if (l.kind === 'interior') continue; const d = Math.hypot(l.x - e.x, l.z - e.z); if (d < bd) { bd = d; best = l; } }
-        const c = new THREE.Color(best ? (best.color ?? 0xffc67a) : 0x8090a8); e.lampK = best ? 1 - bd / 14 : 0; e.lampC = c;
-      }
-      PX.steam = { pts, pos, col, parts, src };
-    }
     // ---- searchlights: long additive beams sweeping the night sky
     {
       const dflt = [{ x: 44, y: 22, z: 120 }, { x: 150, y: 3, z: 206 }, { x: 117, y: 60, z: -117 }, { x: 40, y: 42, z: -40 }];
@@ -1187,25 +1166,6 @@ try {
   };
   AF.onTick('atmos-extras', 705, (dt, t) => {
     const night = (AF.time && AF.time.night) || 0, cam = AF.camera.position;
-    // steam
-    const St = PX.steam;
-    let steamNear = false;
-    if (St) { for (const e of St.src) if (Math.abs(e.x - cam.x) < 140 && Math.abs(e.z - cam.z) < 140 && cam.y < 80) { steamNear = true; break; } St.pts.visible = steamNear; }
-    if (St && steamNear) {
-      const wind = 0.5 + 0.3 * Math.sin(t * 0.2), cold = 0.55 + 0.45 * night;
-      for (let i = 0; i < St.parts.length; i++) {
-        const p = St.parts[i], near = Math.abs(p.e.x - cam.x) < 140 && Math.abs(p.e.z - cam.z) < 140;
-        p.age += dt;
-        if (p.age >= p.life) { p.age = 0; p.life = 3 + Math.random() * 2.5; p.x = p.e.x + (Math.random() - 0.5) * 0.6; p.z = p.e.z + (Math.random() - 0.5) * 0.6; p.y = 0.1; p.vx = wind * (0.4 + Math.random() * 0.4); p.vz = (Math.random() - 0.5) * 0.3; }
-        p.y += dt * (0.9 - p.age * 0.12); p.x += p.vx * dt * p.age * 0.5; p.z += p.vz * dt;
-        const f = near ? Math.sin(Math.min(1, p.age / p.life) * Math.PI) * 0.22 * cold : 0;
-        St.pos[i * 3] = p.x; St.pos[i * 3 + 1] = p.y; St.pos[i * 3 + 2] = p.z;
-        const lk = (p.e.lampK || 0) * night, lc = p.e.lampC;
-        St.col[i * 3] = f * (0.95 + (lc ? lc.r * 1.6 - 0.95 : 0) * lk); St.col[i * 3 + 1] = f * (0.95 + (lc ? lc.g * 1.6 - 0.95 : 0) * lk); St.col[i * 3 + 2] = f * (1 + (lc ? lc.b * 1.6 - 1 : 0) * lk);
-      }
-      St.pts.geometry.attributes.position.needsUpdate = true; St.pts.geometry.attributes.color.needsUpdate = true;
-      St.pts.material.size = 2.2 + night * 0.6;
-    }
     // R2: sea spray
     const Sp = PX.spray;
     if (Sp && Sp.spots.length) {
@@ -1257,7 +1217,7 @@ try {
     const eg = B.mesh.children[0].geometry; eg.computeBoundingBox(); const L2 = eg.boundingBox.max.z - eg.boundingBox.min.z;
     return { ok: !B.panels && B.mesh.children.length <= 8 && L2 > 54 && L2 < 62, info: `children ${B.mesh.children.length}, length ${L2.toFixed(1)} m` };
   });
-  AF.test('atmos: blimp drifts, steam + searchlights exist', () => {
+  AF.test('atmos: blimp drifts, searchlights exist', () => {
     const B = PX.blimp; if (!B) return { ok: false, info: 'no blimp' };
     placeBlimp(B, AF.clock.w);
     const w0 = Math.ceil((AF.clock.w + B.ph) / B.P) * B.P - B.ph;   // the start of a lap
@@ -1265,7 +1225,7 @@ try {
     for (let i = 1; i <= 120; i++) placeBlimp(B, w0 + i * 0.25);
     const moved = Math.hypot(B.mesh.position.x - x0, B.mesh.position.z - z0);
     placeBlimp(B, AF.clock.w);
-    return { ok: moved > 20 && isFinite(moved) && PX.beams.length >= 3 && PX.steam && PX.steam.src.length >= 6, info: `blimp moved ${moved.toFixed(1)} m in 30 s at y ${B.y}, beams ${PX.beams.length}, steam vents ${PX.steam ? PX.steam.src.length : 0}, ${PX.ms} ms` };
+    return { ok: moved > 20 && isFinite(moved) && PX.beams.length >= 3, info: `blimp moved ${moved.toFixed(1)} m in 30 s at y ${B.y}, beams ${PX.beams.length}, ${PX.ms} ms` };
   });
 
   // ============================================================ ROUND 2: HARBOUR DAYS FIREWORKS over the harbour at night (20.6 h -> 0.5 h)

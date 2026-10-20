@@ -35,6 +35,7 @@ AF.loader = (f, msg) => {
   // every generator finishes and the opening view streams in + compiles behind the loader (01-stream): longer load, no pop-in
   if (!AF.TEST) { try { await AF.stream.preload((f, msg) => AF.loader(0.85 + 0.15 * f, msg)); } catch (e) { console.error('[af] preload threw:', e); AF.errors.push({ part: 'preload', msg: String(e && e.stack || e) }); } }
   AF.preloaded = true; AF.emit('preloaded');
+  if (!AF.TEST && AF.stream.drainFirstDraws) { try { await AF.stream.drainFirstDraws(); } catch (e) { console.error('[af] first draws threw:', e); } }
   const ld = document.getElementById('loader'); if (ld) ld.classList.add('done');
   if (AF.TEST) {
     AF.step(3);

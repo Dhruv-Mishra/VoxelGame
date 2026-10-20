@@ -90,6 +90,7 @@ try {
   Vehicle.contact = CONTACT_BUF;
   Vehicle.all = [];
   Vehicle.aim = false;   // set each frame by 77-combat while the seated player aims a gun (the chase camera pulls in and holds its look)
+  Vehicle.aimK = 1;      // look-speed factor while aiming (77-combat: < 1 through a sniper scope)
 
   const IN = Vehicle.IN = { thr: 0, steer: 0, brake: false, boost: false, exit: false, modal: false };
   Vehicle.input = () => {
@@ -123,7 +124,7 @@ try {
       const m = AF.input.mouse, fp = VIEW.fp(), cam = AF.camera, aim = Vehicle.aim;
       // aiming from the seat (77-combat drive-by): the boom pulls in and the look holds where it was put instead of easing back behind
       this.dist = this.dist0 * (VIEW.dist[VIEW.i] || 1) * (aim ? 0.62 : 1);
-      if (!AF.PL.wheel && (document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { const k = aim ? 0.7 : 1; this.orbit = (this.orbit - m.dx * 0.006 * k) % (Math.PI * 2); this.orbitP = AF.clamp(this.orbitP + m.dy * 0.004 * k, fp ? -0.6 : aim ? -0.9 : -0.25, 0.9); this.dragT = 1.5; }
+      if (!AF.PL.wheel && (document.pointerLockElement || (m.buttons & 1)) && (m.dx || m.dy)) { const k = aim ? 0.7 * (Vehicle.aimK || 1) : 1; this.orbit = (this.orbit - m.dx * 0.006 * k) % (Math.PI * 2); this.orbitP = AF.clamp(this.orbitP + m.dy * 0.004 * k, fp ? -0.6 : aim ? -0.9 : -0.25, 0.9); this.dragT = 1.5; }
       else if (aim || AF.PL.wheel) this.dragT = 1.5;
       else if ((this.dragT -= dt) < 0) { this.orbit *= Math.exp(-dt * 1.8); this.orbitP *= Math.exp(-dt * 1.8); }
       if (AF.player && AF.player.mesh) AF.player.mesh.visible = AF.player.visible && !fp;

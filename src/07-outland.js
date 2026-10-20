@@ -177,7 +177,7 @@ function streamCarve(x, z, height) {
   return out;
 }
 // ---- the smugglers' tunnel: centre-line, half-width / height swelling into chambers, a floor falling 0.5 m steps to the cove.
-// tunnelAt(x,z) fills TN_ (s along, d across, hw, floor, ceil) and returns 0 outside the band, 1 inside it, 2 inside the hollow.
+// mainAt(x,z) fills TN_ (s along, d across, hw, floor, ceil) and returns 0 outside the band, 1 inside it, 2 inside the hollow.
 const TUN = ISLE.tunnel;
 const TN = TUN ? (() => {
   const pts = TUN.pts, cs = [0];
@@ -191,10 +191,12 @@ const TN = TUN ? (() => {
   const chambers = TUN.chambers.map(([i, hw, h, len, flat]) => ({ s: cs[i], hw, h, len: len || 6, flat: !!flat }));
   return { pts, cs, L, yE, yX, out, cleftSlope, chambers, box: [x0 - 34, z0 - 34, x1 + 34, z1 + 34], MZ: 1.5, band: 1.25 };
 })() : null;
-const TN_ = { s: 0, d: 0, hw: 0, floor: 0, ceil: 0, end: false };
+// k = which tube (0 the smugglers' tunnel, 1 the secret passage below), open = an opened end of the secret passage
+const TN_ = { s: 0, d: 0, hw: 0, floor: 0, ceil: 0, end: false, k: 0, open: false };
 O.tunnelInfo = TN_;
-function tunnelAt(x, z) {
+function mainAt(x, z) {
   const T = TN; if (!T || x < T.box[0] || x > T.box[2] || z < T.box[1] || z > T.box[3]) return 0;
+  TN_.k = 0; TN_.open = false;
   let best = Infinity, bs = 0, before = false;
   for (let i = 1; i < T.pts.length; i++) {
     const a = T.pts[i - 1], b = T.pts[i], dx = b[0] - a[0], dz = b[1] - a[1], len2 = dx * dx + dz * dz, raw = ((x - a[0]) * dx + (z - a[1]) * dz) / len2, t = clamp(raw, 0, 1);
@@ -211,14 +213,79 @@ function tunnelAt(x, z) {
   TN_.ceil = floor + Math.round((h + (noise(x * 0.5 + 9, z * 0.5) - 0.5) * 0.8) * 2) / 2; TN_.end = before;
   return !before && d < hw ? 2 : 1;
 }
-O.tunnelAt = tunnelAt; O.tunnel = TN;
+// ---- the secret passage (05-plan island.secret): from the stair behind the bookcase in Hotel Serena's study, under the lawns and the
+// cone's north flank, to a rocky cleft near the smugglers' tunnel mouth. Its floor profile is measured on the bare island here (plan
+// data + isleShape only, so the mesh workers derive the same one): the stair from the study floor down to `base`, then as high as
+// 2.2 m of rock over the tallest roof allows (rising at most `k` per metre), level for the last `level` metres to the hillside. Only
+// its ends open (no terrain drawn: the study covers one, the cleft's walls line the other); elsewhere the island is drawn whole over
+// a roof kept >= 0.25 m under the surface (on the flat resort lawn too, where the cover is thinnest).
+const SEC = ISLE.secret;
+const SC = SEC ? (() => {
+  const pts = SEC.pts, cs = [0];
+  for (let i = 1; i < pts.length; i++) cs.push(cs[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const L = cs[cs.length - 1], n = Math.floor(L * 2) + 1, reach = SEC.hw + SEC.band + 3;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  const at = (s) => { let i = 1; while (i < cs.length - 1 && cs[i] < s) i++; const a = pts[i - 1], b = pts[i], len = cs[i] - cs[i - 1], u = clamp((s - cs[i - 1]) / len, 0, 1); return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, (b[0] - a[0]) / len, (b[1] - a[1]) / len]; };
+  // the lowest ground across the passage (centre and 1 m past each wall) every 0.5 m
+  const nat = new Float32Array(n), F = new Float32Array(n), C = new Float32Array(n), U = new Float32Array(n), off = SEC.hw + 1;
+  for (let i = 0; i < n; i++) { const [x, z, dx, dz] = at(i / 2); nat[i] = Math.min(isleShape(x, z), isleShape(x - dz * off, z + dx * off), isleShape(x + dz * off, z - dx * off)); }
+  const last = pts[pts.length - 1], exitY = Math.round(isleShape(last[0], last[1]) * 2) / 2;
+  const steps = Math.round((SEC.top - SEC.base) * 2), stairEnd = SEC.landing + SEC.run * (steps - 1), levelS = L - SEC.level, kS = SEC.k * 0.5;
+  for (let i = 0; i < n; i++) U[i] = i / 2 >= levelS ? Infinity : nat[i] - SEC.h - 0.25 - 2.2;
+  for (let i = 1; i < n; i++) U[i] = Math.min(U[i], U[i - 1] + kS);
+  for (let i = n - 2; i >= 0; i--) U[i] = Math.min(U[i], U[i + 1] + kS);
+  for (let i = 0; i < n; i++) {
+    const s = i / 2;
+    F[i] = s < SEC.landing ? SEC.top : s < stairEnd + SEC.run ? Math.max(SEC.base, SEC.top - 0.5 * (Math.floor((s - SEC.landing) / SEC.run + 1e-6) + 1))
+      : s >= levelS ? exitY : Math.max(SEC.base, Math.floor(Math.min(U[i], exitY) * 2) / 2);
+    // the roof (1 m of rock over the ceiling) stays 0.25 m under the ground
+    C[i] = Math.floor((nat[i] - 1.25) * 2) / 2;
+  }
+  // the cleft: from where the rock over a 2.5 m portal thins under 1.5 m to the hillside
+  let mouthS = L; while (mouthS > levelS && nat[Math.floor(mouthS * 2)] - exitY < 4) mouthS -= 0.5;
+  return { pts, cs, L, n, at, nat, F, C, exitY, stairEnd, levelS, mouthS, openA: SEC.openA, hw: SEC.hw, band: SEC.band, reach, box: [x0 - reach, z0 - reach, x1 + reach, z1 + reach] };
+})() : null;
+const TS_ = { s: 0, d: 0, hw: 0, floor: 0, ceil: 0, end: false, k: 1, open: false };
+O.secretInfo = TS_;
+// fills TS_ (s along, d across, hw, floor, ceil, open, end) and returns 0 outside the passage's reach or behind its stair, 1 within
+// it (end: on the hillside in front of the cleft), 2 inside the hollow
+function secretAt(x, z) {
+  const T = SC; if (!T || x < T.box[0] || x > T.box[2] || z < T.box[1] || z > T.box[3]) return 0;
+  let best = Infinity, bs = 0, past = false;
+  for (let i = 1; i < T.pts.length; i++) {
+    const a = T.pts[i - 1], b = T.pts[i], dx = b[0] - a[0], dz = b[1] - a[1], len2 = dx * dx + dz * dz, raw = ((x - a[0]) * dx + (z - a[1]) * dz) / len2, t = clamp(raw, 0, 1);
+    const d = (x - a[0] - dx * t) ** 2 + (z - a[1] - dz * t) ** 2;
+    if (d < best) { best = d; bs = T.cs[i - 1] + Math.sqrt(len2) * t; past = i === 1 && raw < 0 || i === T.pts.length - 1 && raw > 1; }
+  }
+  const d = Math.sqrt(best);
+  // past the cleft's lip: the hillside in front of it (rock-coloured, never walled or opened)
+  if (past) { if (bs < 1 || d > T.hw + T.band + 2.5) return 0; TS_.s = T.L + d; TS_.d = d; TS_.hw = SEC.hw; TS_.floor = T.exitY; TS_.ceil = T.exitY + 2.5; TS_.end = true; TS_.k = 1; TS_.open = false; return 1; }
+  if (d > T.reach) return 0;
+  const i = Math.min(T.n - 1, Math.floor(bs * 2)), floor = T.F[i], open = bs < T.openA || bs > T.mouthS;
+  // rough-hewn in the middle: the walls wander and the roof steps 2.5 / 3 m; the stair and the cleft stay true
+  const rough = smooth(T.openA, T.openA + 4, bs) * smooth(T.mouthS, T.mouthS - 4, bs);
+  const hw = SEC.hw + (noise(x * 0.45 - 7, z * 0.45 + 11) - 0.5) * 0.7 * rough;
+  TS_.s = bs; TS_.d = d; TS_.hw = hw; TS_.floor = floor; TS_.end = false; TS_.k = 1; TS_.open = open;
+  TS_.ceil = bs < T.openA - 0.5 ? SEC.top + 3 : bs > T.mouthS - 1 ? floor + 2.5 : Math.max(floor + 2, Math.min(T.C[i], floor + Math.round((SEC.h + (noise(x * 0.5 - 4, z * 0.5 + 7) - 0.5) * 0.6 * rough) * 2) / 2));
+  return d < hw ? 2 : 1;
+}
+// the nearest tube at (x,z): the hollow first, then the closer centre-line (TN_.k says which)
+function tunnelAt(x, z) {
+  const a = mainAt(x, z); if (!SC) return a;
+  const b = secretAt(x, z);
+  if (b > a || b && b === a && TS_.d < TN_.d) { TN_.s = TS_.s; TN_.d = TS_.d; TN_.hw = TS_.hw; TN_.floor = TS_.floor; TN_.ceil = TS_.ceil; TN_.end = TS_.end; TN_.k = 1; TN_.open = TS_.open; return b; }
+  return a;
+}
+O.tunnelAt = tunnelAt; O.tunnel = TN; O.tunnelMain = mainAt; O.secretAt = secretAt; O.secret = SC;
 // the island's surface over the tunnel (a lava ridge keeps the tube buried; a walled cleft leads to its mouth), then the hollow
-let cutOn = true;
+// (cutHit: the last sample fell in the secret passage, whose floor no pad levels)
+let cutOn = true, cutHit = false;
 function isleH(x, z) {
   let height = isleShape(x, z);
   height = coveH(x, z, height);
   if (ST) height = streamCarve(x, z, height);
-  const k = tunnelAt(x, z); if (!k) return height;
+  if (SC && cutOn && secretAt(x, z) === 2) { cutHit = true; return TS_.floor; }
+  const k = mainAt(x, z); if (!k) return height;
   const T = TN, s = TN_.s;
   if (!TN_.end) {
     // keep the tube buried without a protruding ridge: full cover (2.2 m of rock over the roof, so coarse hillside tiles never dip
@@ -377,7 +444,9 @@ O.h = (x, z) => {
   if (W.col(x, z) >= 0) return W.H[W.col(x, z)] * 0.25;
   if (seaFar(x, z)) return -4;
   const distance = Math.hypot(Math.max(W.X0 - x, 0, x - W.x1), Math.max(W.Z0 - z, 0, z - W.z1));
+  cutHit = false;
   let height = raw(x, z);
+  if (cutHit) return height;
   if (distance < 90) height = AF.lerp(edge(x, z), height, smooth(0, 90, distance));
   for (const pad of O.pads) {
     const margin = Math.max(Math.abs(x - pad.x) - pad.rx, Math.abs(z - pad.z) - pad.rz);
@@ -453,8 +522,13 @@ function colorIndex(x, z, height = O.h(x, z), slope = 0, step = 0.5) {
     ribLast = 2;
     if (x >= strip.x0 && x <= strip.x1 && Math.abs(z - strip.z) < strip.w / 2) return 34 + (Math.floor(noise(x * 0.05, z * 0.05) * 4) & 3);
     const tk = tunnelAt(x, z);
-    if (tk && !TN_.end && step <= 0.5) { const m = TN_.s < TN.MZ || TN_.s > TN.L - TN.MZ; if (tk === 2 ? m || height <= TN_.ceil + 1 : m && TN_.d < TN_.hw + TN.band) return -1; }
-    if (tk && TN_.end && TN_.s < 0 && TN_.s > -8) return [55, 51, 57][tone];
+    if (tk && TN_.k === 1) {
+      if (step <= 0.5 && TN_.open && TN_.d < TN_.hw + SC.band) return -1;
+      if (TN_.s > SC.mouthS - 2 && TN_.d < TN_.hw + SC.band + 1 + noise(x * 0.4 + 5, z * 0.4 - 3) * 2.5) return ISLE_LOWROCK[tone];   // the cleft's rock
+    } else {
+      if (tk && !TN_.end && step <= 0.5) { const m = TN_.s < TN.MZ || TN_.s > TN.L - TN.MZ; if (tk === 2 ? m || height <= TN_.ceil + 1 : m && TN_.d < TN_.hw + TN.band) return -1; }
+      if (tk && TN_.end && TN_.s < 0 && TN_.s > -8) return [55, 51, 57][tone];
+    }
     const C = COVE;
     if (C && x >= C.ledge.x0 && x < C.ledge.x1 && z >= C.ledge.z0 && z < C.ledge.z1) return 51;
     if (C && height > 1.5 && slope > 0.9 && Math.hypot(x - C.x, z - C.z) < C.r + 7) return ISLE_LAVA[tone];
@@ -1013,21 +1087,24 @@ function slopedTile(entry) {
   return entry.x < ISLE_BOX.x1 && entry.x + entry.size > ISLE_BOX.x0 && entry.z < ISLE_BOX.z1 && entry.z + entry.size > ISLE_BOX.z0;
 }
 O.slopedTile = slopedTile;
-// level-0 cells drawn terraced: the tube's open cells (colorIndex -1) and its cleft, grown by two cells (interior cells only)
+// level-0 cells drawn terraced: the tubes' open cells (colorIndex -1) and the tunnel's cleft, grown by two cells (interior cells only)
+const overTube = (T, entry) => !!T && entry.x < T.box[2] && entry.x + entry.size > T.box[0] && entry.z < T.box[3] && entry.z + entry.size > T.box[1];
 function tubeCells(entry, step) {
   const T = TN, M = tubeMask; M.fill(0);
-  if (!T || entry.size > 32 || entry.x >= T.box[2] || entry.x + entry.size <= T.box[0] || entry.z >= T.box[3] || entry.z + entry.size <= T.box[1]) return 0;
+  if (entry.size > 32 || !overTube(T, entry) && !overTube(SC, entry)) return 0;
   let n = 0;
   // 4 x 4 cell blocks first: openings and the cleft lie within a chamber's half-width of the centre-line, so blocks whose centre is
-  // farther than that (+ a margin) skip
+  // farther than that (+ a margin) skip; the secret passage opens only at its two ends
   for (let br = 0; br < 64; br += 4) for (let bc = 0; bc < 64; bc += 4) {
-    if (!tunnelAt(entry.x + (bc + 2) * step, entry.z + (br + 2) * step) || TN_.d > TN_.hw + 9 || TN_.end && TN_.s < -16) continue;
+    if (!tunnelAt(entry.x + (bc + 2) * step, entry.z + (br + 2) * step)) continue;
+    if (TN_.k === 1 ? TN_.d > TN_.hw + SC.band + 2 || TN_.s > SC.openA + 2 && TN_.s < SC.mouthS - 2 : TN_.d > TN_.hw + 9 || TN_.end && TN_.s < -16) continue;
     for (let row = Math.max(1, br); row < Math.min(63, br + 4); row++) for (let col = Math.max(1, bc); col < Math.min(63, bc + 4); col++) {
       const x = entry.x + (col + 0.5) * step, z = entry.z + (row + 0.5) * step;
       if (!tunnelAt(x, z)) continue;
-      const cleft = TN_.end && TN_.s < 0 && TN_.s > -9;
+      const cleft = TN_.k === 0 && TN_.end && TN_.s < 0 && TN_.s > -9;
       // only the hollow itself and the band round its mouths can open (colorIndex -1); the rest of the band stays buried
-      if (!cleft && !TN_.end && TN_.d >= TN_.hw && TN_.s >= T.MZ && TN_.s <= T.L - T.MZ) continue;
+      if (TN_.k === 0 && !cleft && !TN_.end && TN_.d >= TN_.hw && TN_.s >= T.MZ && TN_.s <= T.L - T.MZ) continue;
+      if (TN_.k === 1 && !TN_.open) continue;
       if (cleft || colorIndex(x, z, O.meshH(x, z, step), 0, step) < 0) { M[row * 64 + col] = 2; n++; }
     }
   }
@@ -1176,7 +1253,7 @@ function* meshSlopedG(entry, rim, step) {
 // (its terraced cells, the cleft) only the columns count.
 const RX0 = -1484, RZ0 = -1708, isleCorners = new Map();
 let cornerPads = -1;
-const tubeNear = (x, z) => tunnelAt(x, z) && (TN_.end ? TN_.s > -11 : TN_.d < TN_.hw + 3 || TN_.s < TN.MZ + 2 || TN_.s > TN.L - TN.MZ - 2);
+const tubeNear = (x, z) => tunnelAt(x, z) && (TN_.k === 1 ? TN_.d < TN_.hw + SC.band + 2 && (TN_.s < SC.openA + 2 || TN_.s > SC.mouthS - 2) : TN_.end ? TN_.s > -11 : TN_.d < TN_.hw + 3 || TN_.s < TN.MZ + 2 || TN_.s > TN.L - TN.MZ - 2);
 function isleCorner(ix, iz) {
   if (O.pads.length !== cornerPads) { cornerPads = padsSeen = O.pads.length; rimCache.clear(); isleCorners.clear(); }
   const key = ix * 16384 + iz;

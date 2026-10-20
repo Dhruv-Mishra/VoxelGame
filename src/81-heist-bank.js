@@ -7,7 +7,7 @@ try {
 // staff door -> the banking hall (round the back of the teller cages) -> the vault door -> keys + time lock -> lasers -> drill -> cash.
 {
   const PI = Math.PI, S = AF.stealth;
-  const HB = AF.heistBank = { ready: false, on: false, doors: {}, beams: [], laserOn: false, laserCut: 0, cageOpen: false, bags: [], spots: {}, zone: null, guards: [], RESERVE: 8, reserve: [], reservePaths: [] };
+  const HB = AF.heistBank = { ready: false, on: false, doors: {}, beams: [], laserOn: false, laserCut: 0, cageOpen: false, bags: [], spots: {}, zone: null, guards: [], RESERVE: 8, reserve: [], reservePaths: [], roofPaths: [], roofZone: null, roofOn: false };
   const c = (h, o) => AF.col(h, Object.assign({ jitter: 0.15, edge: 0.3 }, o));
   const mesh = (m, vs, anchor, x, y, z, yaw = 0) => { const g = AF.meshModel(m, { vs, anchor }); delete g.userData.src; const o = AF.modelMesh(g); o.position.set(x, y, z); o.rotation.y = yaw; o.castShadow = false; o.visible = false; AF.scene.add(o); return o; };
   const NOCOL = 1e-6;
@@ -71,12 +71,20 @@ try {
     // security cameras: a housing on a bracket, a red tally light (1/16 m model, origin at the lens; yaw by 80-stealth)
     const cm = new AF.Model(6, 5, 10); cm.box(1, 1, 0, 5, 4, 8, c(0xd8d8d0)); cm.box(2, 2, 8, 4, 3, 9, c(0x101012)); cm.set(4, 3, 1, led); cm.box(2, 4, 0, 4, 5, 2, dark);
     HB.camGeo = AF.meshModel(cm, { vs: 1 / 16, anchor: [0.5, 0.5, 0.85] }); delete HB.camGeo.userData.src;
-    // the service ladder on the podium's Park Row face (climbed, not teleported: 81-heist plays the climb)
-    const lx = 49.25, lz = -147.2, lad = new AF.Model(6, 112, 1);
-    lad.box(0, 0, 0, 1, 112, 1, steel); lad.box(5, 0, 0, 6, 112, 1, steel); for (let y = 4; y < 112; y += 6) lad.box(1, y, 0, 5, y + 1, 1, steel);
-    HB.ladder = mesh(lad, 1 / 8, [0.5, 0, 0], lx, 0.25, lz - 0.125); HB.ladder.visible = true;
-    HB.spots.ladder = { x: lx, y: 0.25, z: lz - 0.6, yaw: 0, top: 14 };
-    HB.spots.ladderTop = { x: lx - 1.2, y: 14, z: lz + 1.6, yaw: 0 };
+    // the service ladder up City Hall's east wall across Grand Avenue: the heist's sniper vantage over the bank roof (the bank itself has
+    // no ladder: the crew skydives onto it). Climbed, not teleported: 81-heist plays the climb.
+    const lx = -15.95, lz = -112, lad = new AF.Model(6, 156, 1);
+    lad.box(0, 0, 0, 1, 156, 1, steel); lad.box(5, 0, 0, 6, 156, 1, steel); for (let y = 4; y < 156; y += 6) lad.box(1, y, 0, 5, y + 1, 1, steel);
+    HB.ladder = mesh(lad, 1 / 8, [0.5, 0, 0], lx, 0.25, lz, PI / 2); HB.ladder.visible = true;
+    HB.spots.ladder = { x: lx + 0.6, y: 0.25, z: lz, yaw: -PI / 2, top: 19.5 };
+    HB.spots.ladderTop = { x: -17.6, y: 19.5, z: lz, yaw: PI / 2 };
+    // the vantage: City Hall's roof edge facing the bank (eye 21 m; the podium roof is 14 m, the deck 40 m is out of sight)
+    HB.spots.vantage = { x: -18.2, y: 19.5, z: -112, yaw: PI / 2 };
+    HB.spots.skyDeck = { x: 26, y: 40, z: -107.2, yaw: PI / 2 };
+    HB.spots.stairTop = { x: 43.3, y: 40, z: -107.2 };
+    // the roof checkpoint: the podium's far corner, under the deck guards' sight line (the watch the rifle dropped lies here)
+    HB.spots.podium = { x: 12.8, y: 14, z: -110.5, yaw: PI / 2 };
+    HB.spots.stairFoot = { x: 43.6, y: 14, z: -107.4 };
     HB.spots.bulkhead = { x: 43.6, y: 14, z: -106.1, yaw: PI / 2 };
     HB.spots.roof = { x: 40, y: 14, z: -107, yaw: PI / 2 };
     HB.spots.stairTop = { x: 45.7, y: 14, z: -106, yaw: PI };
@@ -130,7 +138,14 @@ try {
     pt('Security phone', 'phone', 39.5, 1.2, -109.6, 'phone'); pt('Records printer', 'printer', 30.3, 1.0, -109.9, 'click_metal'); pt('Staff radio', 'radio', 21, 1.2, -112.4, 'phone');
     pt('Manager\u2019s clock', 'alarm', 15, 1.4, -108.6, 'ui_alert'); pt('Teller phone', 'phone', 30, 1.3, -132.8, 'phone'); pt('Stock ticker', 'printer', 36.8, 1.4, -122, 'click_metal');
     pt('Desk phone', 'phone', 18, 1.3, -118, 'phone');
+    // the roof watch: its own zone (81-heist activates it for the sniper, the jump and the climb down); no cameras, no reserves
+    const rz = HB.roofZone = S.define('roof', { box: [8, 12, -150, 52, 46, -102], mode: 'fight', voice: 'g2', reflexS: 2.0, radius: 150 });
+    HB.roofPaths.forEach((p, i) => { const g = S.guard('roof', { path: p.path, voice: ['g2', 'g4', 'g1', 'g3'][i % 4], name: p.name, range: 16 }); if (g) { g.vantage = !!p.vantage; p.g = g; } });
+    void rz;
   };
+  // the roof watch walks only while the heist is at the bank's roof (or the sniper is watching it); bodies stay down between visits
+  HB.roof = (on) => { HB.roofOn = !!on; for (const p of HB.roofPaths) p.path.enabled = !!on; };
+  HB.roofGuards = (vantage) => HB.roofPaths.filter((p) => p.g && (vantage == null || !!p.g.vantage === !!vantage)).map((p) => p.g);
 
   // ---------------------------------------------------------------- guards (path walkers; disabled until the night)
   AF.onBuild('heist-bank-guards', 600, () => {
@@ -148,6 +163,16 @@ try {
     for (let k = 0; k < HB.RESERVE; k++) {
       try { const p = WK.addPath('heist bank reserve' + k, [[30, -40, -125]], { count: 1, activeRadius: 110, speed: 0, looks: [look(0)] }); p.enabled = false; HB.reservePaths.push(p); } catch (e) { AF.warnOnce('heist bank reserve', e); }
     }
+    // the roof watch (zone 'roof'): four on the podium roof that City Hall's roof can see (vantage), three the rifle can't: the sky
+    // deck, the stair head and the setback ring round the tower
+    const roof = (name, pts, o, extra) => { try { const p = WK.addPath('heist roof ' + name, pts, Object.assign({ count: 1, activeRadius: 140, looks: [look()] }, o)); p.enabled = false; HB.roofPaths.push(Object.assign({ path: p, name: 'Roof guard' }, extra)); } catch (e) { AF.warnOnce('heist roof guards', e); } };
+    roof('west', [[12.6, 14, -108.5], [12.6, 14, -125.5]], { speed: 0.85, mode: 'pingpong', dwell: [{ i: 0, t: 4 }, { i: 1, t: 3 }] }, { vantage: true });
+    roof('corner', [[12.6, 14, -129.5], [12.6, 14, -143.6], [17.5, 14, -143.6]], { speed: 0.8, mode: 'pingpong', dwell: [{ i: 0, t: 3 }, { i: 2, t: 5 }] }, { vantage: true });
+    roof('edge', [[16.5, 14, -106.8], [31.5, 14, -106.8]], { speed: 0.9, mode: 'pingpong', dwell: [{ i: 0, t: 3 }, { i: 1, t: 4 }] }, { vantage: true });
+    roof('door', [[34.3, 14, -105.6], [34.3, 14, -108.9]], { speed: 0.35, mode: 'pingpong', dwell: [{ i: 0, t: 8 }, { i: 1, t: 6 }] }, { vantage: true, name: 'Door guard' });
+    roof('deck', [[18.5, 40, -106.2], [33.5, 40, -106.2]], { speed: 0.8, mode: 'pingpong', dwell: [{ i: 0, t: 5 }, { i: 1, t: 4 }] }, { name: 'Deck guard' });
+    roof('ring', [[17.6, 40, -136.5], [17.6, 40, -114]], { speed: 0.75, mode: 'pingpong', dwell: [{ i: 0, t: 4 }, { i: 1, t: 6 }] });
+    roof('stairhead', [[43.3, 40, -109.2], [43.3, 40, -105.4]], { speed: 0.4, mode: 'pingpong', dwell: [{ i: 0, t: 7 }, { i: 1, t: 5 }] }, { name: 'Stair guard' });
   });
   AF.onBuild('heist-bank', 890, () => { try { props(); zone(); HB.ready = true; } catch (e) { AF.warnOnce('heist bank', e); } });
 

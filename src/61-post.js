@@ -251,6 +251,13 @@ try {
         dispose() {},
       };
       comp.addPass(P.raysPass);
+      // the ray passes only draw once the sun is in view (often first after the title, 2 links at start): AF.stream.warm compiles
+      // their quads with everything else (both write to the rays' own linear targets)
+      P.warmJobs = (cam) => {
+        const jobs = []; if (!R.compileAsync) return jobs;
+        for (const q of [G.mask, G.blur]) { const m = q.fsQuad && q.fsQuad._mesh; if (!m) continue; R.setRenderTarget(G.a); jobs.push(R.compileAsync(m, cam).catch((e) => AF.warnOnce('post warm', e))); }
+        return jobs;
+      };
     }
     // R1's AO pass (optional) right after the scene + rays
     P.insertAO = (pass) => {

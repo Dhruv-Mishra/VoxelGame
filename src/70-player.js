@@ -562,8 +562,9 @@ try {
     const eyeY = body.y + (1.58 - (EYE_STAND - EYE_CROUCH) * AN.crouch) * (player.look.height || 1);
     if (!(Math.abs(eyeY - (WK.py ?? eyeY)) < 1.5) || WK.blend < 1) WK.py = eyeY;
     else WK.py += (eyeY - WK.py) * (1 - Math.exp(-dt * (body.onGround ? 16 : 30)));
-    const hx = body.x, hy = WK.fp ? eyeY : WK.py, hz = body.z;
-    if (WK.fp) {
+    const hx = body.x, hy = WK.fp || PL.scope ? eyeY : WK.py, hz = body.z;
+    // first person, or looking through a sniper scope (PL.scope, 77-combat): the lens at the eye
+    if (WK.fp || PL.scope) {
       c.position.set(hx, hy + 0.04, hz);
       const p = -WK.camPitch, yaw = WK.camYaw + PI;
       LOOK.set(hx + Math.sin(yaw) * Math.cos(p) * 10, hy + 0.04 + Math.sin(p) * 10, hz + Math.cos(yaw) * Math.cos(p) * 10);
@@ -615,9 +616,9 @@ try {
       PL.hideMesh = WK.boom < 0.7;
       if (player.mesh) player.mesh.visible = player.visible && !PL.hideMesh;
     }
-    // a running stride widens the view a touch (eased, outdoors only); aiming narrows it (a rifle scope further)
+    // a running stride widens the view a touch (eased, outdoors only); aiming narrows it (a rifle scope further, and quicker)
     const fov = PL.aim ? PL.aimFov || 40 : 50 + (WK.running && !WK.fp ? 4 * (1 - WK.indoor) : 0);
-    WK.fov = AF.lerp(WK.fov || 50, fov, 1 - Math.exp(-dt * 4));
+    WK.fov = AF.lerp(WK.fov || 50, fov, 1 - Math.exp(-dt * (PL.scope || (WK.fov || 50) < 24 ? 14 : 4)));
     if (Math.abs(c.fov - WK.fov) > 0.02) { c.fov = WK.fov; c.updateProjectionMatrix(); }
     AF.camTarget.set(hx, hy, hz);
     AF.shadowFocus.set(body.x, 0, body.z); AF.shadowRadius = 70;
@@ -927,7 +928,8 @@ try {
       if (!modal) {
         // mouse / touch look: pointer lock (click the view) or drag
         if ((locked || ((m.buttons & 3) && !onPanel())) && (m.dx || m.dy) && !PL.wheel) {
-          const ks = AF.lookSens() * (PL.aim ? 0.6 : 1); WK.camYaw -= m.dx * 0.0045 * ks; WK.camPitch = AF.clamp(WK.camPitch + m.dy * 0.0035 * ks, -0.75, 1.25); WK.lastMouse = AF.clock.t;
+          // aiming slows the look; through a scope it scales with the zoom so the reticle moves the same across the view
+          const ks = AF.lookSens() * (PL.aim ? (PL.scope ? 0.6 * Math.min(1, (WK.fov || 50) / 40) : 0.6) : 1); WK.camYaw -= m.dx * 0.0045 * ks; WK.camPitch = AF.clamp(WK.camPitch + m.dy * 0.0035 * ks, -0.75, 1.25); WK.lastMouse = AF.clock.t;
         }
         if (!locked && m.clicked && !onPanel()) I.requestLock();
         if (I.hit('Tab')) { AF.setMode('aerial', { focusPlayer: true }); return; }

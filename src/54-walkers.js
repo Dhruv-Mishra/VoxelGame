@@ -163,18 +163,21 @@ try {
     mesh.geometry.attributes.walkerProp.array[index]=prop;
   }
   const update=WK.update=(dt,time)=>{
-    if(!ready)return;const camera=AF.camera.position;let active=0;
+    // WK.reach (77-combat: 2.2 through a sniper scope) widens every path's active / drawn radius, so a scoped target far off is there to hit
+    if(!ready)return;const camera=AF.camera.position,reach=WK.reach>1?WK.reach:1;let active=0;
     for(const path of WK.paths){
-      path.active=path.enabled&&WK.distance2(path,camera)<=path.activeRadius**2;
-      if(path.enabled&&!path.active)for(const a of path.actors)if(a.ctl&&(a.ctl.x-camera.x)**2+(a.ctl.y-camera.y)**2+(a.ctl.z-camera.z)**2<=path.activeRadius**2){path.active=true;break;}
+      const R2=(path.activeRadius*reach)**2;
+      path.active=path.enabled&&WK.distance2(path,camera)<=R2;
+      if(path.enabled&&!path.active)for(const a of path.actors)if(a.ctl&&(a.ctl.x-camera.x)**2+(a.ctl.y-camera.y)**2+(a.ctl.z-camera.z)**2<=R2){path.active=true;break;}
       if(path.active)active++;
     }
     WK.stats.active=active;
     if(!active){if(visibleBefore)for(const mesh of WK.meshes){mesh.count=0;mesh.visible=false;}visibleBefore=false;WK.stats.visible=WK.stats.draws=0;return;}
     let count=0,bags=0;
     for(const path of WK.paths){if(!path.active)continue;
+      const R2=(path.activeRadius*reach)**2;
       for(const actor of path.actors){WK.step(path,actor,dt,time);if(actor.gap>0)continue;
-        const distance2=(actor.x-camera.x)**2+(actor.y-camera.y)**2+(actor.z-camera.z)**2;if(distance2>path.activeRadius**2)continue;
+        const distance2=(actor.x-camera.x)**2+(actor.y-camera.y)**2+(actor.z-camera.z)**2;if(distance2>R2)continue;
         actor.sin=Math.sin(actor.yaw);actor.cos=Math.cos(actor.yaw);
         if(distance2<3600||Math.floor(time*5)!==actor.frame){actor.frame=Math.floor(time*5);actor.stride=actor.moving?Math.sin(actor.ph)*0.42:0;actor.wave=Math.sin(time*3)*0.35;}
         const pose=actor.look.pose;

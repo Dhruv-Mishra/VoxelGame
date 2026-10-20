@@ -140,7 +140,7 @@ try {
       const vis = dc < 140 * 140; if (n.root.visible !== vis) n.root.visible = vis;
       if (!vis || dc > 60 * 60) continue;
       let look = null;
-      if (walk && pl) {
+      if (walk && pl && !n.walk) {
         const dx = pl.x - n.x, dz = pl.z - n.z, d2 = dx * dx + dz * dz;
         if (d2 < 36 && Math.abs(pl.y - n.y) < 2.5) {
           const want = Math.atan2(dx, dz);
@@ -155,7 +155,8 @@ try {
       }
       n.st.lookYaw = look == null ? null : AF.lerp(n.st.lookYaw ?? 0, look, 1 - Math.exp(-dt * 5));
       n.root.rotation.y = n.yaw;
-      if (n.visual) AF.avatar.animate(n.parts, n.st, dt, 0, true);
+      // n.walk: a story NPC led along a path by its mission (81-heist moves n.x/z/yaw and sets the speed) walks instead of standing
+      if (n.visual) AF.avatar.animate(n.parts, n.st, dt, n.walk || 0, true);
     }
   });
 

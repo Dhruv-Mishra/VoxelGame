@@ -55,7 +55,9 @@ compare draws and GPU ms.
 - **No per-frame garbage** (heap-sampled with `tools/play-perf.js` + a CDP sampling profile): `Math.hypot` is replaced in
   00-prologue by an allocation-free 1–3-argument version (V8's builtin copied its arguments into a new array on every call);
   `Map` loops in ticks use `keys()` / `values()`, never `for (const [k, v] of map)`; the walk-mode interact scan runs at 15 Hz
-  (and at once on E / F); far animals skip their per-frame field writes.
+  (and at once on E / F); far animals skip their per-frame field writes. The region streamer's terrain mesher writes quads through
+  `GeoBuf.quadS` with scratch corners and the chunk pads copy rows element by element (array literals per quad, a closure per side
+  run and a subarray view per pad row were ~50 MB/s of garbage while walking; total 85 → 30 MB/s, `tools/garbage-probe.js`: a sampling heap profile incl. collected objects while walking / driving).
 
 ## 3b. No freezes in play (locked)
 Measured with `tools/hitch-probe.js` + `tools/play-scenario.js` (title, run, steal + drive, guns, 4-star chase, map, bag, night,
@@ -66,6 +68,18 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
   compiles both light-pool variants, and stay hidden until it resolves.
 - **Graphics changes that swap programs** (tier, shadows; menu or auto-tier) run through `AF.stream.regfx(apply)`: veil, apply,
   parallel compile, reveal. Auto-tier never fires during a travel.
+- **First draws** (01-stream `ST.firstDraws`): a linked program is not finished on ANGLE / D3D11 (Chrome / Edge on Windows). Its
+  first draw with unnormalized integer vertex formats (the voxel `aPal` Uint16 / `aAN` Uint8 / `aBU` Int16) compiles a vertex-input
+  variant in the GPU process (15-25 ms each, `tools/d3d-variant.js`), a first point-sprite draw a geometry-shader variant,
+  and three's first-use program-log query (`getProgramInfoLog`, synchronous) waits for all of them: these were the 100-460 ms
+  frames at the first title cuts, at start, after travels and at the first shot. Every compile (`ST.warm`, `compileAhead`) also
+  collects each new (program, vertex layout) and draws it once with a degenerate 3-vertex proxy on layer 31, alone, with the lights
+  on that layer meanwhile (same light state = same program), both night-pool variants, after every ready program passed its first
+  use. Behind a veil all at once; in play one (entry, light variant) a frame, paced by a GPU fence (never a synchronous wait);
+  `compileAhead` resolves once drawn. The boot loader stays up until the `preloaded` listeners' first draws are done
+  (`ST.drainFirstDraws`), and a veil only lifts once the GPU finished the proxies (`ST.gpuIdle`: a polled fence; lifted early, the
+  first visible frame waited 100-140 ms on the variant compiles). Compile-ahead stand-ins must carry the real vertex formats (02 `FADE.warmGeo`). Proxies never link a
+  program (`ST.firstDraws.newProgs` stays 0). The post chain's god-ray quads compile with the warm (`AF.post.warmJobs`).
 - **Env reflections** (03 `env-refresh`, every ~20 s with the sky): the PMREM writes into two cube-UV targets used in turn (no
   allocation), and a persistent `pmrem-keep` mesh in the env scene keeps three r160's per-call background-box program cached (it
   relinked on every refresh before).
@@ -146,6 +160,11 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
   only), the armoured car (`armored` vehicle type: its own instanced car batch, 1–3 draws while one exists) and 2–4 chaser limousines
   (the existing `wagon` batch). Launchers fire up to 8 pooled rocket meshes kept in the strike-jet group (compiled with it at
   `preloaded`, hidden while idle); mission jets reuse the same 4 pooled jet meshes. Nothing new runs while the job is off.
+  The midnight expansion adds no draws of its own: the bank's sky deck + stair tower and the City Hall ladder are world voxels (one
+  existing ladder mesh moved), the roof watch (7) and the zoo's Kestrel guards (7) are path walkers on the shared draws, enabled only
+  while their scene is on (`HB.roof`, `HS.show`); one zoo camera housing (1 draw within 70 m, the bank's camera geometry). Dry Creek
+  Depot (44-hideout) and Serena's secret passage (44-island / 07 second tube) merge into the outland tiles; Vera's car is one runtime
+  car on the existing batch. Kit and Vera move by writing NPC poses (no new objects).
 - Audio (`75`): one AudioContext; samples (`assets/sfx`, mono MP3: one-shots 32 kHz / 48 kbps, loops + beds 24 kHz / 40 kbps,
   voice 16 kHz / 24 kbps; ~2.3 MB for 167 files) decode on first use, the core set at unlock; ≤ 32 voices (20 on phones); loops
   fade by distance and are reaped after 120 s unused; the context suspends while the page is hidden. Ambience beds are weighted by
@@ -213,5 +232,9 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
   `tick-survey.js` / `lod-check.js`, `stream-fly.js` / `city-fly.js` / `outland-drive.js` / `stream-test.js` (streaming hitches),
   `hitch-probe.js` (every rAF gap > 60 ms with its top hooks / GL calls, every runtime program link with its stack, worst single
   call per hook; `globalThis.__psExtraSrc` = `play-scenario.js` source + `__psScenario = 'play'`, `__psThrottle = 4` for a laptop,
-  `__psTrace` for a browser-wide trace). Long runs exceed the MCP timeout: start them un-awaited and stash the result on `page`.
+  `__psTrace` for a browser-wide trace whose events land on each hitch; `veil` marks hitches behind the loader; summarise with
+  `node tools/hitch-sum.js out.txt --ev`). From plain node: `node tools/pw-run.js tools/hitch-probe.js --g:__psScenario=play
+  --g:__psExtraFile=tools/play-scenario.js` (NODE_PATH must resolve playwright). Other agents' headless browsers on the same machine
+  inflate CPU ms and add GPU-process stalls: compare causes (links, first-use queries, hook names), not raw gaps.
+  Long runs exceed the MCP timeout: start them un-awaited and stash the result on `page`.
   Harnesses that boot their own page close other browser contexts.

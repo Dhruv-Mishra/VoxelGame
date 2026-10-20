@@ -261,11 +261,32 @@ try {
     A.zooYard = DS.yard || free((ZOO.x0 + ZOO.x1) / 2, ZOO.z0 + 30, 6, 10);
     A.locker = DS.locker || A.zooYard; A.hatch = DS.hatch || A.zooYard; A.server = DS.server || A.zooYard; A.manhole = DS.manhole || A.zooYard; A.street = DS.street || A.zooYard; A.denGate = DS.denGate || A.zooYard;
     const zb = [1e9, -20, 1e9, -1e9, 30, -1e9]; for (const p of [A.zooYard, A.locker, A.hatch, A.denGate]) { zb[0] = Math.min(zb[0], p.x); zb[2] = Math.min(zb[2], p.z); zb[3] = Math.max(zb[3], p.x); zb[5] = Math.max(zb[5], p.z); }
-    A.zooBox = [zb[0] - 25, -20, zb[2] - 25, zb[3] + 25, 30, zb[5] + 25];
-    S.define('zoo', { box: A.zooBox, mode: 'fail', voice: 'zw', reflexS: 2.0, radius: 80 });
+    // the zoo at midnight is Kestrel's: armed guards from the Treetop Trail (where the crew drops in) down the bears' walk, the
+    // promenade and the east walk to the keepers' gate and the lion house; a camera over the gate. The zone runs from the banyan to the den.
+    const TT = (ZOO.treetop && ZOO.treetop.T) || { x: -421, z: -268 };
+    A.banyan = { x: TT.x, y: 6, z: TT.z }; A.lookout = { x: TT.x - 3.5, y: 11.5, z: TT.z, yaw: -PI / 2 }; A.treeDeck = { x: TT.x - 5, y: 6, z: TT.z, yaw: -PI / 2 };
+    A.zooBox = [Math.min(zb[0] - 25, -535), -20, Math.min(zb[2] - 25, -300), Math.max(zb[3] + 25, -393), 32, Math.max(zb[5] + 25, -78)];
+    const zz = S.define('zoo', { box: A.zooBox, mode: 'fight', voice: 'g3', reflexS: 2.0, radius: 120 });
     const wpath = DS.watchPath && DS.watchPath.length > 1 ? DS.watchPath : [P3(A.zooYard), [A.zooYard.x + 10, A.zooYard.y, A.zooYard.z], [A.zooYard.x + 10, A.zooYard.y, A.zooYard.z + 8]];
     const watch = walker('watchman', 'Night watchman', wpath, { speed: 0.9, mode: 'loop', dwell: [{ i: 0, t: 6 }] }, crowdLook('worker', 'm', rng, 0x2a3550, 0x2a3550));
     if (watch) S.guard('zoo', { path: watch, voice: 'zw', name: 'Watchman', range: 15, armed: false });
+    const kLook = () => { const L = AF.peopleKit.makeLook('police', 'm', 'adult', rng); L.top = Object.assign({}, L.top, { col: 0x3e434a }); L.bottom = Object.assign({}, L.bottom, { col: 0x30343a }); L.hat = 'cap'; L.hatCol = 0x26292e; return L; };
+    const gy = (x, z) => { const y = AF.surfaceBelow(x, z, 3, 6); return Number.isFinite(y) ? y : 0.25; };
+    HS.zooG = [];
+    const zg = (k, pts, o, vantage) => {
+      const p = walker('zoo' + k, 'Kestrel guard', pts.map(([x, z]) => [x, gy(x, z), z]), Object.assign({ mode: 'pingpong' }, o), kLook());
+      if (p) { const g = S.guard('zoo', { path: p, voice: k % 2 ? 'g3' : 'g1', name: 'Kestrel guard', range: 16 }); if (g) { g.vantage = !!vantage; HS.zooG.push(g); } }
+    };
+    zg(0, [[-453, -256], [-453, -207]], { speed: 0.85, dwell: [{ i: 0, t: 4 }, { i: 1, t: 4 }] }, true);     // the bears' walk (in sight of the lookout)
+    zg(1, [[-453, -200], [-453, -168]], { speed: 0.8, dwell: [{ i: 0, t: 3 }, { i: 1, t: 5 }] }, true);
+    zg(2, [[-494, -150], [-494, -121]], { speed: 0.8, dwell: [{ i: 0, t: 5 }, { i: 1, t: 3 }] }, true);      // the east walk's far end
+    zg(3, [[-443, -287], [-405, -287]], { speed: 0.75, dwell: [{ i: 0, t: 6 }, { i: 1, t: 6 }] }, false);    // the Treetop Trail lawn, under the deck
+    zg(4, [[-460, -162], [-489, -162]], { speed: 0.85, dwell: [{ i: 0, t: 3 }, { i: 1, t: 4 }] }, false);    // the promenade
+    zg(5, [[-490, -117], [-490, -95]], { speed: 0.7, dwell: [{ i: 0, t: 4 }, { i: 1, t: 6 }] }, false);      // the east walk by the gate
+    zg(6, [[-492.5, -86.5], [-492.5, -82]], { speed: 0.3, dwell: [{ i: 0, t: 9 }, { i: 1, t: 7 }] }, false); // the keepers' gate post
+    zz.armoured = true;
+    { const HBk = AF.heistBank, zc = S.camera('zoo', { name: 'KEEPERS\u2019 GATE', x: -495.6, y: 3.2, z: -90.6, yaw0: PI, sweep: 0.55, period: 9, pitch: 0.32, range: 15, fov: 0.86 });
+      if (zc && HBk && HBk.camGeo) { const m = AF.modelMesh(HBk.camGeo); m.position.set(zc.x, zc.y, zc.z); m.castShadow = false; m.visible = false; AF.scene.add(m); zc.mesh = m; } }
     // ---------------------------------------------------------------- Corsair Key: the finale's cast + Silas's crate
     const KS = (AF.key && AF.key.spots) || {}, K = WP.key, F = KS.fight || {};
     A.keyStrip = K ? { x: (K.airstrip.x0 + K.airstrip.x1) / 2, y: K.airstrip.y, z: K.airstrip.z } : { x: 560, y: 2, z: 3176 };

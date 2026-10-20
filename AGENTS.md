@@ -49,7 +49,10 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   60 atmosphere · 61 post (bloom, AO, grade, upscale) · 62 water · 63 sky.
 - World: 05 plan · 07 outland height/colour + tile mesher (workers) · 10 terrain/coast · 11 streets · 12 nature ·
   13–43 districts · 44-farms/flora/island/sites/wayside · 44-key (Corsair Key: Silas's island east of Serena — airstrip, hangar,
-  villa, jetty, lighthouse, a flyable Cub; built from Serena's cached kit; the heist's finale) · 45 friends colony (its road joins
+  villa, jetty, lighthouse, a flyable Cub; built from Serena's cached kit; the heist's finale) ·
+  44-hideout (`AF.hideout`: Dry Creek Depot, Vera's walk-in adobe depot off the Ochre Trail (desert) — map room with a relief map of
+  Port Solace + target flags, photo board, vault blueprint, chalk timeline; spots `door/inside/park/road/drive/table/vera/crew/board/
+  pins/shots`, `mapPoint(x, z)`; merged outland props + wall colliders, lights at build) · 45 friends colony (its road joins
   the highway, 49-roads) · 46 zoo (`ZOO.hours` 8–22, `AF.zoo.feed/feedAt/lure`) ·
   46-zoo-tree (Treetop Trail annex: Great Banyan, treehouse deck, boardwalk ramps, rope bridge, lookout — static voxels, no draws) ·
   46-zoo-den (`AF.den`: Lion House night den + keepers' yard at Pride Rock's SE corner, and below it a 1941 bunker, a brick storm
@@ -73,7 +76,7 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   the minimap + map, and a turn-by-turn / compass guidance line under the objective; `AF.ui.placeAt(x, z)` names a place) · 74 map (`map.overlays`, `map.miniOverlays`) ·
   75 extras (photo mode `P`, Solace Stars collectibles) · 75-audio (`AF.audio`: samples, loops, zone ambience beds, footsteps,
   vehicles, PA; `play(id, {x,y,z})`, `hold(key, id, vol, rate, x, y, z)`; heist lines `voice(id, {x,y,z,radio}) → s`, `voiceLen`,
-  `voicePreload`, `stopVoice`; `music(id | null, {fade, vol})`) · 98 tests · 99 boot.
+  `voicePreload`, `stopVoice`; `music(id | null, {fade, vol})`; synthesized `beep(freq, dur, vol)` / `tone(key, freq, vol)` / `stopTone(key)`) · 98 tests · 99 boot.
 - Gameplay: 76 core (`AF.G` tuning, `AF.save`, money, health/death, `AF.shop` sheet, `AF.fx` particles, `AF.sfx`, `AF.hud`,
   forget policy) · 76-inventory (`AF.inv`: the bag on I / BAG — snacks, pet treats, `AF.inv.extra` rows lent by missions;
   `AF.save.inv`) · 76-minigame (`AF.minigame.play(kind, opts) → Promise<{ ok, cancelled, … }>`: lockpick, circuit, flow, signal,
@@ -97,8 +100,11 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   `CB.release` returns them. Cops = 8 pooled walkers in the `cop` look; the mob = 8 pooled `goon` walkers (`CB.spawnGoon/goons/
   clearGoons`: hostile without a wanted level, no heat). Kids / wheelchair users only ever flee. Everyone starts with bare fists
   (slot 0, held id `fists`, no held mesh); guns are bought or lent. Launchers (`bazooka`, `seeker`: `W.rocket`, gun counters sell
-  them, the heist lends them) fire pooled rockets (`CB.rockets`; the seeker locks the best jet / autogyro / hostile car in a 9° cone,
-  `CB.lock()`, a LOCKED tag under the crosshair). Strike jets have hit points (`G.jetHp`); `CB.jetMission({ n, target, onKill, owner })`
+  them, the heist lends them) fire pooled rockets (`CB.rockets`; the seeker acquires the best jet / autogyro / hostile car in a 9° cone
+  over `W.lockS` s — a red DOM box hugs it and `AF.audio.beep` quickens — then locks: green box + steady `AF.audio.tone`, and only a
+  locked rocket homes; `CB.seek`, `CB.lock()`). The Silenced Sniper (`sniper`: lent via `CB.lend('sniper')`, also sold) aims through a
+  scope: `AF.combat.scoped`, first-person lens at 11° (70 `PL.scope`; from a seat the lens sits over the roof), look speed scaled,
+  path walkers drawn / hittable farther (54 `WK.reach`). Strike jets have hit points (`G.jetHp`); `CB.jetMission({ n, target, onKill, owner })`
   runs mission jets (81's getaway), `CB.jetKill(k)` syncs a crewmate's kill. Armoured cars (`car.armor`, `G.armorCarK`) take a share
   of every hit. Police jurisdiction is geographic (`CB.mainIsland`): bank/getaway crimes still
   count, Serena/Corsair/liner crimes bring thugs instead. High heat adds pooled jets and evadable missiles. Typing GODMODE within
@@ -125,11 +131,21 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   step has a solo way through if a partner drops. No teleports mid-heist: `AF.noTravel()` makes map travel, go-to-friend and skip-crossing
   refuse; only cutscenes and checkpoint retries move the crew. `AF.quiet` (heist on) binds 60 % of the crowd. `node tools/coop-heist.js [port] [--four]` (server running, playwright resolvable, optional
   `CHROME=`) plays it end to end with two or four real clients: lockstep, getaway car, two keys, shared checkpoint/retry, exit and payout.
-  Bank alarms keep replenishing a bounded guard pool; the vault lends guns/armour and the hacker opens the physical getaway exit.
+  Bank alarms keep replenishing a bounded guard pool; the vault lends guns/armour; the fire exit opens from the tablet or its keypad.
   Guards use `WK.kill/sleep/revive` and `S.spawn`; ordinary ticks never revive bodies (lifecycle/network rules in `PERF.md`).
   Crew of 2–4: per-player tasks (`H.mg`: a padlock each on Kovac's grille, a uniform each off the rail, a licence each from Ezra; the
-  shared fact lands when every crew slot is done, `mg` op) — the arms cache (one cracker, `crack`/`crackp`) and the night's roles are the
-  exceptions. Act II: the stash maze (44-island fills chamber B with a 4 m-grid maze + rock; `AF.island.heist.nav/maze/racks/waveSpawns/holds`;
+  shared fact lands when every crew slot is done, `mg` op) — the arms cache (one cracker, `crack`/`crackp`) is the exception. There are no
+  roles: the whole crew plays every step, and the Kestrel tablet (T) is everyone's once the zoo hack is done. The pitch: Vera drives the
+  crew to Dry Creek Depot in the desert (`drive` cutscene, her car `H.vcar` moved by `driveTick`; `AF.hideout`, 44-hideout), the map-room
+  briefing (`brief`: board photos + table pins). Serena: Kit walks the crew (`kitTick`, `n.walk` in 57's NPC tick) to the hotel study's
+  bookcase door and the secret passage (`AF.island.heist.secret`, a second outland tube in 07 / 44-island) to a cleft by the smugglers'
+  tunnel. Midnight after `park`: City Hall's service ladder + Vera's silenced sniper (`vantage`, `snipe`: the 4 `vantage` guards of zone
+  `roof`; a patrol finding a body fails the step, `zone.onBody`), a plane from Westgate and a skydive (`H.flag.chuted`) onto the zoo's
+  Great Banyan (`zoojump`, `zoosnipe`: Kestrel guards `HS.zooG`, `g.vantage` = in sight of the lookout; zone `zoo`), `lions`, `den`,
+  `bunker`, `hack`, `drain`, a second skydive onto the bank's steel sky deck (20-downtown voxels: a deck at 40 m over Charter Street and
+  an 8-flight stair tower down to the roof door), `roofclear` (the 3 guards the rifle couldn't see), then `door` ... `cash` inside. Seen
+  at the zoo or on the roof = five stars (`blown`; the job waits until the police lose the crew). The story voice queue drops lines once
+  their step is two behind or they waited too long, and the next cutscene's lines are preloaded a step ahead. Act II: the stash maze (44-island fills chamber B with a 4 m-grid maze + rock; `AF.island.heist.nav/maze/racks/waveSpawns/holds`;
   the player is in first person inside the tube; the cache / racks answer only with a clear line to their front),
   cracking starts a siege (waves of reserve guards, `S.spawn`, sized by crew; in combat only `zone.hunters` (2) close in, the rest wait at
   `zone.holds` past the maze's way out), then a jet-ski chase (`chase` step, 1 + 2 per player, riders need line of sight + miss fast / off-screen targets, host-steered riders =

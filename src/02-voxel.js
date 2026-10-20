@@ -998,6 +998,9 @@ AF.removeStatic = (pr) => {
 AF.addWater = (geo, mat) => { AF.world.water.push({ geo, mat }); };
 
 function meshTerrainRegion(rx, rz, buf) { runSync(meshTerrainRegionG(rx, rz, buf)); }
+// scratch quad corners / uvs for GeoBuf.quadS (filled and consumed with no yield in between, so concurrent generators can share them)
+const TQ = new Float64Array(12), TU = new Float64Array(8);
+const aoT = (a, b, c) => (a && b) ? 0 : 3 - (a + b + c);
 function* meshTerrainRegionG(rx, rz, buf) {
   const H = W.H, C = W.C, S = W.S, dirtI = AF.col('dirt');
   const bx0 = rx * REG, bz0 = rz * REG, bx1 = Math.min(NX, bx0 + REG), bz1 = Math.min(NZ, bz0 + REG);
@@ -1016,10 +1019,7 @@ function* meshTerrainRegionG(rx, rz, buf) {
     const s10 = occ(j - PW, bx - 1, bz, h), s12 = occ(j + PW, bx + 1, bz, h), s01 = occ(j - 1, bx, bz - 1, h), s21 = occ(j + 1, bx, bz + 1, h);
     const c00 = occ(j - PW - 1, bx - 1, bz - 1, h), c20 = occ(j + PW - 1, bx + 1, bz - 1, h), c22 = occ(j + PW + 1, bx + 1, bz + 1, h), c02 = occ(j - PW + 1, bx - 1, bz + 1, h);
     let ao = 255;
-    if (s10 | s12 | s01 | s21 | c00 | c20 | c22 | c02) {
-      const A = (a, b, c) => (a && b) ? 0 : 3 - (a + b + c);
-      ao = A(s10, s01, c00) | (A(s12, s01, c20) << 2) | (A(s12, s21, c22) << 4) | (A(s10, s21, c02) << 6);
-    }
+    if (s10 | s12 | s01 | s21 | c00 | c20 | c22 | c02) ao = aoT(s10, s01, c00) | (aoT(s12, s01, c20) << 2) | (aoT(s12, s21, c22) << 4) | (aoT(s10, s21, c02) << 6);
     key[i * d + k] = ((h + 32768) * 8192 + C[ci]) * 256 + ao + 1;
   } yield; }
   for (let i = 0; i < w; i++) { for (let k = 0; k < d;) {
@@ -1030,10 +1030,13 @@ function* meshTerrainRegionG(rx, rz, buf) {
     while (lit && i + wid < w) { for (let t = 0; t < len; t++) if (key[(i + wid) * d + k + t] !== kk) { stop = true; break; } if (stop) break; wid++; }
     const v = kk - 1, aob = v % 256, rest = Math.floor(v / 256), c = rest % 8192, h = Math.floor(rest / 8192) - 32768;
     const y = h * VS, xa = X0 + (bx0 + i) * VS, xb = xa + wid * VS, za = Z0 + (bz0 + k) * VS, zb = za + len * VS;
-    const ao = aob === 255 ? [3, 3, 3, 3] : [aob & 3, (aob >> 2) & 3, (aob >> 4) & 3, (aob >> 6) & 3];
+    const a0 = aob === 255 ? 3 : aob & 3, a1 = aob === 255 ? 3 : (aob >> 2) & 3, a2 = aob === 255 ? 3 : (aob >> 4) & 3, a3 = aob === 255 ? 3 : (aob >> 6) & 3;
     const u0 = bx0 + i, v0 = bz0 + k;
-    // +y face, CCW from above: (xa,za) -> (xa,zb) -> (xb,zb) -> (xb,za)
-    buf.quad([xa, y, za], [xa, y, zb], [xb, y, zb], [xb, y, za], [u0, v0], [u0, v0 + len], [u0 + wid, v0 + len], [u0 + wid, v0], c, 2, [ao[0], ao[3], ao[2], ao[1]]);
+    // +y face, CCW from above: (xa,za) -> (xa,zb) -> (xb,zb) -> (xb,za); scratch corners (allocation-free: the array literals per
+    // quad were most of the ~50 MB/s of garbage the terrain mesher made while streaming)
+    TQ[0] = xa; TQ[1] = y; TQ[2] = za; TQ[3] = xa; TQ[4] = y; TQ[5] = zb; TQ[6] = xb; TQ[7] = y; TQ[8] = zb; TQ[9] = xb; TQ[10] = y; TQ[11] = za;
+    TU[0] = u0; TU[1] = v0; TU[2] = u0; TU[3] = v0 + len; TU[4] = u0 + wid; TU[5] = v0 + len; TU[6] = u0 + wid; TU[7] = v0;
+    buf.quadS(TQ, TU, 0, 1, 2, 3, c, 2, a0, a3, a2, a1);
     for (let a = 0; a < wid; a++) for (let t = 0; t < len; t++) key[(i + a) * d + k + t] = 0;
     k += len;
   } yield; }
@@ -1042,6 +1045,24 @@ function* meshTerrainRegionG(rx, rz, buf) {
     // run along the axis perpendicular to (dx,dz)
     const alongX = dz !== 0;
     const nA = alongX ? w : d, nB = alongX ? d : w;
+    // the current run (set before emit): one emit per side pass instead of a closure per run
+    let eb = 0, ea = 0, erun = 0;
+    const emit = (ylo, yhi, col, fl = 0) => {
+      if (yhi <= ylo) return;
+      const Y0b = ylo * VS, Y1b = yhi * VS;
+      if (alongX) {
+        const zf = Z0 + (bz0 + eb + (dz > 0 ? 1 : 0)) * VS, xa = X0 + (bx0 + ea) * VS, xb = xa + erun * VS, u0 = bx0 + ea;
+        const xl = dz > 0 ? xa : xb, xr = dz > 0 ? xb : xa, ul = dz > 0 ? u0 : u0 + erun, ur = dz > 0 ? u0 + erun : u0;
+        TQ[0] = xl; TQ[1] = Y0b; TQ[2] = zf; TQ[3] = xr; TQ[4] = Y0b; TQ[5] = zf; TQ[6] = xr; TQ[7] = Y1b; TQ[8] = zf; TQ[9] = xl; TQ[10] = Y1b; TQ[11] = zf;
+        TU[0] = ul; TU[1] = ylo; TU[2] = ur; TU[3] = ylo; TU[4] = ur; TU[5] = yhi; TU[6] = ul; TU[7] = yhi;
+      } else {
+        const xf = X0 + (bx0 + eb + (dx > 0 ? 1 : 0)) * VS, za = Z0 + (bz0 + ea) * VS, zb = za + erun * VS, u0 = bz0 + ea;
+        const zl = dx > 0 ? zb : za, zr = dx > 0 ? za : zb, ul = dx > 0 ? u0 + erun : u0, ur = dx > 0 ? u0 : u0 + erun;
+        TQ[0] = xf; TQ[1] = Y0b; TQ[2] = zl; TQ[3] = xf; TQ[4] = Y0b; TQ[5] = zr; TQ[6] = xf; TQ[7] = Y1b; TQ[8] = zr; TQ[9] = xf; TQ[10] = Y1b; TQ[11] = zl;
+        TU[0] = ul; TU[1] = ylo; TU[2] = ur; TU[3] = ylo; TU[4] = ur; TU[5] = yhi; TU[6] = ul; TU[7] = yhi;
+      }
+      buf.quadS(TQ, TU, 0, 1, 2, 3, col, nIdx + fl, 1, 1, 3, 3);
+    };
     for (let b = 0; b < nB; b++) {
       let a = 0;
       while (a < nA) {
@@ -1054,19 +1075,7 @@ function* meshTerrainRegionG(rx, rz, buf) {
           if (H[c2] !== h || W.hB(bx2 + dx, bz2 + dz) !== nh || C[c2] !== topC || (S[c2] || (h - nh > 1 ? dirtI : C[c2])) !== sideC) break;
           run++;
         }
-        const emit = (ylo, yhi, col, fl = 0) => {
-          if (yhi <= ylo) return;
-          const Y0b = ylo * VS, Y1b = yhi * VS;
-          if (alongX) {
-            const zf = Z0 + (bz0 + b + (dz > 0 ? 1 : 0)) * VS, xa = X0 + (bx0 + a) * VS, xb = xa + run * VS, u0 = bx0 + a;
-            if (dz > 0) buf.quad([xa, Y0b, zf], [xb, Y0b, zf], [xb, Y1b, zf], [xa, Y1b, zf], [u0, ylo], [u0 + run, ylo], [u0 + run, yhi], [u0, yhi], col, nIdx, [1, 1, 3, 3], fl);
-            else buf.quad([xb, Y0b, zf], [xa, Y0b, zf], [xa, Y1b, zf], [xb, Y1b, zf], [u0 + run, ylo], [u0, ylo], [u0, yhi], [u0 + run, yhi], col, nIdx, [1, 1, 3, 3], fl);
-          } else {
-            const xf = X0 + (bx0 + b + (dx > 0 ? 1 : 0)) * VS, za = Z0 + (bz0 + a) * VS, zb = za + run * VS, u0 = bz0 + a;
-            if (dx > 0) buf.quad([xf, Y0b, zb], [xf, Y0b, za], [xf, Y1b, za], [xf, Y1b, zb], [u0 + run, ylo], [u0, ylo], [u0, yhi], [u0 + run, yhi], col, nIdx, [1, 1, 3, 3], fl);
-            else buf.quad([xf, Y0b, za], [xf, Y0b, zb], [xf, Y1b, zb], [xf, Y1b, za], [u0, ylo], [u0 + run, ylo], [u0 + run, yhi], [u0, yhi], col, nIdx, [1, 1, 3, 3], fl);
-          }
-        };
+        eb = b; ea = a; erun = run;
         if (W.sideFn && h - nh > 1) {
           // optional per-block side colouring (layered cliffs): W.sideFn(bx, bz, blockY, topColour) -> colour index or 0 for default
           let y0 = nh, cur = W.sideFn(bx, bz, nh, topC) || sideC;
@@ -1202,10 +1211,10 @@ function* meshVoxelRegionG(rx, rz, out, par = false) {
       if (!colsReady) { for (let x = -1; x <= 16; x++) for (let z = -1; z <= 16; z++) hcol[(x + 1) * 18 + (z + 1)] = W.hB(ox + x, oz + z) + GOFF; colsReady = true; }
       const oy = cy * 16;
       pad.fill(0);
-      // interior
+      // interior (an element loop: a 16-wide subarray view per row was ~10 MB/s of garbage while streaming)
       for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) {
-        const src = (x * 16 + y) * 16;
-        pad.set(D.subarray(src, src + 16), ((x + 1) * 18 + (y + 1)) * 18 + 1);
+        const src = (x * 16 + y) * 16, dst = ((x + 1) * 18 + (y + 1)) * 18 + 1;
+        for (let z = 0; z < 16; z++) pad[dst + z] = D[src + z];
       }
       // border shell from the 26 neighbour chunks, read directly (engine R2 boot: no per-voxel W.get; same values —
       // an out-of-world or empty neighbour chunk reads 0 exactly like W.get)
@@ -1529,7 +1538,10 @@ AF.onTick('lod-fade', 881, (dt) => {
   if (key !== FADE.warmKey) {
     FADE.warmKey = key; const M = fadeMats(), V = AF.mat.voxel;
     for (const m of [M.in, M.out]) { if (!!m.envMap !== !!V.envMap) m.needsUpdate = true; m.envMap = V.envMap; }
-    const g = FADE.warmGeo || (FADE.warmGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)));
+    // the real fade meshes' vertex formats (ANGLE / D3D11 builds a variant per program and integer layout on the first draw: 01-stream
+    // first draws proxy-draw this layout ahead)
+    const g = FADE.warmGeo || (FADE.warmGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3))
+      .setAttribute('aBU', new THREE.BufferAttribute(new Int16Array(6), 2)).setAttribute('aPal', new THREE.BufferAttribute(new Uint16Array(3), 1)).setAttribute('aAN', new THREE.BufferAttribute(new Uint8Array(3), 1)));
     const group = FADE.warmGroup || (FADE.warmGroup = []);
     if (!group.length) for (const mat of [M.in, M.out]) for (const recv of [true, false]) { const w = new THREE.Mesh(g, mat); w.frustumCulled = false; w.receiveShadow = recv; w.castShadow = recv; group.push(w); }
     FADE.compiling = true;
@@ -1814,7 +1826,7 @@ const streamWork = (budget) => {
       STR.jobs[STR.kind]++;
     }
     const ts = performance.now(), step = STR.gen.next(), fin = step.done, st = performance.now() - ts;
-    if (st > STR.maxStep) { STR.maxStep = st; STR.maxPhase = STR.kind + ':' + STR.phase; }
+    if (st > STR.maxStep) { STR.maxStep = st; STR.maxPhase = STR.kind + ':' + STR.phase + ':' + STR.key; }
     STR.ms[STR.phase] = (STR.ms[STR.phase] || 0) + st;
     if (fin) { STR.gen = null; STR.urgent = false; STR.rest = 0; jobDone(STR.kind); }
     else if (step.value === WAIT) { STR.parked.push({ gen: STR.gen, key: STR.key, kind: STR.kind, urgent: STR.urgent }); STR.gen = null; STR.urgent = false; }

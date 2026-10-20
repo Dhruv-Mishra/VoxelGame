@@ -2,9 +2,11 @@
 try {
 // ===== 77-combat: weapons, gunplay, fighting, the crowd's fight-or-flight, run-overs, police + the wanted level, vehicle damage  (OWNER: game) =====
 // Weapons: slot 0 = bare fists for everyone (held id 'fists'; no friend signature weapon is granted), then firearms from a gun
-//   counter (AF.save.guns / .ammo) and mission weapons lent by AF.combat.lend(id, ammo) (spistol, ssmg, tommy, lmg; never saved).
-//   Launchers (cls 'launcher', W.rocket): the Bazooka (straight rocket) and the Seeker (locks the nearest jet / autogyro / car in a
-//   narrow cone and steers onto it) fire pooled rockets that burst on contact or by proximity (CB.rockets); sold at gun counters too.
+//   counter (AF.save.guns / .ammo) and mission weapons lent by AF.combat.lend(id, ammo) (spistol, ssmg, tommy, lmg, sniper; never saved).
+//   Launchers (cls 'launcher', W.rocket): the Bazooka (straight rocket) and the Seeker (acquires the best jet / autogyro / hostile car in
+//   a narrow cone over W.lockS s: a red box hugs it and a beep quickens, then a green box + steady tone = locked; its rocket then steers
+//   onto it (CB.seek), unlocked it flies straight) fire pooled rockets that burst on contact or by proximity (CB.rockets); sold at gun
+//   counters too. The Silenced Sniper (lent or sold) aims through a scope (AF.combat.scoped, see GUNS.sniper).
 //   Click or Q attack, right mouse (hold) or Z aim (tighter FOV, steadier), R reload. Switching: mouse wheel, 1-5, X taps
 //   to the next one, holding X opens the weapon wheel; the weapon HUD (top right) has a ▸ that takes the next weapon (tap / click) and
 //   opens the wheel when held. Touch: HIT / FIRE / AIM / CROUCH (72-touch); weapons from the HUD chip.
@@ -56,11 +58,19 @@ try {
     // launchers: one rocket a pull (rocket = [speed m/s, turn rad/s (0 = straight), life s, blast radius m, blast damage, seeker]); sold
     // at gun counters and lent by the heist's getaway (81). Rockets are pooled meshes in the strike-jet group (no new programs).
     bazooka: { name: 'Bazooka', cls: 'launcher', dmg: 0, rate: 1.1, mag: 1, reload: 2.1, range: 320, spread: 0.004, bloom: 0, bloomMax: 0, kick: 0.12, rec: 3, pellets: 1, loud: 140, zoom: 34, flash: 1.6, tr: [0.06, 3, 3, 1.6, 0.5], price: 6500, pack: 4, packPrice: 380, snd: 'rocket', two: true, heavy: true, rocket: [80, 0, 5, 7, 210, false] },
-    seeker: { name: 'Seeker Launcher', cls: 'launcher', dmg: 0, rate: 1.5, mag: 2, reload: 2.6, range: 520, spread: 0.004, bloom: 0, bloomMax: 0, kick: 0.1, rec: 3, pellets: 1, loud: 140, zoom: 30, flash: 1.4, tr: [0.06, 3, 3, 1.6, 0.5], price: 9500, pack: 4, packPrice: 520, snd: 'rocket', two: true, heavy: true, rocket: [95, 2.8, 7, 6, 170, true] },
+    seeker: { name: 'Seeker Launcher', cls: 'launcher', dmg: 0, rate: 1.5, mag: 2, reload: 2.6, range: 520, spread: 0.004, bloom: 0, bloomMax: 0, kick: 0.1, rec: 3, pellets: 1, loud: 140, zoom: 30, flash: 1.4, tr: [0.06, 3, 3, 1.6, 0.5], price: 9500, pack: 4, packPrice: 520, snd: 'rocket', two: true, heavy: true, rocket: [95, 2.8, 7, 6, 170, true], lockS: 1.2 },
+    // the Silenced Sniper: bolt action, one body shot drops anyone (a guard's 240 hp included), scoped while aiming. scope = the aim is a
+    // scope (first-person view at `zoom` degrees, DOM reticle, look speed scaled by the zoom, breathing sway; scopeSpread replaces the
+    // aimed spread). lend + sell: missions lend it (AF.combat.lend('sniper')) and gun counters sell it.
+    // Mission API: AF.combat.lend('sniper', ammo?) / unlend('sniper') / has('sniper'); AF.combat.scoped = true while looking through
+    // the scope (on foot or from a seat); every shot is a 'gunshot' { silenced: true, weapon: 'sniper' } and CB.onWalkerHit gets
+    // { head, dmg, silenced: true, weapon: 'sniper' }. Walkers stay hittable out to `range` (54 widens the path-walker radius while scoped).
+    sniper: { name: 'Silenced Sniper', cls: 'rifle', dmg: 260, rate: 1.4, mag: 5, reload: 2.8, range: 300, spread: 0.028, scopeSpread: 0.00035, bloom: 0.0003, bloomMax: 0.0006, kick: 0.06, rec: 3.5, pellets: 1, silenced: true, loud: 6, zoom: 11, scope: true, flash: 0.25, tr: [0.012, 6, 0.9, 0.88, 0.8], price: 4500, pack: 10, packPrice: 60, snd: 'sil', two: true, lend: true, sell: true, model: [14, 7] },
   };
   const GUN_IDS = Object.keys(GUNS);
-  // AF.GUNS = what a gun counter sells (78-jobs lists it); the full weapon table is AF.combat.GUNS
-  AF.GUNS = {}; for (const id of GUN_IDS) if (!GUNS[id].lend) AF.GUNS[id] = GUNS[id];
+  // AF.GUNS = what a gun counter sells (78-jobs lists it): every weapon not lent-only (sell: true = lent by missions and sold too); the full
+  // weapon table is AF.combat.GUNS
+  AF.GUNS = {}; for (const id of GUN_IDS) if (!GUNS[id].lend || GUNS[id].sell) AF.GUNS[id] = GUNS[id];
   // held models: built along -y from the hand (blade / barrel forward when the arm is raised), guns' grips along -z (down).
   // geo.userData.tip = the muzzle in the held mesh's frame
   const MODELS = new Map();
@@ -109,6 +119,13 @@ try {
       m.box(0, L - 5, 5, 2, L + 3, 6, black); m.box(0, L - 4, 4, 2, L - 3, 5, dark); m.box(0, L + 1, 4, 2, L + 2, 5, dark);
       m.box(0, L + 2, 0, 2, L + 4, 2, wood); m.box(0, L + 3, 1, 2, hgt, 4, wood); m.box(0, hgt - 3, 0, 2, hgt, 4, wood);
       anchor = [0.5, (L + 2) / hgt, 2 / 6]; tipZ = 3.5;
+    } else if (id === 'sniper') {   // fat suppressor at the muzzle, long barrel, synthetic forestock, bolt receiver, a big scope on two rings, stock
+      const [L, stock] = g.model, Sp = 5, hgt = Sp + L + 3 + stock; m = new AF.Model(2, hgt, 7);
+      m.box(0, 0, 2, 2, Sp, 5, black); m.box(0, 0, 3, 2, 1, 4, dark);
+      m.box(0, Sp, 3, 2, Sp + L, 4, dark); m.box(0, Sp + 4, 2, 2, Sp + L + 1, 4, olive); m.box(0, Sp + L, 2, 2, Sp + L + 3, 5, dark);
+      m.box(0, Sp + L - 7, 5, 2, Sp + L + 3, 7, black); m.box(0, Sp + L - 8, 5, 2, Sp + L - 7, 7, steel); m.box(0, Sp + L - 5, 4, 2, Sp + L - 4, 5, dark); m.box(0, Sp + L + 1, 4, 2, Sp + L + 2, 5, dark);
+      m.box(0, Sp + L + 2, 0, 2, Sp + L + 4, 2, black); m.box(0, Sp + L + 3, 1, 2, hgt, 4, olive); m.box(0, Sp + L + 4, 4, 2, hgt - 2, 5, olive); m.box(0, hgt - 3, 0, 2, hgt, 4, olive);
+      anchor = [0.5, (Sp + L + 2) / hgt, 2 / 7]; tipZ = 3.5;
     } else if (id === 'bazooka' || id === 'seeker') {   // shoulder tube: muzzle ring at y 0, the grip + trigger under the middle, a sight
       const L = id === 'bazooka' ? 24 : 22, hgt = L; m = new AF.Model(4, hgt, 8);
       const tube = id === 'bazooka' ? olive : c(0x3a4148, { metal: 0.4, rough: 0.6 });
@@ -141,7 +158,7 @@ try {
 
   // ---------------------------------------------------------------- state
   const CB = AF.combat = { slot: 0, aimToggle: false, cd: 0, swing: 0, swingDur: 0.3, side: 0, hitAt: -1, reloadT: 0, mag: S.mag || (S.mag = {}), heat: 0, stars: 0, seenT: 0, engaged: 0, recoil: 0, flinch: 0, held: null, heldId: null, gallery: null,
-    bloom: 0, kick: 0, raise: 0, lastShot: -9 };
+    bloom: 0, kick: 0, raise: 0, lastShot: -9, scoped: false };
   const OWNED = [null], LEND = {}, CHEAT = {};
   // GODMODE (typed, see the cheat block): local only, never saved
   CB.cheat = { god: false };
@@ -172,8 +189,9 @@ try {
   const resOf = (id) => { const L = tmpOf(id); return L ? L.ammo : S.ammo[id] || 0; };
   const setMag = (id, n) => { const L = tmpOf(id); if (L) L.mag = n; else { CB.mag[id] = n; AF.saveSoon(); } };
   const setRes = (id, n) => { const L = tmpOf(id); if (L) { if (L !== CHEAT[id]) L.ammo = n; } else { S.ammo[id] = n; AF.saveSoon(); } };
-  // NPC weapon ids (path guards, peds) → a GUNS id with a held model: exact ids pass, prop / class names alias, unknown → revolver
-  const NPC_ALIAS = { pistol: 'revolver', sidearm: 'revolver', smg: 'tommy', rifle: 'rifle', sniper: 'rifle', shotgun: 'shotgun', lmg: 'lmg', silenced: 'spistol', sil: 'spistol' };
+  // NPC weapon ids (path guards, peds) → a GUNS id with a held model: exact ids pass (a guard given 'sniper' holds the silenced sniper),
+  // prop / class names alias, unknown → revolver
+  const NPC_ALIAS = { pistol: 'revolver', sidearm: 'revolver', smg: 'tommy', rifle: 'rifle', shotgun: 'shotgun', lmg: 'lmg', silenced: 'spistol', sil: 'spistol' };
   CB.npcGun = (id) => (!id ? null : GUNS[id] ? id : NPC_ALIAS[id] || 'revolver');
   CB.GUN_IDS = GUN_IDS;
   CB.gun = cur; CB.GUNS = GUNS; CB.melee = melee; CB.heldGeo = heldGeo; CB.pvp = false; CB.owned = owned; CB.magOf = magOf; CB.resOf = resOf;
@@ -258,6 +276,7 @@ try {
     lmg: '<path d="M1 10h7M8 8.5h11l1 1.5h3v2.5h-5.5l-1 3h-2l1-3h-3v3.5H9.5V12H8zM11 8.5V7h4v1.5M4 10l-1.5 5M6 10l1.5 5"/>',
     bazooka: '<path d="M1 9.5h20v3.5H1zM21 9l2-1v6.5l-2-1M8 13v3h2v-3M13 13v3h2v-3M4 9.5V8h3v1.5"/>',
     seeker: '<path d="M2 9.5h18v3.5H2zM20 9.5l3 1.75L20 13M7 13v3h2v-3M12 13v3h2v-3M5 9.5V7h4v2.5M6 8h2"/>',
+    sniper: '<path d="M1 10.5h4v2.5H1zM5 11h11l4-1h3v2.5h-3l-5 1-1.6 3H10l1-3H5zM9 7.5h7V9.5H9zM10.5 9.5V11M14.5 9.5V11"/>',
   };
   const wIcon = (k) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + (WI[k] || WI.melee) + '</svg>';
   const wcss = document.createElement('style');
@@ -765,7 +784,7 @@ try {
   // the current cone half-angle (rad): base x stance (aiming, crouched, moving, sprinting, airborne) + bloom from recent shots
   const spreadNow = (W) => {
     const p = AF.player, sp = AF.PL.walk.speed || 0;
-    let k = AF.PL.aim ? G.aimSpreadK : 1.3;
+    let k = CB.scoped && W.scopeSpread ? W.scopeSpread / W.spread : AF.PL.aim ? G.aimSpreadK : 1.3;
     if (p.crouch) k *= G.crouchSpreadK;
     if (p.body && !p.body.onGround) k *= G.airSpreadK; else if (sp > 7) k *= G.sprintSpreadK; else k *= 1 + G.moveSpreadK * Math.min(1, sp / 5.8);
     return W.spread * k + CB.bloom;
@@ -797,7 +816,7 @@ try {
     p.mesh.updateMatrixWorld(true);
     muzzle(MZ);
     let ox, oy, oz, t0 = 0;
-    const fp = AF.view.fp();
+    const fp = AF.view.fp() || CB.scoped;
     if (AF.PL.aim || fp) {   // through the crosshair: from the camera, starting level with the player
       cam.getWorldDirection(DIR); ox = cam.position.x; oy = cam.position.y; oz = cam.position.z;
       t0 = Math.max(0, (p.x - ox) * DIR.x + (p.y + 1.4 - oy) * DIR.y + (p.z - oz) * DIR.z);
@@ -867,7 +886,7 @@ try {
   };
   const seatSpread = (W) => {
     const v = VF.veh, sp = v ? Math.abs(v.v || 0) : 0;
-    let k = VF.aim ? G.aimSpreadK : 1.3;
+    let k = CB.scoped && W.scopeSpread ? W.scopeSpread / W.spread : VF.aim ? G.aimSpreadK : 1.3;
     k *= 1 + 0.25 * Math.min(1, sp / 20); if (v && v.air > 0) k *= G.airSpreadK;
     return W.spread * k + CB.bloom;
   };
@@ -899,7 +918,8 @@ try {
     p.mesh.position.set(S.x, S.y, S.z); p.mesh.rotation.set(S.pitch || 0, S.yaw, S.roll || 0, 'YXZ'); seatAimPose();
     p.mesh.updateMatrixWorld(true);
     muzzle(MZ);
-    if (VF.aim) { ox = cam.position.x; oy = cam.position.y; oz = cam.position.z; t0 = Math.max(0, (S.x - ox) * DIR.x + (S.y + 1.2 - oy) * DIR.y + (S.z - oz) * DIR.z); }
+    if (CB.scoped) { scopeSeatEye(SCE); ox = SCE.x; oy = SCE.y; oz = SCE.z; }   // through the scope: from the lens over the roof
+    else if (VF.aim) { ox = cam.position.x; oy = cam.position.y; oz = cam.position.z; t0 = Math.max(0, (S.x - ox) * DIR.x + (S.y + 1.2 - oy) * DIR.y + (S.z - oz) * DIR.z); }
     else { ox = MZ.x; oy = MZ.y; oz = MZ.z; }
     SELF = v;
     try { if (W.rocket) rocketLaunch(g, W, ox, oy, oz, v); else volley(g, W, ox, oy, oz, t0, seatSpread(W)); } finally { SELF = null; }
@@ -1135,7 +1155,7 @@ try {
     VV.placeMesh(car); if (car.interact) car.sync();
     if (Math.abs(car.v) < 0.5) { car.squad = null; car.parked = true; car.v = car.vx = car.vz = 0; }
   };
-  // the autogyro: circles the player from 3 stars, a searchlight pool at night, shoots from 4; can be shot down
+  // the autogyro: circles the player from 3 stars, shoots from 4; can be shot down
   const HELI = CB.heli = { on: false, x: 0, y: 0, z: 0, yaw: 0, vx: 0, vz: 0, hp: 0, a: 0, cd: 2, fall: false, vy: 0, grp: null, rotor: null };
   const heliBuild = () => {
     const c = (hex, o) => AF.col(hex, Object.assign({ jitter: 0.15, edge: 0.3 }, o)), navy = c(0x1f2a44), cream = c(0xefe6cf), glass = AF.col('glass'), dark = c(0x24262a), gold = c(0xd8b04a, { metal: 0.8 });
@@ -1171,7 +1191,6 @@ try {
       HELI.x += HELI.vx * dt; HELI.z += HELI.vz * dt; HELI.y += (ty - HELI.y) * Math.min(1, dt * 0.8);
       HELI.yaw += AF.angDiff(HELI.yaw, Math.atan2(P.x - HELI.x, P.z - HELI.z)) * Math.min(1, dt * 1.5);
       if (leave && (HELI.x - P.x) ** 2 + (HELI.z - P.z) ** 2 > 250 ** 2) { HELI.on = false; HELI.grp.visible = false; return; }
-      if (!leave && AF.time.night > 0.3) FX.glow.spawn(P.x, Math.max(P.y, gy) + 0.3, P.z, 0, 0, 0, 0.05, 6, 0, 0, 0.5, 0.48, 0.38);
       if (!leave && CB.stars >= 4 && (HELI.cd -= dt) <= 0 && !P.away) {
         HELI.cd = 1.6; const d3 = Math.hypot(P.x - HELI.x, P.y - HELI.y, P.z - HELI.z), clear = los(HELI.x, HELI.y - 0.2, HELI.z, P.x, P.y + 1, P.z) || los(HELI.x, HELI.y - 0.2, HELI.z, P.x, P.y + 1.6, P.z), hit = clear && Math.random() < 0.3;
         if (!clear) HELI.cd = 0.4;
@@ -1197,11 +1216,14 @@ try {
   const JET = CB.jets = { on: false, grp: null, jets: [], msl: [], warnT: 0, mission: null };
   const JET_MAX = 4;
   const jetBuild = () => {
-    const c = (hex, o) => AF.col(hex, Object.assign({ jitter: 0.1, edge: 0.3 }, o)), grey = c(0x5c6670, { metal: 0.5 }), dark = c(0x2a2e33), glass = AF.col('glass'), red = c(0xff4020, { emit: 1 });
+    // a light / mid grey airframe (it stays readable against the night sky), darker intakes + exhaust, red / green wingtip lights and a
+    // white tail beacon (palette emissives: same voxel program)
+    const c = (hex, o) => AF.col(hex, Object.assign({ jitter: 0.1, edge: 0.3 }, o)), grey = c(0xaeb6be, { metal: 0.25, rough: 0.5 }), dark = c(0x626970, { metal: 0.3 }), glass = AF.col('glass'), red = c(0xff4020, { emit: 1 });
+    const green = c(0x30ff60, { emit: 1 }), white = c(0xffffff, { emit: 0xffffff, emitK: 1.4 });
     const m = new AF.Model(28, 6, 44);
     m.box(12, 1, 2, 16, 4, 40, grey); m.box(13, 4, 28, 15, 5, 36, glass); m.box(13, 1, 40, 15, 3, 44, dark);
     m.box(0, 2, 12, 28, 3, 24, grey); m.box(6, 2, 2, 22, 3, 8, grey); m.box(13, 4, 2, 15, 6, 9, grey); m.box(12, 1, 0, 16, 4, 2, dark);
-    m.box(0, 2, 12, 1, 3, 14, red); m.box(27, 2, 12, 28, 3, 14, red);
+    m.box(27, 2, 12, 28, 3, 14, red); m.box(0, 2, 12, 1, 3, 14, green); m.box(13, 5, 2, 15, 6, 3, white);
     const geo = AF.meshModel(m, { vs: 1 / 4, anchor: [0.5, 0.5, 0.5] });
     const mm = new AF.Model(2, 2, 10); mm.box(0, 0, 0, 2, 2, 9, grey); mm.box(0, 0, 9, 2, 2, 10, red);
     const mgeo = AF.meshModel(mm, { vs: 1 / 8, anchor: [0.5, 0.5, 0.5] });
@@ -1334,15 +1356,18 @@ try {
   };
 
   // ---------------------------------------------------------------- rockets (bazooka + seeker launcher): 8 pooled meshes in the jet group
-  // W.rocket = [speed, turn rad/s, life s, blast radius, blast damage, seeker]. A seeker picks the best target in a 9 degree cone along the
-  // aim (strike jets first, then the autogyro, then hostile / chasing cars) and steers onto it; every rocket bursts on a voxel, the ground,
-  // within its proximity fuse of a jet (6 m), the autogyro (4 m), a car (its half length) or a person, or when it burns out.
+  // W.rocket = [speed, turn rad/s, life s, blast radius, blast damage, seeker]. A seeker acquires the best target in a 9 degree cone along
+  // the aim (strike jets first, then the autogyro, then hostile / chasing cars; CB.seek below) and, once fully locked, its rocket steers
+  // onto it; every rocket bursts on a voxel, the ground, within its proximity fuse of a jet (6 m), the autogyro (4 m), a car (its half
+  // length) or a person, or when it burns out.
   const RK = CB.rockets = [];
-  let lockAt = null, lockT = 0;
+  let lockT = 0;
   const LK = { o: null, kind: '' };
+  const SEEK_CONE = 0.988, SEEK_KEEP = 0.972, SEEK_GRACE = 0.3;   // acquire inside ~9 deg, hold inside ~13.5 deg, drop after 0.3 s unseen
   const lockPos = (o, kind, out) => (kind === 'heli' ? out.set(o.x, o.y + 1, o.z) : kind === 'car' ? out.set(o.x, o.y + 0.9, o.z) : out.set(o.x, o.y, o.z));
+  const lockAlive = (o, kind) => !!o && (kind === 'jet' ? o.on && !o.dead : kind === 'heli' ? HELI.on && !HELI.fall : !o.dead && o.active !== false);
   const lockFind = (ox, oy, oz, dx, dy, dz, range, self) => {
-    LK.o = null; LK.kind = ''; let best = 0.988;
+    LK.o = null; LK.kind = ''; let best = SEEK_CONE;
     const test = (o, kind, x, y, z, bias) => {
       const vx = x - ox, vy = y - oy, vz = z - oz, d = Math.hypot(vx, vy, vz); if (d < 6 || d > range) return;
       const c = (vx * dx + vy * dy + vz * dz) / d + bias; if (c <= best || !los(ox, oy, oz, x, y, z)) return;
@@ -1354,6 +1379,50 @@ try {
     return LK.o;
   };
   CB.lock = () => LK;
+  // ---- seeker lock-on (while a seeker is drawn on foot or in a seat): the target found in the cone (10 Hz) is acquired over W.lockS s;
+  // meanwhile a red box hugs it on screen (one pooled DOM element, placed every frame from its projected bounds after the camera moved)
+  // and a beep (AF.audio.beep) quickens; at full lock the box turns green and a steady tone holds (AF.audio.tone 'seek-lock') and the
+  // next rocket homes on it. A held target stays locked inside a wider cone (SEEK_KEEP); out of it or behind cover for SEEK_GRACE s, or
+  // destroyed, the lock resets. CB.seek: { on, o, kind, k 0..1, locked, beeps (scheduled), ticks (beep slots), iv (current beep interval s) }
+  const SK = CB.seek = { on: false, o: null, kind: '', k: 0, locked: false, lost: 0, beepT: 0, beeps: 0, ticks: 0, iv: 0 };
+  const SKV = V3();
+  const seekReset = () => {
+    SK.o = null; SK.kind = ''; SK.k = 0; SK.locked = false; SK.lost = 0; SK.beepT = 0; SK.iv = 0;
+    if (AF.audio && AF.audio.stopTone) AF.audio.stopTone('seek-lock');
+  };
+  CB.seekReset = seekReset;
+  const seekHolds = (ox, oy, oz, dx, dy, dz, range) => {
+    if (!lockAlive(SK.o, SK.kind)) return false;
+    lockPos(SK.o, SK.kind, SKV); const vx = SKV.x - ox, vy = SKV.y - oy, vz = SKV.z - oz, d = Math.hypot(vx, vy, vz);
+    return d >= 6 && d <= range && (vx * dx + vy * dy + vz * dz) / d > SEEK_KEEP && los(ox, oy, oz, SKV.x, SKV.y, SKV.z);
+  };
+  const seekTick = (dt, g) => {
+    const W = g && GUNS[g], on = SK.on = !!(W && W.rocket && W.rocket[5]) && !H.dead && (AF.mode === 'walk' || VF.can);
+    if (!on) { if (SK.o) seekReset(); lockT = 0; return; }
+    if ((lockT -= dt) <= 0) {
+      lockT = 0.1;
+      const cam = AF.camera, cp = cam.position; cam.getWorldDirection(PV);
+      if (SK.o && seekHolds(cp.x, cp.y, cp.z, PV.x, PV.y, PV.z, W.range)) SK.lost = 0;
+      else {
+        const o = lockFind(cp.x, cp.y, cp.z, PV.x, PV.y, PV.z, W.range, VF.can ? VF.veh : null);
+        if (o && o !== SK.o) { seekReset(); SK.o = o; SK.kind = LK.kind; }   // a new target: acquire from scratch
+        else if (o) SK.lost = 0;
+        else if (SK.o && (SK.lost += 0.1) >= SEEK_GRACE - 1e-6) seekReset();
+      }
+    }
+    if (!SK.o) return;
+    if (!lockAlive(SK.o, SK.kind)) { seekReset(); return; }
+    if (!SK.locked) {
+      if (SK.lost > 0) return;   // out of sight for a moment: the lock holds where it got to
+      SK.k = Math.min(1, SK.k + dt / (W.lockS || 1.2));
+      if (SK.k >= 1) { SK.locked = true; SK.iv = 0; AF.emit('toast', { text: 'Seeker locked \u2014 fire!', kind: 'ok' }); }
+      else if ((SK.beepT -= dt) <= 0) {   // ~2.4 beeps a second rising to ~12 just before the lock
+        SK.iv = 0.42 - 0.34 * SK.k; SK.beepT += SK.iv; if (SK.beepT < 0) SK.beepT = SK.iv; SK.ticks++;
+        if (AF.audio && AF.audio.beep && AF.audio.beep(880 + 220 * SK.k, 0.055, 0.07)) SK.beeps++;
+      }
+    }
+    if (SK.locked && AF.audio && AF.audio.tone) AF.audio.tone('seek-lock', 1320, 0.06);
+  };
   const rocketLaunch = (g, W, ox, oy, oz, self) => {
     const r = RK.find((q) => !q.on); if (!r) return;
     const R = W.rocket, range = W.range;
@@ -1363,7 +1432,9 @@ try {
     r.on = true; r.W = W; r.g = g; r.self = self || null; r.t = R[2]; r.arm = 0.12; r.hitJet = null;
     r.x = r.sx = MZ.x + TMP.x * 0.6; r.y = r.sy = MZ.y + TMP.y * 0.6; r.z = r.sz = MZ.z + TMP.z * 0.6;
     r.vx = TMP.x * R[0]; r.vy = TMP.y * R[0]; r.vz = TMP.z * R[0];
-    r.tgt = R[5] ? lockFind(ox, oy, oz, DIR.x, DIR.y, DIR.z, range, self) : null; r.tk = LK.kind;
+    // a seeker homes only on a full lock (CB.seek); otherwise, and for the bazooka, the rocket flies straight
+    const lockOn = !!R[5] && SK.locked && lockAlive(SK.o, SK.kind) && SK.o !== self;
+    r.tgt = lockOn ? SK.o : null; r.tk = lockOn ? SK.kind : '';
     r.mesh.visible = true; r.mesh.position.set(r.x, r.y, r.z);
     FX.burst('smoke', MZ.x - TMP.x * 1.2, MZ.y - TMP.y * 1.2, MZ.z - TMP.z * 1.2, 3, { size: 1.1, spread: 1.5 });   // back-blast
     if (r.tgt && r.tk === 'jet') AF.emit('toast', { text: 'Seeker away \u2014 locked on!', kind: 'ok' });
@@ -1421,18 +1492,53 @@ try {
     }
   };
   CB.rocketsLive = () => { let n = 0; for (const r of RK) if (r.on) n++; return n; };
-  // the seeker's lock indicator (a small tag under the crosshair) while a seeker is drawn and something lockable is in the cone, 10 Hz
-  const lockEl = document.createElement('div'); lockEl.id = 'h-lock';
-  lockEl.style.cssText = 'position:fixed;left:50%;top:calc(50% + 26px);transform:translateX(-50%);font:700 12px/1 system-ui,sans-serif;letter-spacing:.18em;color:#ff5a3a;text-shadow:0 1px 2px #000;pointer-events:none;display:none;z-index:6';
-  lockEl.textContent = 'LOCKED'; document.body.appendChild(lockEl);
-  const lockTick = (dt, g) => {
-    const W = g && GUNS[g], on = !!(W && W.rocket && W.rocket[5]) && (AF.mode === 'walk' || VF.on);
-    if (!on) { if (lockAt) { lockAt = null; lockEl.style.display = 'none'; } return; }
-    if ((lockT -= dt) > 0) return; lockT = 0.1;
-    const cam = AF.camera; cam.getWorldDirection(PV);
-    const o = lockFind(cam.position.x, cam.position.y, cam.position.z, PV.x, PV.y, PV.z, W.range, VF.on ? VF.veh : null);
-    if (o !== lockAt) { lockAt = o; lockEl.style.display = o ? 'block' : 'none'; if (o) AU('hit_tick', { rate: 1.6 }); }
+  // ---- the seeker's target box (+ a LOCKING / LOCKED tag over it): pooled DOM, placed after the camera owners and camfx moved
+  // the camera (tick 'combat-seek-box'); the box hugs the target's projected oriented bounds and closes in as the lock builds
+  const skcss = document.createElement('style');
+  skcss.textContent = `#h-seek{position:fixed;left:0;top:0;display:none;pointer-events:none;z-index:6;--c:#ff3b30;box-sizing:border-box;border:1px solid rgba(255,59,48,.35);
+  background:linear-gradient(var(--c),var(--c)) 0 0/14px 2px no-repeat,linear-gradient(var(--c),var(--c)) 0 0/2px 14px no-repeat,linear-gradient(var(--c),var(--c)) 100% 0/14px 2px no-repeat,
+  linear-gradient(var(--c),var(--c)) 100% 0/2px 14px no-repeat,linear-gradient(var(--c),var(--c)) 0 100%/14px 2px no-repeat,linear-gradient(var(--c),var(--c)) 0 100%/2px 14px no-repeat,
+  linear-gradient(var(--c),var(--c)) 100% 100%/14px 2px no-repeat,linear-gradient(var(--c),var(--c)) 100% 100%/2px 14px no-repeat;filter:drop-shadow(0 0 1px #000) drop-shadow(0 0 3px rgba(0,0,0,.6));will-change:transform}
+  #h-seek.ok{--c:#39ff6a;border-color:rgba(57,255,106,.45)}
+  #h-seek b{position:absolute;left:50%;bottom:100%;margin-bottom:5px;transform:translateX(-50%);font:700 11px/1 system-ui,sans-serif;letter-spacing:.18em;color:var(--c);text-shadow:0 1px 2px #000;white-space:nowrap}`;
+  document.head.appendChild(skcss);
+  const seekEl = document.createElement('div'); seekEl.id = 'h-seek'; seekEl.innerHTML = '<b>LOCKING</b>'; document.body.appendChild(seekEl);
+  const lockEl = seekEl.firstChild;   // the LOCKING / LOCKED tag over the box
+  const SB = { shown: false, vis: false, ok: false, x: -1, y: -1, w: -1, h: -1 };
+  const seekHide = () => { if (SB.shown) { SB.shown = false; SB.vis = false; seekEl.style.display = 'none'; } };
+  // the target's oriented half extents (m) around its lock point, by kind
+  const seekBox = () => {
+    const cam = AF.camera, o = SK.o, k = SK.kind;
+    let cx, cy, cz, hx, hy, hz, yaw;
+    if (k === 'jet') { const b = AF.clamp(o.bank || 0, -1, 1), sb = Math.abs(Math.sin(b)), cb = Math.abs(Math.cos(b)); cx = o.x; cy = o.y; cz = o.z; hx = 3.5 * cb + 0.75 * sb; hy = 0.75 * cb + 3.5 * sb; hz = 5.5; yaw = o.yaw; }
+    else if (k === 'heli') { cx = o.x; cy = o.y + 1; cz = o.z; hx = 1.2; hy = 1.05; hz = 2.6; yaw = o.yaw; }
+    else { const h = o.height || 1.5; cx = o.x; cy = o.y + h / 2; cz = o.z; hx = o.halfW || 1; hy = h / 2; hz = o.halfL || 2.3; yaw = o.yaw || 0; }
+    const s = Math.sin(yaw), c = Math.cos(yaw), W = innerWidth, Hh = innerHeight;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < 8; i++) {
+      const lx = i & 1 ? hx : -hx, ly = i & 2 ? hy : -hy, lz = i & 4 ? hz : -hz;
+      SKV.set(cx + lx * c + lz * s, cy + ly, cz - lx * s + lz * c).applyMatrix4(cam.matrixWorldInverse);
+      if (SKV.z > -0.5) return false;   // a corner behind the lens
+      SKV.applyMatrix4(cam.projectionMatrix);
+      const px = (SKV.x * 0.5 + 0.5) * W, py = (0.5 - SKV.y * 0.5) * Hh;
+      if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
+    }
+    if (x1 < 0 || y1 < 0 || x0 > W || y0 > Hh) return false;
+    // at least 26 px, padded; the brackets close in from +22 px as the lock builds
+    const pad = 5 + (SK.locked ? 0 : 22 * (1 - SK.k)), mx = (x0 + x1) / 2, my = (y0 + y1) / 2, w = Math.max(26, x1 - x0 + pad * 2), h = Math.max(26, y1 - y0 + pad * 2);
+    const rx = Math.round(mx - w / 2), ry = Math.round(my - h / 2), rw = Math.round(w), rh = Math.round(h);
+    if (rx !== SB.x || ry !== SB.y) { SB.x = rx; SB.y = ry; seekEl.style.transform = 'translate(' + rx + 'px,' + ry + 'px)'; }
+    if (rw !== SB.w) { SB.w = rw; seekEl.style.width = rw + 'px'; }
+    if (rh !== SB.h) { SB.h = rh; seekEl.style.height = rh + 'px'; }
+    return true;
   };
+  AF.onTick('combat-seek-box', 885, () => {
+    if (!SK.on || !SK.o || AF.mode === 'photo' || (UI.modalOpen && UI.modalOpen())) { seekHide(); return; }
+    const cam = AF.camera; cam.updateMatrixWorld();
+    const vis = seekBox(); if (vis !== SB.vis) { SB.vis = vis; seekEl.style.display = vis ? 'block' : 'none'; }
+    SB.shown = true;
+    if (SB.ok !== SK.locked) { SB.ok = SK.locked; seekEl.classList.toggle('ok', SB.ok); lockEl.textContent = SB.ok ? 'LOCKED' : 'LOCKING'; }
+  });
   const wanted = (dt) => {
     const C = CR(); if (!C) return;
     if (CB.stars && !CB.inJurisdiction()) { clearWanted(AF.heist && AF.heist.on ? null : 'Out of police jurisdiction.'); }
@@ -1624,6 +1730,58 @@ try {
     if (CB.held) CB.held.rotation.x = PO.gx;
   };
 
+  // ---------------------------------------------------------------- the sniper scope (GUNS[g].scope): aiming with it = looking through it
+  const scopeOk = (g) => !!g && !!GUNS[g].scope && !!AF.PL.aim && !(CB.reloadT > 0) && !WH.open && !H.dead;
+  // a scoped gun aims at its zoom only through the scope (reloading: a plain 34 degree aim)
+  const aimFovOf = (g) => (!g ? 40 : GUNS[g].scope && !CB.scoped ? 34 : GUNS[g].zoom || 40);
+  // the reticle: a black field with a round lens, fine crosshair, heavier outer posts and a red centre dot (one pooled DOM block in
+  // #ui, under the HUD; display toggled only when the state changes)
+  const scss = document.createElement('style');
+  scss.textContent = `#ui #h-scope{position:fixed;inset:0;display:none;pointer-events:none;overflow:hidden}
+  #ui #h-scope.on{display:block}
+  #ui #h-scope .lens{position:absolute;left:50%;top:50%;width:94vmin;height:94vmin;margin:-47vmin 0 0 -47vmin;border-radius:50%;box-shadow:0 0 0 150vmax #000,inset 0 0 5vmin 1.5vmin rgba(0,0,0,.9)}
+  #ui #h-scope i{position:absolute;background:#050505}
+  #ui #h-scope .h{left:0;right:0;top:50%;height:1px;margin-top:-.5px} #ui #h-scope .v{top:0;bottom:0;left:50%;width:1px;margin-left:-.5px}
+  #ui #h-scope .pl,#ui #h-scope .pr{top:50%;height:4px;margin-top:-2px;width:calc(50% - 16vmin)} #ui #h-scope .pl{left:0} #ui #h-scope .pr{right:0}
+  #ui #h-scope .pt,#ui #h-scope .pb{left:50%;width:4px;margin-left:-2px;height:calc(50% - 16vmin)} #ui #h-scope .pt{top:0} #ui #h-scope .pb{bottom:0}
+  #ui #h-scope .dot{left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;border-radius:50%;background:#ff2a1a;box-shadow:0 0 3px rgba(255,40,20,.8)}
+  #ui #h-scope .m{left:50%;width:9px;height:1px;margin-left:-4.5px} #ui #h-scope .m1{top:calc(50% + 5vmin)} #ui #h-scope .m2{top:calc(50% + 10vmin)}
+  #ui.photo #h-scope,#ui.mapping #h-scope,#ui.titling #h-scope,#ui.cine #h-scope{display:none!important}`;
+  document.head.appendChild(scss);
+  const scopeEl = document.createElement('div'); scopeEl.id = 'h-scope';
+  scopeEl.innerHTML = '<div class="lens"></div><i class="h"></i><i class="v"></i><i class="pl"></i><i class="pr"></i><i class="pt"></i><i class="pb"></i><i class="m m1"></i><i class="m m2"></i><i class="dot"></i>';
+  uiRoot.insertBefore(scopeEl, uiRoot.firstChild);
+  let scopeShown = false, swX = 0, swY = 0;
+  const scopePaint = (on) => { if (on !== scopeShown) { scopeShown = on; scopeEl.classList.toggle('on', on); } };
+  // breathing sway through the scope: a slow figure-eight of the look (a few hundredths of a degree), steadier crouched, wider on the move.
+  // Applied as a change of offset each frame, taken back off when the scope comes down.
+  const scopeSway = (dt, on) => {
+    const WK = AF.PL.walk; if (!WK) return;
+    let x = 0, y = 0;
+    if (on) {
+      const t = AF.clock.t, p = AF.player, sp = AF.PL.walk.speed || 0, a = 0.0012 * (p.crouch ? 0.45 : 1) * (1 + Math.min(1.5, sp / 2));
+      x = (Math.sin(t * 0.83) + 0.3 * Math.sin(t * 2.1 + 1.3)) * a; y = (Math.sin(t * 1.66 + 0.4) * 0.6 + 0.2 * Math.sin(t * 3.3)) * a;
+    }
+    if (x === swX && y === swY) return;
+    WK.camYaw += x - swX; WK.camPitch = AF.clamp(WK.camPitch + y - swY, -0.75, 1.25); swX = x; swY = y;
+  };
+  // seated (drive-by): the FOV narrows after the camera owners and comes back at the next frame start (the same save / restore pattern as
+  // 04-camfx, whose fov nudge then rides on top), and the lens rises over the vehicle's roof above the seat (the chase camera keeps its
+  // look; it sets its position afresh every frame), so neither the car nor the rider fills the scope. fireSeat shoots from the same point.
+  const SCE = V3();
+  const scopeSeatEye = (out) => {
+    const S = AF.PL.seat, v = VF.veh, top = v && v.height ? v.y + v.height + 0.35 : S.y + 1.4;
+    return out.set(S.x, Math.max(S.y + 1.3, top), S.z);
+  };
+  let scFov = 0, scSet = 0;
+  AF.onTick('combat-scope-restore', -99, () => { if (scFov) { const c = AF.camera; if (c.fov === scSet) { c.fov = scFov; c.updateProjectionMatrix(); } scFov = 0; } });
+  AF.onTick('combat-scope', 882, () => {
+    if (!CB.scoped || AF.mode === 'walk' || !VF.can || !AF.PL.seat) return;
+    const g = cur(), W = g && GUNS[g]; if (!W || !W.scope) return;
+    const c = AF.camera; scFov = c.fov; c.fov = W.zoom; scSet = c.fov; c.updateProjectionMatrix();
+    scopeSeatEye(c.position); c.updateMatrixWorld();
+  });
+
   // ---------------------------------------------------------------- ticks
   let prevFire = false, slowT = 0, xT = -1;
   AF.onTick('combat', 151, (dt) => {
@@ -1657,12 +1815,12 @@ try {
       const gunUp = !!(g || CB.gallery);
       if (seated) {   // drive-by: the shot itself goes in the 'combat-seat' tick, once the vehicle and the seat have moved this frame
         AF.PL.aim = VF.aim = !!g && (CB.aimToggle || (locked && !!(m.buttons & 2)));
-        AF.PL.aimFov = g ? GUNS[g].zoom || 40 : 40;
+        CB.scoped = scopeOk(g); AF.PL.aimFov = aimFovOf(g);
         const down = !!g && !WH.open && ((locked && !!(m.buttons & 1)) || I.key('KeyQ'));
         VF.edge = VF.edge || (down && !prevFire); VF.want = down; prevFire = down;
       } else {
         AF.PL.aim = gunUp && (CB.aimToggle || (locked && !!(m.buttons & 2)) || !!CB.gallery);
-        AF.PL.aimFov = CB.gallery ? 34 : g ? GUNS[g].zoom || 40 : 40;
+        CB.scoped = !CB.gallery && scopeOk(g); AF.PL.aimFov = CB.gallery ? 34 : aimFovOf(g);
         const down = !WH.open && ((locked && !!(m.buttons & 1)) || I.key('KeyQ')), edge = down && !prevFire; prevFire = down;
         if (down && CB.cd <= 0 && CB.reloadT <= 0 && !AF.hud.meterOn()) {
           if (CB.gallery) { if (edge) fire('revolver'); }
@@ -1670,14 +1828,21 @@ try {
           else if (edge) swing();
         }
       }
-    } else { AF.PL.aim = false; prevFire = false; xT = -1; CB.wheelClose(false); VF.want = VF.edge = VF.aim = false; }
+    } else { AF.PL.aim = false; CB.scoped = false; prevFire = false; xT = -1; CB.wheelClose(false); VF.want = VF.edge = VF.aim = false; }
     AF.Vehicle.aim = seated && !!AF.PL.aim;
-    // recoil recovers once the trigger rests a moment; bloom shrinks back
+    // the scope: 70-player looks from the eye on foot (PL.scope), a seat keeps its chase camera at the scope's FOV ('combat-scope');
+    // look speed follows the zoom; far path walkers stay drawn and hittable (54 WK.reach)
     const W = g ? GUNS[g] : null, since = AF.clock.t - CB.lastShot;
+    AF.PL.scope = CB.scoped && walk;
+    AF.Vehicle.aimK = CB.scoped && seated ? W.zoom / 45 : 1;
+    if (AF.walkers) AF.walkers.reach = CB.scoped ? 2.2 : 1;
+    scopeSway(dt, walk && CB.scoped);
+    scopePaint(CB.scoped);
+    // recoil recovers once the trigger rests a moment; bloom shrinks back
     if (CB.kick > 0 && since > 0.06) { const r = CB.kick * (1 - Math.exp(-dt * (W ? W.rec : 6))); CB.kick -= r; if (CB.kick < 1e-4) CB.kick = 0; if (walk) { const WK = AF.PL.walk; WK.camPitch = AF.clamp(WK.camPitch + r, -0.75, 1.25); } }
     if (CB.bloom > 0 && since > 0.08) CB.bloom = Math.max(0, CB.bloom - dt * (W ? W.bloomMax * 2.5 : 0.2));
     hudPaint(dt);
-    crossPaint(((walk && !CB.gallery) || (seated && VF.arc)) && (!!AF.PL.aim || (walk && !!g && AF.view.fp())) && !WH.open, W ? (seated ? seatSpread(W) : spreadNow(W)) : 0.006);
+    crossPaint(((walk && !CB.gallery) || (seated && VF.arc)) && (!!AF.PL.aim || (walk && !!g && AF.view.fp())) && !WH.open && !CB.scoped, W ? (seated ? seatSpread(W) : spreadNow(W)) : 0.006);
     if (hmT > 0 && (hmT -= dt) <= 0) hm.className = '';
     if (CB.swing > 0) { CB.swing -= dt; if (CB.hitAt > 0 && CB.swingDur - CB.swing >= CB.hitAt) { CB.hitAt = -1; resolveMelee(); } }
     if (walk) { overlay(dt, g); bodyPush(dt); }
@@ -1687,7 +1852,7 @@ try {
     if (HELI.grp && (HELI.on || CB.stars >= 3)) heliStep(dt);
     if (JET.grp && (JET.on || JET.mission || CB.stars >= G.jetStars)) jetStep(dt);
     if (RK.length) rocketStep(dt);
-    lockTick(dt, g);
+    seekTick(dt, busy ? null : g);
     carFx(dt);
     if (TR.mesh && (TR.n || TR.was)) {
       const R = AF.post && AF.post.enabled && AF.post.sceneRT ? AF.post.sceneRT.height : AF.renderer.domElement.height;
@@ -1754,7 +1919,9 @@ try {
       jetStep(0.02);
       const j = JET.jets[0]; j.x = P.x + 2; j.y = P.y + 75; j.z = P.z + 6; j.hp = G.jetHp;
       MZ.set(P.x, P.y + 30, P.z); DIR.set(j.x - MZ.x, j.y - MZ.y, j.z - MZ.z).normalize();
+      seekReset(); SK.o = j; SK.kind = 'jet'; SK.k = 1; SK.locked = true;   // a full lock (the acquisition itself has its own test)
       rocketLaunch('seeker', GUNS.seeker, MZ.x, MZ.y, MZ.z, null);
+      seekReset();
       locked = RK.some((r) => r.on && r.tgt === j);
       for (let i = 0; i < 90 && !j.dead; i++) rocketStep(1 / 30);
       downed = j.dead && kills.length === 1 && CB.jetsLeft() === 0;
@@ -1839,6 +2006,81 @@ try {
     if (cop.agg) CB.release(cop); H.v = hp;
     if (mode && mode !== AF.mode && AF.modes[mode]) AF.setMode(mode);
     return { ok: !shots && unhurt && (d1 > d0 || !alive), info: `shots ${shots}, unhurt ${unhurt}, ${d0.toFixed(1)} -> ${d1.toFixed(1)} m, active ${alive}` };
+  });
+  AF.test('combat: the seeker acquires a jet over its lock time (red box, quickening beeps), then locks (green); only a locked rocket homes; looking away resets', () => {
+    if (!JET.grp || !RK.length) return { ok: false, info: 'no jet pool' };
+    const P = AF.player, cam = AF.camera, keepP = cam.position.clone(), keepQ = cam.quaternion.clone(), mode = AF.mode, US = UI.state, title = US && US.title;
+    const box = AF.hooks.tick.find((h) => h.name === 'combat-seek-box'), ivs = [];
+    let early = 'none', homing = false, lockedAt = -1, red = false, green = false, reset = false;
+    try {
+      if (AF.modes.walk && mode !== 'walk') AF.setMode('walk');
+      if (US) US.title = false;
+      CB.jetMission({ n: 1, target: () => ({ x: P.x, y: P.y, z: P.z, car: null, away: false }), owner: () => true });
+      jetStep(0.02);
+      const j = JET.jets[0]; j.x = P.x + 2; j.y = P.y + 75; j.z = P.z + 40; j.yaw = 0; j.bank = 0; j.hp = G.jetHp;
+      cam.position.set(P.x, P.y + 30, P.z); cam.up.set(0, 1, 0); cam.lookAt(j.x, j.y, j.z); cam.updateMatrixWorld();
+      seekReset(); lockT = 0;
+      for (let i = 0; i < 60 && !SK.locked; i++) {
+        const n = SK.ticks; seekTick(1 / 30, 'seeker'); if (SK.ticks > n) ivs.push(+SK.iv.toFixed(3));
+        if (i === 8) {
+          box.fn(0); red = SB.vis && !seekEl.classList.contains('ok') && lockEl.textContent === 'LOCKING';
+          cam.getWorldDirection(DIR); MZ.copy(cam.position); rocketLaunch('seeker', GUNS.seeker, MZ.x, MZ.y, MZ.z, null);
+          const r = RK.find((q) => q.on); early = r ? r.tgt : 'none'; for (const q of RK) { q.on = false; q.mesh.visible = false; }
+        }
+        if (SK.locked) lockedAt = i + 1;
+      }
+      box.fn(0); green = SB.vis && seekEl.classList.contains('ok') && lockEl.textContent === 'LOCKED';
+      cam.getWorldDirection(DIR); MZ.copy(cam.position); rocketLaunch('seeker', GUNS.seeker, MZ.x, MZ.y, MZ.z, null);
+      homing = RK.some((q) => q.on && q.tgt === j);
+      cam.lookAt(cam.position.x - 2, cam.position.y, cam.position.z - 40); cam.updateMatrixWorld();
+      for (let i = 0; i < 15; i++) seekTick(1 / 30, 'seeker');
+      reset = !SK.o && !SK.locked && SK.k === 0;
+    } finally {
+      CB.jetMission(null); for (const q of RK) { q.on = false; q.mesh.visible = false; }
+      seekReset(); seekHide(); SK.on = false; if (US) US.title = title;
+      cam.position.copy(keepP); cam.quaternion.copy(keepQ); cam.updateMatrixWorld();
+      if (mode && mode !== AF.mode && AF.modes[mode]) AF.setMode(mode);
+    }
+    const quicker = ivs.length >= 3 && ivs.every((v, i) => !i || v < ivs[i - 1]), timely = lockedAt >= 30 && lockedAt <= 40;
+    return { ok: quicker && timely && red && green && early === null && homing && reset, info: `beep intervals ${ivs.join(' > ')}, locked after ${lockedAt} frames, red ${red}, green ${green}, early rocket straight ${early === null}, homing ${homing}, reset ${reset}` };
+  });
+  AF.test('combat: the silenced sniper is sold + lendable; through the scope one body shot and one headshot drop path walkers 200 m off, quietly', () => {
+    const WK = AF.walkers, P = AF.player, cam = AF.camera;
+    const path = WK && WK.paths.find((p) => p.enabled && p.actors.length >= 2 && p.activeRadius >= 100 && p.actors.every((q) => !q.ctl && !q.dead && !q.unconscious));
+    if (!path) return { ok: false, info: 'no walker path' };
+    const [a, b] = path.actors, keepP = cam.position.clone(), keepQ = cam.quaternion.clone(), slot = CB.slot, heat = CB.heat, stars = CB.stars, aim = AF.PL.aim, onHit = CB.onWalkerHit;
+    const WKc = AF.PL.walk, pitch = WKc.camPitch, yaw = WKc.camYaw;
+    const ev = AF._ev.gunshot || (AF._ev.gunshot = []); let heard = null; const on = (e) => { if (e.weapon === 'sniper') heard = { loud: e.loud, silenced: e.silenced }; }; ev.push(on);
+    const hits = [];
+    try {
+      const sold = !!AF.GUNS.sniper && !!AF.GUNS.revolver && !AF.GUNS.spistol && GUNS.sniper.lend && GUNS.sniper.silenced;
+      const lent = CB.lend('sniper') && CB.has('sniper') && cur() === 'sniper' && magOf('sniper') === 5 && CB.snapLent().sniper.mag === 5;
+      // a clear 200 m line high over the ground
+      let line = null;
+      for (let i = 0; i < 16 && !line; i++) {
+        const ang = i * PI / 8, y = Math.max(P.y, AF.W.groundY(P.x, P.z)) + 60, x1 = P.x + Math.sin(ang) * 200, z1 = P.z + Math.cos(ang) * 200, sx = Math.cos(ang) * 3, sz = -Math.sin(ang) * 3;
+        if (los(P.x, y, P.z, x1, y - 0.3, z1) && los(P.x, y, P.z, x1 + sx, y - 0.3, z1 + sz) && los(x1, y - 1.7, z1, x1, y + 0.3, z1)) line = { x: x1, y: y - 1.6, z: z1, oy: y, sx, sz };
+      }
+      if (!line) return { ok: false, info: 'no clear line' };
+      a.ctl = { x: line.x, y: line.y, z: line.z, yaw: 0, moving: false, ph: 0 }; b.ctl = { x: line.x + line.sx, y: line.y, z: line.z + line.sz, yaw: 0, moving: false, ph: 0 };
+      cam.position.set(P.x, line.oy, P.z); cam.up.set(0, 1, 0);
+      AF.PL.aim = true; CB.scoped = true; WK.reach = 2.2; WK.update(0.01, AF.clock.w);
+      const reachable = WK.near(P.x, P.z, GUNS.sniper.range).includes(a), tight = spreadNow(GUNS.sniper) < 0.001;
+      CB.onWalkerHit = (q, kind, fx, fz, info) => { hits.push({ q, kind, head: info.head, dmg: info.dmg, silenced: info.silenced, weapon: info.weapon }); return onHit ? onHit(q, kind, fx, fz, info) : false; };
+      cam.lookAt(a.x, a.y + 1.15, a.z); cam.updateMatrixWorld(); fire('sniper');
+      cam.lookAt(b.x, b.y + 1.75 * 0.905, b.z); cam.updateMatrixWorld(); fire('sniper');
+      const h0 = hits.find((h) => h.q === a), h1 = hits.find((h) => h.q === b);
+      const body = !!h0 && !h0.head && h0.dmg >= 240 && h0.weapon === 'sniper' && h0.silenced && WK.isDown(a);
+      const head = !!h1 && h1.head && h1.dmg >= 240 && WK.isDown(b);
+      const quiet = !!heard && heard.silenced && heard.loud <= 8 && magOf('sniper') === 3;
+      return { ok: sold && lent && reachable && tight && body && head && quiet, info: `sold ${sold}, lent ${lent}, reachable at ${Math.hypot(a.x - P.x, a.z - P.z).toFixed(0)} m ${reachable}, scoped spread ${tight}, body ${body} (${h0 ? h0.dmg : '-'}), head ${head} (${h1 ? (h1.head ? 'head' : 'body') + ' ' + h1.dmg : 'miss'}), quiet ${quiet}` };
+    } finally {
+      ev.splice(ev.indexOf(on), 1); CB.onWalkerHit = onHit;
+      for (const q of [a, b]) { q.ctl = null; if (q.rx) { Object.assign(q.rx, { down: 0, fall: 0, st: 0, fear: 0, hold: 0, ox: 0, oz: 0, vx: 0, vz: 0 }); q.rxOn = false; q.tilt = q.lift = 0; } }
+      CB.scoped = false; AF.PL.aim = aim; WK.reach = 1; CB.unlend(); CB.slot = slot; CB.heat = heat; CB.stars = stars; CB.kick = 0; CB.bloom = 0; attachHeld();
+      WKc.camPitch = pitch; WKc.camYaw = yaw;
+      cam.position.copy(keepP); cam.quaternion.copy(keepQ); cam.updateMatrixWorld(); WK.update(0, AF.clock.w);
+    }
   });
   AF.test('combat: airport passengers (path walkers) stagger, go down to a bullet and scatter at gunfire', () => {
     const WK = AF.walkers, path = WK.paths.find((p) => /^airport-/.test(p.name) && p.actors.filter((a) => !a.look.pose).length > 1);

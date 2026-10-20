@@ -51,7 +51,9 @@ try {
   let loading = null;
   const load = () => loading || (loading = Promise.all(layers.map(async (L) => {
     const img = new Image(); img.src = L.src;
-    try { await img.decode(); L.img = img; L.px = img.width / (L.bounds.x1 - L.bounds.x0); } catch (e) { AF.warnOnce('map image ' + L.src, e); }
+    // an ImageBitmap keeps its decoded pixels: a plain <img> drawn into the canvas was re-decoded at raster time on the first map
+    // open (75 ms, GpuImageDecodeCache::DecodeImage in the trace) whenever the browser had dropped its decode
+    try { await img.decode(); L.img = typeof createImageBitmap === 'function' ? await createImageBitmap(img).catch(() => img) : img; L.px = L.img.width / (L.bounds.x1 - L.bounds.x0); } catch (e) { AF.warnOnce('map image ' + L.src, e); }
   })).then(() => { map.ready = true; map.revision++; }));
   AF.on('ready', () => setTimeout(load, 4000));
   map.finish = load;
@@ -130,7 +132,7 @@ try {
     for (const entry of entries) {
       if (level < entry.min || entry.category === 'area' && level > 7) continue;
       const x = (entry.x - map.x) * map.scale + map.width / 2, y = (entry.z - map.z) * map.scale + map.height / 2;
-      const width = g.measureText(entry.name).width + (entry.category === 'area' ? 16 : 30), half = width / 2;
+      const width = (entry.tw || (entry.tw = g.measureText(entry.name).width)) + (entry.category === 'area' ? 16 : 30), half = width / 2;
       if (x - half < 12 || x + half > map.width - 12 || y < 18 || y > map.height - 28) continue;
       let blocked = false;
       for (let index = 0; index < count; index++) { const box = boxes[index]; if (x - half < box[2] && x + half > box[0] && y - 13 < box[3] && y + 13 > box[1]) { blocked = true; break; } }

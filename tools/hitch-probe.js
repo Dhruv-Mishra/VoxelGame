@@ -1,7 +1,10 @@
 // Playwright harness: hitch attribution. Boots globalThis.__psUrl (default output.html, streaming on, tier globalThis.__psTier ||
 // 'lite'), waits for `preloaded`, wraps every tick / idle hook and AF.renderFrame with timers, then runs globalThis.__psScenario
 // ('fly' default | 'walk' | 'drive' | 'all') in real time. Every rAF gap > 60 ms is reported with its top contributors, the
-// shader programs linked during it and the time no hook accounts for (GC, compile, worker callbacks, timers).
+// shader programs linked during it and the time no hook accounts for (GC, compile, worker callbacks, timers). Each hitch carries
+// veil (the loader / travel veil was up: not seen in play); with __psTrace every traced event (>= 6 ms, any process) overlapping the
+// gap lands in hitch.ev. Also timed: each stream system's near() ('n:name'), renderer.compile, AF.stream.warm's synchronous part.
+// Summary: node tools/hitch-sum.js result.txt [--ev]
 async (page) => {
   const b = page.context().browser();
   for (const c of b.contexts().slice(1)) await c.close();
@@ -22,10 +25,10 @@ async (page) => {
     tcdp = await b.newBrowserCDPSession();
     tcdp.on('Tracing.dataCollected', ({ value }) => { for (const e of value) {
       if (e.name === 'TimeStamp' && e.args && e.args.data) marks.push([e.ts, e.args.data.message]);
-      else if (e.ph === 'X' && e.dur >= 25000) trace.push([e.ts, Math.round(e.dur / 1000), e.name, e.pid, e.tid, e.cat, e.args && e.args.data ? (e.args.data.url || e.args.data.functionName || e.args.data.type || '').toString().slice(-40) + (e.args.data.lineNumber ? ':' + e.args.data.lineNumber : '') : '']);
+      else if (e.ph === 'X' && e.dur >= 6000) trace.push([e.ts, Math.round(e.dur / 1000), e.name, e.pid, e.tid, e.cat, e.args && e.args.data ? (e.args.data.url || e.args.data.functionName || e.args.data.type || '').toString().slice(-40) + (e.args.data.lineNumber ? ':' + e.args.data.lineNumber : '') : '']);
     } });
     traceDone = new Promise((res) => tcdp.on('Tracing.tracingComplete', res));
-    await tcdp.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { includedCategories: ['devtools.timeline', 'v8', 'v8.execute', 'gpu', 'disabled-by-default-devtools.timeline', 'blink.user_timing', 'toplevel', 'cc', 'viz'] } });
+    await tcdp.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { includedCategories: ['devtools.timeline', 'v8', 'v8.execute', 'gpu', 'disabled-by-default-devtools.timeline', 'blink.user_timing', 'toplevel', 'cc', 'viz', 'gpu.angle', 'disabled-by-default-gpu.service', 'blink', 'renderer.scheduler'] } });
   }
   const r = await p.evaluate(async (scenario) => {
     const AF = __af, acc = new Map(), R = AF.renderer, worst = new Map();
@@ -33,6 +36,9 @@ async (page) => {
     for (const h of AF.hooks.tick) wrap('t:' + h.name, h);
     for (const h of AF.hooks.idle) wrap('i:' + h.name, h);
     const rf = AF.renderFrame; AF.renderFrame = function () { const s = performance.now(); try { return rf.apply(this, arguments); } finally { const d = performance.now() - s; acc.set('render', (acc.get('render') || 0) + d); if (d > (worst.get('render') || 0)) worst.set('render', d); } };
+    const tw = (obj, k, label) => { const f = obj[k]; if (typeof f !== 'function') return; obj[k] = function () { const s = performance.now(); try { return f.apply(this, arguments); } finally { const d = performance.now() - s; acc.set(label, (acc.get(label) || 0) + d); if (d > (worst.get(label) || 0)) worst.set(label, d); } }; };
+    for (const sy of AF.stream.systems) tw(sy, 'near', 'n:' + sy.name);
+    tw(R, 'compile', 'compile'); tw(AF.stream, 'warm', 'warm-sync');
     // WebGL calls that can stall: uploads (bytes), shader compile / link + their status queries (sync points), reads
     const gl = R.getContext(), links = [], GLW = ['bufferData', 'bufferSubData', 'texImage2D', 'texSubImage2D', 'texImage3D', 'texSubImage3D', 'texStorage2D', 'compileShader', 'linkProgram', 'getProgramParameter', 'getShaderParameter', 'getProgramInfoLog', 'getShaderInfoLog', 'readPixels', 'clientWaitSync', 'getUniformLocation', 'getActiveUniform', 'getActiveAttrib', 'generateMipmap', 'getError', 'renderbufferStorageMultisample', 'framebufferTexture2D', 'checkFramebufferStatus'];
     for (const k of GLW) { const f = gl[k]; if (!f) continue; gl[k] = function () { if (k === 'linkProgram' && links.length < 40) { const lim = Error.stackTraceLimit; Error.stackTraceLimit = 40; const st = String(new Error().stack); Error.stackTraceLimit = lim; links.push((window.__psStep || '') + ' ' + AF.clock.t.toFixed(1) + ' ' + st.split('\n').slice(2).map((s) => s.trim().replace(/\(?https?:\/\/[^)]*\/(output[^:]*|three[^:]*|tools[^:]*):/, '$1:').replace(/^at /, '')).filter((s) => !/three\.module/.test(s) || /render \(|fromScene|compile/.test(s)).slice(0, 10).join(' < ')); } const s = performance.now(); try { return f.apply(gl, arguments); } finally { const d = performance.now() - s; acc.set('gl.' + k, (acc.get('gl.' + k) || 0) + d); if (k === 'bufferData' && arguments[1] && arguments[1].byteLength) acc.set('#bufKB', (acc.get('#bufKB') || 0) + arguments[1].byteLength / 1024); } }; }
@@ -45,7 +51,8 @@ async (page) => {
         let sum = 0; const top = [...acc.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => { return k + ' ' + v.toFixed(0); });
         for (const [k, v] of acc) if (k[0] !== 'g' && k[0] !== '#') sum += v;
         const np = R.info.programs.length;
-        hitches.push({ step: window.__psStep || '', at: +(AF.clock.t).toFixed(1), gap: Math.round(gap), un: Math.round(gap - sum), progs: np - progs, mode: AF.mode, pos: [Math.round(AF.camera.position.x), Math.round(AF.camera.position.y), Math.round(AF.camera.position.z)], top });
+        console.timeStamp('HITCH' + hitches.length + ' ' + Math.round(gap));
+        hitches.push({ id: hitches.length, veil: (() => { const l = document.getElementById('loader'); return !!(l && !l.classList.contains('done')); })(), step: window.__psStep || '', at: +(AF.clock.t).toFixed(1), gap: Math.round(gap), un: Math.round(gap - sum), progs: np - progs, mode: AF.mode, pos: [Math.round(AF.camera.position.x), Math.round(AF.camera.position.y), Math.round(AF.camera.position.z)], top });
       }
       progs = R.info.programs.length; acc.clear();
       if (progs > seenProgs) {
@@ -71,12 +78,14 @@ async (page) => {
       AF.setMode('walk');
     };
     await wait(1500);
+    if (AF.world.stream) AF.world.stream.maxStep = 0;
+    const mem0 = { geos: R.info.memory.geometries, tex: R.info.memory.textures, progs: R.info.programs.length, heap: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : 0, objs: (() => { let n = 0; AF.scene.traverse(() => n++); return n; })() };
     if (scenario === 'fly' || scenario === 'all') await fly();
     if (window.__psExtra) await window.__psExtra(AF, wait);
     run = false;
     gaps.sort((a, b) => b - a);
     const n = gaps.length, p = (q) => Math.round(gaps[Math.floor(n * q)]);
-    return { gpu, newProgs, links, worstCalls: [...worst.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([k, v]) => k + ' ' + v.toFixed(1)), frames, p50: p(0.5), p99: p(0.01), p999: p(0.001), worst: gaps.slice(0, 8).map(Math.round), long: hitches.length, hitches: hitches.sort((a, b) => b.gap - a.gap).slice(0, 30), log: window.__psLog || [], progs: R.info.programs.length, geos: R.info.memory.geometries, tex: R.info.memory.textures, mem: AF.memStats ? AF.memStats() : null };
+    return { gpu, newProgs, links, worstCalls: [...worst.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([k, v]) => k + ' ' + v.toFixed(1)), frames, p50: p(0.5), p99: p(0.01), p999: p(0.001), worst: gaps.slice(0, 8).map(Math.round), long: hitches.length, hitches: hitches.sort((a, b) => b.gap - a.gap).slice(0, 30), log: window.__psLog || [], progs: R.info.programs.length, geos: R.info.memory.geometries, tex: R.info.memory.textures, mem: AF.memStats ? AF.memStats() : null, mem0, mem1: { heap: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : 0, objs: (() => { let n = 0; AF.scene.traverse(() => n++); return n; })() }, strMax: AF.world.stream ? [AF.world.stream.maxStep, AF.world.stream.maxPhase] : null, fd: AF.stream.firstDraws ? { drawn: AF.stream.firstDraws.drawn, keys: AF.stream.firstDraws.keys.size, newProgs: AF.stream.firstDraws.newProgs } : null };
   }, globalThis.__psScenario || 'fly');
   let traced = null;
   if (tcdp) {
@@ -84,7 +93,13 @@ async (page) => {
     marks.sort((a, b) => a[0] - b[0]);
     const stepAt = (ts) => { let s = ''; for (const m of marks) if (m[0] <= ts) s = m[1]; else break; return s; };
     const keep = /GC|Compile|GPUTask|ProgramLink|Shader|Layout|Paint|DecodeImage|TimerFire|FireAnimationFrame|FunctionCall|EvaluateScript|RunMicrotasks|Recalc|UpdateLayoutTree|CommandBuffer|Decode|Raster|Commit|SwapBuffers|Present/;
-    traced = trace.filter((e) => keep.test(e[2])).sort((a, b) => b[1] - a[1]).slice(0, 60).map((e) => stepAt(e[0]) + ' ' + e[1] + 'ms ' + e[2] + ' p' + e[3] + ' ' + e[6]);
+    traced = trace.filter((e) => keep.test(e[2])).sort((a, b) => b[1] - a[1]).slice(0, 30).map((e) => stepAt(e[0]) + ' ' + e[1] + 'ms ' + e[2] + ' p' + e[3] + ' ' + e[6]);
+    // per hitch: every traced event (>= 6 ms, any process) overlapping the gap window
+    const hm = new Map(); for (const m of marks) { const q = /^HITCH(\d+) (\d+)/.exec(m[1]); if (q) hm.set(+q[1], [m[0] - +q[2] * 1000, m[0]]); }
+    for (const h of r.hitches) {
+      const w = hm.get(h.id); if (!w) continue;
+      h.ev = trace.filter((e) => e[0] < w[1] && e[0] + e[1] * 1000 > w[0]).sort((a, b) => b[1] - a[1]).slice(0, 14).map((e) => e[1] + ' ' + e[2] + ' p' + e[3] + '/' + e[4] + ' ' + e[6]);
+    }
   }
   if (!globalThis.__psKeep) await ctx.close();
   return { bootMs, r, traced, errs: errs.slice(0, 8) };

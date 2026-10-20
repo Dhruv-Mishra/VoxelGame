@@ -104,6 +104,7 @@ try {
   A.setOn = (on) => {
     A.on = !!on; try { localStorage.setItem('portSolace.sound', on ? '1' : '0'); } catch (e) { /* storage blocked */ }
     if (!ctx) { if (on) make(); return; }
+    if (!on) for (const k of TONES.keys()) A.stopTone(k);
     if (on) ctx.resume().catch(() => {}); else ctx.suspend().catch(() => {});
   };
   A.setVolume = (v) => { A.vol = AF.clamp(+v || 0, 0, 1); if (master) master.gain.setTargetAtTime(A.vol, ctx.currentTime, 0.05); try { localStorage.setItem('portSolace.volume', String(A.vol)); } catch (e) { /* storage blocked */ } };
@@ -229,7 +230,44 @@ try {
   };
   A.release = (key) => { const h = named.get(key); if (h) { h.stop(); named.delete(key); } };
 
-  // ---------------------------------------------------------------- where is the listener? (zones in plan metres)
+  // ---------------------------------------------------------------- synthesized tones (no files): 77-combat's seeker lock-on
+  // beep(freq, dur s, vol, type) = one short enveloped oscillator on the ui bus (two nodes per beep, freed when it ends) → true if it was
+  // scheduled. tone(key, freq, vol, type) holds a continuous tone per key (one oscillator while it sounds; repeat calls only retune it);
+  // stopTone(key) fades it out. Silent (and nothing made) with Sound off or before the context is unlocked; Sound off stops held tones.
+  const TONES = new Map();
+  const toneEnd = (o, g) => () => { try { o.disconnect(); g.disconnect(); } catch (e) { /* gone */ } };
+  A.beep = (freq, dur = 0.06, vol = 0.08, type = 'square') => {
+    if (!A.on || !ctx || ctx.state !== 'running') return false;
+    try {
+      const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain(), d = Math.max(0.03, dur);
+      o.type = type; o.frequency.value = freq;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.006); g.gain.setValueAtTime(vol, t + d - 0.012); g.gain.linearRampToValueAtTime(0, t + d);
+      o.connect(g); g.connect(bus.ui); o.onended = toneEnd(o, g); o.start(t); o.stop(t + d + 0.02);
+      return true;
+    } catch (e) { AF.warnOnce('audio beep', e); return false; }
+  };
+  A.tone = (key, freq, vol = 0.06, type = 'square') => {
+    if (!A.on || !ctx || ctx.state !== 'running') { A.stopTone(key); return false; }
+    let T = TONES.get(key);
+    if (T) {
+      if (T.f !== freq) { T.f = freq; T.o.frequency.setTargetAtTime(freq, ctx.currentTime, 0.01); }
+      if (T.v !== vol) { T.v = vol; T.g.gain.setTargetAtTime(vol, ctx.currentTime, 0.02); }
+      return true;
+    }
+    try {
+      const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = type; o.frequency.value = freq; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.02);
+      o.connect(g); g.connect(bus.ui); o.onended = toneEnd(o, g); o.start(t);
+      TONES.set(key, { o, g, f: freq, v: vol });
+      return true;
+    } catch (e) { AF.warnOnce('audio tone', e); return false; }
+  };
+  A.stopTone = (key) => {
+    const T = TONES.get(key); if (!T) return;
+    TONES.delete(key);
+    try { const t = ctx.currentTime; T.g.gain.cancelScheduledValues(t); T.g.gain.setValueAtTime(T.g.gain.value, t); T.g.gain.linearRampToValueAtTime(0, t + 0.03); T.o.stop(t + 0.05); } catch (e) { /* gone */ }
+  };
+  A.tones = TONES;
   const P = AF.PLAN, inR = (x, z, r) => x >= r[0] && x <= r[2] && z >= r[1] && z <= r[3];
   const ZR = { city: [-300, -260, 460, 212], park: [P.park.x0, P.park.z0, P.park.x1, P.park.z1], zoo: [P.west.zoo.x0, P.west.zoo.z0, P.west.zoo.x1, P.west.zoo.z1],
     terminal: P.west.air.terminal, air: [P.west.air.x0, P.west.air.z0, P.west.air.x1, P.west.air.z1], station: [173, 10, 300, 72], boardwalk: [-300, 170, -140, 272],

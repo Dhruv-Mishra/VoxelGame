@@ -430,6 +430,41 @@ try {
       const nm = AF.textModel('HARBOUR TRUST', p.gold, {}); W.stamp(nm, 8.75, 10.75, -125 - nm.w * 0.25 / 2, 3);
       D.tank(41.5, 40, -112, 1.25); D.bulkhead(20, 40, -140.5, 3, 2.5, 3); D.aerial(38, 76, -115.5, 6); D.flag(19.5, 76, -115, navy, 7, { city: true, big: true });
       S.push({ x: 42, y: 40.25, z: -139 });
+      // the heist's way down (81-heist: skydive onto the SKY DECK, then down the steel stair to the podium roof and its roof door): a
+      // steel deck at 40 m cantilevered off the tower's setback on the Charter Street side (x 16..44, over the podium's strip), a
+      // switchback stair tower (8 flights of 13 steps, lanes along x) from its east end down to the podium roof beside the roof door, and
+      // two steel steps up from the Trust Annex roof (a short landing) onto the podium's parapet. All world voxels.
+      {
+        const st = p.steel, sd = p.steelD, lamp = p.bulb, DX0 = 16, DX1 = 44, DZ0 = -110, DZ1 = -104.5, RISE = 3.25;
+        const LA = [-109.75, -107.5], LB = [-107, -104.75], XW0 = 35.25, XW1 = 36.5, XE0 = 43, XE1 = 44.25;
+        W.clear(DX0 + 0.25, 40, -110.5, DX1 - 0.25, 41.5, -109.75);                    // the setback parapet between the ring and the deck
+        W.fill(DX0, 39.75, DZ0, DX1, 40, DZ1, st);                                       // deck plate
+        W.clear(XW1, 39.75, LA[0], XE0, 40, LA[1]);                                      // the first flight's well
+        W.fill(DX0, 40, DZ1 - 0.25, DX1, 41, DZ1, sd); W.fill(DX0, 40, DZ0, DX0 + 0.25, 41, DZ1, sd); W.fill(DX1 - 0.25, 40, DZ0, DX1, 41, DZ1, sd);   // rails
+        W.fill(XW1, 40, LA[0] - 0.25, XE0, 41, LA[0], sd); W.fill(XW1 - 0.25, 40, LA[0] - 0.25, XW1, 41, LA[1], sd);                                   // well rails
+        for (let x = DX0 + 1.5; x < XW0; x += 6) W.fill(x, 14, DZ1 - 0.5, x + 0.25, 39.75, DZ1 - 0.25, sd);                                           // posts down to the podium
+        W.fill(XW1, 14, LA[1], XE0, 41, LB[0], sd);                                      // lane divider (doubles as the inner rail)
+        // flights: 0 = lane A from the top (the east end) towards the west, then alternating lanes; landings at both ends span both lanes
+        for (let k = 0; k < 8; k++) {
+          const top = 40 - RISE * k, lane = k % 2 ? LB : LA, west = k % 2 === 0;
+          for (let i = 0; i < 13; i++) {
+            const y = top - 0.25 * (i + 1), x0 = west ? XE0 - 0.5 * (i + 1) : XW1 + 0.5 * i;
+            W.fill(x0, y - 0.25, lane[0], x0 + 0.5, y, lane[1], st);
+            if (lane === LB) W.fill(x0, y, LB[1], x0 + 0.5, y + 1, LB[1] + 0.25, sd);   // outer handrail
+          }
+          const ly = top - RISE;
+          if (west) W.fill(XW0, ly - 0.25, LA[0], XW1, ly, LB[1], st); else W.fill(XE0, ly - 0.25, LA[0], XE1, ly, LB[1], st);
+          if (west) W.fill(XW0, ly, LA[0], XW0 + 0.25, ly + 1, LB[1], sd);
+        }
+        W.fill(XE0, 39.75, LA[0], XE1, 40, LB[1], st);                                   // the top landing is deck
+        // steps up from the Trust Annex roof (12.5) onto the podium parapet, for anyone who lands short
+        for (const x of [20, 40]) { W.fill(x, 12.5, -103.75, x + 2, 13.75, -102.25, sd); W.fill(x, 13.75, -103.75, x + 2, 14, -103, st); }
+        // caged lamps on posts (deck, the podium corners, the stair foot)
+        for (const [x, y0, z] of [[22, 40, -104.75], [32, 40, -104.75], [42, 40, -104.75], [10.75, 14, -105.25], [10.75, 14, -145.75], [30, 14, -146], [34, 14, -104.75]]) {
+          const y = y0 + 1.5; W.fill(x, y0, z, x + 0.25, y - 0.25, z + 0.25, sd);
+          W.fill(x, y - 0.25, z, x + 0.25, y + 0.25, z + 0.25, lamp); AF.addLight({ x: x + 0.125, y: y + 0.3, z: z + 0.125, color: 0xffe2b0, intensity: 1.1, range: 13, kind: 'lamp', night: true });
+        }
+      }
       T('Harbour Trust Bank', { x: 30, z: -125.5, h: 107 });
 
       // CHRYSALIS BUILDING — salmon terracotta, Chrysler-style stacked stainless arches with triangular windows, needle

@@ -69,6 +69,9 @@ try {
   setTone('betrayal', 'kit.t2 silas.k3 vera.k2');
   setTone('urgency', 'vera.cove vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.reflex vera.siege vera.siege2 vera.chase vera.chase2 vera.go vera.loud vera.exit vera.wave vera.k3 vera.k4 vera.loadout vera.bodies vera.spotted kit.boss tony.cove tony.chase tony.k1 tony.k2 vera.farm4 vera.cc1 vera.jets1 vera.jets2 tony.farm');
   setTone('whisper', 'vera.farm2 vera.farm3');
+  setTone('persuasion', 'vera.d1 vera.d2 vera.d3 vera.w1 vera.w2 vera.w3 vera.w4 vera.w5 vera.w6');
+  setTone('whisper', 'vera.n1 vera.n2 vera.n3 vera.n4 vera.n5 vera.n6 vera.n7 vera.n8 vera.n9 vera.n12 kit.f1 kit.f2 kit.f3');
+  setTone('urgency', 'vera.n10');
   setTone('relief', 'vera.cc2 vera.jets3');
   setTone('anger', 'prescott.angry1 prescott.angry2 prescott.angry3 prescott.caught pit.fire');
   setTone('relief', 'vera.f1 vera.f2 vera.f3 vera.a1 vera.a2 vera.fail kit.down silas.down silas.greet');
@@ -94,7 +97,7 @@ try {
       direction: 'Keep Vera’s voice low to protect the crew’s cover, but let the urgency cut through. Whisper this quickly; do not shout.',
     },
   };
-  const RADIO = new Set(('vera.plane vera.island vera.kit vera.ski vera.ski2 vera.got vera.m1 vera.m2 vera.msolo vera.roof vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.k1 vera.k2 vera.k3 vera.k4 vera.f1 vera.f2 vera.f3 vera.a1 vera.a2 vera.fail vera.fail2 vera.spotted vera.reflex vera.maze vera.tough vera.siege vera.siege2 vera.chase vera.chase2 vera.q2b vera.qsec vera.q4b vera.bodies vera.nice vera.loud vera.dark vera.hold vera.go vera.wheels vera.drop vera.exit vera.wave vera.loadout vera.lasersoff vera.roles3 vera.roles4 kestrel.exit vera.farm1 vera.farm2 vera.farm3 vera.farm4 vera.cc1 vera.cc2 vera.paint vera.paint2 vera.jets1 vera.jets2 vera.jets3 tony.farm').split(/\s+/));
+  const RADIO = new Set(('vera.plane vera.island vera.kit vera.ski vera.ski2 vera.got vera.m1 vera.m2 vera.msolo vera.roof vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.k1 vera.k2 vera.k3 vera.k4 vera.f1 vera.f2 vera.f3 vera.a1 vera.a2 vera.fail vera.fail2 vera.spotted vera.reflex vera.maze vera.tough vera.siege vera.siege2 vera.chase vera.chase2 vera.q2b vera.qsec vera.q4b vera.bodies vera.nice vera.loud vera.dark vera.hold vera.go vera.wheels vera.drop vera.exit vera.wave vera.loadout vera.lasersoff vera.roles3 vera.roles4 kestrel.exit vera.farm1 vera.farm2 vera.farm3 vera.farm4 vera.cc1 vera.cc2 vera.paint vera.paint2 vera.jets1 vera.jets2 vera.jets3 tony.farm vera.n1 vera.n2 vera.n3 vera.n4 vera.n5 vera.n6 vera.n7 vera.n8 vera.n9 vera.n10 vera.n12').split(/\s+/));
   const toneOf = (id, who, key) => TONE[id] || (who === 'kestrel' ? 'machine' : who === 'tower' ? 'announcement' :
     /^sus/.test(key) ? (who === 'zw' ? 'cautious' : 'surprise') : /^check/.test(key) ? 'cautious' :
     /^clear/.test(key) ? 'relief' : /^spot/.test(key) || key === 'alarm' || key === 'body' || /^fight/.test(key) ? 'urgency' :
@@ -205,6 +208,28 @@ try {
     jets1: 'Jets on your tail! Get the launchers out of the boot. The seeker locks on by itself!',
     jets2: 'One down! Keep firing!',
     jets3: 'The sky is clear. Get to Westgate and get that plane up!',
+    // the pitch: the drive out to the depot and the map-room briefing
+    d1: 'Get in, all of you. We don\u2019t talk business anywhere the Morettis drink. It\u2019s a long drive.',
+    d2: 'Port Solace thinks the Harbour Trust is just a bank. It\u2019s where every crook on the coast keeps his money. Including the Morettis.',
+    d3: 'My father ran rum through this old depot. Nobody comes out this far. Come inside.',
+    w1: 'Kit Morrow. Eleven years a clerk at the Harbour Trust. He knows the vault, the guards and their habits, and he holds one of its two keys.',
+    w2: 'The second key hangs from Mr Prescott\u2019s watch chain. The bank\u2019s manager. He plays baccarat every night aboard the Solace Queen.',
+    w3: 'Silas Crane runs the Queen\u2019s casino and owns an island you won\u2019t find on any chart. He\u2019ll take the money off our hands, for a cut.',
+    w4: 'And Tony Moretti. His family guards half this coast, and their money sleeps in that vault. Cross them and they come for you. So don\u2019t get seen.',
+    w5: 'Kestrel Systems watches the bank\u2019s cameras from a junction under the zoo. That\u2019s a job for midnight.',
+    w6: 'Uniforms, papers, a plane, Kit, the second key, the bank, then the getaway. One step at a time, together. Let\u2019s go to work.',
+    // midnight: the roof watch, the zoo, the jump onto the bank
+    n1: 'Midnight. The roof watch changes at one. Thin it out from City Hall\u2019s roof. I left a rifle at the foot of the service ladder.',
+    n2: 'Four guards on the bank roof. If one of them finds a body, they\u2019ll call it in. Pick your moments.',
+    n3: 'The roof is quiet. Now the cameras. Kestrel\u2019s junction is under the zoo, and tonight the zoo is crawling with their guards.',
+    n4: 'Take a plane from Westgate and bail out over the Great Banyan on the Treetop Trail. Land on the treehouse deck.',
+    n5: 'Up to the lookout. Clear the paths from up there before you go walking.',
+    n6: 'The keepers\u2019 gate leads to the lion house. Watch that camera.',
+    n7: 'Kestrel is ours. You all have the tablet now. Up the drain stair; Westgate is just across the road.',
+    n8: 'One more jump. There\u2019s a steel deck on the bank tower, over Charter Street. Land on it, and stay low.',
+    n9: 'The rifle couldn\u2019t see that deck. There are still guards up there. Clear them, then take the stairs down to the roof door.',
+    n10: 'They\u2019ve seen you! Every cop in the city is on the way. Lose them, or pull out and try again.',
+    n12: 'That\u2019s the roof door. Open it with the tablet, or punch the code into the keypad.',
   });
   add('kit', 'Kit', {
     k1: 'You are Vera\u2019s crew. Keep your voices down; half the island drinks with the Morettis.',
@@ -216,6 +241,9 @@ try {
     t2: 'I am sorry, friends. The Morettis offered me more than Vera did.',
     boss: 'You should have stayed on the mainland!',
     down: 'Wait! I can still make this right!',
+    f1: 'Not out here. Follow me, and don\u2019t run.',
+    f2: 'The old owner built this place for rum-runners. Watch the bookcase.',
+    f3: 'The passage comes out right beside the Morettis\u2019 tunnel. Go. I\u2019ll keep the bar talking.',
   });
   add('silas', 'Silas', {
     s1: 'You have Prescott\u2019s key already? Vera said you were good.',
