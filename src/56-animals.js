@@ -475,7 +475,7 @@ try {
     const cam = AF.camera.position, pp = playerPos();
     for (const a of animals) {
       if (a.t0 === undefined) { a.t0 = seed0(a); a.uid = 7000 + uidN++; a.x0 = a.x ?? a.root.position.x; a.z0 = a.z ?? a.root.position.z; a.ang0 = a.ang || 0; }
-      a.t = t + a.t0 * 20;
+      if (a.type === 'geese' || a.type === 'murmur' || a.type === 'dogwalk') a.t = t + a.t0 * 20;
       if (a.type === 'geese') { // always visible in the sky
         const u = ((t + a.t * 0) % a.period) / a.period, L = 900, x = -450 + u * L;
         const ang = a.f ? 0.6 : -0.35;
@@ -491,6 +491,7 @@ try {
       const vis = dc < (a.type === 'gullfly' ? 340 : 200); if (a.root.visible !== vis) a.root.visible = vis; if (a.leash) a.leash.visible = vis;
       if (dc < 140) { const m0 = a.body || a.root; if (m0.layers.mask !== 1 || (a.head && a.head.layers.mask !== 1)) a.root.traverse((o) => { if (o.isMesh && o.layers.mask !== 1) o.layers.set(0); }); }   // workaround for AF.CULL layer-31 restore bug
       if (!vis && a.type !== 'dog') continue;
+      a.t = t + a.t0 * 20;   // only for animals that animate this frame (a double written to hundreds of far animals was per-frame garbage)
       switch (a.type) {
         case 'dog': {
           const o = a.owner; if (!o) break;

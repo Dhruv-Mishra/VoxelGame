@@ -160,8 +160,8 @@ try {
   const gunShop = (title) => () => sheet(title, 'Firearms & ammunition \u2014 keep it legal, friend', (tab) => {
     const GN = AF.GUNS; return Object.keys(GN).map((id) => {
       const g = GN[id];
-      if (!tab) return { name: g.name, desc: S.guns[id] ? 'Owned' : g.mag + '-round, ' + (g.auto ? 'automatic' : g.pellets > 1 ? 'buckshot' : 'single shot') + ' \u00b7 includes ' + g.pack + ' rounds', price: g.price, tag: S.guns[id] ? 'Owned' : null, off: !!S.guns[id], act: () => AF.shop.buy(g.price, g.name, () => { AF.combat.give(id); toast('The ' + g.name + ' is yours. Wheel or 1\u20135 to draw it.'); }) };
-      return { name: g.name + ' ammo \u00d7' + g.pack, desc: S.guns[id] ? (S.ammo[id] || 0) + ' spare' : 'Buy the gun first', price: g.packPrice, off: !S.guns[id], act: () => AF.shop.buy(g.packPrice, 'ammo', () => { S.ammo[id] = (S.ammo[id] || 0) + g.pack; }) };
+      if (!tab) return { name: g.name, desc: S.guns[id] ? 'Owned' : g.rocket ? (g.rocket[5] ? 'Rocket launcher \u2014 locks onto jets, the autogyro and cars' : 'Rocket launcher \u2014 straight shots, big blast') + ' \u00b7 includes ' + g.pack + ' rockets' : g.mag + '-round, ' + (g.auto ? 'automatic' : g.pellets > 1 ? 'buckshot' : 'single shot') + ' \u00b7 includes ' + g.pack + ' rounds', price: g.price, tag: S.guns[id] ? 'Owned' : null, off: !!S.guns[id], act: () => AF.shop.buy(g.price, g.name, () => { AF.combat.give(id); toast('The ' + g.name + ' is yours. Wheel or 1\u20135 to draw it.'); }) };
+      return { name: g.name + (g.rocket ? ' rockets \u00d7' : ' ammo \u00d7') + g.pack, desc: S.guns[id] ? (S.ammo[id] || 0) + ' spare' : 'Buy the ' + (g.rocket ? 'launcher' : 'gun') + ' first', price: g.packPrice, off: !S.guns[id], act: () => AF.shop.buy(g.packPrice, 'ammo', () => { S.ammo[id] = (S.ammo[id] || 0) + g.pack; }) };
     });
   }, ['Firearms', 'Ammunition']);
   // clothes: styles are bought at an outfitter (AF.save.wear) and worn free at the home wardrobe; colours are always free
@@ -367,7 +367,7 @@ try {
     const car = AF.mode === 'drive' && VV.player;
     for (const Z of J.zones) {
       const inZ = !!car && Math.abs(car.x - Z.x) < 3.4 && Math.abs(car.z - Z.z) < 3.4;
-      if (inZ && !Z.inside && Math.abs(car.v) < 1.2) { Z.inside = true; car.v = car.vx = car.vz = 0; Z.open(car); }
+      if (inZ && !Z.inside && Math.abs(car.v) < 1.2) { Z.inside = true; car.v = car.vx = car.vz = 0; if (!(J.driveIn && J.driveIn(Z, car))) Z.open(car); }
       else if (!inZ) Z.inside = false;
     }
   });

@@ -27,14 +27,16 @@ try {
     staleS: 300, staleEvery: 5, staleNearD: 60,
     pedHp: 30, copHp: 60, engagedMax: 12, pedForgetD: 85, panicR: 26,
     // gunplay (77): headshot multiplier, stance spread multipliers, recoil recovery; silenced shots only panic / report within these
-    headK: 2.5, aimSpreadK: 0.45, crouchSpreadK: 0.65, moveSpreadK: 0.9, sprintSpreadK: 2.2, airSpreadK: 2.6, adsKickK: 0.6,
+    headK: 2.5, aimSpreadK: 0.28, crouchSpreadK: 0.5, moveSpreadK: 0.7, sprintSpreadK: 1.8, airSpreadK: 2.2, adsKickK: 0.5,
     silencedPanicR: 7, witnessR: 22, copWitnessR: 45,
     // the mob / police guns: [dmg per hit, base hit chance, burst min, burst max, s between shots in a burst, s between bursts]
     npcGun: { pistol: [7, 0.42, 1, 3, 0.28, 1.3], smg: [5, 0.32, 3, 6, 0.1, 1.5], lmg: [8, 0.3, 6, 11, 0.08, 2.2] },
     heat: { assault: 22, ko: 30, kill: 60, shots: 8, copHit: 50, copKill: 120, runOver: 45, carBoom: 40, trespass: 25 },
     stars: [20, 70, 150, 260, 400], evadeS: [0, 10, 14, 18, 24, 30], cops: [0, 2, 3, 4, 6, 8], squad: [0, 0, 1, 2, 3, 3],
-    // the default melee everyone carries (77): [dmg, reach m, s between swings]; armour (missions lend it, never saved) soaks a share
-    batonDmg: 12, batonReach: 1.9, batonCd: 0.5, armorMax: 100, armorAbsorb: 0.7,
+    // the default melee everyone carries (77): bare fists [dmg, reach m, s between punches]; armour (missions lend it, never saved) soaks a share
+    fistDmg: 11, fistReach: 1.6, fistCd: 0.42, armorMax: 100, armorAbsorb: 0.7,
+    // launchers (77): rocket blast radius / damage scale vs cars, strike jets' hit points; armoured cars (car.armor) take this share
+    rocketCarK: 2.2, jetHp: 240, armorCarK: 0.12,
     // the wanted level only exists on the main island: z below mainZ (the islands, the liner and the open sea lie past it)
     mainZ: 1000,
     // 4+ stars: up to jetN pooled strike jets (m/s, rad/s, cruise height) loose seeker missiles after a jetWarnS lock-on warning,
@@ -321,6 +323,8 @@ try {
   PLAY.smg = PLAY.shot;
   PLAY.sil = (t, k) => { hiss(t, 0.09, 2600, 500, 0.32 * k); tone(t, 0.05, 260, 110, 0.22 * k); };
   PLAY.lmg = (t, k) => { hiss(t, 0.26, 3800, 240, k); tone(t, 0.12, 130, 45, 0.8 * k); };
+  // launcher: a hard thump and a long whoosh as the motor lights (no recording; synthesised every time)
+  PLAY.rocket = (t, k) => { tone(t, 0.18, 95, 38, 0.9 * k); hiss(t, 0.12, 5200, 900, 0.8 * k); hiss(t + 0.05, 1.1, 900, 2600, 0.45 * k); };
   // synth kind -> recorded sample (75-audio); explosions far off use the muffled take
   const SAMPLE = { shot: 'rev', smg: 'smg', shotgun: 'shotgun', rifle: 'rifle', sil: 'sil', lmg: 'lmg', punch: 'punch', swing: 'swing', boom: 'boom', crash: 'crash', cash: 'cash', deny: 'ui_deny', ding: 'ui_ding', click: 'ui_click', hurt: 'grunt_m' };
   SFX.play = (kind, x, z) => {

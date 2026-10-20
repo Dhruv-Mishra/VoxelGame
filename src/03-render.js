@@ -197,8 +197,20 @@ try {
   // while hidden (park pose batches) set userData.liveMatrix. Direct obj.updateMatrixWorld() calls keep three's semantics.
   S.matrixWorldAutoUpdate = false;
   const O3 = THREE.Object3D.prototype.updateMatrixWorld;
+  // dirty check (Perf_skill "static transforms"): an auto-updating object whose position / quaternion / scale did not change since
+  // the last frame keeps its local matrix, and — unless its parent moved — its world matrix and its whole subtree are left alone. Only
+  // ~a tenth of the ~4 800 auto-matrix objects move in a given frame (walkers, cars, rides, the player); the rest were recomposed and
+  // re-multiplied every frame. AF.perfStats.upd = ms spent here (accumulated; harnesses reset it), .skip = the check on (default).
+  const PS = AF.perfStats = { upd: 0, skip: true, composed: 0 };
+  const same = (o) => {
+    const p = o.position, q = o.quaternion, s = o.scale; let c = o._trs;
+    if (c === undefined) c = o._trs = new Float64Array(10).fill(NaN);
+    if (c[0] === p.x && c[1] === p.y && c[2] === p.z && c[3] === q._x && c[4] === q._y && c[5] === q._z && c[6] === q._w && c[7] === s.x && c[8] === s.y && c[9] === s.z) return true;
+    c[0] = p.x; c[1] = p.y; c[2] = p.z; c[3] = q._x; c[4] = q._y; c[5] = q._z; c[6] = q._w; c[7] = s.x; c[8] = s.y; c[9] = s.z;
+    return false;
+  };
   const updWorld = (o, force) => {
-    if (o.matrixAutoUpdate) o.updateMatrix();
+    if (o.matrixAutoUpdate && !(PS.skip && same(o))) { o.updateMatrix(); PS.composed++; }
     if (o.matrixWorldNeedsUpdate || force) {
       if (o.parent === null) o.matrixWorld.copy(o.matrix); else o.matrixWorld.multiplyMatrices(o.parent.matrixWorld, o.matrix);
       o.matrixWorldNeedsUpdate = false; force = true;
@@ -233,7 +245,7 @@ try {
     // behind the loader veil (AF.stream settle) only every 6th frame renders (keeps uploads incremental); the rest goes to streaming.
     // AF.stream.hold: nothing renders while the driver links programs in parallel (01-stream warm)
     const veiled = AF.stream.hold > 0 || (AF.stream.settling && AF.clock.frame % 6 !== 0);
-    if (!veiled) try { updWorld(S, false); AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
+    if (!veiled) try { const t0 = performance.now(); updWorld(S, false); PS.upd += performance.now() - t0; AF.renderFrame(); if (AF.afterFrame) AF.afterFrame(); } catch (e) { AF.warnOnce('render threw', e); if (AF.MOBILE) AF.reportError(e); }
     AF.input.endFrame();
   };
   AF.frame = frame;

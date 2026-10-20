@@ -60,19 +60,40 @@ try {
     const toLocal = (p) => new THREE.Vector3((p[0] - B.m.w / 2 + 0.5) * T.vs, p[1] * T.vs, (p[2] - B.m.d / 2) * T.vs);
     return (geoCache[id] = { geo, pgeo, props: [B.prop, B.prop2].filter(Boolean).map(toLocal), halfL: B.m.d * T.vs / 2, halfW: B.m.w * T.vs / 2, h: B.m.h * T.vs });
   };
+  class Plane extends AF.Vehicle {
+    constructor(id, type, G, x, z, yaw, root, props) {
+      super({ name: type.name, x, z, yaw, halfL: G.halfL, halfW: G.halfW, height: G.h });
+      this.id = id; this.T = type; this.G = G; this.root = root; this.props = props;
+      this.y = AF.W.groundY(x, z); this.pitch = 0; this.roll = 0; this.gam = 0;
+      this.pr = 0; this.rr = 0; this.v = 0; this.throttle = 0; this.engine = false;
+      this.home = { x, z, yaw }; this.onGround = true; this.spin = 0;
+    }
+    place() {
+      this.root.position.set(this.x, this.y, this.z);
+      this.root.rotation.set(-this.pitch, this.yaw, this.roll, 'YXZ');
+      if (this.interact) this.sync();
+    }
+    bodyDist(px, pz) {
+      const s = Math.sin(this.yaw), c = Math.cos(this.yaw), rx = px - this.x, rz = pz - this.z;
+      const lx = rx * c - rz * s, lz = rx * s + rz * c;
+      return Math.hypot(Math.max(0, Math.abs(lx) - Math.min(1.5, this.G.halfW)), Math.max(0, Math.abs(lz) - this.G.halfL));
+    }
+  }
+  PL.Plane = Plane;
+  AF.Plane = Plane;
   const make = (id, x, z, yaw) => {
     const T = TYPES[id], G = planeGeo(id), root = new THREE.Group();
     const body = AF.modelMesh(G.geo); root.add(body);
     const props = G.props.map((p) => { const pm = AF.modelMesh(G.pgeo); pm.position.copy(p); root.add(pm); return pm; });
     root.rotation.order = 'YXZ'; AF.scene.add(root);
-    const pl = Object.assign(new AF.Vehicle({ name: T.name, x, z, yaw }), { id, T, G, root, props, x, y: AF.W.groundY(x, z), z, yaw, pitch: 0, roll: 0, gam: 0, pr: 0, rr: 0, v: 0, throttle: 0, engine: false, home: { x, z, yaw }, onGround: true, spin: 0, name: T.name });
+    const pl = new Plane(id, T, G, x, z, yaw, root, props);
     pl.attach({ r: 2.2, lift: 1, label: 'Fly the ' + T.name, prio: 0.1,
-      dist: (px, pz) => { const s = Math.sin(pl.yaw), c = Math.cos(pl.yaw), rx = px - pl.x, rz = pz - pl.z, lx = rx * c - rz * s, lz = rx * s + rz * c; return Math.hypot(Math.max(0, Math.abs(lx) - Math.min(1.5, G.halfW)), Math.max(0, Math.abs(lz) - G.halfL)); },
+      dist: (px, pz) => pl.bodyDist(px, pz),
       can: () => AF.mode === 'walk' && PL.cur !== pl && pl.net == null, act: () => AF.setMode('fly', { plane: pl }) });
-    PL.list.push(pl); place(pl);
+    PL.list.push(pl); pl.place();
     return pl;
   };
-  const place = (pl) => { pl.root.position.set(pl.x, pl.y, pl.z); pl.root.rotation.set(-pl.pitch, pl.yaw, pl.roll, 'YXZ'); if (pl.interact) pl.sync(); };
+  const place = (pl) => pl.place ? pl.place() : (pl.root.position.set(pl.x, pl.y, pl.z), pl.root.rotation.set(-pl.pitch, pl.yaw, pl.roll, 'YXZ'), pl.interact && pl.sync());
   PL.make = make; PL.place = (pl) => place(pl);
   // the model kit for 53-airtraffic's airframes (palette helper, fuselage / wing rasterisers, the airliner propeller)
   PL.kit = { C, fuselage, wing, propGeo: () => planeGeo('airliner').pgeo };

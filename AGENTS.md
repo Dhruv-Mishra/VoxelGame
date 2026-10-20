@@ -69,7 +69,8 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
 - Player/UI: 70 avatar + walk/aerial (walk swims in water > 1.25 m deep — `AF.player.swimming`, surface `AF.PL.waterAt(x, z)`;
   Space climbs / mantles a ledge ≤ 1.6 m (≤ 1.9 m out of the water) — `AF.player.climbing`) · 71 UI (title, minimal HUD, stacked toasts, menu, dialogue) · 72 touch ·
   73 mission kit (`AF.mission`: `blip/unblip` map + minimap blips with world markers (one instanced draw), `objective`, `bar`,
-  `shard` big-message cards, `cut` cutscene player) · 74 map (`map.overlays`, `map.miniOverlays`) ·
+  `shard` big-message cards, `cut` cutscene player; GPS `AF.mission.gps`: the primary blip's A* route over 51's road graph, drawn on
+  the minimap + map, and a turn-by-turn / compass guidance line under the objective; `AF.ui.placeAt(x, z)` names a place) · 74 map (`map.overlays`, `map.miniOverlays`) ·
   75 extras (photo mode `P`, Solace Stars collectibles) · 75-audio (`AF.audio`: samples, loops, zone ambience beds, footsteps,
   vehicles, PA; `play(id, {x,y,z})`, `hold(key, id, vol, rate, x, y, z)`; heist lines `voice(id, {x,y,z,radio}) → s`, `voiceLen`,
   `voicePreload`, `stopVoice`; `music(id | null, {fade, vol})`) · 98 tests · 99 boot.
@@ -94,8 +95,12 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   mid-heist; `AF.forget.touch(obj)` stamps a use, `AF.forget.register(name, { list, busy, away, home, reset })` adds a system.
 - Peds stay bare crowd instances until touched: `w.agg` (77 `engage`) makes 55's crowd tick call `AF.combat.stepPed`;
   `CB.release` returns them. Cops = 8 pooled walkers in the `cop` look; the mob = 8 pooled `goon` walkers (`CB.spawnGoon/goons/
-  clearGoons`: hostile without a wanted level, no heat). Kids / wheelchair users only ever flee. Everyone starts with a baton
-  (slot 0, held id `fists`); guns are bought or lent. Police jurisdiction is geographic (`CB.mainIsland`): bank/getaway crimes still
+  clearGoons`: hostile without a wanted level, no heat). Kids / wheelchair users only ever flee. Everyone starts with bare fists
+  (slot 0, held id `fists`, no held mesh); guns are bought or lent. Launchers (`bazooka`, `seeker`: `W.rocket`, gun counters sell
+  them, the heist lends them) fire pooled rockets (`CB.rockets`; the seeker locks the best jet / autogyro / hostile car in a 9° cone,
+  `CB.lock()`, a LOCKED tag under the crosshair). Strike jets have hit points (`G.jetHp`); `CB.jetMission({ n, target, onKill, owner })`
+  runs mission jets (81's getaway), `CB.jetKill(k)` syncs a crewmate's kill. Armoured cars (`car.armor`, `G.armorCarK`) take a share
+  of every hit. Police jurisdiction is geographic (`CB.mainIsland`): bank/getaway crimes still
   count, Serena/Corsair/liner crimes bring thugs instead. High heat adds pooled jets and evadable missiles. Typing GODMODE within
   five seconds toggles local, unsaved invulnerability, local one-hit kills and temporary guns; it does not bypass co-op hit authority.
 - Vehicles: `car.hp` → `car.dmg` (instanced `carDmg` attribute in the car paint shader); impacts arrive via `VV.onImpact`.
@@ -129,7 +134,12 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   cracking starts a siege (waves of reserve guards, `S.spawn`, sized by crew; in combat only `zone.hunters` (2) close in, the rest wait at
   `zone.holds` past the maze's way out), then a jet-ski chase (`chase` step, 1 + 2 per player, riders need line of sight + miss fast / off-screen targets, host-steered riders =
   'heist chase riders' path walkers with `actor.chase`, hulls in `AF.island.jetski.extra`; `ch`/`chit`/`chshot` ops). Act III: crews of
-  3–4 take ship's-security uniforms (`sec0..5`) and distract the detective / pit boss (`hold`). Conditional radio lines:
+  3–4 take ship's-security uniforms (`sec0..5`) and distract the detective / pit boss (`hold`). Act IV opens with Moretti's armoured
+  car (`wheels` → `farm` → `carchase` → `paint` → `park`): Southfield Farm stealth zone `farm` (6 guards, 81-heist-sets), the launcher
+  crate (`launchers`), host-driven chaser limousines (`netOwned`, `cc`/`cdm` ops), a Body Works respray via `AF.jobs.driveIn`; every client
+  spawns the armoured car at the same spot (netKey-matched). The getaway's `jets` step lends the launchers and runs `CB.jetMission`
+  (`jk` op). Checkpoint retries give back the lent guns held when the checkpoint was reached (`H.cpGuns`, `CB.snapLent/relend`).
+  Steps may carry a `tip` (controls how-to shown on entry). Conditional radio lines:
   `radio(id, urgent, when)` re-checks `when()` at play time.
   Stealth (80-stealth): every guard is killable (armed 240 hp); one hit only from behind (melee or a headshot on a guard not yet fighting);
   guards steered off their path stay hittable (54 `WK.near` tests `ctl` actors outside the path bounds); `zone.strict` (the liner): a

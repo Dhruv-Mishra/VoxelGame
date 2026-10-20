@@ -373,6 +373,15 @@ const TYPES = [
       m.sphere(11, 12, 86, 1.6, k.gold);
       thirties(m, { axles: S.axles, wr: S.wr, belt: 12, bottom: 2 }, { f: k.paint.fire });
       return m; } },
+  // the Moretti armoured car (81-heist; kept last so co-op type indices of the others never move): a riveted strongbox on a truck
+  // chassis, slit windows, steel bumpers, a roof hatch; paintable (the heist resprays it at Body Works)
+  { id: 'armored', name: 'Armoured car', kind: 'van', paints: [['olive', 'jet'], ['greyP', 'jet'], ['navy', 'jet'], ['maroon', 'jet']], seat: 'seatB',
+    build: (p) => { const k = kcols(); const S = { L: 48, W: 20, H: 26, top: 25, hood: 11, hoodTop: 13, axles: [10, 37], wr: 4, winY: [16, 19], bandY: [9, 10] };
+      const m = buildBox(S, { a: p.a, b: p.b, seat: p.seat }); thirties(m, { axles: S.axles, wr: S.wr, belt: 11, bottom: 2 }, { f: p.f });
+      for (const s of [1, -1]) { for (let z = 4; z < 36; z += 4) for (const y of [6, 14, 22]) sideSet(m, y, z, k.chromeD, s); for (let z = 3; z < 36; z++) sideSet(m, 4, z, k.chromeD, s); }
+      m.box(7, 25, 14, 13, 26, 20, k.chromeD);
+      for (const z of [0, 47]) for (let x = 0; x < 20; x++) for (let y = 2; y < 5; y++) m.set(x, y, z, k.chromeD);
+      return m; } },
 ];
 // v2 r2: horse-drawn wagons (a bay horse in the shafts; its four legs are instanced and walk a diagonal gait) — they set the pace of the street
 const HORSE = { bay: 0x7a4a2a, dark: 0x352015, blaze: 0xf2ece0 };
@@ -557,51 +566,71 @@ const WHEELS = {
   fuel: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, catering: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, baggage: { axles: [9, 34], wr: 3.6, L: 44, W: 19 }, followme: { axles: [9, 34], wr: 3.6, L: 44, W: 19 },
   dairycart: { axles: [], wr: 5.6, L: 66, W: 16 }, sidecar: { axles: [], wr: 3.4, L: 24, W: 16 }, icecart: { axles: [], wr: 5.6, L: 66, W: 16 },
   speedster: { axles: [11, 41], wr: 3.8, L: 52, W: 18 }, duesy: { axles: [10, 46], wr: 3.9, L: 58, W: 18 }, arrow: { axles: [9, 39], wr: 3.8, L: 50, W: 16 }, cord: { axles: [10, 40], wr: 3.6, L: 52, W: 18 },
-  moto: { axles: [], wr: 3.4, L: 22, W: 6, wb: 1.5 },
+  moto: { axles: [], wr: 3.4, L: 22, W: 6, wb: 1.5 }, armored: { axles: [10, 37], wr: 4, L: 48, W: 20 },
 };
-// distance from (px,pz) to a car's footprint (0 inside): you are "at" a car when you are next to its body, not its middle
-const bodyDist = (car, px, pz) => { const s = Math.sin(car.yaw), c = Math.cos(car.yaw), rx = px - car.x, rz = pz - car.z; const lx = rx * c - rz * s, lz = rx * s + rz * c; return Math.hypot(Math.max(0, Math.abs(lx) - car.halfW), Math.max(0, Math.abs(lz) - car.halfL)); };
-VV.bodyDist = bodyDist;
 // the driver's seat in car-local [right, up, forward] (instanced AI drivers and the seated player share it)
 const SEAT_L = [0, 0, 0];
-const seatLocal = (car) => {
-  const T = car.type, k = T.kind;
-  SEAT_L[0] = k === 'bike' ? 0 : car.halfW - 0.62;
-  SEAT_L[1] = k === 'cart' ? 1.3 : k === 'car' ? 0.4 : k === 'bike' ? 0.02 : T.big ? 0.45 : 0.42;
-  SEAT_L[2] = k === 'bike' ? -0.3 : k === 'cart' ? -0.45 : k === 'car' ? (T.id === 'convertible' ? 0.2 : 0.35) : car.halfL - (T.big ? T.id === 'bus' ? 2.1 : 2.6 : 1.3);
-  return SEAT_L;
-};
+class Car extends AF.Vehicle {
+  constructor(type, paintIdx, x, z, yaw, o = {}) {
+    const Wl = WHEELS[type.id];
+    const halfL = Wl.L * CVS / 2, halfW = Wl.W * CVS / 2;
+    super({ name: type.name, x, z, yaw, halfL, halfW });
+    const G = getGeo(type, paintIdx);
+    const mesh = new THREE.Object3D();
+    mesh.rotation.order = 'YXZ';
+    mesh.name = 'car';
+    this.mesh = mesh;
+    this.id = VV.cars.length;
+    this.type = type;
+    this.pi = paintIdx;
+    this.wr = Wl.wr * CVS;
+    this.ws = this.wr / 0.37;
+    this.wheelbase = Wl.wb || (Wl.axles.length > 1 ? (Wl.axles[1] - Wl.axles[0]) * CVS : 2.4);
+    this.gait = Math.random() * 6;
+    this.height = G.spec.H;
+    this.ai = null;
+    this.parked = true;
+    this.player = false;
+    this.driver = -1;
+    this.bob = 0;
+    this.bobV = 0;
+    this.sway = 0;
+    this.key = G.key;
+    this.vPrev = 0;
+    this.brake = 0;
+    this.wheels = [];
+    for (const [ai, az] of Wl.axles.entries()) for (const s of [1, -1]) {
+      this.wheels.push({ lx: s * (halfW - 0.17), ly: this.wr, lz: (az + 0.5) * CVS - halfL, front: ai === 1, side: s });
+    }
+    this.y = AF.surfaceBelow(x, z, (o.y ?? 0) + 2.5, 6);
+  }
+  seatLocal() {
+    const T = this.type, k = T.kind;
+    SEAT_L[0] = k === 'bike' ? 0 : this.halfW - 0.62;
+    SEAT_L[1] = k === 'cart' ? 1.3 : k === 'car' ? 0.4 : k === 'bike' ? 0.02 : T.big ? 0.45 : 0.42;
+    SEAT_L[2] = k === 'bike' ? -0.3 : k === 'cart' ? -0.45 : k === 'car' ? (T.id === 'convertible' ? 0.2 : 0.35) : this.halfL - (T.big ? T.id === 'bus' ? 2.1 : 2.6 : 1.3);
+    return SEAT_L;
+  }
+}
+VV.Car = Car;
+AF.Car = Car;
+const seatLocal = (car) => car.seatLocal ? car.seatLocal() : (car.type ? Car.prototype.seatLocal.call(car) : SEAT_L);
 VV.seatLocal = seatLocal;
+const bodyDist = (car, px, pz) => car.bodyDist ? car.bodyDist(px, pz) : AF.Vehicle.prototype.bodyDist.call(car, px, pz);
+VV.bodyDist = bodyDist;
 function makeCar(typeId, paintIdx, x, z, yaw, o = {}) {
   const T = TYPES.find((t) => t.id === typeId);
-  const G = getGeo(T, paintIdx);
-  // v2: every car body is drawn through one InstancedMesh per model (see syncInstances); car.mesh is a transform proxy only
-  const mesh = new THREE.Object3D();
-  mesh.rotation.order = 'YXZ';
-  mesh.name = 'car';
-  const Wl = WHEELS[typeId];
-  const halfL = Wl.L * CVS / 2, halfW = Wl.W * CVS / 2;
-  const wr = Wl.wr * CVS, ws = wr / 0.37;
-  const wheels = [];
-  for (const [ai, az] of Wl.axles.entries()) for (const s of [1, -1]) wheels.push({ lx: s * (halfW - 0.17), ly: wr, lz: (az + 0.5) * CVS - halfL, front: ai === 1, side: s });
-  const car = Object.assign(new AF.Vehicle({ name: T.name, x, z, yaw }), {
-    id: VV.cars.length, type: T, name: T.name, mesh, x, z, y: 0, yaw, pitch: 0, roll: 0, v: 0, vx: 0, vz: 0, steer: 0, spin: 0, pi: paintIdx,
-    halfL, halfW, wr, ws, wheels, wheelbase: Wl.wb || (Wl.axles.length > 1 ? (Wl.axles[1] - Wl.axles[0]) * CVS : 2.4), gait: Math.random() * 6, height: G.spec.H,
-    ai: null, parked: true, player: false, driver: -1, bob: 0, bobV: 0, sway: 0, key: G.key, vPrev: 0, brake: 0,
-  });
-  car.y = AF.surfaceBelow(x, z, (o.y ?? 0) + 2.5, 6);
+  const car = new Car(T, paintIdx, x, z, yaw, o);
   VV.cars.push(car);
   if (WHEEL_IM) { let count = 4; for (const existing of VV.cars) if (existing.type.id === typeId) count++; ensureIM(typeId, count); }
-  if (!o.noDrive && !T.horse) car.attach({ r: 1.6, lift: 0.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => bodyDist(car, px, pz), prio: 0.1,
+  if (!o.noDrive && !T.horse) car.attach({ r: 1.6, lift: 0.6, label: (T.kind === 'bike' ? 'Ride the ' : 'Drive the ') + T.name, dist: (px, pz) => car.bodyDist(px, pz), prio: 0.1,
     can: () => AF.mode === 'walk' && car.active !== false && !car.player && !car.dead && car.net == null && (!car.ai || Math.abs(car.v) < 0.6), act: () => AF.setMode('drive', { car }) });
-  placeMesh(car);
+  car.placeMesh();
   return car;
 }
 function placeMesh(car) {
-  const m = car.mesh;
-  m.position.set(car.x, car.y + car.bob, car.z);
-  m.rotation.set(car.pitch, car.yaw, car.roll, 'YXZ');
-  m.updateMatrix();
+  if (car.placeMesh) car.placeMesh();
+  else AF.Vehicle.prototype.placeMesh.call(car);
 }
 
 // ---------------------------------------------------------------- drive mode
@@ -851,7 +880,9 @@ AF.modes.drive = {
     if (AF.player && AF.player.setVisible) AF.player.setVisible(true);
     avatarShadow(DR.bike);
     const L = seatLocal(car);
-    DR.chase.set({ dist: car.type.big ? 13 : DR.bike ? 5.5 : 8.5, height: (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0), eye: [L[0], L[1] + (DR.bike ? 1.4 : 1.0), L[2] + 0.1] });
+    // tall bodies (vans, the armoured car) lift and lengthen the boom so the roof never fills the view
+    const tall = car.type.big || DR.bike ? 0 : Math.max(0, (car.height || 2) - 2.2);
+    DR.chase.set({ dist: car.type.big ? 13 : DR.bike ? 5.5 : 8.5 + tall * 3, height: (DR.bike ? 1.5 : 1.3) + (car.type.big ? 1.2 : 0) + tall * 1.3, eye: [L[0], L[1] + (DR.bike ? 1.4 : 1.0), L[2] + 0.1] });
     AF.emit('toast', (DR.bike ? 'You swing onto the ' : 'You slide behind the wheel of the ') + car.name + '.');
     AF.emit('hint', AF.touch ? '' : 'W/S throttle · A/D steer · Space brake · E to get out');
   },
@@ -962,14 +993,15 @@ function syncInstances(dt) {
   const lampsOn = night > 0.15 && LAMP.pts, lampK = Math.min(1, (night - 0.15) / 0.35);
   for (const car of VV.cars) {
     if (car.active === false) { car.inView = false; continue; }
-    car.spin += (car.v * dt) / car.wr;
-    if (dt > 0) { const dv = (car.v - car.vPrev) / dt, want = (dv < -1.2 || (car.v < 0.3 && car.ai)) ? 1 : 0; car.brake = want > car.brake ? Math.min(1, car.brake + dt * 8) : Math.max(0, car.brake - dt * 3); car.vPrev = car.v; }
     const d = Math.hypot(car.x - cam.x, car.y - cam.y, car.z - cam.z);
     FR_S.center.set(car.x, car.y + 1, car.z); FR_S.radius = car.halfL + 1.5;
     const inView = FRUSTUM.intersectsSphere(FR_S), far = d > FAR_D || !inView;
-    car.inView = inView;
+    if (car.inView !== inView) car.inView = inView;
     if (!car.player && car.interact && car.ai && d < 60) car.sync();
-    if (far && (!lampsOn || !inView || d > LAMP_D)) continue;
+    if (far && (!lampsOn || !inView || d > LAMP_D)) { car.vPrev = car.v; continue; }
+    // wheel spin + brake lamps only for cars that are drawn (most of the fleet is far or behind the camera every frame)
+    car.spin += (car.v * dt) / car.wr;
+    if (dt > 0) { const dv = (car.v - car.vPrev) / dt, want = (dv < -1.2 || (car.v < 0.3 && car.ai)) ? 1 : 0; car.brake = want > car.brake ? Math.min(1, car.brake + dt * 8) : Math.max(0, car.brake - dt * 3); car.vPrev = car.v; }
     const alpha = VV.renderAlpha ?? 1, interpolate = car.ai && car.renderNear && car.prevX != null;
     const drawX = interpolate ? car.prevX + (car.x - car.prevX) * alpha : car.x, drawZ = interpolate ? car.prevZ + (car.z - car.prevZ) * alpha : car.z, drawYaw = interpolate ? car.prevYaw + AF.angDiff(car.prevYaw, car.yaw) * alpha : car.yaw;
     if (!car.player) { const m = car.mesh; m.position.set(drawX, car.y + car.bob, drawZ); m.rotation.set(car.pitch, drawYaw, car.roll, 'YXZ'); }
@@ -977,11 +1009,15 @@ function syncInstances(dt) {
     tmpM.compose(tmpV.set(drawX, car.y + car.bob, drawZ), tmpQ, tmpS.set(1, 1, 1));
     const r = IMS.get(car.type.id) || ensureIM(car.type.id, 4), pal = VV.models[car.key].pal;
     if (!r) continue;
+    const wantLod = car.isLod ? (d > LOD_D - 12) : (d > LOD_D + 12);
+    car.isLod = wantLod;
     if (far) { /* lamps only */ }
-    else if (d < LOD_D || !r.lod) {
+    else if (!wantLod || !r.lod) {
       if (r.n < r.cap) { r.full.setMatrixAt(r.n, tmpM); r.paint.setXYZ(r.n, pal.a, pal.b, pal.f); r.dmg.array[r.n] = car.dmg || 0; if (r.glass) r.glass.setMatrixAt(r.n, tmpM); r.n++; }
     } else if (r.nl < r.cap) { r.lod.setMatrixAt(r.nl, tmpM); r.farPaint.setXYZ(r.nl++, pal.a, pal.b, pal.f); }
-    if (!far && d < DETAIL_D) {
+    const wantDetail = car.isDetail ? (d < DETAIL_D + 10) : (d < DETAIL_D - 10);
+    car.isDetail = wantDetail;
+    if (!far && wantDetail) {
       tmpE.set(car.spin, 0, 0, 'YXZ'); REAR_Q.setFromEuler(tmpE); tmpE.set(car.spin, car.steer, 0, 'YXZ'); FRONT_Q.setFromEuler(tmpE);
       for (const w of car.wheels) {
         if (wi >= WHEEL_IM.userData.max) break;

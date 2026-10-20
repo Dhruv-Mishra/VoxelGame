@@ -18,6 +18,7 @@ try {
   #ui #h-obj{position:absolute;left:50%;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 14px);transform:translateX(-50%);max-width:min(760px,calc(100% - 600px));min-width:280px;text-align:center;pointer-events:none;transition:opacity .5s;opacity:0;text-shadow:0 1px 3px #000,0 0 14px rgba(0,0,0,.65)}
   #ui #h-obj.on{opacity:1} #ui #h-obj .ot{font-size:10.5px;letter-spacing:2.4px;text-transform:uppercase;color:var(--gold);font-weight:700}
   #ui #h-obj .ol{font-size:17px;font-weight:500;color:#fff;line-height:1.35} #ui #h-obj em{font-style:normal;color:var(--gold);font-weight:700}
+  #ui #h-obj .og{display:none;margin-top:3px;font-size:13px;font-weight:600;color:#cfe8ff;letter-spacing:.2px}
   #ui #h-bars{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
   #ui .tb{display:flex;align-items:center;justify-content:space-between;gap:14px;width:250px;height:30px;padding:0 12px 0 14px;box-sizing:border-box;background:linear-gradient(90deg,rgba(6,8,12,0),rgba(6,8,12,.78) 22%);color:#fff;text-shadow:0 1px 2px #000}
   #ui .tb small{font-size:10.5px;letter-spacing:1.6px;text-transform:uppercase;opacity:.85;white-space:nowrap} #ui .tb b{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -45,11 +46,13 @@ try {
   @media (orientation:portrait) and (max-width:620px){#ui.touch #h-obj{max-width:calc(100% - 24px);bottom:170px}}`;
   document.head.appendChild(css);
   const h = (tag, id, html) => { const e = document.createElement(tag); e.id = id; if (html) e.innerHTML = html; root.appendChild(e); return e; };
-  const objEl = h('div', 'h-obj', '<div class="ot"></div><div class="ol"></div>'), shardEl = h('div', 'h-shard', '<h1></h1><p></p>');
+  const objEl = h('div', 'h-obj', '<div class="ot"></div><div class="ol"></div><div class="og"></div>'), shardEl = h('div', 'h-shard', '<h1></h1><p></p>');
   const edgeEl = h('div', 'h-edge', '<svg viewBox="0 0 34 34"><path d="M17 3 31 29 17 22 3 29z" fill="#f5c542" stroke="#1b1b1b" stroke-width="2" stroke-linejoin="round"/></svg><span></span>');
   const distEl = h('div', 'h-mdist', ''), cutEl = h('div', 'h-cut', '<div class="lb t"></div><div class="lb b"></div><div class="ti"></div><div class="sub"></div><div class="sk"></div>');
   objEl.className = 'hud'; shardEl.className = ''; edgeEl.className = 'hud'; distEl.className = 'hud';
-  const objT = objEl.firstChild, objL = objEl.lastChild, edgeArrow = edgeEl.firstChild, edgeTxt = edgeEl.lastChild;
+  const objT = objEl.firstChild, objL = objEl.children[1], objG = objEl.lastChild, edgeArrow = edgeEl.firstChild, edgeTxt = edgeEl.lastChild;
+  // the GPS guidance line under the objective (written only when it changes)
+  const guideSet = (t) => { if (objG._t === t) return; objG._t = t; objG.textContent = t; objG.style.display = t ? 'block' : 'none'; };
   const mark = (s) => esc(s).replace(/\{([^}]+)\}/g, '<em>$1</em>');
 
   // ---------------------------------------------------------------- objective line + bars + shard
@@ -109,6 +112,7 @@ try {
     const map = UI.map; if (!map) return;
     (map.overlays || (map.overlays = [])).push((g) => {
       g.save();
+      if (M.primary && live(M.primary) && GPS.on) { const f = focusOf(); if (f) drawRoute(g, (x, z) => map.worldToScreen(x, z), f.x, f.z, HEX[M.primary.kind] || HEX.objective, 4); }
       for (const b of M.blips.values()) {
         if (!live(b)) continue; pos(b); const p = map.worldToScreen(b.x, b.z);
         icon(g, b.kind, p.x, p.y, b.primary ? 8 : 7);
@@ -124,8 +128,11 @@ try {
         const p = to(b.x, b.z); let x = p.x, y = p.y; const out = x < pad || x > W - pad || y < pad || y > H - pad;
         if (out) { const dx = x - cx, dy = y - cy, k = Math.min((cx - pad) / Math.max(1e-3, Math.abs(dx)), (cy - pad) / Math.max(1e-3, Math.abs(dy))); x = cx + dx * k; y = cy + dy * k; }
         if (b.primary) {
-          g.strokeStyle = HEX[b.kind] || HEX.objective; g.lineWidth = 3; g.setLineDash([7, 6]); g.globalAlpha = 0.85;
-          g.beginPath(); g.moveTo(cx, cy); g.lineTo(x, y); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+          const f = GPS.on ? focusOf() : null;
+          if (!f || !drawRoute(g, to, f.x, f.z, HEX[b.kind] || HEX.objective, 3)) {
+            g.strokeStyle = HEX[b.kind] || HEX.objective; g.lineWidth = 3; g.setLineDash([7, 6]); g.globalAlpha = 0.85;
+            g.beginPath(); g.moveTo(cx, cy); g.lineTo(x, y); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+          }
         }
         if (out && (b.primary || b.kind === 'heist')) {
           const a = Math.atan2(y - cy, x - cx); g.save(); g.translate(x, y); g.rotate(a); g.fillStyle = HEX[b.kind] || HEX.objective; g.strokeStyle = '#111'; g.lineWidth = 2;
@@ -295,12 +302,104 @@ try {
   };
   AF.on('mode', (name) => { if (name !== 'cutscene' && CUT.on) { CUT.on = false; } if (name !== 'cutscene') { const c = AF.camera; if (c.fov !== 50 && AF.mode !== 'walk') { c.fov = 50; c.updateProjectionMatrix(); } } });
 
+  // ---------------------------------------------------------------- GPS: the primary blip's route along the city's road graph (51 VV.graph)
+  // A* over intersections (lanes A -> B, both directions where the road is two-way), recomputed only when the target or the player has
+  // moved (<= 2 Hz, never per frame, reused arrays); drawn on the minimap + the map instead of the straight line. Under the objective a
+  // guidance line spells out the next turn ("Turn left onto Charter Street - 120 m") or, off the road graph, the compass heading, the
+  // distance and the place it is in ("Head north-west - 1.2 km - Westmoor").
+  const GPS = M.gps = { pts: [], on: false, tx: NaN, tz: NaN, fx: NaN, fz: NaN, t: 0, line: '', d: 0 };
+  let gG = null, gD = null, gF = null, gP = null, gL = null, gOpen = null;
+  const nearNode = (N, x, z) => { let b = -1, bd = 1e18; for (let i = 0; i < N.length; i++) { const n = N[i], d = (n.x - x) ** 2 + (n.z - z) ** 2; if (d < bd) { bd = d; b = i; } } return b; };
+  const route = (fx, fz, tx, tz) => {
+    const G = AF.vehicles && AF.vehicles.graph, N = G && G.nodes; GPS.pts.length = 0; GPS.names = GPS.names || []; GPS.names.length = 0;
+    if (!N || N.length < 2 || Math.hypot(tx - fx, tz - fz) < 90) return false;
+    if (!gG || gG.length !== N.length) { gG = new Float64Array(N.length); gF = new Float64Array(N.length); gP = new Int32Array(N.length); gL = new Array(N.length); gD = new Uint8Array(N.length); gOpen = []; }
+    const s = nearNode(N, fx, fz), e = nearNode(N, tx, tz); if (s < 0 || e < 0 || s === e) return false;
+    // both ends far from any road: the graph wouldn't help
+    if (Math.hypot(N[s].x - fx, N[s].z - fz) > 260 && Math.hypot(N[e].x - tx, N[e].z - tz) > 260) return false;
+    gG.fill(Infinity); gD.fill(0); gP.fill(-1); gOpen.length = 0;
+    const id = new Map(); for (let i = 0; i < N.length; i++) id.set(N[i], i);
+    const h = (i) => Math.hypot(N[i].x - N[e].x, N[i].z - N[e].z);
+    gG[s] = 0; gF[s] = h(s); gOpen.push(s);
+    let found = false;
+    for (let guard = 0; gOpen.length && guard < 20000; guard++) {
+      let bi = 0; for (let k = 1; k < gOpen.length; k++) if (gF[gOpen[k]] < gF[gOpen[bi]]) bi = k;
+      const c = gOpen[bi]; gOpen[bi] = gOpen[gOpen.length - 1]; gOpen.pop();
+      if (c === e) { found = true; break; }
+      if (gD[c]) continue; gD[c] = 1;
+      for (const lane of N[c].outL) {
+        const j = id.get(lane.B); if (j == null || gD[j]) continue;
+        const g = gG[c] + (lane.len || Math.hypot(lane.B.x - N[c].x, lane.B.z - N[c].z)) + 4;   // + a little per junction: fewer turns
+        if (g < gG[j]) { gG[j] = g; gF[j] = g + h(j); gP[j] = c; gL[j] = lane; gOpen.push(j); }
+      }
+    }
+    if (!found) return false;
+    const rev = []; for (let i = e; i !== -1; i = gP[i]) rev.push(i);
+    GPS.pts.push(fx, fz); GPS.names.push('');
+    for (let k = rev.length - 1; k >= 0; k--) { const n = N[rev[k]]; GPS.pts.push(n.x, n.z); GPS.names.push(gL[rev[k]] ? gL[rev[k]].name || '' : ''); }
+    GPS.pts.push(tx, tz); GPS.names.push('');
+    return true;
+  };
+  const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+  // world -z is north on the map (74-map); heading names for a direction (dx, dz)
+  const compass = (dx, dz) => COMPASS[((Math.round(Math.atan2(dx, -dz) / (PI / 4)) % 8) + 8) % 8];
+  const fmtD = (d) => (d < 1000 ? Math.round(d / 10) * 10 + ' m' : (d / 1000).toFixed(1) + ' km');
+  const guidance = (f, b) => {
+    const d = Math.hypot(b.x - f.x, b.z - f.z);
+    if (d < 35) return '';
+    const where = UI.placeAt ? UI.placeAt(b.x, b.z) : '';
+    const P = GPS.pts;
+    if (GPS.on && P.length >= 6) {
+      // walk the route from the player: the first junction where the road bends is the next instruction
+      let acc = Math.hypot(P[2] - f.x, P[3] - f.z);
+      for (let i = 2; i + 3 < P.length; i += 2) {
+        const ax = P[i] - P[i - 2], az = P[i + 1] - P[i - 1], bx = P[i + 2] - P[i], bz = P[i + 3] - P[i + 1], la = Math.hypot(ax, az) || 1, lb = Math.hypot(bx, bz) || 1;
+        const cr = (ax * bz - az * bx) / (la * lb), dot = (ax * bx + az * bz) / (la * lb), name = GPS.names[(i >> 1) + 1] || '';
+        if (dot < 0.8 && i + 4 < P.length) {
+          const turn = dot < -0.6 ? 'Make a U-turn' : cr > 0 ? 'Turn right' : 'Turn left';   // +x east, +z south: a positive cross product is a right turn
+          return (cr > 0 ? '\u21b1 ' : '\u21b0 ') + turn + (name ? ' onto ' + name : '') + ' \u00b7 ' + fmtD(acc) + ' \u2014 ' + fmtD(d) + ' to go';
+        }
+        acc += lb;
+      }
+      return '\u2191 Follow the road ' + compass(b.x - f.x, b.z - f.z) + ' \u00b7 ' + fmtD(d) + (where ? ' \u00b7 ' + where : '');
+    }
+    return '\u2197 Head ' + compass(b.x - f.x, b.z - f.z) + ' \u00b7 ' + fmtD(d) + (where ? ' \u00b7 ' + where : '');
+  };
+  const focusOf = () => (AF.mode === 'drive' && AF.vehicles.player ? AF.vehicles.player : AF.mode === 'fly' && AF.planes.cur ? AF.planes.cur : AF.player);
+  const gpsTick = (dt) => {
+    const b = M.primary;
+    if (!b || !live(b) || AF.mode === 'cutscene') { if (GPS.on) { GPS.on = false; GPS.pts.length = 0; if (UI.map) UI.map.revision++; } guideSet(''); return; }
+    if ((GPS.t -= dt) > 0) return; GPS.t = 0.5;
+    pos(b); const f = focusOf(); if (!f) return;
+    const flying = AF.mode === 'fly' || AF.mode === 'aerial' || AF.mode === 'jetski' || (f.y != null && f.y - AF.W.groundY(f.x, f.z) > 25);
+    let off = true; const P = GPS.pts;
+    if (GPS.on && P.length >= 4) { const ax = P[0], az = P[1], bx = P[2], bz = P[3], lx = bx - ax, lz = bz - az, l2 = lx * lx + lz * lz || 1, k = AF.clamp(((f.x - ax) * lx + (f.z - az) * lz) / l2, 0, 1); off = Math.hypot(ax + lx * k - f.x, az + lz * k - f.z) > 28 || Math.hypot(f.x - bx, f.z - bz) < 12; }
+    const moved = Math.abs(b.x - GPS.tx) + Math.abs(b.z - GPS.tz) > 20;
+    if (flying) { if (GPS.on) { GPS.on = false; P.length = 0; if (UI.map) UI.map.revision++; } }
+    else if (moved || off || !GPS.on) {
+      GPS.tx = b.x; GPS.tz = b.z; GPS.on = route(f.x, f.z, b.x, b.z); if (UI.map) UI.map.revision++;
+    } else { P[0] = f.x; P[1] = f.z; }
+    guideSet(guidance(f, b));
+  };
+  // a polyline of the route through a world -> canvas mapping
+  const drawRoute = (g, to, fx, fz, col, w) => {
+    const P = GPS.pts; if (!GPS.on || P.length < 4) return false;
+    g.strokeStyle = 'rgba(0,0,0,.55)'; g.lineWidth = w + 3; g.lineJoin = 'round'; g.lineCap = 'round';
+    for (let pass = 0; pass < 2; pass++) {
+      g.beginPath(); let p = to(fx, fz); g.moveTo(p.x, p.y);
+      for (let i = 2; i < P.length; i += 2) { p = to(P[i], P[i + 1]); g.lineTo(p.x, p.y); }
+      g.stroke(); g.strokeStyle = col; g.lineWidth = w;
+    }
+    return true;
+  };
+  M.drawRoute = drawRoute;
+
   // ---------------------------------------------------------------- tick
   let mapT = 0;
   AF.onTick('mission', 948, (dt, t) => {
     if (shardT > 0 && (shardT -= dt) <= 0) shardEl.classList.remove('on');
-    if (!M.blips.size) { if (MK.mesh && MK.mesh.visible) { MK.mesh.visible = false; MK.mesh.count = 0; MK.n = 0; } if (edgeEl.style.display !== 'none') indicator(); return; }
-    markers(t); indicator();
+    if (!M.blips.size) { gpsTick(dt); if (MK.mesh && MK.mesh.visible) { MK.mesh.visible = false; MK.mesh.count = 0; MK.n = 0; } if (edgeEl.style.display !== 'none') indicator(); return; }
+    markers(t); indicator(); gpsTick(dt);
     // moving blips (a crewmate's plane, a pet store guide) redraw the minimap at 4 Hz once they've moved a metre
     if ((mapT += dt) > 0.25) { mapT = 0; for (const b of M.blips.values()) { if (!b.at) continue; pos(b); if (Math.abs(b.x - b.mx) + Math.abs(b.z - b.mz) > 1) { b.mx = b.x; b.mz = b.z; if (UI.map) UI.map.revision++; } } }
   });

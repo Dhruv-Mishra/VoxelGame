@@ -175,6 +175,7 @@ AF.col = (hex, o = {}) => {
   if (typeof hex !== 'number' || !isFinite(hex)) { AF.warnOnce('bad colour ' + hex); hex = 0xff00ff; }
   // smooth:true (engine v2) = plaster / wallpaper / painted wood: no block edge lines, almost no per-block jitter, no auto pattern
   if (o.smooth) o = Object.assign({ pat: 'none' }, o, { smooth: undefined, edge: 0, jitter: Math.min(o.jitter ?? 0.04, 0.04) });
+  if (o.glass) o = Object.assign({ pat: 'none', smooth: true, edge: 0, jitter: 0 }, o);
   let k = hex + '|' + (o.emit ?? '') + '|' + (o.emitK ?? '') + '|' + (o.mode ?? '') + '|' + (o.jitter ?? '') + '|' + (o.edge ?? '') + '|' + (o.solid ?? '') + '|' + (o.glass ?? '') + '|' + (o.sat ?? '');
   if (o.rough != null || o.metal != null || o.pat != null || o.patTop != null || o.win != null) k += '|m' + (o.rough ?? '') + '|' + (o.metal ?? '') + '|' + (o.pat ?? '') + '|' + (o.patTop ?? '') + '|' + (o.win ?? '');
   const P = AF.PAL; let i = P.key.get(k); if (i) return i;
@@ -194,7 +195,7 @@ AF.name = (name, hex, o) => { const i = AF.col(hex, o); AF.PAL.names[name] = i; 
 // A few shared colours everyone may use by name: AF.col('grass') etc.
 AF.name('grass', 0x6f9a3e, { jitter: 0.9 }); AF.name('dirt', 0x7a5634, { jitter: 0.8 }); AF.name('asphalt', 0x4a4a4f, { jitter: 0.35, edge: 0.15 });
 AF.name('sidewalk', 0xb8b0a2, { jitter: 0.3 }); AF.name('stone', 0x8e8a82, { jitter: 0.7 }); AF.name('water', 0x3d6f8e);
-AF.name('white', 0xf1ede2, { jitter: 0.2 }); AF.name('black', 0x1d1b1a, { jitter: 0.2 }); AF.name('glass', 0x9fc3cf, { glass: true, jitter: 0.1, edge: 0 });
+AF.name('white', 0xf1ede2, { jitter: 0.2 }); AF.name('black', 0x1d1b1a, { jitter: 0.2 }); AF.name('glass', 0x9fc3cf, { glass: true, jitter: 0, edge: 0 });
 AF.name('window', 0x3b4a58, { emit: 0xffc46b, emitK: 1.4, mode: 'night', jitter: 0.15, edge: 0.1 });
 AF.name('lamp', 0xfff1c9, { emit: 0xffd48a, emitK: 3.0, mode: 'night', jitter: 0, edge: 0 });
 // named material presets for art agents: AF.MAT.brass etc. are palette indices (use like any colour)

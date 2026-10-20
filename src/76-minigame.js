@@ -29,6 +29,28 @@ try {
   const snd = (id, vol, rate) => { const A = AF.audio; if (A && A.LIB && A.LIB[id]) A.play(id, { bus: 'ui', vol: vol ?? 1, rate }); };
   const rr = (g, x, y, w, h, r) => { r = Math.min(r, w / 2, h / 2); g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
   const COL = { ink: '#eef1f2', dim: '#a9b1b6', acc: '#8bd8c3', gold: '#f5c542', ok: '#7ddc8a', bad: '#ff6b6b', bg: '#070a0e' };
+  class Minigame {
+    constructor(def = {}) {
+      this.label = def.label || '';
+      this.title = def.title || '';
+      this.winText = def.winText || 'Success';
+      this.sub = def.sub || '';
+      this.hint = def.hint || '';
+      this.hintTouch = def.hintTouch || '';
+      Object.assign(this, def);
+    }
+    init(c) {}
+    update(c, quiet) {}
+    frame(c, dt) {}
+    down(c, x, y, e) {}
+    move(c, x, y, e) {}
+    up(c, x, y, e) {}
+    key(c, code, down) {}
+    solve(c) {}
+    result(c) { return {}; }
+    draw(c, g, w, h) {}
+  }
+  MG.Minigame = Minigame;
   MG.util = { rr, clamp, shuffle, COL };
 
   // ---------------------------------------------------------------- style + panel
@@ -226,7 +248,7 @@ try {
   // at a time (a fixed random order). Lifting the binding pin's key pin to the shear line under tension in the (hidden) sweet band
   // sets it with a click; too light and nothing catches, too heavy and the binding pin seizes and the pick bends until it snaps,
   // lifting past the line jams it (overset) until the tension is released, which drops every set pin.
-  const LP = KINDS.lockpick = {
+  const LP = KINDS.lockpick = new Minigame({
     label: 'Lock', title: 'Pick the lock', winText: 'Unlocked',
     sub: 'Keep light tension on the plug, find the binding pin (it wobbles) and lift it to the shear line until it clicks.',
     hint: '<kbd>Drag</kbd> a pin up \u00b7 <kbd>\u2190</kbd><kbd>\u2192</kbd> choose pin \u00b7 hold <kbd>\u2191</kbd> lift \u00b7 <kbd>Q</kbd>/<kbd>E</kbd> or wheel: tension \u00b7 <kbd>Esc</kbd> give up',
@@ -361,7 +383,7 @@ try {
       g.textAlign = 'right'; g.fillStyle = COL.dim; g.fillText('PICKS', w - 12 - s.picks * 9 - 4, 16);
       g.strokeStyle = '#cfd6dc'; g.lineWidth = 2; for (let k = 0; k < s.picks; k++) { const px = w - 14 - k * 9; g.beginPath(); g.moveTo(px, 22); g.lineTo(px, 9); g.lineTo(px - 3, 7); g.stroke(); }
     },
-  };
+  });
 
   // ---- circuit: rotate tiles of a random spanning tree ("Net") so power reaches every target. Always solvable (the tree itself).
   const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];   // N E S W = bits 1 2 4 8
@@ -398,7 +420,7 @@ try {
   };
   MG.gen.circuitSolved = (P, rot) => { const lit = circuitLit(P, rot, new Uint8Array(P.n * P.n)); return P.targets.every((t) => lit[t]); };
   const bolt = (g, x, y, r) => { g.beginPath(); g.moveTo(x - 0.25 * r, y - 0.6 * r); g.lineTo(x + 0.3 * r, y - 0.1 * r); g.lineTo(x, y - 0.05 * r); g.lineTo(x + 0.25 * r, y + 0.6 * r); g.lineTo(x - 0.3 * r, y + 0.1 * r); g.lineTo(x, y + 0.05 * r); g.closePath(); g.fill(); };
-  const CI = KINDS.circuit = {
+  const CI = KINDS.circuit = new Minigame({
     label: 'Circuit', title: 'Reroute the power', winText: 'Power routed',
     sub: 'Rotate the tiles so the current runs from the source to every target.',
     hint: '<kbd>Click</kbd> rotate \u00b7 <kbd>Right-click</kbd> rotate back \u00b7 <kbd>Arrows</kbd> + <kbd>Space</kbd> \u00b7 <kbd>Esc</kbd> give up',
@@ -462,7 +484,7 @@ try {
       }
       if (s.kb) { g.strokeStyle = COL.gold; g.lineWidth = 2; rr(g, ox + s.cx * cs + 1, oy + s.cy * cs + 1, cs - 2, cs - 2, 6); g.stroke(); }
     },
-  };
+  });
 
   // ---- flow: colour pairs on a grid. Generated from a random Hamiltonian path (snake + backbite moves) cut into k segments, so the
   // puzzle always has a solution that fills every cell; any non-crossing joining of all pairs wins.
@@ -501,7 +523,7 @@ try {
     });
   };
   const FCOL = ['#ff5a5a', '#4a8cff', '#3ecf6e', '#f5d142', '#ff9a3c', '#3fd4e0', '#d65ad6', '#f2f2f2', '#b07a4a'];
-  const FL = KINDS.flow = {
+  const FL = KINDS.flow = new Minigame({
     label: 'Wiring', title: 'Bridge the wires', winText: 'Wired up',
     sub: 'Join each pair of matching terminals. Wires can\u2019t cross.',
     hint: '<kbd>Drag</kbd> from a terminal \u00b7 drag back to undo \u00b7 <kbd>Arrows</kbd> + <kbd>Space</kbd> \u00b7 <kbd>Esc</kbd> give up',
@@ -600,11 +622,11 @@ try {
       });
       if (s.kb) { g.strokeStyle = COL.gold; g.lineWidth = 2; rr(g, ox + s.cx * cs + 1, oy + s.cy * cs + 1, cs - 2, cs - 2, 4); g.stroke(); }
     },
-  };
+  });
 
   // ---- signal: tune frequency + phase (+ amplitude) of your trace onto the target; the lock fills while the RMS error stays in
   // tolerance and drains outside it. From diff 0.5 amplitude counts and the target phase creeps, so the lock has to be held.
-  const SG = KINDS.signal = {
+  const SG = KINDS.signal = new Minigame({
     label: 'Signal', title: 'Match the carrier', winText: 'Signal locked',
     sub: 'Tune your trace onto the intercepted waveform and hold it there until the lock fills.',
     hint: '<kbd>\u2190</kbd><kbd>\u2192</kbd> frequency \u00b7 <kbd>\u2191</kbd><kbd>\u2193</kbd> phase \u00b7 <kbd>Q</kbd><kbd>E</kbd> amplitude \u00b7 or drag the sliders \u00b7 <kbd>Esc</kbd> give up',
@@ -684,13 +706,13 @@ try {
       if (s.lock > 0.004) { g.fillStyle = s.inT ? COL.ok : COL.gold; rr(g, pad, h - 22, sw * s.lock, 10, 5); g.fill(); }
       g.fillStyle = COL.dim; g.textAlign = 'right'; g.fillText('LOCK ' + Math.round(s.lock * 100) + '%', w - pad, h - 13);
     },
-  };
+  });
 
   // ---- drill: hold to feed the drill; heat follows pressure squared against cooling, so steady full pressure overheats and the bit
   // stalls (overheat = forced cool-down). Progress is fastest with the heat in the green band. Jams stop the bit until the shown
   // arrow sequence is entered (a wrong key restarts it and adds heat).
   const ARW = ['\u2191', '\u2192', '\u2193', '\u2190'];
-  const DR = KINDS.drill = {
+  const DR = KINDS.drill = new Minigame({
     label: 'Drill', title: 'Drill the lock', winText: 'Drilled through',
     sub: 'Feed the drill in bursts and keep the bit\u2019s heat in the green band. Clear jams when the bit binds.',
     hint: 'Hold <kbd>Space</kbd> or the mouse to drill \u00b7 release to cool \u00b7 jam: press the <kbd>arrows</kbd> shown \u00b7 <kbd>Esc</kbd> give up',
@@ -801,7 +823,7 @@ try {
         }
       }
     },
-  };
+  });
 
   // ---- deal: punto banco at the high-roller table. Each coup the guest bets; the player deals it straight or stacks it (a timed card
   // swap: hit the green window while the pit boss looks away). Stays open until the caller closes it, opts.hands coups are dealt, or
@@ -864,7 +886,7 @@ try {
   const rigged = (side) => { let best = null; for (let i = 0; i < 3000; i++) { const h = MG.gen.baccarat(); if (h.win !== 'T' && h.win !== side && Math.abs(h.pt - h.bt) >= 4) return h; if (h.win !== 'T' && h.win !== side) best = h; } return best || MG.gen.baccarat(); };
   const cardHTML = (cd) => { const su = (cd / 13 | 0) % 4; return '<div class="dl-cd' + (su === 1 || su === 2 ? ' r' : '') + '">' + RANKS[cd % 13] + '<span>' + SUITS[su] + '</span></div>'; };
   const SIDE = { P: 'PLAYER', B: 'BANKER' };
-  const DL = KINDS.deal = {
+  const DL = KINDS.deal = new Minigame({
     label: 'Baccarat', title: 'Deal the table', winText: 'Table dealt', dom: true,
     sub: 'Deal each coup to the guest \u2014 straight, or stack a rotten hand with a quick card swap.',
     hint: '<kbd>1</kbd> deal clean \u00b7 <kbd>2</kbd> deal a bad hand \u00b7 <kbd>Space</kbd> swap in the green window \u00b7 <kbd>Esc</kbd> leave the table',
@@ -966,12 +988,12 @@ try {
       else if (code === 'Space' || code === 'Enter') DL.act(c, 'swap');
     },
     result(c) { const s = c.s; return { bad: s.bad, sloppy: s.sloppy, hands: s.hands, caught: s.caught }; },
-  };
+  });
 
   // ---- stamp: forge an aircrew certificate in three scored steps — slide the photo into its frame, press the embossing seal while
   // the swinging needle is in the zone, trace the signature (drag; keyboard: hold Space and steer). Pass = mean score >= opts.pass.
   const STEPS = ['Photo', 'Seal', 'Signature'];
-  const ST = KINDS.stamp = {
+  const ST = KINDS.stamp = new Minigame({
     label: 'Forgery', title: 'Forge the papers', winText: 'Papers pass',
     sub: 'Three steps: line the photo up, emboss the seal, sign along the guide.',
     hint: 'Photo: <kbd>drag</kbd> or <kbd>arrows</kbd>, <kbd>Enter</kbd> \u00b7 Seal: <kbd>Space</kbd> in the zone \u00b7 Sign: <kbd>drag</kbd> along the line, or hold <kbd>Space</kbd> + <kbd>\u2191</kbd><kbd>\u2193</kbd>',
@@ -1151,7 +1173,7 @@ try {
         g.fillStyle = '#7a6a50'; g.font = '700 11px system-ui,sans-serif'; g.textAlign = 'left'; g.fillText('SIGN HERE \u2014 ' + Math.round(s.gi / (s.NP - 1) * 100) + '%', P.x + 12, P.y + 18);
       }
     },
-  };
+  });
 
   // ---- keypad: the code's four keys are worn; the freshest print marks the last digit; from diff 0.5 one worn key is an old decoy.
   // Mastermind feedback (green right place, amber in the code elsewhere). Always solvable in 3 guesses (checked by minimax below).
@@ -1179,7 +1201,7 @@ try {
     };
     return solve(cands, tries);
   };
-  const KP = KINDS.keypad = {
+  const KP = KINDS.keypad = new Minigame({
     label: 'Keypad', title: 'Crack the keypad', winText: 'Access granted', dom: true,
     sub: 'Worn keys give the digits away. Deduce the order before the lockout.',
     hint: '<kbd>0</kbd>\u2013<kbd>9</kbd> enter \u00b7 <kbd>Backspace</kbd> delete \u00b7 <kbd>Enter</kbd> try code \u00b7 green = right place, amber = wrong place \u00b7 <kbd>Esc</kbd> give up',
@@ -1220,7 +1242,7 @@ try {
     },
     solve(c) { const s = c.s; s.entry = s.P.code.slice(); KP.press(c, 'ok'); },
     result(c) { return { attempts: c.s.used }; },
-  };
+  });
 
   // ---------------------------------------------------------------- debug (?mg=kind) + self-tests
   {

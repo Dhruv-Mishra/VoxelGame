@@ -5,3 +5,9 @@ tools/tmp-*/
 tools/shots/
 tools/output-*.html
 .vscode/
+.playwright-mcp/
+playwright-report/
+test-results/
+*.log
+.DS_Store
+Thumbs.db

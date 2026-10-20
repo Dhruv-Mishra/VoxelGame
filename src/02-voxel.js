@@ -443,7 +443,7 @@ AF.mat = {};
     uLitFrac: { value: 0.62 }, uNeon: { value: 1 },
     // engine R2: night emitters (windows, lamps, neon) brighten with distance (70 -> 260 m) so sub-pixel lights keep their energy
     // and the city twinkles from the air instead of averaging into mud. 0 = off.
-    uFarEmit: { value: 1.1 },
+    uFarEmit: { value: 0.5 },
     // engine R2: drifting cloud shadows on the sun light (AF.cloudShadow in 03-render drives them; uCloudK 0 = off)
     uCloudK: { value: 0.0 }, uCloudOff: { value: new THREE.Vector2() }, uCloudScale: { value: 1 / 210 }, uSunW: { value: new THREE.Vector3(0.5, 0.5, 0.3) },
     // R1 night light pools: up to 24 nearest street/porch/sign/shop lights (xyz, range) + colour*intensity
@@ -934,6 +934,12 @@ AF.mat = {};
         .replace('#include <lights_fragment_maps>', THREE.ShaderChunk.lights_fragment_maps
           .replace('iblIrradiance += getIBLIrradiance( geometryNormal );', 'iblIrradiance += getIBLIrradiance( geometryNormal ) * uEnvDiffuse;')
           + '\n radiance *= afSpecAO * mix(1.0, 0.3, smoothstep(0.45, 0.9, material.roughness));\n');
+      if (key === 'glass') {
+        sh.fragmentShader = sh.fragmentShader
+          .replace('float shade = 1.0 + j * vJit * 0.09 * near * near * (1.0 - 0.5 * afPatOn);', 'float shade = 1.0;')
+          .replace('shade *= 1.0 - edge * 0.22 * edgeK * near;', '')
+          .replace('shade *= 1.0 + hl * 0.05 * edgeK * near;', '');
+      }
       if (key === 'fadeIn' || key === 'fadeOut') {
         // screen-door cross-fade: the two variants discard complementary pixels, so in + out always cover the surface once
         sh.fragmentShader = 'uniform float uFadeK;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n{ float afD = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715)))); if (afD ' + (key === 'fadeIn' ? '>=' : '<') + ' uFadeK) discard; }');
@@ -945,7 +951,7 @@ AF.mat = {};
   };
   AF.mat.patchVoxel = patch;
   AF.mat.voxel = patch(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.0 }), 'solid');
-  AF.mat.glass = patch(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.12, metalness: 0.0, transparent: true, opacity: 0.38, depthWrite: false }), 'glass');
+  AF.mat.glass = patch(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.12, metalness: 0.0, transparent: true, opacity: 0.38, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1.0, polygonOffsetUnits: -4.0 }), 'glass');
   AF.mat.water = new THREE.MeshStandardMaterial({ color: 0x3b6f8f, roughness: 0.08, metalness: 0.0, transparent: true, opacity: 0.82 });
   // PERF.md §2b: three re-derives the program (getParameters) every time one material alternates between instanced and plain
   // meshes in a pass. Instanced voxel users get their own material object (same program cache key = no extra compiles) and a
@@ -1886,28 +1892,44 @@ function updatePartial(cl, RL) {
 // longer (x1.25) before it drops, and with the camera moving whatever lies ahead in view gains detail VA.lead earlier (1.5 s of
 // travel, <= 90 m: loaded already, the streamer ranks on the 2.5 s look-ahead). Out of view everything follows the plain distance,
 // so turning round never meets less detail than before; the extra cost is a few regions at the edge of the ring while moving.
-const VA = { fx: 0, fz: -1, cos: 0, lead: 0, vx: 0, vz: 0, cx: 0, cz: 0 }, VDIR = new THREE.Vector3();
+const VA = { fx: 0, fz: -1, cos: 0, lead: 0, vLen: 0, vx: 0, vz: 0, cx: 0, cz: 0 }, VDIR = new THREE.Vector3();
 function viewAim() {
   const cam = AF.camera, A = AF.stream.ahead; cam.getWorldDirection(VDIR);
   const h = Math.hypot(VDIR.x, VDIR.z); VA.cx = cam.position.x; VA.cz = cam.position.z;
   if (h < 0.25) VA.cos = -2;   // looking (nearly) straight down: all around is on screen
-  else { VA.fx = VDIR.x / h; VA.fz = VDIR.z / h; VA.cos = Math.cos(Math.min(Math.PI, Math.atan(Math.tan(cam.fov * Math.PI / 360) * cam.aspect) + 0.3)); }
-  VA.vx = A.vx; VA.vz = A.vz; VA.lead = Math.min(90, Math.hypot(A.vx, A.vz) * 1.5);
+  else { VA.fx = VDIR.x / h; VA.fz = VDIR.z / h; VA.cos = Math.cos(Math.min(Math.PI, Math.atan(Math.tan(cam.fov * Math.PI / 360) * cam.aspect) + 0.38)); }
+  VA.vx = A.vx; VA.vz = A.vz; const vl = Math.hypot(A.vx, A.vz); VA.vLen = vl; VA.lead = Math.min(90, vl * 1.5);
 }
 function inView(x, z, rad) {
   if (VA.cos < -1) return true;
-  const dx = x - VA.cx, dz = z - VA.cz, d = Math.hypot(dx, dz);
-  return d < rad * 1.5 || dx * VA.fx + dz * VA.fz > d * VA.cos - rad;
+  const dx = x - VA.cx, dz = z - VA.cz, d2 = dx * dx + dz * dz;
+  if (d2 < rad * rad * 2.25) return true;
+  const d = Math.sqrt(d2);
+  return dx * VA.fx + dz * VA.fz > d * VA.cos - rad;
 }
-const leadAt = (x, z) => VA.lead > 0 && (x - VA.cx) * VA.vx + (z - VA.cz) * VA.vz > 0 ? VA.lead : 0;
+const leadAt = (x, z) => {
+  if (VA.lead <= 0 || VA.vLen <= 1e-4) return 0;
+  const dx = x - VA.cx, dz = z - VA.cz, d2 = dx * dx + dz * dz;
+  if (d2 < 1e-4) return VA.lead;
+  const dot = (dx * VA.vx + dz * VA.vz) / (Math.sqrt(d2) * VA.vLen);
+  return dot > 0 ? VA.lead * dot : 0;
+};
 // a region with only its 0.5 m copy resident shows that until the streamer delivers the full mesh
 function regWant(r, c, RD, vy) {
   if (!r.fullOk) return 1;
   if (!r.coarse.length) return 0;
-  const d = Math.hypot(r.cx - c.x, r.cz - c.z, vy), vis = inView(r.cx, r.cz, 23);
-  if (r.lvl === 1) return d < RD - 12 + (vis ? leadAt(r.cx, r.cz) : 0) ? 0 : 1;
-  return d > (vis ? RD * 1.25 : RD) + 12 ? 1 : 0;
+  const dx = r.cx - c.x, dz = r.cz - c.z, d2 = dx * dx + dz * dz + vy * vy;
+  if (r.lvl === 1) {
+    if (d2 >= (RD + 80) * (RD + 80)) return 1;
+    const vis = inView(r.cx, r.cz, 23);
+    const d = Math.sqrt(d2);
+    return d < RD - 10 + (vis ? leadAt(r.cx, r.cz) : 0) ? 0 : 1;
+  }
+  const vis = inView(r.cx, r.cz, 23);
+  const dropLimit = (vis ? RD * 1.25 : RD) + 12;
+  return d2 > dropLimit * dropLimit ? 1 : 0;
 }
+const OUTS_BUF = [], INS_BUF = [];
 AF.onTick('prop-lod', 880, () => {
   if (!AF.world.group) return;
   const c = AF.camera.position, D = AF.LOD_DIST;
@@ -1920,8 +1942,8 @@ AF.onTick('prop-lod', 880, () => {
     for (const cl of CLS.values()) {
       if (!cl.built) continue;
       const dx = Math.max(cl.x0 - c.x, 0, c.x - cl.x1), dz = Math.max(cl.z0 - c.z, 0, c.z - cl.z1), ccx = (cl.x0 + cl.x1) / 2, ccz = (cl.z0 + cl.z1) / 2;
-      const vis = inView(ccx, ccz, 91), dist = Math.hypot(dx, dz, vy);
-      const near = cl.lvl ? dist <= FD - 16 + (vis ? leadAt(ccx, ccz) : 0) : dist <= (vis ? FD * 1.15 : FD) + 16;
+      const vis = inView(ccx, ccz, 91), dist = Math.sqrt(dx * dx + dz * dz + vy * vy);
+      const near = cl.lvl ? dist <= FD - 16 + (vis ? leadAt(ccx, ccz) : 0) : dist <= (vis ? FD * 1.15 : FD * 1.08) + 16;
       const want = cl.pending > 0 || !near ? 1 : 0;
       // PARTIAL REVEAL (PERF.md §5): a streaming cluster in view range shows each region as soon as it is meshed and hides that
       // region's slice of the 1 m copy (geometry groups, one extra draw per slice only while half-loaded)
@@ -1946,24 +1968,24 @@ AF.onTick('prop-lod', 880, () => {
       }
       if (want) {
         // regions -> the cluster's 1 m copy: what is on screen now fades out; shadow-only stand-ins go at once
-        const outs = [];
+        OUTS_BUF.length = 0;
         for (const k of cl.regs) {
           const r = RL.get(k); if (!r) continue;
           r.hid = true; r.lvl = 3;
-          for (const m of r.full) if (seenByCam(m)) outs.push(m); else m.visible = false;
-          for (const m of r.coarse) if (seenByCam(m)) outs.push(m); else m.visible = false;
+          for (const m of r.full) if (seenByCam(m)) OUTS_BUF.push(m); else m.visible = false;
+          for (const m of r.coarse) if (seenByCam(m)) OUTS_BUF.push(m); else m.visible = false;
         }
-        FADE.swap(cl, outs, cl.far);
+        FADE.swap(cl, OUTS_BUF, cl.far);
       } else {
         // 1 m copy -> regions, each straight at its own level (full or 0.5 m)
-        const ins = [];
+        INS_BUF.length = 0;
         for (const k of cl.regs) {
           const r = RL.get(k); if (!r) continue;
           r.hid = false; r.lvl = -1; r.lvl = regWant(r, c, RD, vy); r.sh = false;
-          for (const m of r.full) { if (m.material === AF.mat.voxel) m.castShadow = true; if (r.lvl === 0) ins.push(m); else m.visible = false; }
-          for (const m of r.coarse) { if (r.lvl === 1) ins.push(m); else { m.visible = false; m.layers.set(0); } }
+          for (const m of r.full) { if (m.material === AF.mat.voxel) m.castShadow = true; if (r.lvl === 0) INS_BUF.push(m); else m.visible = false; }
+          for (const m of r.coarse) { if (r.lvl === 1) INS_BUF.push(m); else { m.visible = false; m.layers.set(0); } }
         }
-        FADE.swap(cl, cl.far, ins);
+        FADE.swap(cl, cl.far, INS_BUF);
       }
     }
     for (const r of RL.values()) {
@@ -1997,28 +2019,31 @@ AF.onTick('prop-lod', 880, () => {
   }
   // near props are built by the stream scheduler (streamWork, 'props' jobs); ?shot / ?test build them on the spot
   const sync = AF.SHOT || AF.TEST, SN = AF.shadowNear, PC = AF.PROP_CULL || 900;
-  for (const [k, r] of AF.world.lod) {
+  const LODM = AF.world.lod;
+  for (const k of LODM.keys()) {   // keys(), not entries(): destructuring [k, r] allocated an array per region per frame
+    const r = LODM.get(k);
     const rl = RL && RL.get(k), hid = !!(rl && rl.hid);
-    const d = Math.hypot(r.cx - c.x, r.cz - c.z, Math.max(0, c.y - 12) * 0.7);
+    const ry = Math.max(0, c.y - 12) * 0.7, d = Math.sqrt((r.cx - c.x) * (r.cx - c.x) + (r.cz - c.z) * (r.cz - c.z) + ry * ry);
     if (hid) { if (r.nearBuilt) { FADE.cancel(r); freeNear(r); } }
     else if (!r.nearBuilt && d < D) { if (sync) buildNear(r); }
     else if (r.nearBuilt && d > D * AF.LOD.prefetch + 70) { FADE.cancel(r); freeNear(r); }
     // near props: the view-aware band as for regions (on screen they stay a little longer; ahead of a moving camera they come early)
-    const vis = inView(r.cx, r.cz, 23), nearLim = r.showNear ? (vis ? (D + 25) * 1.25 : D + 25) : D + 25 + (vis ? leadAt(r.cx, r.cz) : 0);
-    const showNear = !hid && r.nearBuilt && d < nearLim, farSeen = !!r.far && !showNear && d < (r.farSeen && vis ? PC * 1.15 : PC);
+    const vis = inView(r.cx, r.cz, 23), lead = vis ? leadAt(r.cx, r.cz) : 0;
+    const nearLim = r.showNear ? (vis ? (D + 25) * 1.25 : (D + 25) * 1.15) : (D + 25 + lead);
+    const showNear = !hid && r.nearBuilt && d < nearLim, farSeen = !!r.far && !showNear && d < (r.farSeen ? (vis ? PC * 1.15 : PC * 1.08) : PC);
     // near <-> far props and the far-prop cull cross-fade (PERF.md §4); the first decision for a region just sets the state
     if (!r.fadeE && r.showNear !== undefined && (r.showNear !== showNear || r.farSeen !== farSeen)) {
-      const outs = [], ins = [];
-      if (r.showNear && !showNear) outs.push(r.near, r.nearGlass); else if (!r.showNear && showNear) ins.push(r.near, r.nearGlass);
-      if (r.farSeen && !farSeen) outs.push(r.far); else if (!r.farSeen && farSeen) ins.push(r.far);
-      FADE.swap(r, outs, ins);
+      OUTS_BUF.length = 0; INS_BUF.length = 0;
+      if (r.showNear && !showNear) OUTS_BUF.push(r.near, r.nearGlass); else if (!r.showNear && showNear) INS_BUF.push(r.near, r.nearGlass);
+      if (r.farSeen && !farSeen) OUTS_BUF.push(r.far); else if (!r.farSeen && farSeen) INS_BUF.push(r.far);
+      FADE.swap(r, OUTS_BUF, INS_BUF);
     }
     r.showNear = showNear; r.farSeen = farSeen;
     if (r.fadeE) continue;
     if (r.near) r.near.visible = showNear;
     if (r.nearGlass) r.nearGlass.visible = showNear;
     // full-detail props cast only right around the shadow focus; further out their LOD copy casts instead (shadow pass only, layer 1)
-    const proxy = showNear && !!r.far && Math.hypot(r.cx - SN.cx, r.cz - SN.cz) > 26;
+    const proxy = showNear && !!r.far && (r.cx - SN.cx) * (r.cx - SN.cx) + (r.cz - SN.cz) * (r.cz - SN.cz) > 26 * 26;
     if (r.near && r.near.castShadow === proxy) r.near.castShadow = !proxy;
     if (r.far) { r.far.visible = showNear ? proxy : farSeen; r.far.layers.set(showNear ? 1 : 0); }
     if (AF.MOBILE && r.far) r.far.castShadow = Math.hypot(r.cx - SN.cx, r.cz - SN.cz) < SN.r + 24;

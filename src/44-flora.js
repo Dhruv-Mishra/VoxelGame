@@ -93,7 +93,7 @@ function* models(){
   for(const [lod,geo,capacity] of lods){
     const pal=new THREE.InstancedBufferAttribute(new Float32Array(capacity*4),4),limit=new THREE.InstancedBufferAttribute(new Float32Array(capacity),1);pal.setUsage(THREE.DynamicDrawUsage);limit.setUsage(THREE.DynamicDrawUsage);geo.setAttribute('floraPalette',pal);geo.setAttribute('floraLimit',limit);
     const mat=lod==='near'?(TREE_SPEC[shape]?materials.n:materials.N):lod==='mid'?materials.m:lod==='far'?materials.f:materials.s;
-    const im=new THREE.InstancedMesh(geo,mat,capacity);im.name='flora-'+shape+'-'+lod;im.count=0;im.frustumCulled=false;im.castShadow=lod==='near'&&shape!==5;im.receiveShadow=true;im.customDepthMaterial=depth;im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);group.add(im);F.meshes.push(im);const batch={shape,lod,mesh:im,capacity,write:0};batches.push(batch);slots[shape][lod]=batch;
+    const im=new THREE.InstancedMesh(geo,mat,capacity);im.name='flora-'+shape+'-'+lod;im.count=0;im.frustumCulled=false;im.castShadow=lod==='near'&&shape!==5;im.receiveShadow=true;im.customDepthMaterial=depth;im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);group.add(im);F.meshes.push(im);const batch={shape,lod,mesh:im,capacity,write:0,stageMat:new Float32Array(capacity*16),stagePal:new Float32Array(capacity*4),stageLim:new Float32Array(capacity)};batches.push(batch);slots[shape][lod]=batch;
   }
   yield;
  }
@@ -154,8 +154,9 @@ function* generate(){
  F.stats.generated=true;
 }
 function put(batch,entry){
- if(batch.write>=batch.capacity)return;const index=batch.write++,mesh=batch.mesh;
- position.set(entry.x,entry.y,entry.z);rotation.setFromAxisAngle(up,entry.rot);scale.set(entry.sx,entry.sy,entry.sx);matrix.compose(position,rotation,scale);mesh.setMatrixAt(index,matrix);mesh.geometry.attributes.floraPalette.array.set(entry.pal,index*4);mesh.geometry.attributes.floraLimit.array[index]=entry.range||uniforms.floraFar.value;
+ if(batch.write>=batch.capacity)return;const index=batch.write++;
+ position.set(entry.x,entry.y,entry.z);rotation.setFromAxisAngle(up,entry.rot);scale.set(entry.sx,entry.sy,entry.sx);matrix.compose(position,rotation,scale);
+ matrix.toArray(batch.stageMat,index*16);batch.stagePal.set(entry.pal,index*4);batch.stageLim[index]=entry.range||uniforms.floraFar.value;
 }
 function upload(attr,count){attr.clearUpdateRanges();attr.addUpdateRange(0,Math.max(1,count)*attr.itemSize);attr.needsUpdate=true;}
 function* select(){
@@ -163,20 +164,52 @@ function* select(){
  const cp=AF.camera.position,cx=cp.x,cy=cp.y,cz=cp.z,L=AF.LOD,near=L.floraNear,mid=L.floraMid,far=L.floraFar;
  uniforms.floraMid.value=mid;uniforms.floraNear.value=near;uniforms.floraFar.value=far;uniforms.floraShadow.value=AF.MOBILE?25:55;
  // a wider frustum than the camera's: a turn of the head finds the trees already selected (no pop while the next pass runs)
- AF.camera.updateMatrixWorld();wide.copy(AF.camera,false);wide.fov=Math.min(120,AF.camera.fov*1.4);wide.aspect=AF.camera.aspect*1.1;wide.updateProjectionMatrix();projection.multiplyMatrices(wide.projectionMatrix,AF.camera.matrixWorldInverse);frustum.setFromProjectionMatrix(projection);
+ AF.camera.updateMatrixWorld();wide.copy(AF.camera,false);wide.fov=Math.min(120,AF.camera.fov*1.4);wide.aspect=AF.camera.aspect*1.15;wide.updateProjectionMatrix();projection.multiplyMatrices(wide.projectionMatrix,AF.camera.matrixWorldInverse);frustum.setFromProjectionMatrix(projection);
  for(const batch of batches)batch.write=0;
  const radius=Math.ceil((far+104)/64),bx=Math.floor(cx/64),bz=Math.floor(cz/64);
+ const bList=[];
  for(let ix=bx-radius;ix<=bx+radius;ix++)for(let iz=bz-radius;iz<=bz+radius;iz++){
-  const bucket=buckets.get(ix*10000+iz);if(!bucket)continue;
-    let processed=0;
-    for(const entry of bucket){if(++processed%16===0)yield;const dx=entry.x-cx,dy=entry.y-cy,dz=entry.z-cz,distance=dx*dx+dy*dy+dz*dz,range=(entry.range?Math.min(entry.range,far):far)+24;if(distance>range*range)continue;sphere.center.set(entry.x,entry.y+8*entry.sy,entry.z);sphere.radius=24+10*entry.sx;if(distance>6400&&!frustum.intersectsSphere(sphere))continue;const slot=slots[entry.shape];if(slot.single)put(slot.single,entry);else {if(slot.mid){if(distance<(mid+30)**2)put(slot.near,entry);if(distance>(mid-30)**2&&distance<(near+32)**2)put(slot.mid,entry);}else if(distance<(near+32)**2)put(slot.near,entry);if(distance>(near-32)**2)put(slot.far,entry);}}
-  yield;
+  const bKey=ix*10000+iz;if(buckets.has(bKey))bList.push({bKey,d2:(ix-bx)**2+(iz-bz)**2});
+ }
+ bList.sort((a,b)=>a.d2-b.d2);
+ for(let bi=0;bi<bList.length;bi++){
+  const bucket=buckets.get(bList[bi].bKey);
+  let processed=0;
+  for(const entry of bucket){
+    if(++processed%24===0)yield;
+    const dx=entry.x-cx,dy=entry.y-cy,dz=entry.z-cz,distance=dx*dx+dy*dy+dz*dz,range=(entry.range?Math.min(entry.range,far):far)+24;
+    if(distance>range*range)continue;
+    sphere.center.set(entry.x,entry.y+8*entry.sy,entry.z);sphere.radius=24+10*entry.sx;
+    if(distance>19600&&!frustum.intersectsSphere(sphere))continue;
+    const slot=slots[entry.shape];
+    if(slot.single)put(slot.single,entry);
+    else {
+      if(slot.mid){
+        if(distance<(mid+30)**2)put(slot.near,entry);
+        if(distance>(mid-30)**2&&distance<(near+32)**2)put(slot.mid,entry);
+      } else if(distance<(near+32)**2)put(slot.near,entry);
+      if(distance>(near-32)**2)put(slot.far,entry);
+    }
+  }
+  if(bi%3===0)yield;
  }
  F.stats.near=F.stats.mid=F.stats.far=F.stats.draws=F.stats.triangles=0;
- for(const batch of batches){const mesh=batch.mesh;mesh.count=batch.write;mesh.layers.set(mesh.count?0:31);mesh.instanceMatrix.needsUpdate=true;upload(mesh.geometry.attributes.floraPalette,mesh.count);upload(mesh.geometry.attributes.floraLimit,mesh.count);F.stats[batch.lod==='single'?'far':batch.lod]+=mesh.count;if(mesh.count){F.stats.draws++;F.stats.triangles+=mesh.count*mesh.geometry.index.count/3;}}
+ for(const batch of batches){
+   const mesh=batch.mesh;mesh.count=batch.write;mesh.layers.set(mesh.count?0:31);
+   if(mesh.count>0){
+     mesh.instanceMatrix.array.set(batch.stageMat.subarray(0,mesh.count*16));
+     mesh.geometry.attributes.floraPalette.array.set(batch.stagePal.subarray(0,mesh.count*4));
+     mesh.geometry.attributes.floraLimit.array.set(batch.stageLim.subarray(0,mesh.count));
+     upload(mesh.geometry.attributes.floraPalette,mesh.count);
+     upload(mesh.geometry.attributes.floraLimit,mesh.count);
+   }
+   mesh.instanceMatrix.needsUpdate=true;
+   F.stats[batch.lod==='single'?'far':batch.lod]+=mesh.count;
+   if(mesh.count){F.stats.draws++;F.stats.triangles+=mesh.count*mesh.geometry.index.count/3;}
+ }
  lastX=cx;lastY=cy;lastZ=cz;lastQ.copy(AF.camera.quaternion);selected=revision;
 }
-const stale=()=>selected!==revision||(AF.camera.position.x-lastX)**2+(AF.camera.position.y-lastY)**2+(AF.camera.position.z-lastZ)**2>576||Math.abs(lastQ.dot(AF.camera.quaternion))<0.993;
+const stale=()=>selected!==revision||(AF.camera.position.x-lastX)**2+(AF.camera.position.y-lastY)**2+(AF.camera.position.z-lastZ)**2>576||Math.abs(lastQ.dot(AF.camera.quaternion))<0.985;
 const work=F.work=ms=>{
  if(!AF.ready)return false;const start=performance.now(),end=start+Math.min(ms,AF.MOBILE?1.5:2);
  while(performance.now()<end){

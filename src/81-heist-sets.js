@@ -290,6 +290,36 @@ try {
       p.enabled = false; WKR.chase = p;
       for (const a of p.actors) { a.ctl = { x: A.cove.x, y: -60, z: A.cove.z, yaw: 0, moving: false, ph: 0 }; a.weapon = 'tommy'; }
     } catch (e) { AF.warnOnce('heist chase riders', e); }
+    // ---------------------------------------------------------------- Southfield Farm at midnight (Act IV prologue): Moretti's armoured car in the
+    // yard east of the farmhouse, a crate of launchers beside it, six armed men on rounds (stealth zone 'farm', alarm = a gunfight)
+    try {
+      const site = AF.outlandSites && AF.outlandSites.sites.find((s) => s.name === 'Southfield Farm');
+      const sx = site ? site.x : -820, sz = site ? site.z : 48, sy = site ? site.y : AF.W.groundY(-820, 48);
+      const at = (dx, dz, yaw = 0) => ({ x: sx + dx, y: sy, z: sz + dz, yaw });
+      A.farm = at(6, 0); A.farmGate = at(6, 36); A.farmYard = at(6, 10);
+      A.armor = at(6, 13, 0); A.farmCrate = at(2.2, 9.5, PI / 2); A.farmName = site ? site.name : 'Southfield Farm';
+      A.farmBox = [sx - 48, sy - 4, sz - 40, sx + 48, sy + 24, sz + 48];
+      const FP = (pts) => pts.map(([dx, dz]) => [sx + dx, sy, sz + dz]);
+      const ROUTES = [
+        { pts: [[1, 7], [12, 7], [12, 19], [1, 19]], mode: 'loop', speed: 0.8, dwell: [{ i: 0, t: 5 }, { i: 2, t: 5 }] },   // round the car
+        { pts: [[2, 27], [11, 27]], mode: 'pingpong', speed: 0.7, dwell: [{ i: 0, t: 6 }, { i: 1, t: 6 }] },                // the driveway gap
+        { pts: [[-9, -12], [9, -12]], mode: 'pingpong', speed: 0.75, dwell: [{ i: 0, t: 4 }, { i: 1, t: 4 }] },             // behind the farmhouse
+        { pts: [[33, -8], [33, 13]], mode: 'pingpong', speed: 0.8, dwell: [{ i: 0, t: 5 }, { i: 1, t: 3 }] },                // past the barn + silo
+        { pts: [[-21, -10], [-21, 9]], mode: 'pingpong', speed: 0.7, dwell: [{ i: 0, t: 6 }, { i: 1, t: 4 }] },              // the orchard
+        { pts: [[4.2, 5.2], [5.2, 5.2]], mode: 'pingpong', speed: 0.4, dwell: [{ i: 0, t: 14 }, { i: 1, t: 9 }] },          // the crate's minder
+      ];
+      const fz = HS.zones.farm = S.define('farm', { box: A.farmBox, mode: 'fight', voice: 'm1', reflexS: 2.0, radius: 110, hunters: 3 });
+      HS.farmG = [];
+      ROUTES.forEach((r, i) => {
+        const p = walker('farm' + i, 'Moretti', FP(r.pts), { speed: r.speed, mode: r.mode, dwell: r.dwell, activeRadius: 140 }, mob(i));
+        if (p) { const g = S.guard('farm', { path: p, voice: i % 2 ? 'm2' : 'm1', name: 'Moretti guard', range: 15, torch: i < 3 ? { range: 11, cone: 0.75, eye: 1.4 } : null }); if (g) HS.farmG.push(g); }
+      });
+      void fz;
+      // the crate of launchers (olive, stencilled), hidden outside the farm scene
+      const m = new AF.Model(14, 7, 7), wood = col(0x5a4a2e, { pat: 'plank' }), olive = col(0x46522c), stencil = col(0xe8d070);
+      m.box(0, 0, 0, 14, 6, 7, wood); m.box(0, 6, 0, 14, 7, 7, olive); m.box(3, 2, 7, 11, 4, 7, stencil); m.box(0, 0, 3, 14, 6, 4, olive);
+      HS.props.farmCrate = mesh(m, 1 / 8, [0.5, 0, 0.5], A.farmCrate.x, A.farmCrate.y, A.farmCrate.z, A.farmCrate.yaw); HS.props.farmCrate.visible = false;
+    } catch (e) { AF.warnOnce('heist farm', e); }
     HS.ready = true;
   });
   // the watchman + the guards only walk while their scene is on (81-heist toggles them)

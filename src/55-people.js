@@ -1126,7 +1126,9 @@ try {
       const turn = AF.angDiff(p.yaw, p.tyaw); p.yaw += turn * Math.min(1, pdt * (moving ? 10 : 5));
       p.root.position.set(p.x, p.y, p.z); p.root.rotation.y = p.yaw;
       if (!far) animate(p, pdt, moving, sp);
-      const it = p.interact; it.x = p.x; it.y = p.y + 1.0; it.z = p.z;
+      // the talk prompt follows only residents someone could reach (hidden ones park it out of the scan's height band once)
+      const it = p.interact;
+      if (!hide) { it.x = p.x; it.y = p.y + 1.0; it.z = p.z; } else if (it.y !== -999) it.y = -999;
     }
   };
   AF.onTick('people', 300, peopleTick);

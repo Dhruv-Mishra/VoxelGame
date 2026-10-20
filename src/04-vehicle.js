@@ -19,10 +19,15 @@ try {
   VIEW.cycle = () => { VIEW.i = (VIEW.i + 1) % 3; try { localStorage.setItem('portSolace.view', String(VIEW.i)); } catch (e) { /* storage blocked */ } AF.emit('toast', VIEW.names[VIEW.i]); };
   VIEW.fp = () => VIEW.i === 0;
   AF.onTick('view-key', 148, () => { if (AF.input.hit('KeyV') && AF.mode !== 'photo' && !(AF.ui && AF.ui.modalOpen && AF.ui.modalOpen())) VIEW.cycle(); });
+  const LOCAL_POINTS = new Float64Array([1, 1, -1, 1, 0, 1, 1, -1, -1, -1, 0, -1, 1, 0, -1, 0, 1, 0.5, -1, 0.5, 1, -0.5, -1, -0.5]);
+  const PTS_BUF = new Float64Array(24), CONTACT_BUF = new Float64Array(3), AXES_BUF = new Float64Array(8);
   class Vehicle {
     constructor(o = {}) {
       this.name = o.name || 'vehicle'; this.x = o.x ?? 0; this.y = o.y ?? 0; this.z = o.z ?? 0; this.yaw = o.yaw ?? 0;
-      this.pitch = 0; this.roll = 0; this.v = 0; this.interact = null; this.lift = 0.6;
+      this.pitch = 0; this.roll = 0; this.v = 0; this.vx = 0; this.vz = 0; this.steer = 0; this.spin = 0;
+      this.interact = null; this.lift = 0.6; this.active = true;
+      this.halfL = o.halfL ?? 2.2; this.halfW = o.halfW ?? 0.9; this.height = o.height ?? 1.5;
+      this.bob = 0; this.bobV = 0; this.sway = 0; this.dmg = 0;
       // the same on every client for vehicles built at boot or unparked from the same kerb spot (80-coop matches on it)
       this.netKey = this.name + '@' + Math.round(this.x * 4) + ',' + Math.round(this.z * 4);
       Vehicle.all.push(this);
@@ -39,7 +44,50 @@ try {
       it.x = this.x; it.z = this.z; it.y = this.y + this.lift;
       if (this.reach) { const r = this.reach(this); it.r = r || this.r0; if (r) it.y = undefined; }   // a wide reach ignores height (a beach above a ski)
     }
+    placeMesh() {
+      const m = this.mesh; if (!m) return;
+      m.position.set(this.x, this.y + (this.bob || 0), this.z);
+      m.rotation.set(this.pitch || 0, this.yaw || 0, this.roll || 0, 'YXZ');
+      m.updateMatrix();
+    }
+    bodyDist(px, pz) {
+      const s = Math.sin(this.yaw), c = Math.cos(this.yaw), rx = px - this.x, rz = pz - this.z;
+      const lx = rx * c - rz * s, lz = rx * s + rz * c;
+      return Math.hypot(Math.max(0, Math.abs(lx) - this.halfW), Math.max(0, Math.abs(lz) - this.halfL));
+    }
+    pts(x = this.x, z = this.z, yaw = this.yaw, inset = 0) {
+      const s = Math.sin(yaw), c = Math.cos(yaw), hl = this.halfL - 0.1 - inset, hw = this.halfW - 0.08 - inset;
+      for (let index = 0; index < 24; index += 2) {
+        const lx = LOCAL_POINTS[index] * hw, lz = LOCAL_POINTS[index + 1] * hl;
+        PTS_BUF[index] = x + lx * c + lz * s; PTS_BUF[index + 1] = z - lx * s + lz * c;
+      }
+      return PTS_BUF;
+    }
+    worldHits(x = this.x, z = this.z, yaw = this.yaw) {
+      const feet = this.y + 0.5, h = Math.min(1.2, (this.height || 1.5) - 0.6);
+      const pts = this.pts(x, z, yaw); let hits = 0;
+      for (let index = 0; index < 24; index += 2) if (AF.boxBlocked(pts[index], feet, pts[index + 1], 0.12, h)) hits++;
+      return hits;
+    }
+    overlap(other, x = this.x, z = this.z, yaw = this.yaw) {
+      const sine = Math.sin(yaw), cosine = Math.cos(yaw), os = Math.sin(other.yaw), oc = Math.cos(other.yaw);
+      AXES_BUF[0] = cosine; AXES_BUF[1] = -sine; AXES_BUF[2] = sine; AXES_BUF[3] = cosine;
+      AXES_BUF[4] = oc; AXES_BUF[5] = -os; AXES_BUF[6] = os; AXES_BUF[7] = oc;
+      const dx = x - other.x, dz = z - other.z;
+      let depth = Infinity, normalX = 0, normalZ = 0;
+      for (let index = 0; index < 8; index += 2) {
+        const ax = AXES_BUF[index], az = AXES_BUF[index + 1], distance = dx * ax + dz * az;
+        const radius = this.halfW * Math.abs(cosine * ax - sine * az) + this.halfL * Math.abs(sine * ax + cosine * az)
+          + other.halfW * Math.abs(oc * ax - os * az) + other.halfL * Math.abs(os * ax + oc * az);
+        const penetration = radius - Math.abs(distance);
+        if (penetration <= 0) { CONTACT_BUF[2] = 0; return 0; }
+        if (penetration < depth) { depth = penetration; const sign = distance < 0 ? -1 : 1; normalX = ax * sign; normalZ = az * sign; }
+      }
+      CONTACT_BUF[0] = normalX; CONTACT_BUF[1] = normalZ; CONTACT_BUF[2] = depth;
+      return depth;
+    }
   }
+  Vehicle.contact = CONTACT_BUF;
   Vehicle.all = [];
   Vehicle.aim = false;   // set each frame by 77-combat while the seated player aims a gun (the chase camera pulls in and holds its look)
 

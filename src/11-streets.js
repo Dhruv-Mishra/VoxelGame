@@ -415,7 +415,7 @@ try {
       for (const ly of [3, 7, 11]) { headM.box(3, ly, 1, 7, ly + 3, 2, k.black); headM.box(3, ly, 8, 7, ly + 3, 9, k.black); headM.box(1, ly, 3, 2, ly + 3, 7, k.black); headM.box(8, ly, 3, 9, ly + 3, 7, k.black);
         headM.box(3, ly + 3, 0, 7, ly + 4, 2, k.iron); headM.box(3, ly + 3, 8, 7, ly + 4, 10, k.iron); headM.box(0, ly + 3, 3, 2, ly + 4, 7, k.iron); headM.box(8, ly + 3, 3, 10, ly + 4, 7, k.iron); }
       const pole = AF.meshModel(poleM, { vs: 1 / 16 }), head = AF.meshModel(headM, { vs: 1 / 16 });
-      const lensGeo = new THREE.BoxGeometry(0.2, 0.2, 0.05), lensMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+      const lensGeo = new THREE.BoxGeometry(0.2, 0.2, 0.04), lensMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
       const sel = inter.filter((I) => /Grand|Meridian|Broad|Library/.test(I.h.name) || /Grand|Meridian|Broad|Library/.test(I.v.name));
       const lens = new THREE.InstancedMesh(lensGeo, lensMat, sel.length * 4 * 6);
       const dummy = new THREE.Object3D(); let li = 0;
@@ -427,7 +427,7 @@ try {
           const hy = 4.3; put(head, px, hy, pz, 0);
           for (const [fx, fz] of [[sx, 0], [0, sz]]) {
             ['red', 'amber', 'green'].forEach((colName, r) => {
-              dummy.position.set(px + fx * 0.315, hy + [11.5, 7.5, 3.5][r] / 16 + 0.03, pz + fz * 0.315);
+              dummy.position.set(px + fx * 0.325, hy + [11.5, 7.5, 3.5][r] / 16 + 0.03, pz + fz * 0.325);
               dummy.rotation.set(0, Math.atan2(fx, fz), 0); dummy.updateMatrix(); lens.setMatrixAt(li, dummy.matrix);
               L.idx.push({ i: li, axis: fz !== 0 ? 'z' : 'x', col: colName }); li++;
             });

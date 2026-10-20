@@ -19,7 +19,7 @@ try {
     const rng=AF.rng(WK.paths.length*733+541);
     for(let index=0;index<path.count;index++){
       const look=looks?.length?looks[index%looks.length]:AF.peopleKit.makeLook('traveler',index%3?'m':'f','adult',rng);
-      const actor={s:path.length*index/Math.max(1,path.count),dir:1,wait:0,gap:0,gap0:2+(index*1.7)%4,idx:index,lag:0,ph:index*1.7,x:0,y:0,z:0,yaw:0,look,pal:palette(look),bag:rng()<luggage,moving:false,frame:0};
+      const actor=new Actor({s:path.length*index/Math.max(1,path.count),dir:1,wait:0,gap:0,gap0:2+(index*1.7)%4,idx:index,lag:0,ph:index*1.7,x:0,y:0,z:0,yaw:0,look,pal:palette(look),bag:rng()<luggage,moving:false,frame:0});
       locate(path,actor);path.actors.push(actor);
     }
     WK.paths.push(path);return path;
@@ -60,18 +60,35 @@ try {
   WK.distance2=(path,camera)=>Math.max(path.minX-camera.x,0,camera.x-path.maxX)**2+Math.max(path.minY-camera.y,0,camera.y-path.maxY)**2+Math.max(path.minZ-camera.z,0,camera.z-path.maxZ)**2;
   // reactions to the player (77-combat): shoved (stagger), knocked flat (down s, then they get up), scared (run along the path, or cower
   // in place when the path has no speed). Offsets from the path ease back once they walk on. State lives on the actor (actor.rx), made once.
-  const rx=(a)=>{if(!a.rx)a.rx={down:0,fall:0,st:0,fear:0,ox:0,oz:0,vx:0,vz:0,yaw:0};a.rxOn=true;return a.rx;};
+  class Actor {
+    constructor(o={}){
+      this.s=o.s??0;this.dir=o.dir??1;this.wait=o.wait??0;this.gap=o.gap??0;this.gap0=o.gap0??2;this.idx=o.idx??0;this.lag=o.lag??0;this.ph=o.ph??0;
+      this.x=o.x??0;this.y=o.y??0;this.z=o.z??0;this.yaw=o.yaw??0;this.look=o.look??null;this.pal=o.pal??null;this.bag=!!o.bag;
+      this.moving=false;this.frame=0;this.dead=false;this.unconscious=false;this.rx=null;this.rxOn=false;this.tilt=0;this.lift=0;
+    }
+    getRx(){if(!this.rx)this.rx={down:0,fall:0,st:0,fear:0,ox:0,oz:0,vx:0,vz:0,yaw:0};this.rxOn=true;return this.rx;}
+    knock(fx,fz,v,t){if(this.dead||this.unconscious)return;const R=this.getRx();R.down=Math.max(R.down,t);R.vx=fx*v;R.vz=fz*v;R.yaw=Math.atan2(-fx,-fz);R.st=0;R.fear=0;R.hold=0;}
+    sleep(fx=0,fz=1,v=1.3){if(this.dead)return;this.knock(fx,fz,v,Infinity);this.unconscious=true;this.getRx().down=Infinity;}
+    kill(fx=0,fz=1,v=1.3){if(this.dead)return;if(this.unconscious)this.unconscious=false;this.knock(fx,fz,v,Infinity);this.dead=true;this.unconscious=false;}
+    revive(){this.dead=this.unconscious=false;if(this.rx)Object.assign(this.rx,{down:0,fall:0,st:0,fear:0,hold:0,ox:0,oz:0,vx:0,vz:0});this.rxOn=false;this.tilt=this.lift=0;}
+    stagger(fx,fz){if(this.dead||this.unconscious)return;const R=this.getRx();if(R.down>0||R.fall>0)return;R.st=0.7;R.vx=fx*1.8;R.vz=fz*1.8;R.yaw=Math.atan2(-fx,-fz);R.fear=Math.max(R.fear,3);}
+    scare(t){if(this.dead||this.unconscious)return;const R=this.getRx();if(!(R.down>0))R.fear=Math.max(R.fear,t);}
+    hold(yaw,t){if(this.dead||this.unconscious)return;const R=this.getRx();if(R.down>0||R.fall>0)return;R.hold=Math.max(R.hold||0,t);R.yaw=yaw;}
+    isDown(){return !!(this.dead||this.unconscious||(this.rxOn&&(this.rx.down>0||this.rx.fall>0.4)));}
+  }
+  WK.Actor=Actor;AF.Actor=Actor;
+  const rx=(a)=>a.getRx?a.getRx():(!a.rx?(a.rx={down:0,fall:0,st:0,fear:0,ox:0,oz:0,vx:0,vz:0,yaw:0},a.rxOn=true,a.rx):(a.rxOn=true,a.rx));
   const reacts=(a)=>!!a.chase||a.look.pose!=='dance'&&a.look.pose!=='ride';
-  WK.knock=(a,fx,fz,v,t)=>{if(a.dead||a.unconscious)return;const R=rx(a);R.down=Math.max(R.down,t);R.vx=fx*v;R.vz=fz*v;R.yaw=Math.atan2(-fx,-fz);R.st=0;R.fear=0;R.hold=0;};
+  WK.knock=(a,fx,fz,v,t)=>{if(a.knock)a.knock(fx,fz,v,t);else{if(a.dead||a.unconscious)return;const R=rx(a);R.down=Math.max(R.down,t);R.vx=fx*v;R.vz=fz*v;R.yaw=Math.atan2(-fx,-fz);R.st=0;R.fear=0;R.hold=0;}};
   // Persistent lifecycle is separate from a timed knock/stagger; only an explicit mission reset/spawn revives it.
-  WK.sleep=(a,fx=0,fz=1,v=1.3)=>{if(a.dead)return;WK.knock(a,fx,fz,v,Infinity);a.unconscious=true;rx(a).down=Infinity;};
-  WK.kill=(a,fx=0,fz=1,v=1.3)=>{if(a.dead)return;if(a.unconscious)a.unconscious=false;WK.knock(a,fx,fz,v,Infinity);a.dead=true;a.unconscious=false;};
-  WK.revive=(a)=>{a.dead=a.unconscious=false;if(a.rx)Object.assign(a.rx,{down:0,fall:0,st:0,fear:0,hold:0,ox:0,oz:0,vx:0,vz:0});a.rxOn=false;a.tilt=a.lift=0;};
-  WK.stagger=(a,fx,fz)=>{if(a.dead||a.unconscious)return;const R=rx(a);if(R.down>0||R.fall>0)return;R.st=0.7;R.vx=fx*1.8;R.vz=fz*1.8;R.yaw=Math.atan2(-fx,-fz);R.fear=Math.max(R.fear,3);};
-  WK.scare=(a,t)=>{if(a.dead||a.unconscious)return;const R=rx(a);if(!(R.down>0))R.fear=Math.max(R.fear,t);};
+  WK.sleep=(a,fx=0,fz=1,v=1.3)=>{if(a.sleep)a.sleep(fx,fz,v);else{if(a.dead)return;WK.knock(a,fx,fz,v,Infinity);a.unconscious=true;rx(a).down=Infinity;}};
+  WK.kill=(a,fx=0,fz=1,v=1.3)=>{if(a.kill)a.kill(fx,fz,v);else{if(a.dead)return;if(a.unconscious)a.unconscious=false;WK.knock(a,fx,fz,v,Infinity);a.dead=true;a.unconscious=false;}};
+  WK.revive=(a)=>{if(a.revive)a.revive();else{a.dead=a.unconscious=false;if(a.rx)Object.assign(a.rx,{down:0,fall:0,st:0,fear:0,hold:0,ox:0,oz:0,vx:0,vz:0});a.rxOn=false;a.tilt=a.lift=0;}};
+  WK.stagger=(a,fx,fz)=>{if(a.stagger)a.stagger(fx,fz);else{if(a.dead||a.unconscious)return;const R=rx(a);if(R.down>0||R.fall>0)return;R.st=0.7;R.vx=fx*1.8;R.vz=fz*1.8;R.yaw=Math.atan2(-fx,-fz);R.fear=Math.max(R.fear,3);}};
+  WK.scare=(a,t)=>{if(a.scare)a.scare(t);else{if(a.dead||a.unconscious)return;const R=rx(a);if(!(R.down>0))R.fear=Math.max(R.fear,t);}};
   // stop and face yaw for t seconds (a chat: the heist's distraction), then walk on and catch up with the schedule
-  WK.hold=(a,yaw,t)=>{if(a.dead||a.unconscious)return;const R=rx(a);if(R.down>0||R.fall>0)return;R.hold=Math.max(R.hold||0,t);R.yaw=yaw;};
-  WK.isDown=(a)=>!!(a.dead||a.unconscious||a.rxOn&&(a.rx.down>0||a.rx.fall>0.4));
+  WK.hold=(a,yaw,t)=>{if(a.hold)a.hold(yaw,t);else{if(a.dead||a.unconscious)return;const R=rx(a);if(R.down>0||R.fall>0)return;R.hold=Math.max(R.hold||0,t);R.yaw=yaw;}};
+  WK.isDown=(a)=>a.isDown?a.isDown():!!(a.dead||a.unconscious||a.rxOn&&(a.rx.down>0||a.rx.fall>0.4));
   // actors of active paths within r of (x, z) that can react (a shared scratch array: copy it before calling near() again)
   const NEAR=[];
   WK.near=(x,z,r)=>{

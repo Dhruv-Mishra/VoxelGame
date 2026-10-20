@@ -171,7 +171,7 @@ function* cropModels() {
     pal.setUsage(THREE.DynamicDrawUsage); radius.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('cropPal', pal); geo.setAttribute('cropR', radius);
     const mesh = new THREE.InstancedMesh(geo, name === 'slab' ? mid : near, cap); mesh.name = 'farm-crops-' + name; mesh.count = 0; mesh.frustumCulled = false; mesh.castShadow = false; mesh.receiveShadow = true;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.layers.set(31); group.add(mesh); FM.meshes.push(mesh);
-    batches[name] = { mesh, cap, n: 0, tris: geo.index.count / 3 };
+    batches[name] = { mesh, cap, n: 0, tris: geo.index.count / 3, stageMat: new Float32Array(cap * 16), stagePal: new Float32Array(cap * 4), stageR: new Float32Array(cap) };
   }
   FM.stats.trianglesPer = Object.fromEntries(Object.entries(batches).map(([key, batch]) => [key, batch.tris]));
 }
@@ -217,31 +217,38 @@ let lastX = Infinity, lastY = Infinity, lastZ = Infinity, revision = 0, selected
 const tierIndex = () => AF.MOBILE || AF.GFX.tier === 'low' ? 0 : AF.GFX.lite ? 1 : 2;
 function put(batch, index, sx, sy, sz, lift, p0, p1, p2, p3, radius) {
   if (batch.n >= batch.cap) return;
-  const slot = batch.n++, e = batch.mesh.instanceMatrix.array, o = slot * 16, r = index * STRIDE, c = REC[r + 3], s = REC[r + 4];
+  const slot = batch.n++, e = batch.stageMat, o = slot * 16, r = index * STRIDE, c = REC[r + 3], s = REC[r + 4];
   e[o] = c * sx; e[o + 1] = REC[r + 7] * sx; e[o + 2] = -s * sx; e[o + 3] = 0; e[o + 4] = 0; e[o + 5] = sy; e[o + 6] = 0; e[o + 7] = 0;
   e[o + 8] = s * sz; e[o + 9] = REC[r + 8] * sz; e[o + 10] = c * sz; e[o + 11] = 0; e[o + 12] = REC[r]; e[o + 13] = REC[r + 1] + lift; e[o + 14] = REC[r + 2]; e[o + 15] = 1;
-  const pal = batch.mesh.geometry.attributes.cropPal.array; pal[slot * 4] = p0; pal[slot * 4 + 1] = p1; pal[slot * 4 + 2] = p2; pal[slot * 4 + 3] = p3;
-  batch.mesh.geometry.attributes.cropR.array[slot] = radius;
+  const pal = batch.stagePal; pal[slot * 4] = p0; pal[slot * 4 + 1] = p1; pal[slot * 4 + 2] = p2; pal[slot * 4 + 3] = p3;
+  batch.stageR[slot] = radius;
 }
 function upload(attr, count) { attr.clearUpdateRanges(); attr.addUpdateRange(0, Math.max(1, count) * attr.itemSize); attr.needsUpdate = true; }
 const radii = [0, 0, 0, 0, 0];
 function* select(eye = AF.camera.position, cull = true) {
   const cx = eye.x, cy = eye.y, cz = eye.z, view = AF.LOD.view, tier = tierIndex();
-  // from the street inside the city grid the fields are > 110 m away behind buildings: keep the canopy boxes off
-  const far = AF.W.col(cx, cz) >= 0 && cy - O.h(cx, cz) < 40 ? 110 : Math.min(400, FAR[tier] * view);
+  // smooth farm far distance when approaching from zoo to prevent boundary popping and freeze
+  const distToFarmland = cx - (-660);
+  const cityMuffle = distToFarmland > 0 ? AF.clamp(1 - distToFarmland / 90, 0.45, 1) : 1;
+  const far = Math.round(Math.min(400, FAR[tier] * view) * cityMuffle);
   for (let kind = 0; kind < 5; kind++) radii[kind] = Math.min(90, KS[kind].R[tier] * view);
   uniforms.cropFar.value = far;
-  if (cull) { AF.camera.updateMatrixWorld(); wide.copy(AF.camera, false); wide.fov = Math.min(120, AF.camera.fov * 1.4); wide.aspect = AF.camera.aspect * 1.1; wide.updateProjectionMatrix(); projection.multiplyMatrices(wide.projectionMatrix, AF.camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projection); }
+  if (cull) { AF.camera.updateMatrixWorld(); wide.copy(AF.camera, false); wide.fov = Math.min(120, AF.camera.fov * 1.4); wide.aspect = AF.camera.aspect * 1.15; wide.updateProjectionMatrix(); projection.multiplyMatrices(wide.projectionMatrix, AF.camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projection); }
   for (const name in batches) batches[name].n = 0;
   const reach = Math.ceil((far + 64) / 64), bx = Math.floor(cx / 64), bz = Math.floor(cz / 64), far2 = far * far;
+  const bList = [];
   for (let ix = bx - reach; ix <= bx + reach; ix++) for (let iz = bz - reach; iz <= bz + reach; iz++) {
-    const bucket = buckets.get(ix * 10000 + iz); if (!bucket) continue;
-    if (cull) { sphere.center.set(ix * 64 + 32, 6, iz * 64 + 32); sphere.radius = 50; if ((ix * 64 + 32 - cx) ** 2 + (iz * 64 + 32 - cz) ** 2 > 8100 && !frustum.intersectsSphere(sphere)) continue; }
+    const bKey = ix * 10000 + iz; if (buckets.has(bKey)) bList.push({ ix, iz, bKey, d2: (ix - bx) ** 2 + (iz - bz) ** 2 });
+  }
+  bList.sort((a, b) => a.d2 - b.d2);
+  for (let bi = 0; bi < bList.length; bi++) {
+    const bucket = buckets.get(bList[bi].bKey);
+    if (cull) { sphere.center.set(bList[bi].ix * 64 + 32, 6, bList[bi].iz * 64 + 32); sphere.radius = 50; if (bList[bi].d2 * 4096 > 19600 && !frustum.intersectsSphere(sphere)) continue; }
     for (let at = 0; at < bucket.length; at++) {
       if ((at & 63) === 63) yield;
       const index = bucket[at], r = index * STRIDE, dx = REC[r] - cx, dy = REC[r + 1] - cy, dz = REC[r + 2] - cz, d2 = dx * dx + dy * dy + dz * dz;
       if (d2 > far2) continue;
-      if (cull && d2 > 400) { sphere.center.set(REC[r], REC[r + 1] + 1, REC[r + 2]); sphere.radius = 3.5; if (!frustum.intersectsSphere(sphere)) continue; }
+      if (cull && d2 > 6400) { sphere.center.set(REC[r], REC[r + 1] + 1, REC[r + 2]); sphere.radius = 3.5; if (!frustum.intersectsSphere(sphere)) continue; }
       const kind = KINDS[index], spec = KS[kind], radius = radii[kind], pal = PALI[index], sx = REC[r + 5], sz = REC[r + 6];
       if (d2 < (radius + 6) ** 2) {
         const q = kind === 0 ? PALS.wheat[pal] : kind === 1 ? PALS.corn[0] : kind === 2 ? PALS.sunflower[pal] : kind === 3 ? PALS.vine[pal] : PALS.veg[pal];
@@ -252,12 +259,18 @@ function* select(eye = AF.camera.position, cull = true) {
         put(batches.slab, index, sx, spec.h * 2, spec.w * (kind === 3 ? 1 : sz), spec.y, two[0], two[1], two[0], two[0], radius);
       }
     }
-    yield;
+    if (bi % 2 === 0) yield;
   }
   let draws = 0, triangles = 0;
   for (const name in batches) {
     const batch = batches[name], mesh = batch.mesh; mesh.count = batch.n; mesh.layers.set(batch.n ? 0 : 31);
-    mesh.instanceMatrix.needsUpdate = true; upload(mesh.geometry.attributes.cropPal, batch.n); upload(mesh.geometry.attributes.cropR, batch.n);
+    if (batch.n > 0) {
+      mesh.instanceMatrix.array.set(batch.stageMat.subarray(0, batch.n * 16));
+      mesh.geometry.attributes.cropPal.array.set(batch.stagePal.subarray(0, batch.n * 4));
+      mesh.geometry.attributes.cropR.array.set(batch.stageR.subarray(0, batch.n));
+      upload(mesh.geometry.attributes.cropPal, batch.n); upload(mesh.geometry.attributes.cropR, batch.n);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
     if (batch.n) { draws++; triangles += batch.n * batch.tris; }
   }
   Object.assign(FM.stats, { draws, triangles, near: batches.wheat.n + batches.tall.n + batches.vine.n + batches.veg.n, mid: batches.slab.n, selects: FM.stats.selects + 1 });
@@ -267,9 +280,9 @@ FM.select = (eye, cull = true) => { const gen = select(eye, cull); while (!gen.n
 function stale() {
   if (selected !== revision) return true;
   const cp = AF.camera.position;
-  // nothing drawn and the camera is well east of the farmland: keep sleeping
-  if (!FM.stats.draws && cp.x > -660 + FAR[2] * 2.6) return false;
-  return (cp.x - lastX) ** 2 + (cp.y - lastY) ** 2 + (cp.z - lastZ) ** 2 > 9 || Math.abs(lastQ.dot(AF.camera.quaternion)) < 0.993;
+  // keep sleeping only when far east of the farmland (past x = -540)
+  if (!FM.stats.draws && cp.x > -540) return false;
+  return (cp.x - lastX) ** 2 + (cp.y - lastY) ** 2 + (cp.z - lastZ) ** 2 > 36 || Math.abs(lastQ.dot(AF.camera.quaternion)) < 0.985;
 }
 // ---------------------------------------------------------------- machine and prop models
 const col = (hex, opts = {}) => AF.col(hex, { jitter: 0.4, edge: 0.2, ...opts });

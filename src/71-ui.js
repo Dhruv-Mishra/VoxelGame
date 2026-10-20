@@ -235,6 +235,15 @@ try {
     <div><h3>Fighting</h3>${K('Click+Q', 'Attack / shoot')}${K('Right-drag+Z', 'Aim (hold / toggle)')}${K('Wheel+1-5+X', 'Switch weapon (or the \u25b8 by its name)')}${K('Hold X', 'Weapon wheel')}${K('R', 'Reload')}<h3>Work</h3>${K('J', 'Start / quit a job (taxi, bus, van, fire engine, on foot: courier)')}</div>
     <div><h3>Driving & riding</h3>${K('W+S', 'Throttle / reverse')}${K('A+D', 'Steer')}${K('Space', 'Brake')}${K('H', 'Horn / bell')}${K('E+F', 'Get out')}<h3>Flying</h3>${K('Space+Shift', 'Throttle up / down (hold)')}${K('W+S', 'Nose up / down (I inverts)')}${K('A+D', 'Bank to turn / steer on the ground')}${K('Q+E', 'Rudder')}${K('X+B', 'Wheel brakes')}${K('F', 'Get out (on the ground) \u00b7 bail out (high)')}</div>
     <div><h3>From the sky</h3>${K('Drag', 'Rotate')}${K('Right-drag', 'Pan')}${K('Wheel', 'Zoom')}${K('Double-click', 'Land there')}<h3>Anywhere</h3>${K('M', 'Map')}${K('P', 'Photo mode')}${K('F1+?', 'Controls (this list)')}${K('Esc', 'Close what is open \u00b7 else the menu')}${K('Space', 'Skip a cutscene')}</div></div>`}
+    <h3>How to play \u2014 finding your way</h3><div class="cols"><div>
+    <div class="k"><span>The <b style="color:var(--gold)">gold line</b> at the bottom says what to do next; words in gold are the place or thing to go to.</span></div>
+    <div class="k"><span>The <b style="color:#cfe8ff">blue line</b> under it gives directions: the next turn, the street, the distance, or the compass heading off-road.</span></div>
+    <div class="k"><span>Follow the <b style="color:var(--gold)">gold route</b> on the minimap (and on the map, ${TOUCH ? 'MAP button' : 'M'}). A gold column of light marks the spot in the world.</span></div>
+    <div class="k"><span>Target off screen? The <b style="color:var(--gold)">arrow</b> on the screen edge points to it, with the distance.</span></div></div><div>
+    <div class="k"><span><b>Missions:</b> Vera (the <b>H</b> on the map, at the Blue Heron) runs the heist; ${TOUCH ? 'the JOB button' : 'J'} starts a job in a cab, bus, van or on foot.</span></div>
+    <div class="k"><span><b>Stealth:</b> crouch (${TOUCH ? 'CROUCH' : 'C'}), stay out of torchlight, hit a guard <b>from behind</b> to drop him silently, ${TOUCH ? 'tap' : 'E'} to carry and hide a body.</span></div>
+    <div class="k"><span><b>Fighting:</b> slot 1 is always your fists. In a car, ${TOUCH ? 'AIM + FIRE' : 'right mouse aims, left mouse fires'} from the seat (passengers all round, the driver to the front and sides).</span></div>
+    <div class="k"><span><b>Launchers:</b> the Seeker locks on (a red LOCKED tag under the crosshair) and steers into jets, the autogyro or cars; the Bazooka flies straight.</span></div></div></div>
     <div class="stack"><button class="btn primary" data-k="closehelp">Got it</button></div></div>`;
 
   // ------------------------------------------------------------------ state + public api
@@ -472,6 +481,8 @@ try {
     const c = AF.friends.current;
     UI.notify({ title: 'Port Solace', text: `Welcome home, ${c.name}! Your friends live along Friends Lane \u2014 go say hi.`, kind: 'ok', ms: 6000 });
     setTimeout(() => UI.help(TOUCH ? 'Tap a prompt to talk, or to get into a car, a bike or a plane.' : 'Walk up to anyone \u2014 or any car \u2014 and press [E]. [M] map \u00b7 [I] bag \u00b7 [F1] controls \u00b7 [Esc] menu', 9000), 1200);
+    // second tip: where the story starts and how the guidance works
+    setTimeout(() => UI.help(TOUCH ? 'Want a job? Vera (the H on the map) has a heist. Follow the gold route on the minimap.' : 'Looking for action? Vera at the Blue Heron (the [H] on the map, [M]) has a heist. During a mission follow the gold route on the minimap \u2014 the blue line under the objective tells you where to turn. [F1] explains everything.', 11000), 11500);
   };
   tDots.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) select(b.dataset.id); });
   title.querySelector('.arr.l').addEventListener('click', () => step(-1));
@@ -622,8 +633,9 @@ try {
   AF.on('mode', (name) => { if (name !== 'drive' && name !== 'fly') show(speed, false); });
   let frameN = 0;
   const fmt = (hrs) => { const hh = Math.floor(hrs) % 24, mm = Math.floor((hrs - Math.floor(hrs)) * 60); return [((hh + 11) % 12) + 1 + ':' + String(mm).padStart(2, '0'), hh < 12 ? 'AM' : 'PM']; };
-  const placeName = () => {
-    const pl = focus(); if (!pl) return '';
+  const placeName = () => { const pl = focus(); return pl ? placeNameAt(pl.x, pl.z) : ''; };
+  const placeNameAt = (x, z) => {
+    const pl = { x, z };
     const lot = AF.PLAN.lotAt(pl.x, pl.z), id = lot && lot.id, K2 = AF.PLAN.world.key;
     if (id === 'w-zoo' || id === 'w-zoo-annex') return 'Solace Zoo'; if (id === 'w-airfield') return 'Westgate Airfield';
     if (K2 && Math.abs(pl.x - K2.cx) < K2.rx * 1.3 && Math.abs(pl.z - K2.cz) < K2.rz * 1.3) return K2.name;
@@ -631,6 +643,12 @@ try {
     if (AF.liner && Math.abs(pl.x - AF.liner.x) < 110 && Math.abs(pl.z - AF.liner.z) < 40) return 'SS Solace Queen';
     if (pl.z > 300) return Math.hypot((pl.x - SI.cx) / SI.rx, (pl.z - SI.cz) / SI.rz) < 1.4 ? 'Serena Isle' : 'Open sea'; if (pl.z < -300) return 'Solace Range'; if (pl.x < -660) return 'Westmoor'; if (pl.x > 460) return 'Eastwood';
     const nr = AF.PLAN.nearestRoad(pl.x, pl.z); return nr.road && nr.d < 12 ? nr.road.name : pl.x < -300 ? 'The West Side' : 'Port Solace';
+  };
+  // the place a point is in, for directions ("on Charter Street", "Westmoor"): a named outland site within 60 m wins, then the HUD's rules
+  UI.placeAt = (x, z) => {
+    const SS = AF.outlandSites && AF.outlandSites.sites; if (SS) for (const s of SS) if (Math.abs(s.x - x) < 60 && Math.abs(s.z - z) < 60) return s.name;
+    const n = placeNameAt(x, z), d = district(x, z), inCity = x >= -660 && x < 460 && z > -300 && z < 300;
+    return inCity && n && d && n !== d && n !== 'Port Solace' ? n + ', ' + d : n || d;
   };
   const district = (x, z) => { const K2 = AF.PLAN.world.key; if (K2 && Math.abs(x - K2.cx) < K2.rx * 1.3 && Math.abs(z - K2.cz) < K2.rz * 1.3) return 'Private island';
     return x < -300 ? (z < -10 && x > -446 ? 'New Friends Colony' : 'The West Side') : x > 300 ? 'Eastport' : z > 160 ? 'The Harbour' : z < -160 ? 'Park Side' : x > 0 && z < 0 ? 'Downtown' : x < -120 ? 'Old Town' : 'Port Solace'; };

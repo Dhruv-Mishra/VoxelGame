@@ -62,16 +62,25 @@ try {
   let dirty = true, boundsRect = null, selection = null, mapTimer = 0, miniTimer = 0, miniX = NaN, miniZ = NaN, miniYaw = NaN, miniSpan = 0, miniRevision = -1, labelCount = -1;
   const fit = () => { map.tx = map.x = (B.x0 + B.x1) / 2; map.tz = map.z = (B.z0 + B.z1) / 2; map.ts = map.scale = map.fitScale; dirty = true; };
   map.fit = fit;
-  const resize = () => {
+  const centreMe = () => {
+    const src = focus();
+    if (src && Number.isFinite(src.x) && Number.isFinite(src.z)) { map.tx = map.x = src.x; map.tz = map.z = src.z; }
+    map.ts = map.scale = AF.clamp(map.fitScale * 3.5, map.fitScale, map.fitScale * 12);
+    constrain();
+  };
+  map.centreMe = centreMe;
+  const resize = (initCenter = false) => {
     if (!S.map) return;
     boundsRect = stage.getBoundingClientRect(); map.width = Math.max(1, Math.round(boundsRect.width)); map.height = Math.max(1, Math.round(boundsRect.height));
     const res = Math.min(1, 1600 / map.width, 1000 / map.height); cv.width = Math.round(map.width * res); cv.height = Math.round(map.height * res);
-    map.fitScale = Math.min((map.width - 40) / (B.x1 - B.x0), (map.height - 40) / (B.z1 - B.z0)); fit(); pick.classList.add('hide');
+    map.fitScale = Math.min((map.width - 40) / (B.x1 - B.x0), (map.height - 40) / (B.z1 - B.z0));
+    if (initCenter) centreMe(); else fit();
+    pick.classList.add('hide');
   };
-  addEventListener('resize', resize);
+  addEventListener('resize', () => resize(false));
   UI.toggleMap = (on, resume = true) => {
     S.map = on ?? !S.map; el.classList.toggle('open', S.map); root.classList.toggle('mapping', S.map);
-    if (S.map) { load(); UI.toggleMenu(false, false); if (S.help) UI.toggleHelp(false); AF.input.releaseLock(); resize(); drawMap(); cv.focus({ preventScroll: true }); }
+    if (S.map) { load(); UI.toggleMenu(false, false); if (S.help) UI.toggleHelp(false); AF.input.releaseLock(); resize(true); drawMap(); cv.focus({ preventScroll: true }); }
     else { pointers.clear(); selection = null; pick.classList.add('hide'); if (resume) AF.input.requestLock(); }
   };
   const constrain = () => { map.ts = AF.clamp(map.ts, map.fitScale, map.fitScale * 24); map.tx = AF.clamp(map.tx, B.x0, B.x1); map.tz = AF.clamp(map.tz, B.z0, B.z1); dirty = true; };
@@ -168,7 +177,7 @@ try {
     const button = event.target.closest('[data-a]'); if (!button) return;
     const action = button.dataset.a;
     if (action === 'close') UI.toggleMap(false); else if (action === 'fit') fit(); else if (action === 'in') zoom(1.6); else if (action === 'out') zoom(1 / 1.6);
-    else if (action === 'me') { const src = focus(); map.tx = src.x; map.tz = src.z; map.ts = Math.max(map.ts, map.fitScale * 5); constrain(); }
+    else if (action === 'me') { centreMe(); }
     else if (action === 'walk' || action === 'fly') travel(action === 'walk');
   });
   cv.addEventListener('wheel', event => { event.preventDefault(); zoom(Math.exp(-event.deltaY * 0.0015), event.clientX - boundsRect.left, event.clientY - boundsRect.top); pick.classList.add('hide'); }, { passive: false });

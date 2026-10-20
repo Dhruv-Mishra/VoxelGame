@@ -67,7 +67,9 @@ try {
   setTone('whisper', 'vera.shop vera.shop1 vera.shop2 vera.tunnel vera.cache vera.gear vera.m3 vera.z1 vera.z2 vera.z3 vera.h1 vera.hatch vera.hatch2 vera.tip vera.cams vera.keys vera.laser vera.drill vera.cash vera.nice vera.hold vera.q1 vera.q2 vera.qsolo vera.q3 vera.q4 vera.q5 vera.qsec vera.q2b vera.q4b vera.lasersoff vera.roles3 vera.roles4 vera.msolo vera.got vera.dark vera.bodies kit.k1 kit.k4 kit.k5');
   setTone('surprise', 'prescott.angry1 prescott.angry2 prescott.angry3 prescott.caught ezra.fail mabel.sus mabel.spot');
   setTone('betrayal', 'kit.t2 silas.k3 vera.k2');
-  setTone('urgency', 'vera.cove vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.reflex vera.siege vera.siege2 vera.chase vera.chase2 vera.go vera.loud vera.exit vera.wave vera.k3 vera.k4 vera.loadout vera.bodies vera.spotted kit.boss tony.cove tony.chase tony.k1 tony.k2');
+  setTone('urgency', 'vera.cove vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.reflex vera.siege vera.siege2 vera.chase vera.chase2 vera.go vera.loud vera.exit vera.wave vera.k3 vera.k4 vera.loadout vera.bodies vera.spotted kit.boss tony.cove tony.chase tony.k1 tony.k2 vera.farm4 vera.cc1 vera.jets1 vera.jets2 tony.farm');
+  setTone('whisper', 'vera.farm2 vera.farm3');
+  setTone('relief', 'vera.cc2 vera.jets3');
   setTone('anger', 'prescott.angry1 prescott.angry2 prescott.angry3 prescott.caught pit.fire');
   setTone('relief', 'vera.f1 vera.f2 vera.f3 vera.a1 vera.a2 vera.fail kit.down silas.down silas.greet');
   setTone('grief', 'tony.down');
@@ -92,7 +94,7 @@ try {
       direction: 'Keep Vera’s voice low to protect the crew’s cover, but let the urgency cut through. Whisper this quickly; do not shout.',
     },
   };
-  const RADIO = new Set(('vera.plane vera.island vera.kit vera.ski vera.ski2 vera.got vera.m1 vera.m2 vera.msolo vera.roof vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.k1 vera.k2 vera.k3 vera.k4 vera.f1 vera.f2 vera.f3 vera.a1 vera.a2 vera.fail vera.fail2 vera.spotted vera.reflex vera.maze vera.tough vera.siege vera.siege2 vera.chase vera.chase2 vera.q2b vera.qsec vera.q4b vera.bodies vera.nice vera.loud vera.dark vera.hold vera.go vera.wheels vera.drop vera.exit vera.wave vera.loadout vera.lasersoff vera.roles3 vera.roles4 kestrel.exit').split(/\s+/));
+  const RADIO = new Set(('vera.plane vera.island vera.kit vera.ski vera.ski2 vera.got vera.m1 vera.m2 vera.msolo vera.roof vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.k1 vera.k2 vera.k3 vera.k4 vera.f1 vera.f2 vera.f3 vera.a1 vera.a2 vera.fail vera.fail2 vera.spotted vera.reflex vera.maze vera.tough vera.siege vera.siege2 vera.chase vera.chase2 vera.q2b vera.qsec vera.q4b vera.bodies vera.nice vera.loud vera.dark vera.hold vera.go vera.wheels vera.drop vera.exit vera.wave vera.loadout vera.lasersoff vera.roles3 vera.roles4 kestrel.exit vera.farm1 vera.farm2 vera.farm3 vera.farm4 vera.cc1 vera.cc2 vera.paint vera.paint2 vera.jets1 vera.jets2 vera.jets3 tony.farm').split(/\s+/));
   const toneOf = (id, who, key) => TONE[id] || (who === 'kestrel' ? 'machine' : who === 'tower' ? 'announcement' :
     /^sus/.test(key) ? (who === 'zw' ? 'cautious' : 'surprise') : /^check/.test(key) ? 'cautious' :
     /^clear/.test(key) ? 'relief' : /^spot/.test(key) || key === 'alarm' || key === 'body' || /^fight/.test(key) ? 'urgency' :
@@ -192,6 +194,17 @@ try {
     lasersoff: 'The grid\u2019s dead for good. Walk through.',
     roles3: 'Three of you on the boat: one of you keeps the detective busy before anyone serves the high rollers.',
     roles4: 'Four of you: one on the detective, one on the pit boss. Only then do we serve.',
+    farm1: 'Change of plan. Moretti keeps an armoured car at Southfield Farm, west of the city. Grab any car and drive out there.',
+    farm2: 'Six of his men are guarding the yard. Stay low, take them from behind, and do not let anyone raise the alarm.',
+    farm3: 'There is a crate of launchers beside the car. Load it into the boot. We will need them tonight.',
+    farm4: 'You have the launchers. Now take the car and get off that farm!',
+    cc1: 'Moretti\u2019s men are coming after you! Passengers, lean out and shoot. Driver, keep moving!',
+    cc2: 'That was the last of them. Nice driving.',
+    paint: 'Every Moretti on the coast knows that paint job. Take it to Body Works for a respray.',
+    paint2: 'Fresh paint. Now park it on Charter Street, by the bank\u2019s fire door. We go in at midnight.',
+    jets1: 'Jets on your tail! Get the launchers out of the boot. The seeker locks on by itself!',
+    jets2: 'One down! Keep firing!',
+    jets3: 'The sky is clear. Get to Westgate and get that plane up!',
   });
   add('kit', 'Kit', {
     k1: 'You are Vera\u2019s crew. Keep your voices down; half the island drinks with the Morettis.',
@@ -255,6 +268,7 @@ try {
   add('tony', 'Tony Moretti', {
     cove: 'Nobody steals from the Morettis! Open fire!',
     chase: 'After them! Do not let them reach the ship!',
+    farm: 'Somebody is stealing my car! Get after them, all of you!',
     k1: 'Nothing personal. The Morettis always collect. Men, move!',
     k2: 'Take them down! Nobody leaves this island!',
     down: 'Tell my brother... I tried...',

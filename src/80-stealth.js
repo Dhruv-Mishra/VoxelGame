@@ -156,7 +156,7 @@ try {
   // ---------------------------------------------------------------- players in the zone (local + remote), scratch objects, no garbage
   const PS = []; for (let k = 0; k < 4; k++) PS.push({ slot: k, x: 0, y: 0, z: 0, eye: 1.5, noise: 0, crouch: false, moving: false, on: false, px: 0, pz: 0, has: false, armed: false, carry: false });
   // what counts as a weapon in hand (80-coop's held ids): guns and melee weapons, not a guitar or a shopping bag
-  const ARMS = new Set(['bat', 'pan', 'cutlass', 'revolver', 'shotgun', 'tommy', 'rifle', 'spistol', 'ssmg', 'lmg']);
+  const ARMS = new Set(['bat', 'pan', 'cutlass', 'revolver', 'shotgun', 'tommy', 'rifle', 'spistol', 'ssmg', 'lmg', 'bazooka', 'seeker']);
   const carrying = (slot) => { const z = S.zone; if (!z) return false; for (const g of z.guards) if (g.carrier === slot) return true; return false; };
   const gather = (z) => {
     let n = 0; const me = mySlot(), p = AF.player;

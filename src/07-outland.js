@@ -221,18 +221,21 @@ function isleH(x, z) {
   const k = tunnelAt(x, z); if (!k) return height;
   const T = TN, s = TN_.s;
   if (!TN_.end) {
-    // a smooth lava ridge keeps the tube buried (the floor's 0.5 m steps and the roof's noise stay inside the rock): the roof line
-    // without its rounding or noise, never less than 2 m of rock over the real roof
-    let hw = TUN.hw, h = TUN.h, fs = s;
-    for (const c of T.chambers) { const k = Math.exp(-(((s - c.s) / (c.len || 6)) ** 2)); hw += (c.hw - TUN.hw) * k; h += (c.h - TUN.h) * k; if (c.flat) fs = AF.lerp(fs, c.s, clamp(k * 1.7, 0, 1)); }
-    const top = Math.max(TN_.ceil + 2, AF.lerp(T.yE, T.yX, fs / T.L) + h + 3 + noise(x * 0.06, z * 0.06 + 2) * 1.2);
-    const ridge = top - Math.max(0, TN_.d - hw - 2.5) * 0.75, m = clamp(0.5 + 0.5 * (ridge - height) / 2, 0, 1);
-    height = AF.lerp(height, ridge, m) + 2 * m * (1 - m);   // a soft max: the ridge's foot rounds into the hillside
-  } else if (s < 0 && s > -7.5) {
-    // the cleft: a level floor between rock arms, open to the hillside below
-    const across = Math.abs((x - T.pts[0][0]) * T.out[1] - (z - T.pts[0][1]) * T.out[0]), core = T.yE + s * T.cleftSlope;
-    if (across < 2.2) height = core;
-    else if (across < 6.5) height = Math.max(height, core + 3.8 + s * 0.2 - (across - 2.2) * 0.25);
+    // keep the tube buried without a protruding ridge: full cover (2.2 m of rock over the roof, so coarse hillside tiles never dip
+    // through to the shell) above the hollow and 1 m either side, easing back into the natural hillside over the next 11 m (a softer
+    // cover left the stash hall's roof open to the sky)
+    const minCover = TN_.ceil + 2.2;
+    if (height < minCover) {
+      const k2 = 1 - smooth(TN_.hw + 1, TN_.hw + 12, TN_.d);
+      height = AF.lerp(height, minCover, k2);
+    }
+  } else if (s < 0 && s > -5.0) {
+    // gentle entrance hollow conforming naturally to the hillside slope
+    const across = Math.abs((x - T.pts[0][0]) * T.out[1] - (z - T.pts[0][1]) * T.out[0]);
+    if (across < 2.5) {
+      const blend = clamp(-s / 5.0, 0, 1);
+      height = AF.lerp(T.yE, height, blend);
+    }
   }
   if (k === 2 && cutOn) return TN_.floor;
   return height;

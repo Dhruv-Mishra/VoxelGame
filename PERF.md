@@ -48,6 +48,14 @@ compare draws and GPU ms.
   ~4 700 objects, ~1 ms desktop / ~4 ms laptop). A hidden subtree whose parent moved is marked stale and catches up the frame it is
   shown. Code that reads `matrixWorld` of a hidden object sets `userData.liveMatrix` (13-park pose batches) or calls
   `updateWorldMatrix` itself; direct `obj.updateMatrixWorld()` calls keep three's semantics.
+- **World-matrix dirty check** (03 `updWorld`, `AF.perfStats`): an auto-matrix object whose position / quaternion / scale did not
+  change since the last frame keeps its matrix, and its subtree is left alone unless the parent moved. ~600 of ~2 900 visited
+  objects recompose per frame instead of all of them (−30 % pass time, more on a throttled CPU). Never write `obj.matrix` by hand
+  on an object with `matrixAutoUpdate` on (set it off, as three expects). `AF.perfStats.skip = false` turns the check off to compare.
+- **No per-frame garbage** (heap-sampled with `tools/play-perf.js` + a CDP sampling profile): `Math.hypot` is replaced in
+  00-prologue by an allocation-free 1–3-argument version (V8's builtin copied its arguments into a new array on every call);
+  `Map` loops in ticks use `keys()` / `values()`, never `for (const [k, v] of map)`; the walk-mode interact scan runs at 15 Hz
+  (and at once on E / F); far animals skip their per-frame field writes.
 
 ## 3b. No freezes in play (locked)
 Measured with `tools/hitch-probe.js` + `tools/play-scenario.js` (title, run, steal + drive, guns, 4-star chase, map, bag, night,
@@ -134,6 +142,10 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
   outland props (merged into the tile meshes: no draws of their own) + merged colliders; siege reinforcements are 12 reserve path walkers
   (off stage until spawned), the ship's 6 officers and the 8 chase riders are path walkers too, and the chasers' hulls ride in the
   island's jet-ski InstancedMesh (20 instances) — the whole Act II / III expansion adds no draws.
+  The Act IV armoured-car job (Southfield Farm) adds 6 farm guards (path walkers, shared draws), one crate mesh (1 draw, farm scene
+  only), the armoured car (`armored` vehicle type: its own instanced car batch, 1–3 draws while one exists) and 2–4 chaser limousines
+  (the existing `wagon` batch). Launchers fire up to 8 pooled rocket meshes kept in the strike-jet group (compiled with it at
+  `preloaded`, hidden while idle); mission jets reuse the same 4 pooled jet meshes. Nothing new runs while the job is off.
 - Audio (`75`): one AudioContext; samples (`assets/sfx`, mono MP3: one-shots 32 kHz / 48 kbps, loops + beds 24 kHz / 40 kbps,
   voice 16 kHz / 24 kbps; ~2.3 MB for 167 files) decode on first use, the core set at unlock; ≤ 32 voices (20 on phones); loops
   fade by distance and are reaped after 120 s unused; the context suspends while the page is hidden. Ambience beds are weighted by
@@ -195,7 +207,9 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
 ## 9. Measuring
 - `node tools/serve.mjs 8765`; `node tools/build.mjs --check`. Baseline: `git show HEAD:output.html > tools/output-base.html`.
 - Playwright (MCP run_code with `filename`): `test-run.js` (`?test`), `boot-time.js`, `perf-areas.js` (per-pose ms/draws/tris),
-  `perf-run.js` (base vs current), `session.js` + `perf-list.js` / `perf-break.js` / `cpu-prof.js` / `gpu-prof.js` /
+  `perf-run.js` (base vs current), `play-perf.js` (real play: preload on, fps uncapped, per-spot frame time median / p95 / worst,
+  tick + render + world-matrix ms with the dirty check on and off, draws, tris, geometries + heap; `__psThrottle = 4` for a laptop
+  CPU, `__psUrl` for a baseline), `session.js` + `perf-list.js` / `perf-break.js` / `cpu-prof.js` / `gpu-prof.js` /
   `tick-survey.js` / `lod-check.js`, `stream-fly.js` / `city-fly.js` / `outland-drive.js` / `stream-test.js` (streaming hitches),
   `hitch-probe.js` (every rAF gap > 60 ms with its top hooks / GL calls, every runtime program link with its stack, worst single
   call per hook; `globalThis.__psExtraSrc` = `play-scenario.js` source + `__psScenario = 'play'`, `__psThrottle = 4` for a laptop,

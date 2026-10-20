@@ -942,10 +942,11 @@ try {
         if (I.stick && (I.stick.x || I.stick.y)) { ix += I.stick.x; iz += I.stick.y; }
       }
       const mag = Math.min(1, Math.hypot(ix, iz)), analog = !!(I.stick && (I.stick.x || I.stick.y));
-      let run = I.key('ShiftLeft') || I.key('ShiftRight') || !!(I.stick && I.stick.run);
-      // KeyC toggles the crouch; sprinting or jumping stands you up (when there is headroom: else you stay low and can't sprint)
+      const shiftSprint = I.key('ShiftLeft') || I.key('ShiftRight');
+      let run = shiftSprint || (!!(I.stick && I.stick.run) && !player.crouch);
+      // KeyC toggles the crouch; keyboard sprint or jumping stands you up (when there is headroom: else you stay low and can't sprint)
       if (!modal && I.hit('KeyC') && !SW.on && !CL.on) { if (!player.setCrouch(!player.crouch)) AF.emit('toast', 'No room to stand up here.'); }
-      if (player.crouch && run && (ix || iz) && !player.setCrouch(false)) run = false;
+      if (player.crouch && shiftSprint && (ix || iz) && !player.setCrouch(false)) run = false;
       if (player.crouch && !modal && I.hit('Space') && !player.setCrouch(false)) I.pressed.delete('Space');
       const fx = -Math.sin(WK.camYaw), fz = -Math.cos(WK.camYaw), rx = -fz, rz = fx;
       let wx = fx * iz + rx * ix, wz = fz * iz + rz * ix;
@@ -1000,9 +1001,12 @@ try {
       AN.fwd = hs > 0.2 ? AF.clamp(((body.x - ox) * Math.sin(player.yaw) + (body.z - oz) * Math.cos(player.yaw)) / (hs * Math.max(dt, 1e-4)), -1, 1) : 1;
       if (player.parts && !SW.on && !CL.on) AV.animate(player.parts, AN, dt, hs, body.onGround);
       // interactions
-      const it = modal || CL.on ? null : findInteract();
+      // interactions: the scan over every interact (hundreds of cars, doors, counters) runs at ~15 Hz, and at once on E / F
+      const press = I.hit('KeyE') || I.hit('KeyF');
+      if ((WK.itT = (WK.itT || 0) - dt) <= 0 || press || modal || CL.on) { WK.itT = 1 / 15; WK.it = modal || CL.on ? null : findInteract(); }
+      const it = WK.it;
       AF.interactTarget = it;
-      if (it && (I.hit('KeyE') || I.hit('KeyF')) && !talking) {
+      if (it && press && !talking) {
         try { it.act && it.act(); } catch (e) { console.error('[af] interact', e); }
         AF.emit('interact', it);
       }
