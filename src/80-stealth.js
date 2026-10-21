@@ -156,7 +156,7 @@ try {
   // ---------------------------------------------------------------- players in the zone (local + remote), scratch objects, no garbage
   const PS = []; for (let k = 0; k < 4; k++) PS.push({ slot: k, x: 0, y: 0, z: 0, eye: 1.5, noise: 0, crouch: false, moving: false, on: false, px: 0, pz: 0, has: false, armed: false, carry: false });
   // what counts as a weapon in hand (80-coop's held ids): guns and melee weapons, not a guitar or a shopping bag
-  const ARMS = new Set(['bat', 'pan', 'cutlass', 'revolver', 'shotgun', 'tommy', 'rifle', 'spistol', 'ssmg', 'lmg', 'bazooka', 'seeker', 'sniper']);
+  const ARMS = new Set(['bat', 'pan', 'cutlass', 'revolver', 'shotgun', 'tommy', 'rifle', 'spistol', 'ssmg', 'lmg', 'bazooka', 'seeker', 'sniper', 'minigun']);
   const carrying = (slot) => { const z = S.zone; if (!z) return false; for (const g of z.guards) if (g.carrier === slot) return true; return false; };
   const gather = (z) => {
     let n = 0; const me = mySlot(), p = AF.player;
@@ -547,7 +547,7 @@ try {
         // a weapon in hand or a body over the shoulder: no uniform covers that, and a strict zone (the liner) reacts at once
         const flagged = z.strict && (q.armed || q.carry);
         if (flagged) k = Math.max(k, 0.5) * 4;
-        else if (z.disguise && z.disguise(q.slot)) k *= d < 2.2 && c > 0.8 ? 0.35 : 0.08;
+        else if (z.disguise) { const dg = z.disguise(q.slot, g); if (dg === 2) k = 0; else if (dg) k *= d < 2.2 && c > 0.8 ? 0.35 : 0.08; }
         if (k > best) { best = k; bq = q; g.flagged = flagged; }
       }
       if (heard && !g.hearT) {
@@ -805,8 +805,44 @@ try {
     }
   };
 
+  // sight cones: a rough grey fan on the ground in front of every guard on duty in the active zone (one instanced, dithered draw)
+  const CONE = { im: null, ready: false, max: 48 }, CM = new THREE.Matrix4(), CP = new THREE.Vector3(), CQ = new THREE.Quaternion(), CS = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
+  const coneMesh = () => {
+    if (CONE.im) return CONE.im;
+    const n = 12, half = 1.05, pos = [0, 0, 0], col = [0.32, 0.32, 0.34, 0.45], idx = [];
+    for (let i = 0; i <= n; i++) { const a = -half + 2 * half * i / n; pos.push(Math.sin(a), 0, Math.cos(a)); col.push(0.32, 0.32, 0.34, 0.05); }
+    for (let i = 1; i <= n; i++) idx.push(0, i, i + 1);
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4)); geo.setIndex(idx); geo.computeVertexNormals();
+    // lit (it darkens with the night like the ground under it; an unlit grey glowed white under the night exposure)
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, alphaHash: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const im = new THREE.InstancedMesh(geo, mat, CONE.max); im.name = 'guard-cones'; im.frustumCulled = false; im.castShadow = im.receiveShadow = false; im.count = 0; im.visible = false;
+    AF.scene.add(im); return (CONE.im = im);
+  };
+  AF.on('preloaded', () => {
+    if (!AF.stream || !AF.stream.compileAhead) { coneMesh(); CONE.ready = true; return; }
+    try { const im = coneMesh(); im.count = 1; im.visible = true; AF.stream.compileAhead(im).then(() => { im.count = 0; im.visible = false; CONE.ready = true; }); } catch (e) { AF.warnOnce('guard cones', e); }
+  });
+  const cones = (z) => {
+    const im = CONE.im; if (!CONE.ready || !im) return;
+    let n = 0;
+    if (z && !(AF.mission && AF.mission.cut && AF.mission.cut.on)) {
+      const cp = AF.camera.position, R2 = AF.combat && AF.combat.scoped ? 230 * 230 : 110 * 110;
+      for (const g of z.guards) {
+        if (n >= CONE.max) break;
+        if (g.down || !g.a || (g.path && !g.path.enabled)) continue;
+        const c = g.a.ctl || g.a; if ((c.x - cp.x) ** 2 + (c.z - cp.z) ** 2 > R2) continue;
+        const r = (g.torch ? g.torch.range ?? 9 : g.range) * z.sight;
+        CP.set(c.x, c.y + 0.06, c.z); CQ.setFromAxisAngle(UP, c.yaw || 0); CS.set(r * (g.torch ? 0.6 : 1), 1, r);
+        im.setMatrixAt(n++, CM.compose(CP, CQ, CS));
+      }
+    }
+    if (n || im.count) { im.count = n; im.instanceMatrix.needsUpdate = true; }
+    const vis = n > 0; if (im.visible !== vis) im.visible = vis;
+  };
+
   AF.onTick('stealth', 430, (dt) => {
     const z = S.zone;
+    cones(z);
     if (!z) { if (S.carrying) S.carrying = null; if (bodyIt.g || bodyIt.y > -900) { bodyIt.g = null; bodyIt.y = -999; } if (tagTxt || vigOn) hud(true); return; }
     // only near the zone: everything sleeps when nobody is within its radius
     const cp = AF.camera.position, b = z.box;

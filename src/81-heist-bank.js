@@ -78,8 +78,11 @@ try {
     HB.ladder = mesh(lad, 1 / 8, [0.5, 0, 0], lx, 0.25, lz, PI / 2); HB.ladder.visible = true;
     HB.spots.ladder = { x: lx + 0.6, y: 0.25, z: lz, yaw: -PI / 2, top: 19.5 };
     HB.spots.ladderTop = { x: -17.6, y: 19.5, z: lz, yaw: PI / 2 };
-    // the vantage: City Hall's roof edge facing the bank (eye 21 m; the podium roof is 14 m, the deck 40 m is out of sight)
-    HB.spots.vantage = { x: -18.2, y: 19.5, z: -112, yaw: PI / 2 };
+    // the vantages: City Hall's east roof edge facing the bank (eye 21 m; the podium roof is 14 m, the deck 40 m is out of sight):
+    // the middle, the south corner, the north end (one per shift of the roof watch)
+    HB.spots.vantage = { x: -16.6, y: 19.5, z: -112, yaw: PI / 2 };
+    HB.spots.vantage2 = { x: -16.6, y: 19.5, z: -133.5, yaw: PI / 2 };
+    HB.spots.vantage3 = { x: -16.6, y: 19.5, z: -104, yaw: PI / 2 };
     HB.spots.skyDeck = { x: 26, y: 40, z: -107.2, yaw: PI / 2 };
     HB.spots.stairTop = { x: 43.3, y: 40, z: -107.2 };
     // the roof checkpoint: the podium's far corner, under the deck guards' sight line (the watch the rifle dropped lies here)
@@ -140,7 +143,7 @@ try {
     pt('Desk phone', 'phone', 18, 1.3, -118, 'phone');
     // the roof watch: its own zone (81-heist activates it for the sniper, the jump and the climb down); no cameras, no reserves
     const rz = HB.roofZone = S.define('roof', { box: [8, 12, -150, 52, 46, -102], mode: 'fight', voice: 'g2', reflexS: 2.0, radius: 150 });
-    HB.roofPaths.forEach((p, i) => { const g = S.guard('roof', { path: p.path, voice: ['g2', 'g4', 'g1', 'g3'][i % 4], name: p.name, range: 16 }); if (g) { g.vantage = !!p.vantage; p.g = g; } });
+    HB.roofPaths.forEach((p, i) => { const g = S.guard('roof', { path: p.path, voice: ['g2', 'g4', 'g1', 'g3'][i % 4], name: p.name, range: 16 }); if (g) { g.vantage = !!p.vantage; g.level = p.level || 0; p.g = g; } });
     void rz;
   };
   // the roof watch walks only while the heist is at the bank's roof (or the sniper is watching it); bodies stay down between visits
@@ -163,16 +166,29 @@ try {
     for (let k = 0; k < HB.RESERVE; k++) {
       try { const p = WK.addPath('heist bank reserve' + k, [[30, -40, -125]], { count: 1, activeRadius: 110, speed: 0, looks: [look(0)] }); p.enabled = false; HB.reservePaths.push(p); } catch (e) { AF.warnOnce('heist bank reserve', e); }
     }
-    // the roof watch (zone 'roof'): four on the podium roof that City Hall's roof can see (vantage), three the rifle can't: the sky
-    // deck, the stair head and the setback ring round the tower
+    // the roof watch (zone 'roof'): the rifle's targets in three shifts, each in sight of one perch along City Hall's east edge
+    // (level 1 from the middle, 2 from the south corner, 3 from the north end; the later shifts walk out once the crew moves), and four
+    // the rifle can't see: the door, the sky deck, the stair head and the setback ring round the tower
     const roof = (name, pts, o, extra) => { try { const p = WK.addPath('heist roof ' + name, pts, Object.assign({ count: 1, activeRadius: 140, looks: [look()] }, o)); p.enabled = false; HB.roofPaths.push(Object.assign({ path: p, name: 'Roof guard' }, extra)); } catch (e) { AF.warnOnce('heist roof guards', e); } };
-    roof('west', [[12.6, 14, -108.5], [12.6, 14, -125.5]], { speed: 0.85, mode: 'pingpong', dwell: [{ i: 0, t: 4 }, { i: 1, t: 3 }] }, { vantage: true });
-    roof('corner', [[12.6, 14, -129.5], [12.6, 14, -143.6], [17.5, 14, -143.6]], { speed: 0.8, mode: 'pingpong', dwell: [{ i: 0, t: 3 }, { i: 2, t: 5 }] }, { vantage: true });
-    roof('edge', [[16.5, 14, -106.8], [31.5, 14, -106.8]], { speed: 0.9, mode: 'pingpong', dwell: [{ i: 0, t: 3 }, { i: 1, t: 4 }] }, { vantage: true });
-    roof('door', [[34.3, 14, -105.6], [34.3, 14, -108.9]], { speed: 0.35, mode: 'pingpong', dwell: [{ i: 0, t: 8 }, { i: 1, t: 6 }] }, { vantage: true, name: 'Door guard' });
-    roof('deck', [[18.5, 40, -106.2], [33.5, 40, -106.2]], { speed: 0.8, mode: 'pingpong', dwell: [{ i: 0, t: 5 }, { i: 1, t: 4 }] }, { name: 'Deck guard' });
-    roof('ring', [[17.6, 40, -136.5], [17.6, 40, -114]], { speed: 0.75, mode: 'pingpong', dwell: [{ i: 0, t: 4 }, { i: 1, t: 6 }] });
-    roof('stairhead', [[43.3, 40, -109.2], [43.3, 40, -105.4]], { speed: 0.4, mode: 'pingpong', dwell: [{ i: 0, t: 7 }, { i: 1, t: 5 }] }, { name: 'Stair guard' });
+    const dw = (a, b, sp = 0.8) => ({ speed: sp, mode: 'pingpong', dwell: [{ i: 0, t: a }, { i: 1, t: b }] });
+    roof('west', [[12.6, 14, -108.5], [12.6, 14, -125.5]], dw(4, 3, 0.85), { vantage: true, level: 1 });
+    roof('corner', [[12.6, 14, -129.5], [12.6, 14, -143.6], [17.5, 14, -143.6]], { speed: 0.8, mode: 'pingpong', dwell: [{ i: 0, t: 3 }, { i: 2, t: 5 }] }, { vantage: true, level: 1 });
+    roof('edge', [[16.5, 14, -106.8], [31.5, 14, -106.8]], dw(3, 4, 0.9), { vantage: true, level: 1 });
+    roof('door', [[34.3, 14, -105.6], [34.3, 14, -108.9]], dw(8, 6, 0.35), { name: 'Door guard' });
+    roof('deck', [[18.5, 40, -106.2], [33.5, 40, -106.2]], dw(5, 4), { name: 'Deck guard' });
+    roof('ring', [[17.6, 40, -136.5], [17.6, 40, -114]], dw(4, 6, 0.75));
+    roof('stairhead', [[43.3, 40, -109.2], [43.3, 40, -105.4]], dw(7, 5, 0.4), { name: 'Stair guard' });
+    // shift 2: the podium's far south side (only the south corner of City Hall sees it)
+    roof('south1', [[22.5, 14, -144], [27, 14, -144]], dw(4, 3), { vantage: true, level: 2 });
+    roof('south2', [[25.5, 14, -145.5], [28.5, 14, -145.5]], dw(3, 5, 0.6), { vantage: true, level: 2 });
+    roof('south3', [[31.5, 14, -145.5], [34.5, 14, -145.5]], dw(5, 4, 0.6), { vantage: true, level: 2 });
+    roof('south4', [[18, 14, -142.5], [21, 14, -142.5]], dw(6, 3, 0.5), { vantage: true, level: 2 });
+    // shift 3: under the sky deck and up the tower's setbacks on the north side (the north end of City Hall's roof)
+    roof('north1', [[27, 14, -109], [34.5, 14, -109]], dw(4, 4), { vantage: true, level: 3 });
+    roof('north2', [[36, 24, -109], [37.5, 24, -109]], dw(5, 5, 0.4), { vantage: true, level: 3 });
+    roof('north3', [[43.5, 17, -107], [43.5, 17, -106.5]], dw(6, 4, 0.3), { vantage: true, level: 3 });
+    roof('north4', [[45, 17, -107], [46.5, 17, -106]], dw(4, 6, 0.4), { vantage: true, level: 3 });
+    roof('north5', [[51, 22, -111], [51, 22, -109.5]], dw(5, 5, 0.4), { vantage: true, level: 3 });
   });
   AF.onBuild('heist-bank', 890, () => { try { props(); zone(); HB.ready = true; } catch (e) { AF.warnOnce('heist bank', e); } });
 

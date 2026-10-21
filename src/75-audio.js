@@ -456,7 +456,7 @@ try {
     if (VV && VV.cars) {
       let a = null, ad = 900, b = null, bd = 900, s = null, sd = 160 * 160, f = null, fd = 60 * 60;
       for (const c of VV.cars) {
-        if (c.active === false) continue;
+        if (c.active === false || (VV.hideTraffic && c.ai)) continue;
         const d = (c.x - LS.x) ** 2 + (c.z - LS.z) ** 2;
         if (c.squad && d < sd && CB && CB.stars) { sd = d; s = c; }
         if ((c.burnT > 0 || (c.dead && c.smokeT > 10)) && d < fd) { fd = d; f = c; }
@@ -571,7 +571,7 @@ try {
     let voMan = null, voManP = null, muMan = null, fishMan = null, fishEntries = null;
     A.musicVol = 0.6;
     try { const v = localStorage.getItem('portSolace.musicVol'); if (v !== null && +v >= 0 && +v <= 1) A.musicVol = +v; } catch (e) { /* storage blocked */ }
-    const getJSON = (u) => fetch(u, { cache: 'no-cache' }).then((r) => {
+    const getJSON = (u) => fetch(u, { cache: 'no-store' }).then((r) => {
       if (!r.ok) throw new Error(r.status + ' ' + u);
       return r.json();
     }).catch((e) => { AF.warnOnce('audio manifest ' + u, e); return {}; });
@@ -654,7 +654,7 @@ try {
       let f = vo.get(id); if (f) { f.used = AF.clock.t; return f.p; }
       if (!graph()) return Promise.resolve(null);
       f = { buf: null, p: null, used: AF.clock.t, bytes: 0 }; vo.set(id, f);
-      f.p = fetch(VO_BASE + encodeURIComponent(id) + '.mp3?v=' + fishEntries[id].assetHash).then(async (r) => {
+      f.p = fetch(VO_BASE + encodeURIComponent(id) + '.mp3?v=' + fishEntries[id].assetHash, { cache: 'no-store' }).then(async (r) => {
         if (!r.ok) throw new Error(r.status + ' ' + id);
         const bytes = await r.arrayBuffer(), expected = fishEntries && fishEntries[id] && fishEntries[id].assetHash;
         const digest = await crypto.subtle.digest('SHA-256', bytes), actual = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');

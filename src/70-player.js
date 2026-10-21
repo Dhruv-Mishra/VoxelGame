@@ -1054,6 +1054,13 @@ try {
     if (!player.mesh || AF.mode === 'walk' || AF.mode === 'aerial' || AF.mode === 'skydive' || AF.mode === 'row' || AF.mode === 'dead') return;
     const S = PL.seat;
     if (S && player.parts) {
+      // standing aboard (the heist's gunners in the armoured car's open back): feet on the bed, gun at the shoulder, facing S.yaw
+      if (S.stand) {
+        AV.sit(player.parts, false);
+        player.mesh.position.set(S.x, S.y, S.z); player.mesh.rotation.set(0, S.yaw, 0, 'YXZ');
+        const P = player.parts; P.armL.rotation.set(-1.45, 0, 0.25); P.armR.rotation.set(-1.4, 0, -0.1); P.chest.rotation.set(0.05, 0, 0); P.head.rotation.set(0, 0, 0);
+        return;
+      }
       AV.sit(player.parts, true, S.seatH ?? 0.62);
       player.mesh.position.set(S.x, S.y, S.z); player.mesh.rotation.set(S.pitch || 0, S.yaw, S.roll || 0, 'YXZ');
       const P = player.parts; P.armL.rotation.x = P.armR.rotation.x = -1.2; P.armL.rotation.z = -0.25; P.armR.rotation.z = 0.25; P.chest.rotation.x = S.lean ?? 0.25; P.head.rotation.x = -0.15; P.head.rotation.y = 0;

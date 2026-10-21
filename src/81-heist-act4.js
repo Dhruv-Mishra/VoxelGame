@@ -158,13 +158,26 @@ try {
     const lmg = new AF.Model(4, 14, 22); lmg.box(1, 0, 2, 3, 9, 4, C.steel); lmg.box(0, 9, 0, 4, 12, 12, C.dark); lmg.box(1, 10, 12, 3, 11, 22, C.dark); lmg.box(1, 6, 4, 3, 9, 8, C.olive);
     const lg = AF.meshModel(lmg, { vs: 1 / 16, anchor: [0.5, 0, 0.5] }); delete lg.userData.src;
     for (const s of [0.45, -0.45]) { const l = AF.modelMesh(lg, { cast: false }); l.position.set(s, 1.05, -2.3); l.rotation.y = PI; grp.add(l); }
+    // the gunners' hatch: the back half of the roof thrown open (a dark well with a steel rim the crew stands up through)
+    const hatch = new AF.Model(20, 2, 16); hatch.box(0, 0, 0, 20, 2, 16, C.steel); hatch.box(1, 1, 1, 19, 2, 15, C.dark);
+    const hg = AF.meshModel(hatch, { vs: 0.1, anchor: [0.5, 0, 0.5] }); delete hg.userData.src; const hm = AF.modelMesh(hg, { cast: false }); hm.position.set(0, 2.52, -1.3); grp.add(hm);
     grp.visible = false; AF.scene.add(grp);
     return (KIT.rear = grp);
+  };
+  // the chase's mines: a squat olive disc with a red tally light (one instanced draw, up to 16, only while any are down)
+  X4.mines = () => {
+    if (KIT.mines) return KIT.mines;
+    const m = new AF.Model(8, 3, 8), olive = col(0x3c4528, { metal: 0.3 }), led = col(0xff2a20, { emit: 0xff2010, emitK: 3, mode: 'always', jitter: 0 });
+    for (let x = 0; x < 8; x++) for (let z = 0; z < 8; z++) if (Math.hypot(x - 3.5, z - 3.5) < 4) m.box(x, 0, z, x + 1, 2, z + 1, Math.hypot(x - 3.5, z - 3.5) < 2 ? C.steel : olive);
+    m.box(3, 2, 3, 5, 3, 5, led);
+    const g = AF.meshModel(m, { vs: 1 / 12, anchor: [0.5, 0, 0.5] }); delete g.userData.src;
+    const im = new THREE.InstancedMesh(g, AF.mat.voxelInst, 16); im.customDepthMaterial = AF.mat.depthInst; im.frustumCulled = false; im.count = 0; im.castShadow = false; im.visible = false; AF.scene.add(im);
+    return (KIT.mines = im);
   };
   // the kit links its programs behind the boot veil (PERF.md 3b): no shader may link mid-chase
   AF.on('preloaded', () => {
     if (!AF.stream || !AF.stream.compileAhead) return;
-    try { const h = X4.heli(0), r = X4.rear(), men = X4.gunmen(); for (const o of [h.grp, r]) { o.visible = true; AF.stream.compileAhead(o).then(() => { o.visible = false; }); } for (const im of [men.driver, men.gun]) { im.count = 1; AF.stream.compileAhead(im).then(() => { im.count = 0; }); } }
+    try { const h = X4.heli(0), r = X4.rear(), men = X4.gunmen(), mines = X4.mines(); for (const o of [h.grp, r]) { o.visible = true; AF.stream.compileAhead(o).then(() => { o.visible = false; }); } for (const im of [men.driver, men.gun, mines]) { im.count = 1; im.visible = true; AF.stream.compileAhead(im).then(() => { im.count = 0; if (im === mines) { im.visible = false; X4.mineReady = true; } }); } }
     catch (e) { AF.warnOnce('act4 kit warm-up', e); }
   });
 }

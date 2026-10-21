@@ -51,7 +51,8 @@ try {
       });
     };
     trunk(T, 2.6, 22); trunk(F, 1.3, 14);
-    for (const [a, l, h] of [[0.4, 7, 15], [2.1, 6.5, 16.5], [3.6, 7.5, 14.5], [5.1, 6, 17]]) limb(T.x + Math.cos(a) * 2, 12.5, T.z + Math.sin(a) * 2, T.x + Math.cos(a) * l, h, T.z + Math.sin(a) * l, 0.5);
+    // the limbs leave the trunk above the lookout's headroom (they used to cross the ring at head height and wall it off)
+    for (const [a, l, h] of [[0.4, 7, 15.5], [2.1, 6.5, 16.5], [3.6, 7.5, 15.5], [5.1, 6, 17]]) limb(T.x + Math.cos(a) * 2, 14.25, T.z + Math.sin(a) * 2, T.x + Math.cos(a) * l, h, T.z + Math.sin(a) * l, 0.5);
     for (const [dx, y, dz, r] of [[0, 21, 0, 8.5], [5.5, 17.5, 3, 6.5], [-5.5, 18, -2, 6.5], [2, 18.5, -6, 6], [-3, 17, 6, 6]]) blob(T.x + dx, y, T.z + dz, r, r * 0.62, r);
     for (const [dx, y, dz, r] of [[0, 15, 0, 5], [2.5, 13.5, 1.5, 3.5]]) blob(F.x + dx, y, F.z + dz, r, r * 0.6, r);
     // parrots on the limb tips (a few bright blocks)
@@ -94,18 +95,20 @@ try {
       for (let r = 4.75; r <= 6.25; r += 0.2) for (let da = 0; da <= 0.11; da += 0.02) { const x = T.x + Math.cos(a + da) * r, z = T.z + Math.sin(a + da) * r; W.fill(x - 0.125, top - 0.25, z - 0.125, x + 0.125, top, z + 0.125, plank[s & 1]); }
       if (s % 3 === 0) { const x = T.x + Math.cos(a) * 6.4, z = T.z + Math.sin(a) * 6.4; W.fill(x - 0.125, top, z - 0.125, x + 0.125, top + 1, z + 0.125, post); }
     }
-    W.eachCol(T.x - 4.5, T.z - 4.5, T.x + 4.5, T.z + 4.5, (bx, bz, i, x, z) => {
-      const d = Math.hypot(x - T.x, z - T.z); if (d > 4.5 || d < 2.5) return;
+    // the lookout ring: 2 m wide round the trunk, 3 m where no stair runs underneath it (the sniper's perch on the west side)
+    const ringR = (a) => { const u = AF.angDiff(stairEnd, a); return u > -1.3 && u < 0.3 ? 4.5 : 5.5; };
+    W.eachCol(T.x - 5.5, T.z - 5.5, T.x + 5.5, T.z + 5.5, (bx, bz, i, x, z) => {
+      const d = Math.hypot(x - T.x, z - T.z), a = ang(x, z, T), R = ringR(a); if (d > R || d < 2.5) return;
       W.fill(x - 0.125, D2 - 0.25, z - 0.125, x + 0.125, D2, z + 0.125, plank[Math.floor(d / 0.75) & 1]);
-      if (d > 4.2 && Math.abs(AF.angDiff(ang(x, z, T), stairEnd)) > 0.3) W.setM(x, D2 + 0.875, z, rope);
+      if (d > R - 0.3 && Math.abs(AF.angDiff(a, stairEnd)) > 0.3) W.setM(x, D2 + 0.875, z, rope);
     });
-    for (let k = 0; k < 14; k++) { const a = k / 14 * PI * 2; if (Math.abs(AF.angDiff(a, stairEnd)) < 0.3) continue; const x = T.x + Math.cos(a) * 4.35, z = T.z + Math.sin(a) * 4.35; W.fill(x - 0.125, D2, z - 0.125, x + 0.125, D2 + 1, z + 0.125, post); }
+    for (let k = 0; k < 18; k++) { const a = k / 18 * PI * 2; if (Math.abs(AF.angDiff(a, stairEnd)) < 0.3) continue; const r = ringR(a) - 0.15, x = T.x + Math.cos(a) * r, z = T.z + Math.sin(a) * r; W.fill(x - 0.125, D2, z - 0.125, x + 0.125, D2 + 1, z + 0.125, post); }
     // ---- the rope bridge (every fourth board missing: you can't fall through a quarter-metre gap) + the Fig's fireman's pole
     for (let x = -414.5; x < F.x - 3.5; x += 0.25) { const n = Math.round(x * 4) & 3; if (n !== 3) W.fill(x, D1 - 0.25, -269, x + 0.25, D1, -267, plank[n & 1]); }
     for (let x = -414.5; x < F.x - 3.5; x += 0.25) for (const z of [-269.25, -266.75]) { W.setM(x, D1 + 0.875, z, rope); if ((Math.round(x * 4) & 7) === 0) W.fill(x, D1 - 0.25, z - 0.125, x + 0.25, D1 + 1, z + 0.125, post); }
     W.fill(TT.poleAt.x - 0.125, 0.25, TT.poleAt.z - 0.125, TT.poleAt.x + 0.125, D1 + 1.5, TT.poleAt.z + 0.125, col(0xc8c8c0, { metal: 0.85, rough: 0.3 }));
     // lanterns
-    for (const [x, z, y] of [[T.x - 6, T.z + 2, D1 + 1.25], [T.x + 2, T.z + 6.5, D1 + 1.25], [F.x + 3.5, F.z - 1, D1 + 1.25], [T.x - 4, T.z, D2 + 1.25], [-440, -251, 2.25], [-428, -248, 5.75]]) W.setM(x, y, z, glow(0xffc870, 2.2, 'night'));
+    for (const [x, z, y] of [[T.x - 6, T.z + 2, D1 + 1.25], [T.x + 2, T.z + 6.5, D1 + 1.25], [F.x + 3.5, F.z - 1, D1 + 1.25], [T.x - 5.35, T.z + 0.6, D2 + 1.25], [-440, -251, 2.25], [-428, -248, 5.75]]) W.setM(x, y, z, glow(0xffc870, 2.2, 'night'));
     AF.addLight({ x: T.x, y: D1 + 2, z: T.z + 5, color: 0xffd090, intensity: 1, range: 12, kind: 'street' });
     AF.addLight({ x: F.x, y: D1 + 2, z: F.z, color: 0xffd090, intensity: 0.8, range: 9, kind: 'street' });
     AF.addBuilding({ id: 'zoo-treetop', name: 'Treetop Trail', kind: 'zoo', box: [ax0, 0, az0, ax1, 26, az1], doors: [], interior: false, owner: 'west', label: true });

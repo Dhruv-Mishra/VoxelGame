@@ -146,7 +146,7 @@ AF.onBuild('island-tunnel',496.42,()=>{
  x0=Math.floor(x0-9);x1=Math.ceil(x1+9);z0=Math.floor(z0-9);z1=Math.ceil(z1+9);
  const NI=(x1-x0)*2,NK=(z1-z0)*2,N=NI*NK,kind=new Uint8Array(N),fl=new Float32Array(N),ce=new Float32Array(N),na=new Float32Array(N),ss=new Float32Array(N),lamp=new Map();
  const cx=i=>x0+i*0.5+0.25,cz=k=>z0+k*0.5+0.25,mouth=s=>s<T.MZ||s>T.L-T.MZ;
- for(let i=0;i<NI;i++)for(let k=0;k<NK;k++){const t=tAt(cx(i),cz(k));if(!t||ti.end||t===1&&ti.d>=ti.hw+BAND)continue;const n=i*NK+k;kind[n]=t;fl[n]=ti.floor;ce[n]=ti.ceil;ss[n]=ti.s;}
+ for(let i=0;i<NI;i++)for(let k=0;k<NK;k++){const t=tAt(cx(i),cz(k));if(!t||ti.end||t===1&&ti.d>=ti.hw+BAND)continue;if(t===1&&O.secretAt&&O.secretAt(cx(i),cz(k))===2)continue;const n=i*NK+k;kind[n]=t;fl[n]=ti.floor;ce[n]=ti.ceil;ss[n]=ti.s;}
  for(let n=0;n<N;n++)if(kind[n])na[n]=Math.round(O.hNat(cx(Math.floor(n/NK)),cz(n%NK))*4)/4;
  // centre-line samples: point, tangent, floor at s
  const along=s=>{s=AF.clamp(s,0,T.L);let i=1;while(i<T.cs.length-1&&T.cs[i]<s)i++;const a=T.pts[i-1],b=T.pts[i],len=T.cs[i]-T.cs[i-1],u=(s-T.cs[i-1])/len,dx=(b[0]-a[0])/len,dz=(b[1]-a[1])/len,x=a[0]+(b[0]-a[0])*u,z=a[1]+(b[1]-a[1])*u;tAt(x,z);return{x,z,dx,dz,y:ti.floor,hw:ti.hw,ceil:ti.ceil};};
@@ -362,8 +362,9 @@ AF.onBuild('island-tunnel',496.42,()=>{
 });
 // ---------------------------------------------------------------- the secret passage (heist): Hotel Serena's study (an annex on the
 // hotel's north-east corner, its door on the lawn under the Sky Terrace), a swinging bookcase in its partition, the stair behind it and a
-// rough-hewn passage under the lawns and the cone's north flank to a rocky cleft 23 m west of the smugglers' tunnel mouth. 07-outland
-// cuts it out of the ground (O.secretAt: O.h = its floor) and leaves only its two ends undrawn; this lines it as the tunnel is lined (a
+// rough-hewn passage under the lawns and the cone's north flank that breaks into the smugglers' tunnel a few metres inside its mouth
+// (05-plan secret.join; neither tube's lining walls off the other's hollow). 07-outland
+// cuts it out of the ground (O.secretAt: O.h = its floor) and leaves only its study end undrawn; this lines it as the tunnel is lined (a
 // 0.5 m rock shell per 32 m outland tile merged into the tile meshes, roof colliders up to the hillside, lanterns = pooled lights) and
 // builds the study over the stair (merged props + colliders). The one mover is the bookcase: a single mesh (1 draw, drawn only within
 // 90 m) swung on its hinge by open(on); its collider moves with it. Spots + open/isOpen: S.heist.secret (81-heist).
@@ -382,7 +383,7 @@ AF.onBuild('island-secret',496.43,()=>{
  const R=SP.hw+BAND+1;x0=Math.floor(x0-R);x1=Math.ceil(x1+R);z0=Math.floor(z0-R);z1=Math.ceil(z1+R);
  const NI=(x1-x0)*2,NK=(z1-z0)*2,N=NI*NK,kind=new Uint8Array(N),fl=new Float32Array(N),ce=new Float32Array(N),na=new Float32Array(N),ss=new Float32Array(N),lamp=new Map();
  const cx=i=>x0+i*0.5+0.25,cz=k=>z0+k*0.5+0.25,cellOf=(x,z)=>{const i=Math.floor((x-x0)*2),k=Math.floor((z-z0)*2);return i<0||k<0||i>=NI||k>=NK?-1:i*NK+k;};
- for(let i=0;i<NI;i++)for(let k=0;k<NK;k++){const x=cx(i),z=cz(k),t=O.secretAt(x,z);if(!t||ti.end||t===1&&ti.d>=ti.hw+BAND)continue;const n=i*NK+k;kind[n]=t;fl[n]=ti.floor;ce[n]=ti.ceil;ss[n]=ti.s;na[n]=Math.round(O.hNat(x,z)*4)/4;}
+ for(let i=0;i<NI;i++)for(let k=0;k<NK;k++){const x=cx(i),z=cz(k),t=O.secretAt(x,z);if(!t||ti.end||t===1&&ti.d>=ti.hw+BAND)continue;if(SP.join&&O.tunnelMain(x,z)===2)continue;const n=i*NK+k;kind[n]=t;fl[n]=ti.floor;ce[n]=ti.ceil;ss[n]=ti.s;na[n]=Math.round(O.hNat(x,z)*4)/4;}
  // 1 = the study end (open to the stairwell), 2 = its lintel (under the study's north wall), 3 = the cleft, 0 = buried
  const zone=s=>s<T.openA-0.5?1:s<T.openA?2:s>T.mouthS?3:0;
  const roofTop=n=>Math.max(ce[n]+0.5,Math.min(ce[n]+1,f2(na[n]-0.25)));
@@ -809,7 +810,7 @@ AF.test('island: smugglers\u2019 tunnel walks end to end under a roof; posts, ro
  return{ok:!stuck&&roofed===H.tunnel.length-4&&!posts&&!routes&&stand&&skis>=2&&len>=150&&len<=250&&!!H.kit&&!!S.spots.strip,info:Math.round(len)+' m, stuck '+stuck+', roofed '+roofed+'/'+(H.tunnel.length-4)+', blocked posts '+posts+' / route points '+routes+', cache stand '+stand+', wet skis '+skis};
 });
 S.kit={geometry,block,site,prop,sign,cottage,canopy,openCanopy,paint,cache,col:{white,mint,coral,teal,wood,rock,gold,dark,win,glow}};
-AF.test('island: secret passage walks from the study to the cleft; the bookcase blocks when shut; no scar over it',()=>{
+AF.test('island: secret passage walks from the study into the smugglers\u2019 tunnel; the bookcase blocks when shut; no scar over it',()=>{
  const X=S.heist&&S.heist.secret,T=O.secret;if(!X||!T)return{ok:false,info:'no secret passage'};
  const was=X.isOpen(),P3=p=>Array.isArray(p)?p:[p.x,p.y,p.z];
  // a walker body (0.3 m radius, 1.7 m tall, 0.55 m steps) heads for each waypoint in turn
@@ -825,7 +826,10 @@ AF.test('island: secret passage walks from the study to the cleft; the bookcase 
   const mid=X.path.filter(p=>{O.secretAt(p[0],p[2]);const s=O.secretInfo.s;return s>T.openA+1&&s<T.mouthS-1;});
   midN=mid.length;for(const p of mid)if([2.2,2.7,3.2,3.7,4.2].some(h=>AF.solidAt(p[0],p[1]+h,p[2])))roofed++;
   // the hillside over it: drawn whole (no open cell), no trench or ridge across it, the roof under the surface, bodies stay on top
-  for(let s=T.openA+1;s<T.mouthS-1;s+=1){const [x,z,dx,dz]=T.at(s);for(const o of [-(T.hw+T.band),0,T.hw+T.band]){const px=x-dz*o,pz=z+dx*o,g=O.hNat(px,pz);samples++;
+  for(let s=T.openA+1;s<T.mouthS-1;s+=1){const [x,z,dx,dz]=T.at(s);
+   // where it breaks into the tube the hillside is the tube's own cover (07 isleH), not this passage's
+   if(I.secret.join&&O.tunnelMain(x,z)&&O.tunnelInfo.d<O.tunnelInfo.hw+13)continue;
+   for(const o of [-(T.hw+T.band),0,T.hw+T.band]){const px=x-dz*o,pz=z+dx*o,g=O.hNat(px,pz);samples++;
    if(O.colTop(px,pz,g,0,0.5)===0){opened++;if(scars.length<4)scars.push(['open',+px.toFixed(1),+pz.toFixed(1)]);}
    if(O.secretAt(px,pz)===2){cover=Math.min(cover,g-O.secretInfo.floor);if(O.secretInfo.ceil+1>g-0.2){buried++;if(scars.length<4)scars.push(['thin',+px.toFixed(1),+pz.toFixed(1)]);}}
    if(AF.surfaceBelow(px,pz,g+0.3,3)<g-0.3){sink++;if(scars.length<4)scars.push(['sink',+px.toFixed(1),+pz.toFixed(1)]);}}

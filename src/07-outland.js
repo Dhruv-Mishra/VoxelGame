@@ -229,7 +229,7 @@ const SC = SEC ? (() => {
   // the lowest ground across the passage (centre and 1 m past each wall) every 0.5 m
   const nat = new Float32Array(n), F = new Float32Array(n), C = new Float32Array(n), U = new Float32Array(n), off = SEC.hw + 1;
   for (let i = 0; i < n; i++) { const [x, z, dx, dz] = at(i / 2); nat[i] = Math.min(isleShape(x, z), isleShape(x - dz * off, z + dx * off), isleShape(x + dz * off, z - dx * off)); }
-  const last = pts[pts.length - 1], exitY = Math.round(isleShape(last[0], last[1]) * 2) / 2;
+  const last = pts[pts.length - 1], exitY = SEC.join && mainAt(last[0], last[1]) === 2 ? TN_.floor : Math.round(isleShape(last[0], last[1]) * 2) / 2;
   const steps = Math.round((SEC.top - SEC.base) * 2), stairEnd = SEC.landing + SEC.run * (steps - 1), levelS = L - SEC.level, kS = SEC.k * 0.5;
   for (let i = 0; i < n; i++) U[i] = i / 2 >= levelS ? Infinity : nat[i] - SEC.h - 0.25 - 2.2;
   for (let i = 1; i < n; i++) U[i] = Math.min(U[i], U[i - 1] + kS);
@@ -238,11 +238,13 @@ const SC = SEC ? (() => {
     const s = i / 2;
     F[i] = s < SEC.landing ? SEC.top : s < stairEnd + SEC.run ? Math.max(SEC.base, SEC.top - 0.5 * (Math.floor((s - SEC.landing) / SEC.run + 1e-6) + 1))
       : s >= levelS ? exitY : Math.max(SEC.base, Math.floor(Math.min(U[i], exitY) * 2) / 2);
+    // joined to the tube: climb to its floor at most k per metre (never a wall at the level stretch)
+    if (SEC.join && s > stairEnd + SEC.run && s < levelS) F[i] = Math.max(F[i], Math.floor((exitY - (levelS - s) * SEC.k) * 2) / 2);
     // the roof (1 m of rock over the ceiling) stays 0.25 m under the ground
     C[i] = Math.floor((nat[i] - 1.25) * 2) / 2;
   }
   // the cleft: from where the rock over a 2.5 m portal thins under 1.5 m to the hillside
-  let mouthS = L; while (mouthS > levelS && nat[Math.floor(mouthS * 2)] - exitY < 4) mouthS -= 0.5;
+  let mouthS = L; while (!SEC.join && mouthS > levelS && nat[Math.floor(mouthS * 2)] - exitY < 4) mouthS -= 0.5;
   return { pts, cs, L, n, at, nat, F, C, exitY, stairEnd, levelS, mouthS, openA: SEC.openA, hw: SEC.hw, band: SEC.band, reach, box: [x0 - reach, z0 - reach, x1 + reach, z1 + reach] };
 })() : null;
 const TS_ = { s: 0, d: 0, hw: 0, floor: 0, ceil: 0, end: false, k: 1, open: false };
@@ -259,7 +261,7 @@ function secretAt(x, z) {
   }
   const d = Math.sqrt(best);
   // past the cleft's lip: the hillside in front of it (rock-coloured, never walled or opened)
-  if (past) { if (bs < 1 || d > T.hw + T.band + 2.5) return 0; TS_.s = T.L + d; TS_.d = d; TS_.hw = SEC.hw; TS_.floor = T.exitY; TS_.ceil = T.exitY + 2.5; TS_.end = true; TS_.k = 1; TS_.open = false; return 1; }
+  if (past) { if (SEC.join || bs < 1 || d > T.hw + T.band + 2.5) return 0; TS_.s = T.L + d; TS_.d = d; TS_.hw = SEC.hw; TS_.floor = T.exitY; TS_.ceil = T.exitY + 2.5; TS_.end = true; TS_.k = 1; TS_.open = false; return 1; }
   if (d > T.reach) return 0;
   const i = Math.min(T.n - 1, Math.floor(bs * 2)), floor = T.F[i], open = bs < T.openA || bs > T.mouthS;
   // rough-hewn in the middle: the walls wander and the roof steps 2.5 / 3 m; the stair and the cleft stay true
@@ -284,7 +286,8 @@ function isleH(x, z) {
   let height = isleShape(x, z);
   height = coveH(x, z, height);
   if (ST) height = streamCarve(x, z, height);
-  if (SC && cutOn && secretAt(x, z) === 2) { cutHit = true; return TS_.floor; }
+  // (where the passage breaks into the tube the tube's own floor rules)
+  if (SC && cutOn && secretAt(x, z) === 2 && !(SEC.join && mainAt(x, z) === 2)) { cutHit = true; return TS_.floor; }
   const k = mainAt(x, z); if (!k) return height;
   const T = TN, s = TN_.s;
   if (!TN_.end) {

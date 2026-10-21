@@ -3,7 +3,7 @@
   "model": "Fish Audio Drama 3 Newest",
   "generatedBy": "Fish Audio web UI",
   "complete": true,
-  "lineCount": 313,
+  "lineCount": 329,
   "voiceConfigSlots": {
     "vera": {
       "speakerId": "vera",
@@ -1601,27 +1601,6 @@
       "inputHash": "6d3de7da29b3eb177cafe8a83cb391159bbb81a9f3b94ab8d54ee4d818a86d50",
       "assetHash": "633d054ce9cb686e0cd4d3f0eaabe2f7ec516ea61648dde49783791df751f03a",
       "duration": 8.52,
-      "sourceFormat": "mp3",
-      "losslessMaster": null
-    },
-    "vera.q4b": {
-      "id": "vera.q4b",
-      "fileId": "vera.q4b",
-      "filename": "vera.q4b.mp3",
-      "speakerId": "vera",
-      "speaker": "Vera",
-      "legacyVoice": "af_heart",
-      "voiceSlot": "vera",
-      "fishVoiceName": "Laura",
-      "displayText": "Officers, keep the house detective busy. Give the pit boss something else to focus on.",
-      "generationText": "[whispering] Officers, keep the house detective busy. Give the pit boss something else to focus on.",
-      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
-      "fishTags": [
-        "whispering"
-      ],
-      "inputHash": "231a63b019f1f01cbb66ccbd0aabbe43d09dac6dde67c0fc6a8440acc4e09cdc",
-      "assetHash": "4110b274a11ea65b64ff67898674a0411b6c70e50c81ca325e821c909369bbf0",
-      "duration": 6.3,
       "sourceFormat": "mp3",
       "losslessMaster": null
     },
@@ -6162,27 +6141,6 @@
       "sourceFormat": "mp3",
       "losslessMaster": null
     },
-    "vera.n2": {
-      "id": "vera.n2",
-      "fileId": "vera.n2",
-      "filename": "vera.n2.mp3",
-      "speakerId": "vera",
-      "speaker": "Vera",
-      "legacyVoice": "af_heart",
-      "voiceSlot": "vera",
-      "fishVoiceName": "Laura",
-      "displayText": "Four guards on the bank roof. If one of them finds a body, they’ll call it in. Pick your moments.",
-      "generationText": "[whispering] Four guards on the bank roof. If one of them finds a body, they’ll call it in. Pick your moments.",
-      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
-      "fishTags": [
-        "whispering"
-      ],
-      "inputHash": "ca8ca87221869b40888c1128c0693f1ac6a32f7409c6a3cb2aa99c0d135af48f",
-      "assetHash": "73d6415ab2b400f7d150e7aaea049463f63e1ba1708a1e0d4740325259aac34c",
-      "duration": 8.07,
-      "sourceFormat": "mp3",
-      "losslessMaster": null
-    },
     "vera.n3": {
       "id": "vera.n3",
       "fileId": "vera.n3",
@@ -6411,27 +6369,6 @@
       "inputHash": "7732ad576f3d54b0a0f140bea84bc7efe94a084b9fb1cf4e29541acde87e8ef0",
       "assetHash": "22ef68f8ce957d6ca387bb9aae648882c1b456ecd21d75698edb7dfe3e99d545",
       "duration": 5.1,
-      "sourceFormat": "mp3",
-      "losslessMaster": null
-    },
-    "kit.f3": {
-      "id": "kit.f3",
-      "fileId": "kit.f3",
-      "filename": "kit.f3.mp3",
-      "speakerId": "kit",
-      "speaker": "Kit",
-      "legacyVoice": "am_liam",
-      "voiceSlot": "kit",
-      "fishVoiceName": "Ethan",
-      "displayText": "The passage comes out right beside the Morettis’ tunnel. Go. I’ll keep the bar talking.",
-      "generationText": "[whispering] The passage comes out right beside the Morettis’ tunnel. Go. I’ll keep the bar talking.",
-      "expressionText": "Kit is practical and guarded, with nerves just under the surface. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
-      "fishTags": [
-        "whispering"
-      ],
-      "inputHash": "1170827b4b0606de048bbb5e611737e39a169bfd77e5b305346d497005a8df35",
-      "assetHash": "fdfd7f234a7e0af51790fe12cf88e86b60c089d1b8777471df31879d167a1e81",
-      "duration": 5.85,
       "sourceFormat": "mp3",
       "losslessMaster": null
     },
@@ -6705,6 +6642,405 @@
       "inputHash": "52c4021e43907cf6cb0dd13364b398ff6729d6aac9badafb4bb2fb979b2ff57b",
       "assetHash": "919869c95b4338ffe28fde8d29a347bd24617891d49262ae181dfef7433ba3d5",
       "duration": 4.21,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.q4b": {
+      "id": "vera.q4b",
+      "fileId": "vera.q4b",
+      "filename": "vera.q4b.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Officers, the pit boss is yours. Give him something else to focus on.",
+      "generationText": "[whispering] Officers, the pit boss is yours. Give him something else to focus on.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "ead93b6ada02b0abc7daa2fc8fad5df1e62c8afbf9399f780f8ff9534d2c6b79",
+      "assetHash": "7a7677fa1e47111d7c8cda9eb3ed3bb94f7d102887dba519c230c61fd986fcdd",
+      "duration": 5.57,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.det1": {
+      "id": "vera.det1",
+      "fileId": "vera.det1",
+      "filename": "vera.det1.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Careful. The house detective in the salon trusts nobody but the waiter. Waiter, lace a drink at the salon bar and take it to him.",
+      "generationText": "[whispering] Careful. The house detective in the salon trusts nobody but the waiter. Waiter, lace a drink at the salon bar and take it to him.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "1143f335005b4bedc01dd2ba8f392ceb6063e6d2670abff7213afaf1b5663100",
+      "assetHash": "e4edfb5c11f20a774c8f0f10f764af51108e1c94a0b89648c090781d7ac0619a",
+      "duration": 10.41,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.det2": {
+      "id": "vera.det2",
+      "fileId": "vera.det2",
+      "filename": "vera.det2.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Everyone else, stay outside the salon door until he is gone.",
+      "generationText": "[whispering] Everyone else, stay outside the salon door until he is gone.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "2dcb6ef68ed09759cbf543d5335ea4b7ce45a2bbc786f889ce4f2ec359ca1c2c",
+      "assetHash": "a7442f6c83b1692de9c488d23b0e0edb5ef767484d3ea1ad9f673a2b3f455028",
+      "duration": 4.93,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.det3": {
+      "id": "vera.det3",
+      "fileId": "vera.det3",
+      "filename": "vera.det3.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "He has gone to lie down. The salon is clear. Everyone, up the crew stairs.",
+      "generationText": "[whispering] He has gone to lie down. The salon is clear. Everyone, up the crew stairs.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "121a21a5f0162fc84a1eabd2c9fe1d7c5de0fa9af307c0e5bc945a12e83b08d5",
+      "assetHash": "b24bb1cd0430ce9699ec88a08a3da2626ec4f28e04cb687af8ddf44a6ead1526",
+      "duration": 6.46,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.snipeall": {
+      "id": "vera.snipeall",
+      "fileId": "vera.snipeall",
+      "filename": "vera.snipeall.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Every guard on that roof has to drop. Take them all out, before one of them calls it in.",
+      "generationText": "[whispering] Every guard on that roof has to drop. Take them all out, before one of them calls it in.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "f021cba54c34c648f3b5f627a0e54f1120ef7c9b104954b75ff531fe1a8cfe88",
+      "assetHash": "09ae63ff7a565cb48f8d177b3232c85e65190f2a30dfb34100b4b38c26498874",
+      "duration": 6.72,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.zooall": {
+      "id": "vera.zooall",
+      "fileId": "vera.zooall",
+      "filename": "vera.zooall.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Clear every Kestrel guard on those paths. All of them. One radio call and the whole zoo locks down.",
+      "generationText": "[whispering] Clear every Kestrel guard on those paths. All of them. One radio call and the whole zoo locks down.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "83f104ea67f7f8489e3fd5f99d128df5618ff039e8e4cd1d5efcfb2ec741235d",
+      "assetHash": "3ab095700299dffec24970fad292877cda2bdca6463803d6136d4a8c2810864e",
+      "duration": 8.05,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.lv2": {
+      "id": "vera.lv2",
+      "fileId": "vera.lv2",
+      "filename": "vera.lv2.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Good shooting. More guards are coming out, and you cannot see them from there. Move to the next marker.",
+      "generationText": "[whispering] Good shooting. More guards are coming out, and you cannot see them from there. Move to the next marker.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "82ac82e1c1ce08b69d15191a569ee1841c455fdc2e145b5c17c2d2aa00b15dad",
+      "assetHash": "91696a519c266b748aa4091ae7bd5b48b76fc822aed03952a2d89d35d93ed5cf",
+      "duration": 7.26,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.lv3": {
+      "id": "vera.lv3",
+      "fileId": "vera.lv3",
+      "filename": "vera.lv3.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Last of them. Change position again, and make every shot count.",
+      "generationText": "[whispering] Last of them. Change position again, and make every shot count.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "81e57d96bf4ac3a35a976b6a7d22fae3ed566c7cfaf4e93ec1b81016ee3cfde7",
+      "assetHash": "0cafcea4dc41b647a09e41dfbf40cf260eacfebf5e775a13d7bbfdb5ab133dcf",
+      "duration": 5.32,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.cc3": {
+      "id": "vera.cc3",
+      "fileId": "vera.cc3",
+      "filename": "vera.cc3.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Keep that gun spinning! Do not let them get alongside!",
+      "generationText": "[urgent] Keep that gun spinning! Do not let them get alongside!",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "b64539b40bc6ad8fcf11d5cf4d9dc8819632f1e5c5feb9d7ab2284533b878fa4",
+      "assetHash": "a62ee0d2355ffba13e3055b6bcbff08d0fbbb7ddea9c773cf909185832001736",
+      "duration": 4.33,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.cc4": {
+      "id": "vera.cc4",
+      "fileId": "vera.cc4",
+      "filename": "vera.cc4.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "More cars coming in hot behind you! Light them up!",
+      "generationText": "[urgent] More cars coming in hot behind you! Light them up!",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "44d1e597c5c963c1f69ed51c9abb0b72bedb3805a362b803089ec8c17877087e",
+      "assetHash": "b85a0c5bb36ca61d149629cff9f50d97deabb3ebffb6976e94dd7f362f947a25",
+      "duration": 3.05,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.cc5": {
+      "id": "vera.cc5",
+      "fileId": "vera.cc5",
+      "filename": "vera.cc5.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Did you see that one flip? Keep it up!",
+      "generationText": "[urgent] Did you see that one flip? Keep it up!",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "6576af99ee67948614de26144499798e88f88e4217df8d197a958ea25a53fa69",
+      "assetHash": "9e756554404d827cc3bbda9c04d6fa66586d75208708b79b0a922bd939fd28d5",
+      "duration": 2.2,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.mine1": {
+      "id": "vera.mine1",
+      "fileId": "vera.mine1",
+      "filename": "vera.mine1.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "Mines on the road! Driver, weave around them!",
+      "generationText": "[urgent] Mines on the road! Driver, weave around them!",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "dbf8f8dd09b2dfb43148aebc0b338e2c3581b6dfac2ad6662d64b3b074e9f242",
+      "assetHash": "2ba2baf606fb6c89571d076dbbe88e68438646d4ea6c9c5af459779d6b9c77a1",
+      "duration": 3.26,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.mine2": {
+      "id": "vera.mine2",
+      "fileId": "vera.mine2",
+      "filename": "vera.mine2.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "That one hit us hard! Watch the road!",
+      "generationText": "[urgent] That one hit us hard! Watch the road!",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "7c4d16ced9e14ae26fba3e82b86e3b3fcb8cb7d1db00dcf792d9b165949d427d",
+      "assetHash": "5960fc509f1f2def3a9e02103abc77f445b1b73ede11c15954a69edefcf81d77",
+      "duration": 2.49,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "vera.n2": {
+      "id": "vera.n2",
+      "fileId": "vera.n2",
+      "filename": "vera.n2.mp3",
+      "speakerId": "vera",
+      "speaker": "Vera",
+      "legacyVoice": "af_heart",
+      "voiceSlot": "vera",
+      "fishVoiceName": "Laura",
+      "displayText": "The roof watch works in shifts, three guards at a time. If one of them finds a body, they’ll call it in. Pick your moments.",
+      "generationText": "[whispering] The roof watch works in shifts, three guards at a time. If one of them finds a body, they’ll call it in. Pick your moments.",
+      "expressionText": "Vera is warm, poised, and quietly in charge. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "229d34773aaa5cd67b9c42959bdb373741e2d32e4152b32c70d9ccab26bdf89d",
+      "assetHash": "02762c7595161649333e666f1ca219cd126e40daad79bde730c4afcf06ed7938",
+      "duration": 9.5,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "kit.f3": {
+      "id": "kit.f3",
+      "fileId": "kit.f3",
+      "filename": "kit.f3.mp3",
+      "speakerId": "kit",
+      "speaker": "Kit",
+      "legacyVoice": "am_liam",
+      "voiceSlot": "kit",
+      "fishVoiceName": "Ethan",
+      "displayText": "This passage breaks right into the Morettis’ tunnel. Go. I’ll keep the bar talking.",
+      "generationText": "[whispering] This passage breaks right into the Morettis’ tunnel. Go. I’ll keep the bar talking.",
+      "expressionText": "Kit is practical and guarded, with nerves just under the surface. Speak in a controlled, close whisper; keep the consonants crisp and the words fully intelligible.",
+      "fishTags": [
+        "whispering"
+      ],
+      "inputHash": "42335aba5eb7ff8036ccd7e7aaeab1dffe6e032bac68fd06120beee9ce9d6555",
+      "assetHash": "5cadd27a74e7abe8e951d21ad16a36a61ef064e39138f5b8e345f599cd79a363",
+      "duration": 6.09,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "tony.cc2": {
+      "id": "tony.cc2",
+      "fileId": "tony.cc2",
+      "filename": "tony.cc2.mp3",
+      "speakerId": "tony",
+      "speaker": "Tony Moretti",
+      "legacyVoice": "am_onyx",
+      "voiceSlot": "tony",
+      "fishVoiceName": "Jordan",
+      "displayText": "You think you can take my car? I will bury you in it!",
+      "generationText": "[urgent] You think you can take my car? I will bury you in it!",
+      "expressionText": "Tony Moretti is a hard, impatient mob boss. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "2c17541675d698239b025981bba5a4d4a3a945bef484a32c54df7c664ab921b8",
+      "assetHash": "3047e4ab2fd4f027e87b88f5d613fa3fdd7a7e7852b211895df0608bdc0a1c50",
+      "duration": 3.7,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "tony.cc3": {
+      "id": "tony.cc3",
+      "fileId": "tony.cc3",
+      "filename": "tony.cc3.mp3",
+      "speakerId": "tony",
+      "speaker": "Tony Moretti",
+      "legacyVoice": "am_onyx",
+      "voiceSlot": "tony",
+      "fishVoiceName": "Jordan",
+      "displayText": "More men! I want that car back, in one piece or in pieces!",
+      "generationText": "[urgent] More men! I want that car back, in one piece or in pieces!",
+      "expressionText": "Tony Moretti is a hard, impatient mob boss. Sound urgent and decisive; project over the noise, but keep the words clear.",
+      "fishTags": [
+        "urgent"
+      ],
+      "inputHash": "1114ba9865c79949bb39e4bd2ee0bc2a72d6df052169585e3f2fd6d8166d5fc7",
+      "assetHash": "dbe175f9adef27c3da71201fcb90c3649a14f5f66e3a01fd81e01f8a434df76b",
+      "duration": 5.09,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "det.thanks": {
+      "id": "det.thanks",
+      "fileId": "det.thanks",
+      "filename": "det.thanks.mp3",
+      "speakerId": "det",
+      "speaker": "House detective",
+      "legacyVoice": "am_onyx",
+      "voiceSlot": "detective",
+      "fishVoiceName": "Adrian",
+      "displayText": "On the house? How thoughtful. Don’t mind if I do.",
+      "generationText": "[calm] On the house? How thoughtful. Don’t mind if I do.",
+      "expressionText": "The house detective is observant and politely suspicious. Ease into a dry, relieved delivery; let the tension drop without becoming sentimental.",
+      "fishTags": [
+        "calm"
+      ],
+      "inputHash": "685f4aff6adadcc6a15d33a560973c24dca713a1410c99f62dc72e1bddf879cb",
+      "assetHash": "dc7cb24479468a06f95df002fef83f11d53feb459cd673ac1411b63e22d952b7",
+      "duration": 4.67,
+      "sourceFormat": "mp3",
+      "losslessMaster": null
+    },
+    "det.unwell": {
+      "id": "det.unwell",
+      "fileId": "det.unwell",
+      "filename": "det.unwell.mp3",
+      "speakerId": "det",
+      "speaker": "House detective",
+      "legacyVoice": "am_onyx",
+      "voiceSlot": "detective",
+      "fishVoiceName": "Adrian",
+      "displayText": "Hm. I am feeling rather unwell. I think I will lie down in my cabin. Carry on.",
+      "generationText": "[calm] Hm. I am feeling rather unwell. I think I will lie down in my cabin. Carry on.",
+      "expressionText": "The house detective is observant and politely suspicious. Speak quietly and with fading strength; leave a little space at the end.",
+      "fishTags": [
+        "calm"
+      ],
+      "inputHash": "7eab5dd7d0709b7c11efa489f6d708fe27a5311238ce5167e6365d2cfd992865",
+      "assetHash": "2be77035be3d526f9be70fb3751a0f8b2363f04664507ab5040914dfc5b3c180",
+      "duration": 8.45,
       "sourceFormat": "mp3",
       "losslessMaster": null
     }

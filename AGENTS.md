@@ -138,10 +138,13 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   roles: the whole crew plays every step, and the Kestrel tablet (T) is everyone's once the zoo hack is done. The pitch: Vera drives the
   crew to Dry Creek Depot in the desert (`drive` cutscene, her car `H.vcar` moved by `driveTick`; `AF.hideout`, 44-hideout), the map-room
   briefing (`brief`: board photos + table pins). Serena: Kit walks the crew (`kitTick`, `n.walk` in 57's NPC tick) to the hotel study's
-  bookcase door and the secret passage (`AF.island.heist.secret`, a second outland tube in 07 / 44-island) to a cleft by the smugglers'
-  tunnel. Midnight after `park`: City Hall's service ladder + Vera's silenced sniper (`vantage`, `snipe`: the 4 `vantage` guards of zone
-  `roof`; a patrol finding a body fails the step, `zone.onBody`), a plane from Westgate and a skydive (`H.flag.chuted`) onto the zoo's
-  Great Banyan (`zoojump`, `zoosnipe`: Kestrel guards `HS.zooG`, `g.vantage` = in sight of the lookout; zone `zoo`), `lions`, `den`,
+  bookcase door and the secret passage (`AF.island.heist.secret`, a second outland tube in 07 / 44-island that breaks into the smugglers'
+  tunnel a few metres inside its mouth: 05-plan `secret.join`, neither tube's lining walls off the other's hollow). Midnight after `park`:
+  City Hall's service ladder + Vera's silenced sniper (`vantage`, `snipe`: the roof watch in three shifts, `g.level` 1-3, each only in
+  sight from its own perch on City Hall's east edge, `HB.spots.vantage/2/3`; a later shift walks out once the last is down and a crew
+  member stands on the next perch, host `lv` op; a patrol finding a same-shift body fails the step, `zone.onBody`), a plane from Westgate
+  and a skydive (`H.flag.chuted`) onto the zoo's Great Banyan (`zoojump`, `zoosnipe`: Kestrel guards `HS.zooG` in three shifts from the
+  treehouse lookout, the Fig's deck and the big deck's south side, `A.lookout/figSpot/deckSpot`; zone `zoo`), `lions`, `den`,
   `bunker`, `hack`, `drain`, a second skydive onto the bank's steel sky deck (20-downtown voxels: a deck at 40 m over Charter Street and
   an 8-flight stair tower down to the roof door), `roofclear` (the 3 guards the rifle couldn't see), then `door` ... `cash` inside. Seen
   at the zoo or on the roof = five stars (`blown`; the job waits until the police lose the crew). The story voice queue drops lines once
@@ -150,16 +153,22 @@ Read `PERF.md` before any change: it is the performance contract (locked items, 
   cracking starts a siege (waves of reserve guards, `S.spawn`, sized by crew; in combat only `zone.hunters` (2) close in, the rest wait at
   `zone.holds` past the maze's way out), then a jet-ski chase (`chase` step, 1 + 2 per player, riders need line of sight + miss fast / off-screen targets, host-steered riders =
   'heist chase riders' path walkers with `actor.chase`, hulls in `AF.island.jetski.extra`; `ch`/`chit`/`chshot` ops). Act III: crews of
-  3–4 take ship's-security uniforms (`sec0..5`) and distract the detective / pit boss (`hold`). Act IV (`wheels` → `armycut`/`army` → `haul` →
+  3–4 take ship's-security uniforms (`sec0..5`) and distract the pit boss (`hold`); before the salon, `lace`: the house detective trusts
+  only the waiter (`zone.disguise(slot, g)` may return 2 = fully trusted), the waiter laces a drink at the salon bar and serves him
+  (`detOut`), he walks out to his cabin, then the crew comes up. Act IV (`wheels` → `armycut`/`army` → `haul` →
   `farmcut`/`farm` → `carchase` → `paint`/`paintcut` → `park`/`nightcut`; places in 81-heist-act4: the desert army stash (stealth zone `army`, a car
   driven up to the crate loads the seekers), the drop outside Southfield Farm, Dusty's Respray at the east edge): sitting in the armoured car
-  starts the chase — host-driven limousines (`netOwned`, ≤ 14, gunmen drawn by 81-heist-act4's kit), roadblocks (2 cars + goons), then
-  per-client helicopters (`CB.xt` ray targets, `hk` kills) shot down with the LMG lent at the open back doors (`CB.freeArc`); no police
+  starts the chase — host-driven limousines (`netOwned`, ≤ 20, gunmen drawn by 81-heist-act4's kit), roadblocks (3 cars + goons), mines
+  across the road ahead (host `mn`, the car owner's client sets them off `mx`, heavy damage), then per-client helicopters (`CB.xt` ray
+  targets, `hk` kills); the ambient traffic is hidden (`VV.hideTraffic`); riders in the armoured car stand up through its rear roof hatch
+  with the lent Minigun (`minigun`; 80-coop `standSeat/standHook` hooks, a free all-round over-the-shoulder camera, `PL.seat.stand`); no police
   (`CB.noCops`); the car's hit points live with its driver's client (`chp`/`cdm`/`cph` ops, top HP bar), a wreck fails the job. Every
   client spawns the armoured car at the same spot (netKey-matched). The getaway's `jets` step lends the launchers and runs `CB.jetMission`
   (`jk` op). Checkpoint retries give back the lent guns held when the checkpoint was reached (`H.cpGuns`, `CB.snapLent/relend`).
   Steps may carry a `tip` (general guidance shown on entry — never key names: players may be on touch). Conditional radio lines:
-  `radio(id, urgent, when)` re-checks `when()` at play time.
+  `radio(id, urgent, when)` re-checks `when()` at play time. Pause menu "Skip step" (`H.skip`, guests send `skip`): the host grants the
+  step's facts, enters the next step (`st` with `sk: 1`) and every client is moved near its objective behind the travel veil.
+  Stealth guards show a grey sight cone on the ground (80-stealth `cones`, the active zone only).
   Stealth (80-stealth): every guard is killable (armed 240 hp); one hit only from behind (melee or a headshot on a guard not yet fighting);
   guards steered off their path stay hittable (54 `WK.near` tests `ctl` actors outside the path bounds); `zone.strict` (the liner): a
   weapon in hand or a carried body seen = instant alarm, any witnessed violence = alarm (`S.witness`); bodies are carried / hidden with

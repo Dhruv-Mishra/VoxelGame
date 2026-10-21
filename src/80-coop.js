@@ -18,9 +18,9 @@ try {
   const MODES = ['walk', 'drive', 'fly', 'jetski', 'carousel', 'funride', 'ride', 'ferry-ride', 'row', 'skydive', 'dead', 'passenger', 'photo', 'aerial', 'cine', 'other', 'cctv'];
   const MODE_I = new Map(MODES.map((m, i) => [m, i])), M = Object.fromEntries(MODES.map((m, i) => [m, i]));
   const JP = ['legL', 'legR', 'armL', 'armL', 'armR', 'armR', 'armR', 'chest', 'chest', 'head', 'head'], JA = ['x', 'x', 'x', 'z', 'x', 'y', 'z', 'x', 'y', 'x', 'y'], NJ = JP.length;
-  const HELD = [null, 'keyboard', 'bag', 'dumbbell', 'mic', 'bat', 'pan', 'cutlass', 'guitar', 'revolver', 'shotgun', 'tommy', 'rifle', 'spistol', 'ssmg', 'lmg', 'bazooka', 'seeker', 'sniper'];
+  const HELD = [null, 'keyboard', 'bag', 'dumbbell', 'mic', 'bat', 'pan', 'cutlass', 'guitar', 'revolver', 'shotgun', 'tommy', 'rifle', 'spistol', 'ssmg', 'lmg', 'bazooka', 'seeker', 'sniper', 'minigun'];
   const FRAMES = ['a', 'p', 'b', 'sit', 'work', 'phone', 'chat', 'look', 'hail', 'runA', 'runB'], WF = ['a', 'p', 'b', 'p'];
-  const SND = [null, 'shot', 'shotgun', 'smg', 'rifle', 'sil', 'sil', 'lmg', 'rocket', 'rocket', 'sil'];
+  const SND = [null, 'shot', 'shotgun', 'smg', 'rifle', 'sil', 'sil', 'lmg', 'rocket', 'rocket', 'sil', 'lmg'];
   const VK_CAR = 1, VK_PLANE = 2, VK_SKI = 3;
   const AK = { carousel: 1, wheel: 2, coaster: 3, train: 4, ferry: 5 };
   const COLORS = ['#ffd24a', '#5ad1ff', '#ff7ab8', '#9dff7a'];
@@ -156,6 +156,8 @@ try {
   const seatOf = (v, k, seat) => {
     if (seat >= seatsOf(v, k)) seat = 0;
     if (k === VK_CAR) {
+      // a mission may stand its riders somewhere else aboard (81-heist: the gunners in the armoured car's open back)
+      const st = seat && C.standSeat ? C.standSeat(v, seat) : null; if (st) { SL[0] = st[0]; SL[1] = st[1]; SL[2] = st[2]; return SL; }
       const T = v.type, L = VV.seatLocal(v), bike = isBike(v); SL[0] = L[0]; SL[1] = L[1] - (bike ? 0 : 0.57); SL[2] = L[2];
       if (seat) {
         if (bike) { SL[1] += 0.06; SL[2] -= 0.55; }
@@ -267,7 +269,7 @@ try {
     // vehicles: the one I drive and my police (squad cars)
     const vAt = w.o; w.u8v(0); let nv = 0;
     if (veh) { writeVeh(w, veh); nv++; }
-    for (const c of VV.cars) if (c.netOwned && c.active !== false && c.net == null && nv < 5 && (c.x - x) ** 2 + (c.z - z) ** 2 < 160000) { writeVeh(w, c); nv++; }
+    for (const c of VV.cars) if (c.netOwned && c.active !== false && c.net == null && nv < 12 && (c.x - x) ** 2 + (c.z - z) ** 2 < 160000) { writeVeh(w, c); nv++; }
     W.u8[vAt] = nv; sentNV = nv;
     // fights and police only matter to players nearby
     const near = peerNear(x, z, 320), CR = crowd();
@@ -332,7 +334,7 @@ try {
     r.tr.push(stamp, PV); r.last = now;
     const peer = N.peers.get(from); if (peer) { peer.x = x; peer.z = z; }
     const nv = R.u8v();
-    for (let i = 0; i < nv && i < 8; i++) {
+    for (let i = 0; i < nv && i < 12; i++) {
       const h = R.u32(), kind = R.u8v(), type = R.u8v(), paint = R.u8v(), vf = R.u8v();
       VVb[0] = R.p24(); VVb[1] = R.p24(); VVb[2] = R.p24(); VVb[3] = R.i16() / 10430; VVb[4] = R.i8() / 40; VVb[5] = R.i8() / 40; VVb[6] = R.i16() / 100; VVb[7] = R.i8() / 100; VVb[8] = R.u8v(); VVb[9] = vf;
       if (Math.abs(VVb[0]) > 6000 || Math.abs(VVb[2]) > 6000 || VVb[1] < -500 || VVb[1] > 3000) continue;
@@ -386,7 +388,7 @@ try {
     if (e) return e.owner === owner ? e : null;
     if (kind < VK_CAR || kind > VK_SKI) return null;
     let n = 0; for (const q of RV.values()) if (q.owner === owner) n++;
-    if (n >= 6) return null;   // the driven vehicle + 5 squad cars
+    if (n >= 13) return null;   // the driven vehicle + 12 owned cars (squad cars, the heist's chasers)
     let v = findVeh(h), created = false;
     // I'm driving my own copy of it: theirs is shown as a second car
     if (v && (v === myVeh() || (v.net != null && v.net !== owner))) v = null;
@@ -484,7 +486,7 @@ try {
     if (v) {
       const k = kindOf(v);
       if (k === VK_PLANE) { vis = false; root.position.set(v.x, v.y + 1, v.z); }
-      else { seatPose(v, k, seatOf(v, k, r.seat), POSE); root.position.set(POSE.x, POSE.y, POSE.z); root.rotation.set(POSE.pitch, POSE.yaw, POSE.roll, 'YXZ'); }
+      else { seatPose(v, k, seatOf(v, k, r.seat), POSE); root.position.set(POSE.x, POSE.y, POSE.z); if (k === VK_CAR && r.seat && C.standSeat && C.standSeat(v, r.seat)) root.rotation.set(0, o[3], 0, 'YXZ'); else root.rotation.set(POSE.pitch, POSE.yaw, POSE.roll, 'YXZ'); }
     } else { root.position.set(o[0], o[1], o[2]); root.rotation.set(o[4], o[3], o[5], 'YXZ'); }
     if (r.ak && !v) vis = true;   // ride anchors: placed after the rides move (coop-late)
     const cp = AF.camera.position, d2 = (root.position.x - cp.x) ** 2 + (root.position.z - cp.z) ** 2;
@@ -552,6 +554,7 @@ try {
     const v = PR.veh; if (!v) return;
     if (v.active === false) { getOut(true); return; }
     const P = AF.player;
+    if (PR.kind === VK_CAR && C.standHook && C.standHook(v, PR.seat, dt, P)) { AF.Vehicle.hud(v.v || 0, v.name, ' \u00b7 gunner'); return; }
     if (PR.kind !== VK_PLANE) {
       const S = AF.Vehicle.seat(v, seatOf(v, PR.kind, PR.seat), PR.kind === VK_SKI ? PR.skiO : isBike(v) ? PR.bikeO : PR.carO);
       if (PR.kind === VK_SKI) S.pitch = -(v.pitch || 0);

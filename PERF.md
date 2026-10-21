@@ -161,10 +161,15 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
   (the existing `wagon` batch). Launchers fire up to 8 pooled rocket meshes kept in the strike-jet group (compiled with it at
   `preloaded`, hidden while idle); mission jets reuse the same 4 pooled jet meshes. Nothing new runs while the job is off.
   The midnight expansion adds no draws of its own: the bank's sky deck + stair tower and the City Hall ladder are world voxels (one
-  existing ladder mesh moved), the roof watch (7) and the zoo's Kestrel guards (7) are path walkers on the shared draws, enabled only
-  while their scene is on (`HB.roof`, `HS.show`); one zoo camera housing (1 draw within 70 m, the bank's camera geometry). Dry Creek
-  Depot (44-hideout) and Serena's secret passage (44-island / 07 second tube) merge into the outland tiles; Vera's car is one runtime
-  car on the existing batch. Kit and Vera move by writing NPC poses (no new objects).
+  existing ladder mesh moved), the roof watch (16, three sniper shifts + four the rifle can't see) and the zoo's Kestrel guards (15, three
+  shifts + the paths to the lion house) are path walkers on the shared draws, enabled only while their scene is on (`HB.roof`, `HS.show`;
+  a later shift stays disabled until it walks out); one zoo camera housing (1 draw within 70 m, the bank's camera geometry). Dry Creek
+  Depot (44-hideout) and Serena's secret passage (44-island / 07 second tube, joined into the smugglers' tube) merge into the outland
+  tiles; Vera's car is one runtime car on the existing batch. Kit and Vera move by writing NPC poses (no new objects).
+  Guard sight cones (80-stealth): one instanced lit `alphaHash` fan (opaque pass, no transparency), the active zone's guards within
+  110 m (230 m scoped), compiled at `preloaded`. The armoured-car chase hides the ambient fleet (`VV.hideTraffic`: still simulated on
+  the world clock for co-op, but neither drawn, solid, heard nor hittable) and adds one instanced mine draw (≤ 16, only while any are
+  down, compiled at `preloaded`); its gunners stand on writes to `AF.PL.seat` (no new objects).
 - Audio (`75`): one AudioContext; samples (`assets/sfx`, mono MP3: one-shots 32 kHz / 48 kbps, loops + beds 24 kHz / 40 kbps,
   voice 16 kHz / 24 kbps; ~2.3 MB for 167 files) decode on first use, the core set at unlock; ≤ 32 voices (20 on phones); loops
   fade by distance and are reaped after 120 s unused; the context suspends while the page is hidden. Ambience beds are weighted by
@@ -182,7 +187,8 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
   direction; stale recordings never play against rewritten subtitles. Keep downloaded originals unchanged; WAV originals can
   additionally become lossless FLAC masters. MP3 downloads are already lossy and must never be described as lossless masters.
   Radio speech shares filtered speech/noise processing in the existing AudioContext; retain the same voice/cache limits.
-  Revalidate the small audio manifests at unlock; voice URLs use the imported file hash so CDN/browser caches cannot replay old takes.
+  Fetch the small audio manifests at unlock with no-store; voice requests and hosting headers also use no-store. Voice URLs use the
+  imported file hash and verify the response bytes so CDN/browser caches cannot replay old takes. Keep the bounded decoded cache above.
 
 ## 8. Content rules (locked)
 1. Static → voxels (`W.fill`) or `AF.placeStatic`; outland → `AF.outland.addProp`.
@@ -198,7 +204,7 @@ travel to the liner and the hills; optionally under 4x CPU throttle). Rules:
 - One binary snapshot per client on the unordered, no-retransmit `fast` channel, rate by activity: `N.rate` (20 Hz, 15 on phones)
   while driving, flying, fighting, aiming or falling, half on foot, 2 Hz standing still (each held 0.3 s after it ends). Header 8 B,
   player 26 B + 11 B of joints only while they change (and 3 snapshots after, and every 8th), positions as 3-byte centimetres,
-  4 B of counts, 25 B per vehicle (driven + squad cars within 400 m), 11 B per engaged ped within 150 m (only while a peer is within 320 m), shots.
+  4 B of counts, 25 B per vehicle (driven + up to 11 owned cars within 400 m: squad cars, the heist's chasers), 11 B per engaged ped within 150 m (only while a peer is within 320 m), shots.
   Standing ≈ 80 B/s, walking ≈ 0.5 KB/s per direction per peer. Players > 250 m apart get 1/2 rate, > 500 m 1/4. The host bundles
   what it sends each guest (its snapshot + the newest relay per origin, ≤ 35 ms wait) into one datagram (type 2). A link skips
   `fast` sends while `bufferedAmount` > 32 KB. Reliable JSON (`rel`) is for rare events only (hits, seats, looks, time changes,

@@ -69,7 +69,10 @@ try {
   setTone('betrayal', 'kit.t2 silas.k3 vera.k2');
   setTone('urgency', 'vera.cove vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.reflex vera.siege vera.siege2 vera.chase vera.chase2 vera.go vera.loud vera.exit vera.wave vera.k3 vera.k4 vera.loadout vera.bodies vera.spotted kit.boss tony.cove tony.chase tony.k1 tony.k2 vera.farm4 vera.cc1 vera.jets1 vera.jets2 tony.farm');
   setTone('whisper', 'vera.farm2 vera.farm3 vera.army2 vera.army3 vera.farm5');
-  setTone('urgency', 'vera.army4 vera.heli1 vera.heli2 vera.block vera.armor tony.cc');
+  setTone('urgency', 'vera.army4 vera.heli1 vera.heli2 vera.block vera.armor tony.cc tony.cc2 tony.cc3 vera.cc3 vera.cc4 vera.cc5 vera.mine1 vera.mine2');
+  setTone('whisper', 'vera.det1 vera.det2 vera.det3 vera.snipeall vera.zooall vera.lv2 vera.lv3');
+  setTone('relief', 'det.thanks');
+  setTone('grief', 'det.unwell');
   setTone('persuasion', 'vera.army1 vera.garage1 vera.garage2');
   setTone('relief', 'vera.army5');
   setTone('persuasion', 'vera.d1 vera.d2 vera.d3 vera.w1 vera.w2 vera.w3 vera.w4 vera.w5 vera.w6');
@@ -100,7 +103,7 @@ try {
       direction: 'Keep Vera’s voice low to protect the crew’s cover, but let the urgency cut through. Whisper this quickly; do not shout.',
     },
   };
-  const RADIO = new Set(('vera.plane vera.island vera.kit vera.ski vera.ski2 vera.got vera.m1 vera.m2 vera.msolo vera.roof vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.k1 vera.k2 vera.k3 vera.k4 vera.f1 vera.f2 vera.f3 vera.a1 vera.a2 vera.fail vera.fail2 vera.spotted vera.reflex vera.maze vera.tough vera.siege vera.siege2 vera.chase vera.chase2 vera.q2b vera.qsec vera.q4b vera.bodies vera.nice vera.loud vera.dark vera.hold vera.go vera.wheels vera.drop vera.exit vera.wave vera.loadout vera.lasersoff vera.roles3 vera.roles4 kestrel.exit vera.farm1 vera.farm2 vera.farm3 vera.farm4 vera.cc1 vera.cc2 vera.paint vera.paint2 vera.jets1 vera.jets2 vera.jets3 tony.farm vera.army1 vera.army4 vera.army5 vera.heli1 vera.heli2 vera.block vera.armor vera.garage1 vera.garage2 vera.army2 vera.army3 vera.farm5 tony.cc vera.n1 vera.n2 vera.n3 vera.n4 vera.n5 vera.n6 vera.n7 vera.n8 vera.n9 vera.n10 vera.n12').split(/\s+/));
+  const RADIO = new Set(('vera.plane vera.island vera.kit vera.ski vera.ski2 vera.got vera.m1 vera.m2 vera.msolo vera.roof vera.alarm vera.g1 vera.g2 vera.g3 vera.g4 vera.g5 vera.k1 vera.k2 vera.k3 vera.k4 vera.f1 vera.f2 vera.f3 vera.a1 vera.a2 vera.fail vera.fail2 vera.spotted vera.reflex vera.maze vera.tough vera.siege vera.siege2 vera.chase vera.chase2 vera.q2b vera.qsec vera.q4b vera.bodies vera.nice vera.loud vera.dark vera.hold vera.go vera.wheels vera.drop vera.exit vera.wave vera.loadout vera.lasersoff vera.roles3 vera.roles4 kestrel.exit vera.farm1 vera.farm2 vera.farm3 vera.farm4 vera.cc1 vera.cc2 vera.paint vera.paint2 vera.jets1 vera.jets2 vera.jets3 tony.farm vera.army1 vera.army4 vera.army5 vera.heli1 vera.heli2 vera.block vera.armor vera.garage1 vera.garage2 vera.army2 vera.army3 vera.farm5 tony.cc vera.n1 vera.n2 vera.n3 vera.n4 vera.n5 vera.n6 vera.n7 vera.n8 vera.n9 vera.n10 vera.n12 vera.det1 vera.det2 vera.det3 vera.snipeall vera.zooall vera.lv2 vera.lv3 vera.cc3 vera.cc4 vera.cc5 vera.mine1 vera.mine2 tony.cc2 tony.cc3').split(/\s+/));
   const toneOf = (id, who, key) => TONE[id] || (who === 'kestrel' ? 'machine' : who === 'tower' ? 'announcement' :
     /^sus/.test(key) ? (who === 'zw' ? 'cautious' : 'surprise') : /^check/.test(key) ? 'cautious' :
     /^clear/.test(key) ? 'relief' : /^spot/.test(key) || key === 'alarm' || key === 'body' || /^fight/.test(key) ? 'urgency' :
@@ -185,7 +188,19 @@ try {
     chase2: 'That is the last jet ski. Head for the Queen.',
     q2b: 'Everyone else, security is all over this ship. Take an officer from behind and borrow his uniform.',
     qsec: 'Keep your weapons holstered. The ship\u2019s guards will shoot on sight. Hide anyone you put to sleep before they are found.',
-    q4b: 'Officers, keep the house detective busy. Give the pit boss something else to focus on.',
+    q4b: 'Officers, the pit boss is yours. Give him something else to focus on.',
+    det1: 'Careful. The house detective in the salon trusts nobody but the waiter. Waiter, lace a drink at the salon bar and take it to him.',
+    det2: 'Everyone else, stay outside the salon door until he is gone.',
+    det3: 'He has gone to lie down. The salon is clear. Everyone, up the crew stairs.',
+    snipeall: 'Every guard on that roof has to drop. Take them all out, before one of them calls it in.',
+    zooall: 'Clear every Kestrel guard on those paths. All of them. One radio call and the whole zoo locks down.',
+    lv2: 'Good shooting. More guards are coming out, and you cannot see them from there. Move to the next marker.',
+    lv3: 'Last of them. Change position again, and make every shot count.',
+    cc3: 'Keep that gun spinning! Do not let them get alongside!',
+    cc4: 'More cars coming in hot behind you! Light them up!',
+    cc5: 'Did you see that one flip? Keep it up!',
+    mine1: 'Mines on the road! Driver, weave around them!',
+    mine2: 'That one hit us hard! Watch the road!',
     bodies: 'Hide the body before someone finds it!',
     nice: 'Good work. Nobody heard a thing.',
     loud: 'That was too loud. Every guard heard it!',
@@ -236,7 +251,7 @@ try {
     w6: 'Uniforms, papers, a plane, Kit, the second key, the bank, then the getaway. One step at a time, together. Let\u2019s go to work.',
     // midnight: the roof watch, the zoo, the jump onto the bank
     n1: 'Midnight. The roof watch changes at one. Thin it out from City Hall\u2019s roof. I left a rifle at the foot of the service ladder.',
-    n2: 'Four guards on the bank roof. If one of them finds a body, they\u2019ll call it in. Pick your moments.',
+    n2: 'The roof watch works in shifts, three guards at a time. If one of them finds a body, they\u2019ll call it in. Pick your moments.',
     n3: 'The roof is quiet. Now the cameras. Kestrel\u2019s junction is under the zoo, and tonight the zoo is crawling with their guards.',
     n4: 'Take a plane from Westgate and bail out over the Great Banyan on the Treetop Trail. Land on the treehouse deck.',
     n5: 'Up to the lookout. Clear the paths from up there before you go walking.',
@@ -259,7 +274,7 @@ try {
     down: 'Wait! I can still make this right!',
     f1: 'Not out here. Follow me, and don\u2019t run.',
     f2: 'The old owner built this place for rum-runners. Watch the bookcase.',
-    f3: 'The passage comes out right beside the Morettis\u2019 tunnel. Go. I\u2019ll keep the bar talking.',
+    f3: 'This passage breaks right into the Morettis\u2019 tunnel. Go. I\u2019ll keep the bar talking.',
   });
   add('silas', 'Silas', {
     s1: 'You have Prescott\u2019s key already? Vera said you were good.',
@@ -314,6 +329,8 @@ try {
     chase: 'After them! Do not let them reach the ship!',
     farm: 'Somebody is stealing my car! Get after them, all of you!',
     cc: 'Every car we have, every man! And get the helicopters up!',
+    cc2: 'You think you can take my car? I will bury you in it!',
+    cc3: 'More men! I want that car back, in one piece or in pieces!',
     k1: 'Nothing personal. The Morettis always collect. Men, move!',
     k2: 'Take them down! Nobody leaves this island!',
     down: 'Tell my brother... I tried...',
@@ -330,6 +347,8 @@ try {
   });
   add('det', 'House detective', {
     chat: 'Quiet night, officer. Almost too quiet. Walk with me for a moment.',
+    thanks: 'On the house? How thoughtful. Don\u2019t mind if I do.',
+    unwell: 'Hm. I am feeling rather unwell. I think I will lie down in my cabin. Carry on.',
   });
   add('dealer', 'Dealer', {
     hand: 'Player wins. Banker loses.',

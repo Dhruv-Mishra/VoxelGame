@@ -669,7 +669,10 @@ const overlap = (car, x, z, yaw, other) => {
   CONTACT[0] = normalX; CONTACT[1] = normalZ; CONTACT[2] = depth;
   return depth;
 };
-const nearby = (car, x, z, other) => other !== car && other.active !== false && Math.abs(other.x - x) < car.halfL + other.halfL + 1 && Math.abs(other.z - z) < car.halfL + other.halfL + 1 && Math.abs((other.y || 0) - car.y) < 2;
+// VV.hideTraffic (81-heist's car chase): the shared fleet keeps its schedule (co-op clients must agree) but is neither drawn nor solid
+VV.hideTraffic = false;
+VV.ghost = (c) => VV.hideTraffic && !!c.ai;
+const nearby = (car, x, z, other) => other !== car && other.active !== false && !(VV.hideTraffic && other.ai) && Math.abs(other.x - x) < car.halfL + other.halfL + 1 && Math.abs(other.z - z) < car.halfL + other.halfL + 1 && Math.abs((other.y || 0) - car.y) < 2;
 const carBlocked = (car, x, z, yaw) => {
   if (worldHits(car, x, z, yaw)) return 'world';
   for (const o of VV.cars) {
@@ -992,7 +995,7 @@ function syncInstances(dt) {
   const tm = AF.time, night = tm?.night ?? ((tm?.hours < 6.3 || tm?.hours > 18.9) ? 1 : 0);
   const lampsOn = night > 0.15 && LAMP.pts, lampK = Math.min(1, (night - 0.15) / 0.35);
   for (const car of VV.cars) {
-    if (car.active === false) { car.inView = false; continue; }
+    if (car.active === false || (VV.hideTraffic && car.ai)) { car.inView = false; continue; }
     const d = Math.hypot(car.x - cam.x, car.y - cam.y, car.z - cam.z);
     FR_S.center.set(car.x, car.y + 1, car.z); FR_S.radius = car.halfL + 1.5;
     const inView = FRUSTUM.intersectsSphere(FR_S), far = d > FAR_D || !inView;

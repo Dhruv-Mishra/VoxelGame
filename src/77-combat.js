@@ -66,6 +66,8 @@ try {
     // the scope (on foot or from a seat); every shot is a 'gunshot' { silenced: true, weapon: 'sniper' } and CB.onWalkerHit gets
     // { head, dmg, silenced: true, weapon: 'sniper' }. Walkers stay hittable out to `range` (54 widens the path-walker radius while scoped).
     sniper: { name: 'Silenced Sniper', cls: 'rifle', dmg: 260, rate: 1.4, mag: 5, reload: 2.8, range: 300, spread: 0.028, scopeSpread: 0.00035, bloom: 0.0003, bloomMax: 0.0006, kick: 0.06, rec: 3.5, pellets: 1, silenced: true, loud: 6, zoom: 11, scope: true, flash: 0.25, tr: [0.012, 6, 0.9, 0.88, 0.8], price: 4500, pack: 10, packPrice: 60, snd: 'sil', two: true, lend: true, sell: true, model: [14, 7] },
+    // the Minigun: lent by the heist's armoured-car chase to the gunners standing in its open back (a mission weapon only)
+    minigun: { name: 'Minigun', cls: 'lmg', dmg: 17, rate: 0.045, mag: 500, reload: 3.2, range: 130, spread: 0.017, bloom: 0.0012, bloomMax: 0.028, kick: 0.008, rec: 9, pellets: 1, auto: true, loud: 100, zoom: 46, flash: 1.2, tr: [0.045, 9, 3.4, 1.6, 0.45], pack: 500, snd: 'lmg', two: true, heavy: true, lend: true },
   };
   const GUN_IDS = Object.keys(GUNS);
   // AF.GUNS = what a gun counter sells (78-jobs lists it): every weapon not lent-only (sell: true = lent by missions and sold too); the full
@@ -95,6 +97,13 @@ try {
       m.box(0, B, 3, 3, B + R, 8, dark); m.box(1, B + 2, 8, 2, B + 6, 9, steel); m.box(0, B + 1, 0, 3, B + 5, 3, olive); m.box(1, B + R - 2, 0, 2, B + R, 3, dark);
       m.box(0, B + R, 3, 3, hgt, 7, olive);
       anchor = [0.5, (B + R - 1) / hgt, 3 / 9]; tipZ = 5.5;
+    } else if (id === 'minigun') {   // six barrels round a spindle, the motor drum, a box feed and a carry handle
+      const B = 10, R = 6, hgt = B + R + 3; m = new AF.Model(4, hgt, 9);
+      for (const [x, z] of [[0, 4], [1, 3], [2, 3], [3, 4], [1, 5], [2, 5]]) m.box(x, 0, z, x + 1, B, z + 1, black);
+      m.box(0, 0, 3, 4, 1, 6, steel); m.box(0, B - 3, 3, 4, B - 2, 6, steel);
+      m.box(0, B, 2, 4, B + R, 7, dark); m.box(1, B + 1, 7, 3, B + 5, 9, steel); m.box(0, B + 1, 0, 4, B + 5, 2, olive);
+      m.box(1, B + R, 3, 3, hgt, 6, dark);
+      anchor = [0.5, (B + R - 1) / hgt, 3 / 9]; tipZ = 4.5;
     } else if (id === 'revolver') {   // slim barrel with a top rib, fluted cylinder, hammer, trigger guard, raked wooden grip
       const L = g.model[0], hgt = L + 4; m = new AF.Model(2, hgt, 5);
       m.box(0, 0, 3, 2, L - 1, 5, dark); m.box(0, 0, 4, 2, L - 1, 5, black); m.box(0, L - 1, 2, 2, L + 1, 5, steel); m.box(0, L - 1, 3, 2, L + 1, 4, dark);
@@ -277,6 +286,7 @@ try {
     bazooka: '<path d="M1 9.5h20v3.5H1zM21 9l2-1v6.5l-2-1M8 13v3h2v-3M13 13v3h2v-3M4 9.5V8h3v1.5"/>',
     seeker: '<path d="M2 9.5h18v3.5H2zM20 9.5l3 1.75L20 13M7 13v3h2v-3M12 13v3h2v-3M5 9.5V7h4v2.5M6 8h2"/>',
     sniper: '<path d="M1 10.5h4v2.5H1zM5 11h11l4-1h3v2.5h-3l-5 1-1.6 3H10l1-3H5zM9 7.5h7V9.5H9zM10.5 9.5V11M14.5 9.5V11"/>',
+    minigun: '<path d="M1 8.5h10M1 10.5h10M1 12.5h10M11 7.5h7v6h-7zM18 9h4v3h-4M13 13.5v3h3v-3M12.5 7.5V6h4v1.5"/>',
   };
   const wIcon = (k) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + (WI[k] || WI.melee) + '</svg>';
   const wcss = document.createElement('style');
@@ -745,7 +755,7 @@ try {
       const t = rayPerson(ox, oy, oz, dx, dy, dz, a.x, a.y, a.z, 1.75); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'walker'; HIT.obj = a; HIT.head = RPH; }
     }
     if (!CB.gallery) for (const c of VV.cars) {
-      if (c.active === false || c.player || c === SELF || (c.x - ox) ** 2 + (c.z - oz) ** 2 > R2) continue;
+      if (c.active === false || c.player || c === SELF || (VV.hideTraffic && c.ai) || (c.x - ox) ** 2 + (c.z - oz) ** 2 > R2) continue;
       const t = raySphere(ox, oy, oz, dx, dy, dz, c.x, c.y + 0.8, c.z, Math.min(c.halfL, 2.2)); if (t > t0 && t < HIT.t) { HIT.t = t; HIT.kind = 'car'; HIT.obj = c; HIT.head = false; }
     }
     if (HELI.on && !CB.gallery) { const t = raySphere(ox, oy, oz, dx, dy, dz, HELI.x, HELI.y + 1, HELI.z, 3); if (t < HIT.t) { HIT.t = t; HIT.kind = 'heli'; HIT.head = false; } }
@@ -1459,7 +1469,7 @@ try {
     if (r.hitJet) jetHit(r.hitJet, R[4] * 1.5, false);
     for (const j of JET.jets) if (j !== r.hitJet && j.on && !j.dead) { const d = Math.hypot(j.x - x, j.y - y, j.z - z); if (d < R[3] + 6) jetHit(j, R[4] * (d < 6 ? 1.5 : 1 - d / (R[3] + 6)), false); }
     if (HELI.on && !HELI.fall) { const d = Math.hypot(HELI.x - x, HELI.y + 1 - y, HELI.z - z); if (d < R[3] + 3) heliHit(R[4] * 1.2); }
-    for (const c of VV.cars) if (c !== r.self && !c.dead && c.active !== false && Math.abs(c.x - x) < R[3] && Math.abs(c.z - z) < R[3]) { const d = Math.hypot(c.x - x, c.y + 0.8 - y, c.z - z); if (d < R[3]) dmgCar(c, R[4] * G.rocketCarK * 0.35 * (1 - d / R[3]), true); }
+    for (const c of VV.cars) if (c !== r.self && !c.dead && c.active !== false && !(VV.hideTraffic && c.ai) && Math.abs(c.x - x) < R[3] && Math.abs(c.z - z) < R[3]) { const d = Math.hypot(c.x - x, c.y + 0.8 - y, c.z - z); if (d < R[3]) dmgCar(c, R[4] * G.rocketCarK * 0.35 * (1 - d / R[3]), true); }
     SELF = r.self; try { blast(x, y, z, R[3], true, false); } finally { SELF = null; }
     if (CB.onShot) CB.onShot(GUN_IDS.indexOf(r.g) + 1, r.sx, r.sy, r.sz, x, y, z, 3);
     emitShot(x, y, z, r.W.loud, false, r.g, false, r.self);
@@ -1492,7 +1502,7 @@ try {
       }
       if (r.hitJet) continue;
       if (!boom && HELI.on && !HELI.fall && Math.hypot(HELI.x - x1, HELI.y + 1 - y1, HELI.z - z1) < 4) boom = true;
-      if (!boom) for (const c of VV.cars) if (c !== r.self && !c.dead && c.active !== false && Math.abs(c.x - x1) < 4 && Math.abs(c.z - z1) < 4 && Math.abs(c.y + 0.8 - y1) < 1.6 && VV.bodyDist(c, x1, z1) < 0.4) { boom = true; break; }
+      if (!boom) for (const c of VV.cars) if (c !== r.self && !c.dead && c.active !== false && !(VV.hideTraffic && c.ai) && Math.abs(c.x - x1) < 4 && Math.abs(c.z - z1) < 4 && Math.abs(c.y + 0.8 - y1) < 1.6 && VV.bodyDist(c, x1, z1) < 0.4) { boom = true; break; }
       if (!boom) { const C = CR(); if (C) for (const w of C.walkers) if (w.act && !flat(w) && Math.abs(w.x - x1) < 1 && Math.abs(w.z - z1) < 1 && y1 > w.y && y1 < w.y + 1.9) { boom = true; break; } }
       if (!boom && AF.walkers && AF.walkers.near) for (const a of AF.walkers.near(x1, z1, 1)) if (!AF.walkers.isDown(a) && y1 > a.y && y1 < a.y + 1.9) { boom = true; break; }
       if (boom) { r.x = r.x + (x1 - r.x) * 0.6; r.y = Math.max(r.y + (y1 - r.y) * 0.6, AF.W.groundY(r.x, r.z) + 0.2); r.z = r.z + (z1 - r.z) * 0.6; rocketBurst(r); continue; }

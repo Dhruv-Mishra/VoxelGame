@@ -264,7 +264,7 @@ try {
     // the zoo at midnight is Kestrel's: armed guards from the Treetop Trail (where the crew drops in) down the bears' walk, the
     // promenade and the east walk to the keepers' gate and the lion house; a camera over the gate. The zone runs from the banyan to the den.
     const TT = (ZOO.treetop && ZOO.treetop.T) || { x: -421, z: -268 };
-    A.banyan = { x: TT.x, y: 6, z: TT.z }; A.lookout = { x: TT.x - 3.5, y: 11.5, z: TT.z, yaw: -PI / 2 }; A.treeDeck = { x: TT.x - 5, y: 6, z: TT.z, yaw: -PI / 2 };
+    A.banyan = { x: TT.x, y: 6, z: TT.z }; A.lookout = { x: TT.x - 4.6, y: 11.5, z: TT.z, yaw: -PI / 2 }; A.treeDeck = { x: TT.x - 5, y: 6, z: TT.z, yaw: -PI / 2 };
     A.zooBox = [Math.min(zb[0] - 25, -535), -20, Math.min(zb[2] - 25, -300), Math.max(zb[3] + 25, -393), 32, Math.max(zb[5] + 25, -78)];
     const zz = S.define('zoo', { box: A.zooBox, mode: 'fight', voice: 'g3', reflexS: 2.0, radius: 120 });
     const wpath = DS.watchPath && DS.watchPath.length > 1 ? DS.watchPath : [P3(A.zooYard), [A.zooYard.x + 10, A.zooYard.y, A.zooYard.z], [A.zooYard.x + 10, A.zooYard.y, A.zooYard.z + 8]];
@@ -273,17 +273,34 @@ try {
     const kLook = () => { const L = AF.peopleKit.makeLook('police', 'm', 'adult', rng); L.top = Object.assign({}, L.top, { col: 0x3e434a }); L.bottom = Object.assign({}, L.bottom, { col: 0x30343a }); L.hat = 'cap'; L.hatCol = 0x26292e; return L; };
     const gy = (x, z) => { const y = AF.surfaceBelow(x, z, 3, 6); return Number.isFinite(y) ? y : 0.25; };
     HS.zooG = [];
-    const zg = (k, pts, o, vantage) => {
+    const zg = (k, pts, o, level) => {
       const p = walker('zoo' + k, 'Kestrel guard', pts.map(([x, z]) => [x, gy(x, z), z]), Object.assign({ mode: 'pingpong' }, o), kLook());
-      if (p) { const g = S.guard('zoo', { path: p, voice: k % 2 ? 'g3' : 'g1', name: 'Kestrel guard', range: 16 }); if (g) { g.vantage = !!vantage; HS.zooG.push(g); } }
+      if (p) { const g = S.guard('zoo', { path: p, voice: k % 2 ? 'g3' : 'g1', name: 'Kestrel guard', range: 16 }); if (g) { g.vantage = !!level; g.level = level || 0; HS.zooG.push(g); } }
     };
-    zg(0, [[-453, -256], [-453, -207]], { speed: 0.85, dwell: [{ i: 0, t: 4 }, { i: 1, t: 4 }] }, true);     // the bears' walk (in sight of the lookout)
-    zg(1, [[-453, -200], [-453, -168]], { speed: 0.8, dwell: [{ i: 0, t: 3 }, { i: 1, t: 5 }] }, true);
-    zg(2, [[-494, -150], [-494, -121]], { speed: 0.8, dwell: [{ i: 0, t: 5 }, { i: 1, t: 3 }] }, true);      // the east walk's far end
-    zg(3, [[-443, -287], [-405, -287]], { speed: 0.75, dwell: [{ i: 0, t: 6 }, { i: 1, t: 6 }] }, false);    // the Treetop Trail lawn, under the deck
-    zg(4, [[-460, -162], [-489, -162]], { speed: 0.85, dwell: [{ i: 0, t: 3 }, { i: 1, t: 4 }] }, false);    // the promenade
-    zg(5, [[-490, -117], [-490, -95]], { speed: 0.7, dwell: [{ i: 0, t: 4 }, { i: 1, t: 6 }] }, false);      // the east walk by the gate
-    zg(6, [[-492.5, -86.5], [-492.5, -82]], { speed: 0.3, dwell: [{ i: 0, t: 9 }, { i: 1, t: 7 }] }, false); // the keepers' gate post
+    // the sniper's three perches (81-heist 'zoosnipe'): the treehouse lookout, the Fig's deck, the big deck's south side. Each level's
+    // guards walk out only once the last level is down and the crew is on the next perch; every path was checked for a clear line from
+    // its own perch (and none from the earlier ones, apart from a few metres)
+    A.figSpot = { x: TT.x + 21, y: 6, z: TT.z + 3, yaw: PI / 2 }; A.deckSpot = { x: TT.x, y: 6, z: TT.z - 6, yaw: PI };
+    const dw = (a, b) => ({ speed: 0.8, dwell: [{ i: 0, t: a }, { i: 1, t: b }] });
+    // level 1 (the lookout): the south riverside walk and the east walk's north end, 75-120 m out
+    zg(0, [[-517, -144.7], [-499, -144.7]], dw(4, 4), 1);
+    zg(1, [[-496, -144.7], [-478, -144.7]], dw(3, 5), 1);
+    zg(2, [[-490, -145], [-490, -131]], dw(5, 3), 1);
+    zg(3, [[-443, -287], [-405, -287]], { speed: 0.75, dwell: [{ i: 0, t: 6 }, { i: 1, t: 6 }] }, 3);   // the Treetop Trail lawn, south of the deck
+    zg(4, [[-460, -162], [-489, -162]], { speed: 0.85, dwell: [{ i: 0, t: 3 }, { i: 1, t: 4 }] }, 0);    // the promenade
+    zg(5, [[-490, -117], [-490, -95]], { speed: 0.7, dwell: [{ i: 0, t: 4 }, { i: 1, t: 6 }] }, 0);      // the east walk by the gate
+    zg(6, [[-492.5, -86.5], [-492.5, -82]], { speed: 0.3, dwell: [{ i: 0, t: 9 }, { i: 1, t: 7 }] }, 0); // the keepers' gate post
+    // level 2 (the Fig's deck): the annex lawn's north side and east fence
+    zg(7, [[-419, -238], [-411, -238]], dw(4, 3), 2);
+    zg(8, [[-408, -238], [-401, -238]], dw(3, 4), 2);
+    zg(9, [[-398, -253], [-398, -241]], dw(5, 4), 2);
+    zg(10, [[-431, -238], [-425, -238]], dw(3, 5), 2);
+    // level 3 (the big deck, south side): the annex lawn's south fence
+    zg(11, [[-413, -292], [-404, -292]], dw(4, 3), 3);
+    zg(12, [[-398, -291], [-398, -284]], dw(3, 4), 3);
+    zg(13, [[-425, -292], [-419, -292]], dw(5, 3), 3);
+    zg(14, [[-437, -292], [-434, -292]], dw(4, 6), 3);
+    HS.zooN = HS.zooG.length;
     zz.armoured = true;
     { const HBk = AF.heistBank, zc = S.camera('zoo', { name: 'KEEPERS\u2019 GATE', x: -495.6, y: 3.2, z: -90.6, yaw0: PI, sweep: 0.55, period: 9, pitch: 0.32, range: 15, fov: 0.86 });
       if (zc && HBk && HBk.camGeo) { const m = AF.modelMesh(HBk.camGeo); m.position.set(zc.x, zc.y, zc.z); m.castShadow = false; m.visible = false; AF.scene.add(m); zc.mesh = m; } }
